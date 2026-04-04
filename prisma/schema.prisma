@@ -1,0 +1,351 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../apps/api/src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum BookingStage {
+  target
+  outreach
+  conversation
+  offer
+  hold
+  confirmed
+  closed
+}
+
+enum TaskStatus {
+  todo
+  in_progress
+  blocked
+  done
+}
+
+enum ApprovalStatus {
+  proposed
+  pending
+  approved
+  rejected
+  expired
+  executed
+  failed
+}
+
+enum AuditSeverity {
+  info
+  warning
+  critical
+}
+
+enum ContactKind {
+  general
+  promoter
+  venue_staff
+}
+
+enum ArtistMembershipRole {
+  owner
+  member
+  viewer
+}
+
+enum MembershipInviteStatus {
+  pending
+  accepted
+  revoked
+  expired
+}
+
+enum InviteDeliveryChannel {
+  none
+  gmail_draft
+  mock
+  skipped
+  failed
+}
+
+enum WorkflowNotificationKind {
+  invite_delivered
+  approval_created
+  approval_approved
+  approval_rejected
+  approval_executed
+  approval_failed
+  membership_invite_accepted
+  integration_connection_changed
+  task_overdue_digest
+  followup_stale_digest
+  digest_daily
+  digest_weekly
+}
+
+model Operator {
+  id          String                   @id @default(cuid())
+  email       String                   @unique
+  name        String?
+  googleSub   String?                  @unique
+  workflowEmailEnabled Boolean        @default(true)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  memberships ArtistMembership[]
+  auditEvents AuditEvent[]
+  invitesCreated ArtistMembershipInvite[] @relation("InviteCreator")
+  invitesAccepted ArtistMembershipInvite[] @relation("InviteAcceptor")
+  workflowNotifications WorkflowNotification[]
+  telegramRegistrationTokensCreated TelegramRegistrationToken[] @relation("TelegramRegistrationCreator")
+}
+
+model ArtistMembership {
+  id                   String               @id @default(cuid())
+  operatorId           String
+  artistId             String
+  role                 ArtistMembershipRole @default(member)
+  workflowNotifyPrefs  Json?
+  createdAt            DateTime             @default(now())
+  operator             Operator             @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  artist               Artist               @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([operatorId, artistId])
+  @@index([artistId])
+}
+
+model Artist {
+  id                          String               @id @default(cuid())
+  name                        String
+  slug                        String               @unique
+  workflowOverdueGraceDays    Int?
+  workflowStaleFollowupDays   Int?
+  workflowPendingApprovalDays Int?
+  telegramUrgentEnabled       Boolean              @default(false)
+  telegramChatId              String?
+  telegramNotifyCategories    Json?
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+  venues        Venue[]
+  contacts      Contact[]
+  opportunities BookingOpportunity[]
+  tasks         Task[]
+  approvals     ApprovalRequest[]
+  commandRuns   CommandRun[]
+  integrations  IntegrationConnection[]
+  memberships   ArtistMembership[]
+  membershipInvites ArtistMembershipInvite[]
+  workflowNotifications WorkflowNotification[]
+  telegramUrgentDedupes TelegramUrgentDedupe[]
+  telegramRegistrationTokens TelegramRegistrationToken[]
+}
+
+model TelegramRegistrationToken {
+  id                    String    @id @default(cuid())
+  artistId              String
+  createdByOperatorId   String
+  tokenHash             String    @unique
+  expiresAt             DateTime
+  consumedAt            DateTime?
+  boundChatId           String?
+  createdAt             DateTime  @default(now())
+  artist                Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdBy             Operator  @relation("TelegramRegistrationCreator", fields: [createdByOperatorId], references: [id], onDelete: Cascade)
+
+  @@index([artistId])
+  @@index([expiresAt])
+}
+
+model TelegramUrgentDedupe {
+  id        String   @id @default(cuid())
+  artistId  String
+  dedupeKey String
+  sentAt    DateTime @default(now())
+  lastError String?
+  artist    Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([artistId, dedupeKey])
+  @@index([artistId])
+}
+
+model ArtistMembershipInvite {
+  id                  String                 @id @default(cuid())
+  artistId            String
+  email               String
+  role                ArtistMembershipRole   @default(member)
+  tokenHash           String                 @unique
+  status              MembershipInviteStatus @default(pending)
+  expiresAt           DateTime
+  createdAt           DateTime               @default(now())
+  createdByOperatorId String
+  acceptedAt          DateTime?
+  acceptedOperatorId  String?
+  revokedAt           DateTime?
+  deliveredAt         DateTime?
+  deliveryChannel     InviteDeliveryChannel @default(none)
+  deliveryLastError   String?
+  artist              Artist                 @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdBy           Operator               @relation("InviteCreator", fields: [createdByOperatorId], references: [id], onDelete: Cascade)
+  acceptedBy          Operator?              @relation("InviteAcceptor", fields: [acceptedOperatorId], references: [id], onDelete: SetNull)
+
+  @@index([artistId])
+  @@index([artistId, email])
+}
+
+model Venue {
+  id          String               @id @default(cuid())
+  artistId    String
+  name        String
+  city        String
+  region      String?
+  country     String?
+  addressLine String?
+  lat         Float?
+  lng         Float?
+  driveMinutesFromBase Int?
+  fitScore    Int?
+  capacity    Int?
+  notes       String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  artist      Artist               @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  contacts    Contact[]
+  opportunities BookingOpportunity[]
+}
+
+model Contact {
+  id          String    @id @default(cuid())
+  artistId    String
+  venueId     String?
+  contactKind ContactKind @default(general)
+  fullName    String
+  role        String?
+  email       String?
+  phone       String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  artist      Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  venue       Venue?    @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  commandRuns CommandRun[]
+}
+
+model BookingOpportunity {
+  id             String       @id @default(cuid())
+  artistId       String
+  venueId        String?
+  title          String
+  stage          BookingStage @default(target)
+  targetDate     DateTime?
+  marketNotes    String?
+  sourceSystem   String?
+  sourceRef      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  artist         Artist       @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  venue          Venue?       @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  tasks          Task[]
+  approvals      ApprovalRequest[]
+  commandRuns    CommandRun[]
+}
+
+model Task {
+  id             String        @id @default(cuid())
+  artistId       String
+  opportunityId  String?
+  title          String
+  status         TaskStatus    @default(todo)
+  ownerLabel     String?
+  dueAt          DateTime?
+  checklist      Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  artist         Artist        @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  opportunity    BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+}
+
+model ApprovalRequest {
+  id             String          @id @default(cuid())
+  artistId       String
+  opportunityId  String?
+  title          String
+  status         ApprovalStatus  @default(proposed)
+  actionType     String
+  payload        Json
+  proposedBy     String?
+  approvedBy     String?
+  approvedAt     DateTime?
+  executionAttemptedAt DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  artist         Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  opportunity    BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+}
+
+model AuditEvent {
+  id               String        @id @default(cuid())
+  artistId         String?
+  severity         AuditSeverity @default(info)
+  aggregateType    String
+  aggregateId      String
+  action           String
+  actorLabel       String?
+  actorOperatorId  String?
+  metadata         Json
+  createdAt        DateTime      @default(now())
+  actorOperator    Operator?     @relation(fields: [actorOperatorId], references: [id], onDelete: SetNull)
+
+  @@index([aggregateType, aggregateId])
+  @@index([artistId, createdAt])
+  @@index([actorOperatorId])
+}
+
+model CommandRun {
+  id             String      @id @default(cuid())
+  artistId       String
+  opportunityId  String?
+  contactId      String?
+  rawInput       String
+  intent         String?
+  resolvedAction Json
+  dryRun         Boolean     @default(true)
+  status         String
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  artist         Artist      @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  opportunity    BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  contact        Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, createdAt])
+}
+
+model IntegrationConnection {
+  id               String   @id @default(cuid())
+  artistId         String
+  provider         String
+  accountLabel     String?
+  scopes           String[]
+  status           String
+  encryptedSecrets Json?
+  lastSyncedAt     DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  artist           Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([artistId, provider])
+}
+
+model WorkflowNotification {
+  id                    String                   @id @default(cuid())
+  artistId              String
+  recipientOperatorId   String
+  kind                  WorkflowNotificationKind
+  title                 String
+  body                  String
+  readAt                DateTime?
+  metadata              Json                     @default("{}")
+  createdAt             DateTime                 @default(now())
+  artist                Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  recipient             Operator                 @relation(fields: [recipientOperatorId], references: [id], onDelete: Cascade)
+
+  @@index([recipientOperatorId, artistId, readAt])
+  @@index([artistId, createdAt])
+}

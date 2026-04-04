@@ -1,0 +1,125 @@
+# StoryBoard
+
+StoryBoard is an AI-assisted operating system for bands and artists. It is
+designed to reflect how real band management works: venue relationships, booking
+workflow, scheduling, release coordination, approvals, show operations, and
+business follow-through.
+
+## Locked Stack
+
+- `pnpm` workspace monorepo (Node `22.22.x`, pnpm `10.x`)
+- `apps/web`: Next.js `16.2.x`, React `19`, TypeScript, Tailwind CSS `4.2.x`
+- `apps/api`: NestJS `11.1.18`, TypeScript, Fastify
+- `packages/shared`: shared types, contracts, and Zod schemas (CommonJS `dist` for the API)
+- `packages/ui`: reusable React UI primitives
+- PostgreSQL `16` as the source of truth
+- Redis `7` for queues and coordination
+- Prisma ORM `7.6.0` (`prisma.config.ts` + driver adapter in API when you wire Prisma)
+- BullMQ `5.73.0` for background jobs
+- Zod `4.3.6` for validation
+- Docker Compose for local infrastructure
+- OpenAI SDK for orchestration (optional locally via `OPENAI_ENABLED`)
+
+## Run locally (from zero)
+
+Prerequisites: **Node 22.22.x**, **pnpm 10.x** (via Corepack), **Docker Desktop** (or compatible engine).
+
+```bash
+cd /path/to/StoryBoard
+corepack enable && corepack prepare pnpm@10.32.0 --activate
+cp .env.example .env
+pnpm install   # runs prepare → builds @storyboard/shared into dist/
+pnpm infra:up
+pnpm db:generate
+pnpm db:migrate
+# optional: pre-link a dev operator to the default artist
+pnpm db:seed
+pnpm dev
+```
+
+- Web: http://localhost:3000 — sign in with Google (or dev login when enabled). New operators without memberships go through **onboarding** (create an artist or accept an invite). Owners manage team invites from **Team** in the sidebar. Then: dashboard (including booking health + priority actions), CRM, booking, tasks, approvals, command bar, weekly summary, **Notifications** (preferences, optional **Telegram** urgent settings for owners, escalation), activity  
+- API: http://localhost:4000/health  
+
+The web app loads the repo-root `.env` via `apps/web/next.config.ts` so `API_URL` / `NEXT_PUBLIC_API_URL` stay in sync (see `.env.example`). API requests use `credentials: "include"`; optional **`COOKIE_DOMAIN=localhost`** helps the session cookie work across Next (3000) and the API (4000) in local development.
+
+Stop infra: `pnpm infra:down`
+
+**Phase 3A:** Operator auth (Google OIDC + optional dev bypass), `Operator` / `ArtistMembership`, session-guarded routes, integration OAuth state bound to the signed-in operator, and audit rows with `actorOperatorId`. See `docs/auth-operators.md`.
+
+**Phase 3B:** Membership **invitations** (hashed tokens, audit), **`viewer`** role with a small capability map, **Team** admin UI (owners), **first-artist onboarding** without requiring seed, and minimal **Origin / Referer** checks on mutating requests (`docs/invitations.md`, `docs/auth-operators.md`).
+
+**Phase 2B:** Per-artist Google connections (encrypted in Postgres), real Calendar/Drive adapters when scoped, minimal OAuth routes (`docs/integrations-google-oauth.md`), a two-job BullMQ worker in the API process, and shared Zod payloads in `@storyboard/shared` for key approval types.
+
+**Phase 4A:** Workflow automation and notifications on the existing queue: invite email drafts (Gmail real or mock), approval and integration connection notifications, overdue task and stale follow-up digests (repeatable jobs), minimal in-app `WorkflowNotification` rows + optional operator **`workflowEmailEnabled`**, and auditable automation actions. See `docs/workflow-automation.md`.
+
+**Phase 4B:** Per-membership **notification preferences** (Zod-validated JSON on `ArtistMembership`), **owner escalation thresholds** on `Artist`, **daily/weekly digest** jobs (`digest.generate.daily` / `digest.generate.weekly`) on the same queue, and a **Notifications** page in the web app. Preferences gate in-app rows and Gmail drafts; digests stay draft-based. See `docs/workflow-automation.md`.
+
+**Phase 5A:** **Telegram** urgent outbound channel (`sendMessage` only, narrow adapter; **mock** when `TELEGRAM_BOT_TOKEN` is unset), **owner-only** per-artist routing (`GET`/`PATCH /workflow/telegram`), repeatable **`urgent.telegram.scan`** job plus **approval execution failed** hook, **`TelegramUrgentDedupe`** for idempotency, and deterministic **operational intelligence** (`GET /dashboard/insights`: booking health, pipeline risk, priority actions). UI: Notifications (Telegram card), dashboard health + actions, pipeline risk badges, weekly briefing snapshot. See `docs/telegram-alerts.md`, `docs/workflow-automation.md`, and `docs/architecture.md`.
+
+**Phase 5B:** **Telegram inbound registration** — owners issue short-lived **`POST /workflow/telegram/registration-token`** links; **`POST /integrations/telegram/webhook`** handles **`/start`** payloads only, binds **`telegramChatId`** with one-time **`TelegramRegistrationToken`** rows, full audit trail, optional **`TELEGRAM_WEBHOOK_SECRET`**, and minimal Notifications UI (deep link / copy / manual chat id fallback). Expanded **`pnpm test`** coverage (shared + API). See `docs/telegram-alerts.md`.
+
+Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/environment-setup-plan.md`.
+
+## Core Product Principles
+
+- One coherent app, not a collection of disconnected assistants
+- One source of truth in PostgreSQL
+- All external systems behind adapters
+- Risky actions require approval before execution
+- Important actions must be auditable
+- Write actions should support dry run mode where practical
+- Natural language commands resolve to structured actions
+
+## Repository Map
+
+- `apps/web`: operator-facing web application
+- `apps/api`: orchestration API, domain logic, adapters, queue producers
+- `packages/shared`: shared schemas, types, and contracts
+- `packages/ui`: reusable UI components
+- `prisma/`: schema and migrations; `prisma.config.ts` at repo root (Prisma 7)
+- `docs`: architecture, domain, integration, env, and runbook docs
+- `.cursor/rules`, `.cursor/commands`, `.cursor/plans`: Cursor artifacts
+- `scripts/`: e.g. `preflight.mjs`
+
+## Workspace commands
+
+| Command | Purpose |
+| ------- | ------- |
+| `pnpm dev` | Run web + API in parallel |
+| `pnpm dev:web` | Run Next dev only |
+| `pnpm dev:api` | Run Nest dev only |
+| `pnpm build` | Build packages and apps |
+| `pnpm typecheck` | TypeScript check |
+| `pnpm lint` | ESLint (API + web) |
+| `pnpm test` | Tests (`@storyboard/shared` + `@storyboard/api`; API runs `nest build` then Node test runner) |
+| `pnpm infra:up` / `infra:down` | Docker Postgres + Redis |
+| `pnpm db:generate` | `prisma generate` (root config) |
+| `pnpm db:migrate` | `prisma migrate dev` (needs Postgres) |
+| `pnpm db:seed` | Seed default artist + operator membership (needs migrate) |
+| `pnpm db:studio` | Prisma Studio |
+| `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
+
+## Phase 2A providers
+
+Gmail (OAuth draft-only), Bandsintown (read), and Ticketmaster Discovery (read) can run as **real** adapters when env vars are set; otherwise **mocks** keep local development safe. Approval **execute** creates Gmail drafts only after explicit approval. See `docs/developer-runbook.md`; `GET /integrations/status` (authenticated) reports provider modes.
+
+## MVP Scope
+
+- Venue CRM, contact/promoter CRM, booking pipeline, task engine, approval center with post-approval **execution**, command bar, weekly summary, and adapter layer (real Gmail/Bandsintown/Ticketmaster when configured; Calendar, Drive, YouTube, Spotify still mock-first).
+
+## Commands API
+
+`POST /commands/execute` accepts **`text`** (natural language) and/or **`intent`**
+(structured). See `docs/developer-runbook.md` for intent names and examples.
+
+## Read Next
+
+- `docs/architecture.md`
+- `docs/domain-model.md`
+- `docs/integration-plan.md`
+- `docs/environment-setup-plan.md`
+- `docs/developer-runbook.md`
+- `docs/workflow-automation.md`
+- `docs/telegram-alerts.md`
+- `docs/package-map.md`
+- `.cursor/plans/storyboard-master-plan.md`

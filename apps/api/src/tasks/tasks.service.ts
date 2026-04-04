@@ -1,0 +1,149 @@
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "../generated/prisma/client";
+import { TaskStatus } from "../generated/prisma/enums";
+import { AuditService } from "../audit/audit.service";
+import { PrismaService } from "../prisma/prisma.service";
+
+@Injectable()
+export class TasksService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService
+  ) {}
+
+  list(artistId: string) {
+    return this.prisma.client.task.findMany({
+      where: { artistId },
+      include: { opportunity: { include: { venue: true } } },
+      orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }]
+    });
+  }
+
+  /**
+   * Tasks past their due date, excluding done.
+   * When `graceDays` &gt; 0, `dueAt` must be before (now minus that many UTC calendar days).
+   * Null or 0 grace matches “any past-due” (`dueAt` &lt; now).
+   */
+  overdueByDueDate(artistId: string, graceDays?: number | null) {
+    const cutoff = new Date();
+    if (graceDays != null && graceDays > 0) {
+      cutoff.setUTCDate(cutoff.getUTCDate() - graceDays);
+    }
+    return this.prisma.client.task.findMany({
+      where: {
+        artistId,
+        status: { not: TaskStatus.done },
+        dueAt: { lt: cutoff }
+      },
+      include: { opportunity: { include: { venue: true } } },
+      orderBy: [{ dueAt: "asc" }]
+    });
+  }
+
+  /**
+   * Incomplete tasks whose last update is older than `days` (stale follow-ups).
+   */
+  followUpsOlderThan(artistId: string, days: number) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    return this.prisma.client.task.findMany({
+      where: {
+        artistId,
+        status: { not: TaskStatus.done },
+        updatedAt: { lt: cutoff }
+      },
+      include: { opportunity: true }
+    });
+  }
+
+  async get(artistId: string, id: string) {
+    const row = await this.prisma.client.task.findFirst({
+      where: { id, artistId },
+      include: { opportunity: true }
+    });
+    if (!row) {
+      throw new NotFoundException("Task not found");
+    }
+    return row;
+  }
+
+  async create(
+    artistId: string,
+    data: {
+      title: string;
+      opportunityId?: string | null;
+      status?: TaskStatus;
+      ownerLabel?: string | null;
+      dueAt?: string | null;
+    },
+    actorLabel?: string | null,
+    actorOperatorId?: string | null
+  ) {
+    const row = await this.prisma.client.task.create({
+      data: {
+        artistId,
+        title: data.title,
+        opportunityId: data.opportunityId ?? null,
+        status: data.status ?? TaskStatus.todo,
+        ownerLabel: data.ownerLabel ?? null,
+        dueAt: data.dueAt ? new Date(data.dueAt) : null
+      }
+    });
+    await this.audit.log({
+      artistId,
+      aggregateType: "Task",
+      aggregateId: row.id,
+      action: "task.created",
+      actorLabel,
+      actorOperatorId: actorOperatorId ?? null,
+      metadata: { title: row.title }
+    });
+    return row;
+  }
+
+  async patch(
+    artistId: string,
+    id: string,
+    data: Partial<{
+      title: string;
+      status: TaskStatus;
+      ownerLabel: string | null;
+      dueAt: string | null;
+      opportunityId: string | null;
+    }>,
+    actorLabel?: string | null,
+    actorOperatorId?: string | null
+  ) {
+    await this.get(artistId, id);
+    const patchData: Prisma.TaskUncheckedUpdateInput = {};
+    if (data.title !== undefined) {
+      patchData.title = data.title;
+    }
+    if (data.status !== undefined) {
+      patchData.status = data.status;
+    }
+    if (data.ownerLabel !== undefined) {
+      patchData.ownerLabel = data.ownerLabel;
+    }
+    if (data.opportunityId !== undefined) {
+      patchData.opportunityId = data.opportunityId;
+    }
+    if (data.dueAt !== undefined) {
+      patchData.dueAt = data.dueAt ? new Date(data.dueAt) : null;
+    }
+    const row = await this.prisma.client.task.update({
+      where: { id },
+      data: patchData
+    });
+    await this.audit.log({
+      artistId,
+      aggregateType: "Task",
+      aggregateId: row.id,
+      action: "task.updated",
+      actorLabel,
+      actorOperatorId: actorOperatorId ?? null,
+      metadata: data as Record<string, unknown>
+    });
+    return row;
+  }
+}
