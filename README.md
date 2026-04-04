@@ -60,6 +60,8 @@ Stop infra: `pnpm infra:down`
 
 Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/environment-setup-plan.md`.
 
+**Agents (Codex, Cursor, etc.):** read [`AGENTS.md`](AGENTS.md) and [`docs/codex-handoff.md`](docs/codex-handoff.md) for the current delivery snapshot, file map, and quality gate.
+
 ## Core Product Principles
 
 - One coherent app, not a collection of disconnected assistants
@@ -114,6 +116,8 @@ Gmail (OAuth draft-only), Bandsintown (read), and Ticketmaster Discovery (read) 
 
 ## Read Next
 
+- `AGENTS.md` — concise rules for coding agents
+- `docs/codex-handoff.md` — handoff: what is shipped, where code lives, next-work ideas
 - `docs/architecture.md`
 - `docs/domain-model.md`
 - `docs/integration-plan.md`
@@ -122,4 +126,4 @@ Gmail (OAuth draft-only), Bandsintown (read), and Ticketmaster Discovery (read) 
 - `docs/workflow-automation.md`
 - `docs/telegram-alerts.md`
 - `docs/package-map.md`
-- `.cursor/plans/storyboard-master-plan.md`
+- `.cursor/plans/storyboard-master-plan.md` (historical roadmap; cross-check README phases)

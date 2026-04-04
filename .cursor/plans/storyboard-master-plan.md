@@ -1,5 +1,7 @@
 # StoryBoard Master Plan
 
+> **Note (2026):** Delivery has outpaced this document. Phases **3A–5B** (auth, invites, workflow, Telegram outbound + inbound registration, etc.) are reflected in the root **README** and **`docs/codex-handoff.md`**. Use those for “what exists now”; keep this file for original vision and early phase naming.
+
 ## Vision
 
 StoryBoard should behave like a real band manager's operating system: always
