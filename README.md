@@ -37,7 +37,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-- Web: http://localhost:3000 — sign in with Google (or dev login when enabled). New operators without memberships go through **onboarding** (create an artist or accept an invite). Owners manage team invites from **Team** in the sidebar. Then: dashboard (including booking health + priority actions), CRM, **Find shows**, booking, **Pitch campaigns**, the optional **Booking inbox**, tasks, approvals, command bar, weekly summary, **Notifications** (preferences, optional **Telegram** urgent settings for owners, escalation), activity
+- Web: http://localhost:3000 — sign in with Google (or dev login when enabled). New operators without memberships go through **onboarding** (create an artist or accept an invite). Owners manage team invites from **Team** in the sidebar. Then: **Manager** intake/brief/chat, dashboard, **Band operations** (events, songs/setlists, projects, offers), CRM, **Find shows**, booking, **Pitch campaigns**, the optional **Booking inbox**, tasks, approvals, weekly summary, notifications, and activity.
 - API: http://localhost:4000/health  
 
 The web app loads the repo-root `.env` via `apps/web/next.config.ts` so `API_URL` / `NEXT_PUBLIC_API_URL` stay in sync (see `.env.example`). API requests use `credentials: "include"`; optional **`COOKIE_DOMAIN=localhost`** helps the session cookie work across Next (3000) and the API (4000) in local development.
@@ -78,6 +78,31 @@ Google OAuth, real secrets, and public `WEB_URL`/API URLs.
 **Booking acquisition:** A quick, artist-scoped booking profile unlocks market prospecting and pitch campaigns. **Find shows** searches one city at a time through Ticketmaster Discovery when configured, otherwise states that manual mode is active rather than inventing leads. It stores venue, festival, private-event, and corporate-event prospects; only physical-room prospects create a `Venue` on conversion. **Pitch campaigns** render only a small allowlist of variables, show every personalized email before approval, and create Gmail drafts only after approval execution — never an auto-send. Each executed draft creates one follow-up task seven days later by default. See `docs/domain-model.md` and `docs/developer-runbook.md`.
 
 **Booking advisor:** The Booking advisor turns sprint, campaign, delivery, outcome, and feedback into reviewable next steps. It remains deterministic when `OPENAI_ENABLED=false`. When enabled, `OPENAI_ADVISOR_CONTEXT=aggregate` (default) sends counts only; the explicit global `full` mode sends artist CRM context to the configured provider. It never sends messages or mutates booking records.
+
+**Manager OS:** The Manager workspace is the cross-functional successor to the
+booking-only advisor (the old advisor API remains compatible). A guided intake
+records band mode, market, lineup, constraints, and ambition; creates an
+editable initial goal set; and produces a daily/weekly brief grounded in
+artist-owned records. Optional OpenAI reasoning uses `OPENAI_MANAGER_MODEL`
+(`gpt-5.6-terra` by default); disabled or failed requests use a deterministic
+fallback. Manager traces retain facts/record IDs, policy results, prompt/model
+version, latency, and structured recommendations—not hidden reasoning or raw
+provider inbox data. The OpenAI path must first call the single explicit,
+read-only `read_manager_snapshot` function; code supplies the tenant snapshot
+and records token usage. Model output cannot invent tools: code permits direct
+acceptance only for low-risk internal task creation; email, calendar, Drive,
+legal, and financial work remains human-reviewed and approval-gated.
+
+**Band operations:** Confirming a booking opportunity idempotently creates a
+gig event. Events hold availability, logistics, show advance tasks, setlists,
+deal/invoice links, expenses, and settlement state. The same workspace includes
+a shared song library, practical setlists, release/content/tour/business
+projects, versioned deal memos, owner-activated agreement templates, immutable
+PDF snapshots, idempotent manual payments, and finalized settlements. Financial
+values are integer minor units with US/USD defaults. Agreement templates are
+starting points only and explicitly not legal advice. Gmail/calendar/Drive
+side effects still require Approvals; generated PDFs remain in StoryBoard until
+the reviewed provider-delivery step is executed.
 
 **Booking reply loop:** When `GMAIL_REPLY_SYNC_ENABLED=true` and an owner reconnects Google with `gmail.readonly`, the Booking inbox checks only Gmail threads created by StoryBoard campaigns. It stores bounded message metadata/snippets, not full bodies or attachments. AI analysis is a separate per-artist opt-in; selected bodies are fetched transiently and discarded after structured terms are derived. Applying terms and creating a threaded Gmail reply draft both require explicit actions, and drafts still pass through Approvals. Keep reply sync disabled until Google restricted-scope requirements are satisfied.
 

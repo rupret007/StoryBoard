@@ -161,91 +161,470 @@ enum WorkflowNotificationKind {
   digest_daily
   digest_weekly
   booking_reply_detected
+  manager_brief_ready
+  event_readiness_risk
+  invoice_overdue
+}
+
+enum BandMode {
+  original
+  cover_event
+  hybrid
+}
+
+enum ManagerWorkstream {
+  live
+  releases
+  audience
+  content
+  business
+  relationships
+  band_operations
+}
+
+enum ManagerGoalStatus {
+  draft
+  active
+  achieved
+  paused
+  abandoned
+}
+
+enum ManagerInitiativeStatus {
+  proposed
+  active
+  completed
+  blocked
+  abandoned
+}
+
+enum ManagerDecisionStatus {
+  open
+  decided
+  superseded
+}
+
+enum ManagerRunCadence {
+  intake
+  daily
+  weekly
+  conversational
+}
+
+enum ManagerRecommendationOutcome {
+  suggested
+  accepted
+  dismissed
+  completed
+  blocked
+}
+
+enum ManagerMemorySensitivity {
+  normal
+  sensitive
+  restricted
+}
+
+enum BandEventType {
+  gig
+  rehearsal
+  studio
+  release
+  promotion
+  travel
+  meeting
+}
+
+enum BandEventStatus {
+  draft
+  hold
+  confirmed
+  completed
+  cancelled
+}
+
+enum AvailabilityResponse {
+  unknown
+  available
+  tentative
+  unavailable
+}
+
+enum ArtistProjectType {
+  release
+  content_campaign
+  tour
+  business
+}
+
+enum ArtistProjectStatus {
+  draft
+  active
+  completed
+  paused
+  cancelled
+}
+
+enum DealStatus {
+  draft
+  proposed
+  negotiating
+  accepted
+  declined
+  cancelled
+  completed
+}
+
+enum AgreementStatus {
+  draft
+  approval_pending
+  sent
+  viewed
+  signed
+  declined
+  voided
+}
+
+enum InvoiceStatus {
+  draft
+  issued
+  partially_paid
+  paid
+  overdue
+  voided
+}
+
+enum SettlementStatus {
+  draft
+  ready
+  finalized
+  voided
+}
+
+enum SetlistStatus {
+  draft
+  active
+  archived
 }
 
 model Operator {
-  id          String                   @id @default(cuid())
-  email       String                   @unique
-  name        String?
-  googleSub   String?                  @unique
-  workflowEmailEnabled Boolean        @default(true)
-  createdAt   DateTime                 @default(now())
-  updatedAt   DateTime                 @updatedAt
-  memberships ArtistMembership[]
-  auditEvents AuditEvent[]
-  invitesCreated ArtistMembershipInvite[] @relation("InviteCreator")
-  invitesAccepted ArtistMembershipInvite[] @relation("InviteAcceptor")
-  workflowNotifications WorkflowNotification[]
+  id                                String                      @id @default(cuid())
+  email                             String                      @unique
+  name                              String?
+  googleSub                         String?                     @unique
+  workflowEmailEnabled              Boolean                     @default(true)
+  createdAt                         DateTime                    @default(now())
+  updatedAt                         DateTime                    @updatedAt
+  memberships                       ArtistMembership[]
+  auditEvents                       AuditEvent[]
+  invitesCreated                    ArtistMembershipInvite[]    @relation("InviteCreator")
+  invitesAccepted                   ArtistMembershipInvite[]    @relation("InviteAcceptor")
+  workflowNotifications             WorkflowNotification[]
   telegramRegistrationTokensCreated TelegramRegistrationToken[] @relation("TelegramRegistrationCreator")
-  advisorFeedback BookingAdvisorFeedback[]
+  advisorFeedback                   BookingAdvisorFeedback[]
+  bandMemberProfiles                BandMember[]
+  managerMessages                   ManagerMessage[]
 }
 
 model ArtistMembership {
-  id                   String               @id @default(cuid())
-  operatorId           String
-  artistId             String
-  role                 ArtistMembershipRole @default(member)
-  workflowNotifyPrefs  Json?
-  createdAt            DateTime             @default(now())
-  operator             Operator             @relation(fields: [operatorId], references: [id], onDelete: Cascade)
-  artist               Artist               @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  id                  String               @id @default(cuid())
+  operatorId          String
+  artistId            String
+  role                ArtistMembershipRole @default(member)
+  workflowNotifyPrefs Json?
+  createdAt           DateTime             @default(now())
+  operator            Operator             @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  artist              Artist               @relation(fields: [artistId], references: [id], onDelete: Cascade)
 
   @@unique([operatorId, artistId])
   @@index([artistId])
 }
 
 model Artist {
-  id                          String               @id @default(cuid())
+  id                          String                      @id @default(cuid())
   name                        String
-  slug                        String               @unique
+  slug                        String                      @unique
   workflowOverdueGraceDays    Int?
   workflowStaleFollowupDays   Int?
   workflowPendingApprovalDays Int?
-  telegramUrgentEnabled       Boolean              @default(false)
+  telegramUrgentEnabled       Boolean                     @default(false)
   telegramChatId              String?
   telegramNotifyCategories    Json?
-  createdAt                   DateTime             @default(now())
-  updatedAt                   DateTime             @updatedAt
-  venues        Venue[]
-  contacts      Contact[]
-  opportunities BookingOpportunity[]
-  tasks         Task[]
-  approvals     ApprovalRequest[]
-  commandRuns   CommandRun[]
-  integrations  IntegrationConnection[]
-  memberships   ArtistMembership[]
-  bookingProfile ArtistBookingProfile?
-  bookingProspects BookingProspect[]
-  bookingCampaigns BookingCampaign[]
-  bookingMarketSprints BookingMarketSprint[]
-  bookingCampaignDeliveries BookingCampaignDelivery[]
-  bookingReplySettings ArtistBookingReplySettings?
-  bookingReplies BookingReply[]
-  advisorRuns             BookingAdvisorRun[]
-  bookingAdvisorSettings  BookingAdvisorSettings?
-  membershipInvites ArtistMembershipInvite[]
-  workflowNotifications WorkflowNotification[]
-  telegramUrgentDedupes TelegramUrgentDedupe[]
-  telegramRegistrationTokens TelegramRegistrationToken[]
+  createdAt                   DateTime                    @default(now())
+  updatedAt                   DateTime                    @updatedAt
+  venues                      Venue[]
+  contacts                    Contact[]
+  opportunities               BookingOpportunity[]
+  tasks                       Task[]
+  approvals                   ApprovalRequest[]
+  commandRuns                 CommandRun[]
+  integrations                IntegrationConnection[]
+  memberships                 ArtistMembership[]
+  bookingProfile              ArtistBookingProfile?
+  bookingProspects            BookingProspect[]
+  bookingCampaigns            BookingCampaign[]
+  bookingMarketSprints        BookingMarketSprint[]
+  bookingCampaignDeliveries   BookingCampaignDelivery[]
+  bookingReplySettings        ArtistBookingReplySettings?
+  bookingReplies              BookingReply[]
+  advisorRuns                 BookingAdvisorRun[]
+  bookingAdvisorSettings      BookingAdvisorSettings?
+  membershipInvites           ArtistMembershipInvite[]
+  workflowNotifications       WorkflowNotification[]
+  telegramUrgentDedupes       TelegramUrgentDedupe[]
+  telegramRegistrationTokens  TelegramRegistrationToken[]
+  operatingProfile            ArtistOperatingProfile?
+  managerSettings             ManagerSettings?
+  bandMembers                 BandMember[]
+  managerGoals                ManagerGoal[]
+  managerInitiatives          ManagerInitiative[]
+  managerDecisions            ManagerDecision[]
+  managerMemoryFacts          ManagerMemoryFact[]
+  managerRuns                 ManagerRun[]
+  managerConversations        ManagerConversation[]
+  events                      BandEvent[]
+  songs                       Song[]
+  setlists                    Setlist[]
+  projects                    ArtistProject[]
+  deals                       DealOffer[]
+  documentTemplates           DocumentTemplate[]
+  agreements                  Agreement[]
+  documentSnapshots           DocumentSnapshot[]
+  invoices                    Invoice[]
+  payments                    PaymentRecord[]
+  expenses                    Expense[]
+  settlements                 Settlement[]
+}
+
+model ArtistOperatingProfile {
+  id                       String    @id @default(cuid())
+  artistId                 String    @unique
+  bandMode                 BandMode  @default(hybrid)
+  careerStage              String?
+  homeCity                 String?
+  homeRegion               String?
+  homeCountry              String?
+  genres                   String[]  @default([])
+  businessName             String?
+  taxIdLast4               String?
+  revenueSources           String[]  @default([])
+  currentAssets            String[]  @default([])
+  constraints              String[]  @default([])
+  educationTopics          String[]  @default([])
+  availabilityExpectations String?
+  budgetToleranceMinor     Int?
+  currency                 String    @default("USD")
+  twelveMonthAmbition      String?
+  communicationCadence     String    @default("daily")
+  decisionStyle            String    @default("guided")
+  intakeCompletedAt        DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  artist                   Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
+}
+
+model ManagerSettings {
+  id                 String   @id @default(cuid())
+  artistId           String   @unique
+  aiEnabled          Boolean  @default(false)
+  fullContextEnabled Boolean  @default(false)
+  scheduleEnabled    Boolean  @default(false)
+  timezone           String?
+  dailyHour          Int      @default(9)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  artist             Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+}
+
+model BandMember {
+  id                      String             @id @default(cuid())
+  artistId                String
+  linkedOperatorId        String?
+  name                    String
+  email                   String?
+  phone                   String?
+  instruments             String[]           @default([])
+  roles                   String[]           @default([])
+  defaultSplitBasisPoints Int?
+  notes                   String?
+  active                  Boolean            @default(true)
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  artist                  Artist             @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  linkedOperator          Operator?          @relation(fields: [linkedOperatorId], references: [id], onDelete: SetNull)
+  eventResponses          EventParticipant[]
+  memberSplits            MemberSplit[]
+
+  @@unique([artistId, linkedOperatorId])
+  @@index([artistId, active])
+}
+
+model ManagerGoal {
+  id           String              @id @default(cuid())
+  artistId     String
+  workstream   ManagerWorkstream
+  title        String
+  description  String?
+  targetValue  Float?
+  targetUnit   String?
+  currentValue Float?
+  deadline     DateTime?
+  status       ManagerGoalStatus   @default(draft)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  artist       Artist              @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  initiatives  ManagerInitiative[]
+  projects     ArtistProject[]
+
+  @@index([artistId, status, deadline])
+}
+
+model ManagerInitiative {
+  id              String                  @id @default(cuid())
+  artistId        String
+  goalId          String?
+  workstream      ManagerWorkstream
+  title           String
+  description     String?
+  status          ManagerInitiativeStatus @default(proposed)
+  startsAt        DateTime?
+  dueAt           DateTime?
+  successMetric   String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  artist          Artist                  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  goal            ManagerGoal?            @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  tasks           Task[]
+  recommendations ManagerRecommendation[]
+
+  @@index([artistId, status, dueAt])
+}
+
+model ManagerDecision {
+  id         String                @id @default(cuid())
+  artistId   String
+  workstream ManagerWorkstream
+  title      String
+  context    String?
+  options    Json
+  choice     String?
+  rationale  String?
+  evidence   Json                  @default("[]")
+  status     ManagerDecisionStatus @default(open)
+  reviewAt   DateTime?
+  decidedAt  DateTime?
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  artist     Artist                @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@index([artistId, status, reviewAt])
+}
+
+model ManagerMemoryFact {
+  id          String                   @id @default(cuid())
+  artistId    String
+  key         String
+  value       Json
+  sourceType  String
+  sourceId    String?
+  confidence  Float                    @default(1)
+  sensitivity ManagerMemorySensitivity @default(normal)
+  confirmedAt DateTime?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  artist      Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([artistId, key])
+}
+
+model ManagerRun {
+  id              String                  @id @default(cuid())
+  artistId        String
+  cadence         ManagerRunCadence
+  mode            String
+  model           String?
+  promptVersion   String
+  inputFacts      Json
+  output          Json
+  trace           Json
+  latencyMs       Int?
+  inputTokens     Int?
+  outputTokens    Int?
+  createdAt       DateTime                @default(now())
+  artist          Artist                  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  recommendations ManagerRecommendation[]
+
+  @@index([artistId, cadence, createdAt])
+}
+
+model ManagerRecommendation {
+  id             String                       @id @default(cuid())
+  managerRunId   String
+  initiativeId   String?
+  stableKey      String
+  workstream     ManagerWorkstream
+  title          String
+  reason         String
+  nextAction     String
+  priority       String
+  evidence       Json
+  proposedAction Json?
+  outcome        ManagerRecommendationOutcome @default(suggested)
+  taskId         String?
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+  managerRun     ManagerRun                   @relation(fields: [managerRunId], references: [id], onDelete: Cascade)
+  initiative     ManagerInitiative?           @relation(fields: [initiativeId], references: [id], onDelete: SetNull)
+  task           Task?                        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@unique([managerRunId, stableKey])
+  @@index([managerRunId, outcome])
+}
+
+model ManagerConversation {
+  id        String           @id @default(cuid())
+  artistId  String
+  title     String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  artist    Artist           @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  messages  ManagerMessage[]
+
+  @@index([artistId, updatedAt])
+}
+
+model ManagerMessage {
+  id              String              @id @default(cuid())
+  conversationId  String
+  operatorId      String?
+  role            String
+  content         String
+  citations       Json                @default("[]")
+  proposedActions Json                @default("[]")
+  createdAt       DateTime            @default(now())
+  conversation    ManagerConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  operator        Operator?           @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
 }
 
 model BookingAdvisorRun {
-  id            String   @id @default(cuid())
-  artistId      String
-  mode          String
-  model         String?
-  promptVersion String
-  trigger       BookingAdvisorTrigger @default(manual)
+  id                 String                         @id @default(cuid())
+  artistId           String
+  mode               String
+  model              String?
+  promptVersion      String
+  trigger            BookingAdvisorTrigger          @default(manual)
   scheduledLocalDate String?
-  inputFacts    Json
-  advice        Json
-  createdAt     DateTime @default(now())
-  artist        Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  feedback      BookingAdvisorFeedback[]
-  recommendations BookingAdvisorRecommendation[]
+  inputFacts         Json
+  advice             Json
+  createdAt          DateTime                       @default(now())
+  artist             Artist                         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  feedback           BookingAdvisorFeedback[]
+  recommendations    BookingAdvisorRecommendation[]
 
-  @@index([artistId, createdAt])
   @@unique([artistId, trigger, scheduledLocalDate])
+  @@index([artistId, createdAt])
 }
 
 model BookingAdvisorSettings {
@@ -260,45 +639,45 @@ model BookingAdvisorSettings {
 }
 
 model BookingAdvisorRecommendation {
-  id          String   @id @default(cuid())
+  id           String                              @id @default(cuid())
   advisorRunId String
-  stableKey   String
-  title       String
-  priority    String
-  evidence    Json
-  outcome     BookingAdvisorRecommendationOutcome @default(suggested)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  advisorRun  BookingAdvisorRun @relation(fields: [advisorRunId], references: [id], onDelete: Cascade)
+  stableKey    String
+  title        String
+  priority     String
+  evidence     Json
+  outcome      BookingAdvisorRecommendationOutcome @default(suggested)
+  createdAt    DateTime                            @default(now())
+  updatedAt    DateTime                            @updatedAt
+  advisorRun   BookingAdvisorRun                   @relation(fields: [advisorRunId], references: [id], onDelete: Cascade)
 
   @@unique([advisorRunId, stableKey])
   @@index([advisorRunId, outcome])
 }
 
 model BookingAdvisorFeedback {
-  id           String   @id @default(cuid())
+  id           String            @id @default(cuid())
   advisorRunId String
   operatorId   String
   helpful      Boolean
-  createdAt    DateTime @default(now())
+  createdAt    DateTime          @default(now())
   advisorRun   BookingAdvisorRun @relation(fields: [advisorRunId], references: [id], onDelete: Cascade)
-  operator     Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  operator     Operator          @relation(fields: [operatorId], references: [id], onDelete: Cascade)
 
   @@unique([advisorRunId, operatorId])
   @@index([advisorRunId])
 }
 
 model TelegramRegistrationToken {
-  id                    String    @id @default(cuid())
-  artistId              String
-  createdByOperatorId   String
-  tokenHash             String    @unique
-  expiresAt             DateTime
-  consumedAt            DateTime?
-  boundChatId           String?
-  createdAt             DateTime  @default(now())
-  artist                Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  createdBy             Operator  @relation("TelegramRegistrationCreator", fields: [createdByOperatorId], references: [id], onDelete: Cascade)
+  id                  String    @id @default(cuid())
+  artistId            String
+  createdByOperatorId String
+  tokenHash           String    @unique
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  boundChatId         String?
+  createdAt           DateTime  @default(now())
+  artist              Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdBy           Operator  @relation("TelegramRegistrationCreator", fields: [createdByOperatorId], references: [id], onDelete: Cascade)
 
   @@index([artistId])
   @@index([expiresAt])
@@ -330,7 +709,7 @@ model ArtistMembershipInvite {
   acceptedOperatorId  String?
   revokedAt           DateTime?
   deliveredAt         DateTime?
-  deliveryChannel     InviteDeliveryChannel @default(none)
+  deliveryChannel     InviteDeliveryChannel  @default(none)
   deliveryLastError   String?
   artist              Artist                 @relation(fields: [artistId], references: [id], onDelete: Cascade)
   createdBy           Operator               @relation("InviteCreator", fields: [createdByOperatorId], references: [id], onDelete: Cascade)
@@ -341,86 +720,98 @@ model ArtistMembershipInvite {
 }
 
 model Venue {
-  id          String               @id @default(cuid())
-  artistId    String
-  name        String
-  city        String
-  region      String?
-  country     String?
-  addressLine String?
-  lat         Float?
-  lng         Float?
+  id                   String               @id @default(cuid())
+  artistId             String
+  name                 String
+  city                 String
+  region               String?
+  country              String?
+  addressLine          String?
+  lat                  Float?
+  lng                  Float?
   driveMinutesFromBase Int?
-  fitScore    Int?
-  capacity    Int?
-  notes       String?
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  artist      Artist               @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  contacts    Contact[]
-  opportunities BookingOpportunity[]
-  bookingProspects BookingProspect[]
+  fitScore             Int?
+  capacity             Int?
+  notes                String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  artist               Artist               @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  contacts             Contact[]
+  opportunities        BookingOpportunity[]
+  bookingProspects     BookingProspect[]
+  events               BandEvent[]
 }
 
 model Contact {
-  id          String    @id @default(cuid())
-  artistId    String
-  venueId     String?
-  contactKind ContactKind @default(general)
-  fullName    String
-  role        String?
-  email       String?
-  phone       String?
-  notes       String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  artist      Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  venue       Venue?    @relation(fields: [venueId], references: [id], onDelete: SetNull)
-  commandRuns CommandRun[]
-  bookingProspects BookingProspect[]
+  id                 String                     @id @default(cuid())
+  artistId           String
+  venueId            String?
+  contactKind        ContactKind                @default(general)
+  fullName           String
+  role               String?
+  email              String?
+  phone              String?
+  notes              String?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  artist             Artist                     @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  venue              Venue?                     @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  commandRuns        CommandRun[]
+  bookingProspects   BookingProspect[]
   campaignRecipients BookingCampaignRecipient[]
+  events             BandEvent[]
+  deals              DealOffer[]
 }
 
 model BookingOpportunity {
-  id             String       @id @default(cuid())
-  artistId       String
-  venueId        String?
-  title          String
-  stage          BookingStage @default(target)
-  targetDate     DateTime?
-  marketNotes    String?
-  sourceSystem   String?
-  sourceRef      String?
-  proposedFeeMinor Int?
-  proposedCurrency String?
-  depositDueAt DateTime?
-  paymentTerms String?
+  id                    String                     @id @default(cuid())
+  artistId              String
+  venueId               String?
+  title                 String
+  stage                 BookingStage               @default(target)
+  targetDate            DateTime?
+  marketNotes           String?
+  sourceSystem          String?
+  sourceRef             String?
+  proposedFeeMinor      Int?
+  proposedCurrency      String?
+  depositDueAt          DateTime?
+  paymentTerms          String?
   negotiationConditions String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  artist         Artist       @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  venue          Venue?       @relation(fields: [venueId], references: [id], onDelete: SetNull)
-  tasks          Task[]
-  approvals      ApprovalRequest[]
-  commandRuns    CommandRun[]
-  bookingProspects BookingProspect[]
-  campaignRecipients BookingCampaignRecipient[]
-  bookingReplies BookingReply[]
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  artist                Artist                     @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  venue                 Venue?                     @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  tasks                 Task[]
+  approvals             ApprovalRequest[]
+  commandRuns           CommandRun[]
+  bookingProspects      BookingProspect[]
+  campaignRecipients    BookingCampaignRecipient[]
+  bookingReplies        BookingReply[]
+  event                 BandEvent?
+  deals                 DealOffer[]
 }
 
 model Task {
-  id             String        @id @default(cuid())
-  artistId       String
-  opportunityId  String?
-  title          String
-  status         TaskStatus    @default(todo)
-  ownerLabel     String?
-  dueAt          DateTime?
-  checklist      Json?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  artist         Artist        @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  opportunity    BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  id                         String                    @id @default(cuid())
+  artistId                   String
+  opportunityId              String?
+  eventId                    String?
+  projectId                  String?
+  initiativeId               String?
+  title                      String
+  status                     TaskStatus                @default(todo)
+  ownerLabel                 String?
+  dueAt                      DateTime?
+  checklist                  Json?
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
+  artist                     Artist                    @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  opportunity                BookingOpportunity?       @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  event                      BandEvent?                @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  project                    ArtistProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  initiative                 ManagerInitiative?        @relation(fields: [initiativeId], references: [id], onDelete: SetNull)
+  managerRecommendations     ManagerRecommendation[]
   bookingCampaignFollowUpFor BookingCampaignRecipient? @relation("CampaignRecipientFollowUpTask")
 }
 
@@ -442,32 +833,32 @@ model ArtistBookingProfile {
 }
 
 model BookingProspect {
-  id             String                @id @default(cuid())
-  artistId       String
-  kind           BookingProspectKind
-  status         BookingProspectStatus @default(discovered)
-  name           String
-  city           String
-  region         String?
-  country        String?
-  capacity       Int?
-  websiteUrl     String?
-  notes          String?
-  sourceSystem   String?
-  sourceRef      String?
-  sourceMetadata Json?
-  venueId        String?
-  contactId      String?
-  opportunityId  String?
-  marketSprintId String?
-  convertedAt    DateTime?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  artist         Artist                @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  venue          Venue?                @relation(fields: [venueId], references: [id], onDelete: SetNull)
-  contact        Contact?              @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  opportunity    BookingOpportunity?   @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
-  marketSprint   BookingMarketSprint?  @relation(fields: [marketSprintId], references: [id], onDelete: SetNull)
+  id                 String                     @id @default(cuid())
+  artistId           String
+  kind               BookingProspectKind
+  status             BookingProspectStatus      @default(discovered)
+  name               String
+  city               String
+  region             String?
+  country            String?
+  capacity           Int?
+  websiteUrl         String?
+  notes              String?
+  sourceSystem       String?
+  sourceRef          String?
+  sourceMetadata     Json?
+  venueId            String?
+  contactId          String?
+  opportunityId      String?
+  marketSprintId     String?
+  convertedAt        DateTime?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  artist             Artist                     @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  venue              Venue?                     @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  contact            Contact?                   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  opportunity        BookingOpportunity?        @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  marketSprint       BookingMarketSprint?       @relation(fields: [marketSprintId], references: [id], onDelete: SetNull)
   campaignRecipients BookingCampaignRecipient[]
 
   @@unique([artistId, sourceSystem, sourceRef])
@@ -477,7 +868,7 @@ model BookingProspect {
 }
 
 model BookingMarketSprint {
-  id                    String                   @id @default(cuid())
+  id                    String                    @id @default(cuid())
   artistId              String
   name                  String
   city                  String
@@ -489,9 +880,9 @@ model BookingMarketSprint {
   targetOutreachCount   Int?
   targetBookedCount     Int?
   status                BookingMarketSprintStatus @default(draft)
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
-  artist                Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  artist                Artist                    @relation(fields: [artistId], references: [id], onDelete: Cascade)
   prospects             BookingProspect[]
   campaigns             BookingCampaign[]
 
@@ -500,24 +891,24 @@ model BookingMarketSprint {
 }
 
 model BookingCampaign {
-  id                  String                @id @default(cuid())
+  id                  String                      @id @default(cuid())
   artistId            String
   name                String
-  status              BookingCampaignStatus @default(draft)
+  status              BookingCampaignStatus       @default(draft)
   dateWindowStart     DateTime?
   dateWindowEnd       DateTime?
   subjectTemplate     String
   bodyTemplate        String
-  defaultFollowUpDays Int                   @default(7)
+  defaultFollowUpDays Int                         @default(7)
   deliveryMode        BookingCampaignDeliveryMode @default(draft_only)
-  aiAutomationEnabled Boolean @default(false)
+  aiAutomationEnabled Boolean                     @default(false)
   marketSprintId      String?
-  approvalRequestId   String?               @unique
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
-  artist              Artist                @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  marketSprint        BookingMarketSprint?  @relation(fields: [marketSprintId], references: [id], onDelete: SetNull)
-  approvalRequest     ApprovalRequest?      @relation("CampaignApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  approvalRequestId   String?                     @unique
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  artist              Artist                      @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  marketSprint        BookingMarketSprint?        @relation(fields: [marketSprintId], references: [id], onDelete: SetNull)
+  approvalRequest     ApprovalRequest?            @relation("CampaignApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
   recipients          BookingCampaignRecipient[]
 
   @@index([artistId, status])
@@ -552,23 +943,23 @@ model BookingCampaignRecipient {
 }
 
 model BookingCampaignDelivery {
-  id          String                        @id @default(cuid())
-  artistId    String
-  approvalId  String
-  recipientId String
-  status      BookingCampaignDeliveryStatus @default(pending)
+  id                String                        @id @default(cuid())
+  artistId          String
+  approvalId        String
+  recipientId       String
+  status            BookingCampaignDeliveryStatus @default(pending)
   providerMessageId String?
-  providerThreadId String?
-  providerDraftId String?
-  error       String?
-  attemptedAt DateTime?
-  sentAt      DateTime?
-  createdAt   DateTime                      @default(now())
-  updatedAt   DateTime                      @updatedAt
-  artist      Artist                        @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  approval    ApprovalRequest               @relation(fields: [approvalId], references: [id], onDelete: Cascade)
-  recipient   BookingCampaignRecipient      @relation(fields: [recipientId], references: [id], onDelete: Cascade)
-  replies     BookingReply[]
+  providerThreadId  String?
+  providerDraftId   String?
+  error             String?
+  attemptedAt       DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
+  artist            Artist                        @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  approval          ApprovalRequest               @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  recipient         BookingCampaignRecipient      @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  replies           BookingReply[]
 
   @@unique([approvalId, recipientId])
   @@index([artistId, status])
@@ -576,55 +967,55 @@ model BookingCampaignDelivery {
 }
 
 model ArtistBookingReplySettings {
-  id                String   @id @default(cuid())
-  artistId          String   @unique
-  syncEnabled       Boolean  @default(false)
-  aiAnalysisEnabled Boolean  @default(false)
+  id                String    @id @default(cuid())
+  artistId          String    @unique
+  syncEnabled       Boolean   @default(false)
+  aiAnalysisEnabled Boolean   @default(false)
   lastSyncedAt      DateTime?
   lastSyncError     String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  artist            Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  artist            Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
 }
 
 model BookingReply {
-  id                String                       @id @default(cuid())
-  artistId          String
-  recipientId       String
-  deliveryId        String?
-  providerMessageId String
-  providerThreadId  String
-  fromEmail         String
-  fromName          String?
-  subject           String?
-  snippet           String?
-  receivedAt        DateTime
-  processingStatus  BookingReplyProcessingStatus @default(unread)
-  intent            BookingReplyIntent?
-  summary           String?
-  proposedDate      DateTime?
-  proposedFeeMinor  Int?
-  proposedCurrency  String?
-  proposedVenue     String?
-  materialConditions String?
-  questions         Json?
+  id                    String                       @id @default(cuid())
+  artistId              String
+  recipientId           String
+  deliveryId            String?
+  providerMessageId     String
+  providerThreadId      String
+  fromEmail             String
+  fromName              String?
+  subject               String?
+  snippet               String?
+  receivedAt            DateTime
+  processingStatus      BookingReplyProcessingStatus @default(unread)
+  intent                BookingReplyIntent?
+  summary               String?
+  proposedDate          DateTime?
+  proposedFeeMinor      Int?
+  proposedCurrency      String?
+  proposedVenue         String?
+  materialConditions    String?
+  questions             Json?
   recommendedNextAction String?
   suggestedReplySubject String?
-  suggestedReplyBody String?
-  confidence        Float?
-  evidence          Json?
-  analysisMode      String?
-  analysisModel     String?
-  promptVersion     String?
-  analyzedAt        DateTime?
-  termsAppliedAt    DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  artist            Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  recipient         BookingCampaignRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
-  delivery          BookingCampaignDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
-  opportunity       BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
-  opportunityId     String?
+  suggestedReplyBody    String?
+  confidence            Float?
+  evidence              Json?
+  analysisMode          String?
+  analysisModel         String?
+  promptVersion         String?
+  analyzedAt            DateTime?
+  termsAppliedAt        DateTime?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+  artist                Artist                       @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  recipient             BookingCampaignRecipient     @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  delivery              BookingCampaignDelivery?     @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  opportunity           BookingOpportunity?          @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  opportunityId         String?
 
   @@unique([artistId, providerMessageId])
   @@index([artistId, processingStatus, receivedAt])
@@ -632,37 +1023,37 @@ model BookingReply {
 }
 
 model ApprovalRequest {
-  id             String          @id @default(cuid())
-  artistId       String
-  opportunityId  String?
-  title          String
-  status         ApprovalStatus  @default(proposed)
-  actionType     String
-  payload        Json
-  proposedBy     String?
-  approvedBy     String?
-  approvedAt     DateTime?
+  id                   String                    @id @default(cuid())
+  artistId             String
+  opportunityId        String?
+  title                String
+  status               ApprovalStatus            @default(proposed)
+  actionType           String
+  payload              Json
+  proposedBy           String?
+  approvedBy           String?
+  approvedAt           DateTime?
   executionAttemptedAt DateTime?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  artist         Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  opportunity    BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
-  bookingCampaign BookingCampaign? @relation("CampaignApproval")
-  campaignDeliveries BookingCampaignDelivery[]
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+  artist               Artist                    @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  opportunity          BookingOpportunity?       @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  bookingCampaign      BookingCampaign?          @relation("CampaignApproval")
+  campaignDeliveries   BookingCampaignDelivery[]
 }
 
 model AuditEvent {
-  id               String        @id @default(cuid())
-  artistId         String?
-  severity         AuditSeverity @default(info)
-  aggregateType    String
-  aggregateId      String
-  action           String
-  actorLabel       String?
-  actorOperatorId  String?
-  metadata         Json
-  createdAt        DateTime      @default(now())
-  actorOperator    Operator?     @relation(fields: [actorOperatorId], references: [id], onDelete: SetNull)
+  id              String        @id @default(cuid())
+  artistId        String?
+  severity        AuditSeverity @default(info)
+  aggregateType   String
+  aggregateId     String
+  action          String
+  actorLabel      String?
+  actorOperatorId String?
+  metadata        Json
+  createdAt       DateTime      @default(now())
+  actorOperator   Operator?     @relation(fields: [actorOperatorId], references: [id], onDelete: SetNull)
 
   @@index([aggregateType, aggregateId])
   @@index([artistId, createdAt])
@@ -670,26 +1061,26 @@ model AuditEvent {
 }
 
 model CommandRun {
-  id             String      @id @default(cuid())
+  id             String              @id @default(cuid())
   artistId       String
   opportunityId  String?
   contactId      String?
   rawInput       String
   intent         String?
   resolvedAction Json
-  dryRun         Boolean     @default(true)
+  dryRun         Boolean             @default(true)
   status         String
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  artist         Artist      @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  artist         Artist              @relation(fields: [artistId], references: [id], onDelete: Cascade)
   opportunity    BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
-  contact        Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  contact        Contact?            @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([artistId, createdAt])
 }
 
 model IntegrationConnection {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   artistId         String
   provider         String
   accountLabel     String?
@@ -697,25 +1088,403 @@ model IntegrationConnection {
   status           String
   encryptedSecrets Json?
   lastSyncedAt     DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  artist           Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  artist           Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
 
   @@unique([artistId, provider])
 }
 
+model BandEvent {
+  id                  String              @id @default(cuid())
+  artistId            String
+  opportunityId       String?             @unique
+  venueId             String?
+  contactId           String?
+  projectId           String?
+  setlistId           String?
+  type                BandEventType
+  status              BandEventStatus     @default(draft)
+  title               String
+  startsAt            DateTime?
+  endsAt              DateTime?
+  timezone            String?
+  locationName        String?
+  address             String?
+  loadInAt            DateTime?
+  soundcheckAt        DateTime?
+  doorsAt             DateTime?
+  setAt               DateTime?
+  curfewAt            DateTime?
+  travelNotes         String?
+  hospitalityNotes    String?
+  productionNotes     String?
+  cancellationTerms   String?
+  guaranteeMinor      Int?
+  currency            String              @default("USD")
+  depositMinor        Int?
+  depositDueAt        DateTime?
+  balanceDueAt        DateTime?
+  stagePlotUrl        String?
+  inputListUrl        String?
+  techRiderUrl        String?
+  hospitalityRiderUrl String?
+  driveFolderUrl      String?
+  calendarEventId     String?
+  parkingNotes        String?
+  guestListNotes      String?
+  attendance          Int?
+  grossRevenueMinor   Int?
+  postShowNotes       String?
+  relationshipOutcome String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  artist              Artist              @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  opportunity         BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  venue               Venue?              @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  contact             Contact?            @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  project             ArtistProject?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  setlist             Setlist?            @relation(fields: [setlistId], references: [id], onDelete: SetNull)
+  participants        EventParticipant[]
+  schedule            EventScheduleItem[]
+  tasks               Task[]
+  deals               DealOffer[]
+  invoices            Invoice[]
+  expenses            Expense[]
+  settlement          Settlement?
+
+  @@index([artistId, status, startsAt])
+}
+
+model EventParticipant {
+  id           String               @id @default(cuid())
+  eventId      String
+  bandMemberId String
+  response     AvailabilityResponse @default(unknown)
+  assignment   String?
+  respondedAt  DateTime?
+  notes        String?
+  event        BandEvent            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  bandMember   BandMember           @relation(fields: [bandMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, bandMemberId])
+}
+
+model EventScheduleItem {
+  id        String    @id @default(cuid())
+  eventId   String
+  title     String
+  startsAt  DateTime
+  endsAt    DateTime?
+  location  String?
+  notes     String?
+  sortOrder Int       @default(0)
+  event     BandEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, sortOrder])
+}
+
+model Song {
+  id              String        @id @default(cuid())
+  artistId        String
+  title           String
+  durationSeconds Int?
+  musicalKey      String?
+  bpm             Int?
+  leadVocalist    String?
+  genre           String?
+  notes           String?
+  lyricsUrl       String?
+  chartUrl        String?
+  active          Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  artist          Artist        @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  setlistItems    SetlistItem[]
+
+  @@index([artistId, title])
+}
+
+model Setlist {
+  id          String        @id @default(cuid())
+  artistId    String
+  name        String
+  status      SetlistStatus @default(draft)
+  notes       String?
+  publicToken String?       @unique
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  artist      Artist        @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  items       SetlistItem[]
+  events      BandEvent[]
+
+  @@index([artistId, status])
+}
+
+model SetlistItem {
+  id              String  @id @default(cuid())
+  setlistId       String
+  songId          String?
+  itemType        String  @default("song")
+  label           String?
+  sortOrder       Int
+  transitionNotes String?
+  setlist         Setlist @relation(fields: [setlistId], references: [id], onDelete: Cascade)
+  song            Song?   @relation(fields: [songId], references: [id], onDelete: SetNull)
+
+  @@unique([setlistId, sortOrder])
+}
+
+model ArtistProject {
+  id             String              @id @default(cuid())
+  artistId       String
+  goalId         String?
+  type           ArtistProjectType
+  status         ArtistProjectStatus @default(draft)
+  name           String
+  description    String?
+  startsAt       DateTime?
+  dueAt          DateTime?
+  budgetMinor    Int?
+  currency       String              @default("USD")
+  successMetrics Json                @default("[]")
+  assets         Json                @default("[]")
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  artist         Artist              @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  goal           ManagerGoal?        @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  events         BandEvent[]
+  tasks          Task[]
+  expenses       Expense[]
+
+  @@index([artistId, status, dueAt])
+}
+
+model DealOffer {
+  id                String              @id @default(cuid())
+  artistId          String
+  eventId           String?
+  opportunityId     String?
+  contactId         String?
+  status            DealStatus          @default(draft)
+  title             String
+  offerAmountMinor  Int?
+  currency          String              @default("USD")
+  depositMinor      Int?
+  depositDueAt      DateTime?
+  balanceDueAt      DateTime?
+  performanceDate   DateTime?
+  terms             String?
+  cancellationTerms String?
+  buyerName         String?
+  buyerEmail        String?
+  expiresAt         DateTime?
+  acceptedAt        DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  artist            Artist              @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  event             BandEvent?          @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  opportunity       BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  contact           Contact?            @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  memos             DealMemo[]
+  agreements        Agreement[]
+  invoices          Invoice[]
+
+  @@index([artistId, status, performanceDate])
+}
+
+model DealMemo {
+  id            String    @id @default(cuid())
+  dealOfferId   String
+  version       Int
+  termsSnapshot Json
+  createdAt     DateTime  @default(now())
+  dealOffer     DealOffer @relation(fields: [dealOfferId], references: [id], onDelete: Cascade)
+
+  @@unique([dealOfferId, version])
+}
+
+model DocumentTemplate {
+  id              String      @id @default(cuid())
+  artistId        String
+  kind            String
+  name            String
+  version         Int         @default(1)
+  bodyTemplate    String
+  active          Boolean     @default(false)
+  legalDisclaimer String      @default("Template only — not legal advice. Review with qualified counsel before use.")
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  artist          Artist      @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  agreements      Agreement[]
+
+  @@unique([artistId, kind, version])
+}
+
+model Agreement {
+  id                   String             @id @default(cuid())
+  artistId             String
+  dealOfferId          String
+  templateId           String?
+  status               AgreementStatus    @default(draft)
+  version              Int
+  title                String
+  renderedText         String
+  signerName           String?
+  signerEmail          String?
+  sentAt               DateTime?
+  signedAt             DateTime?
+  signatureEvidenceUrl String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  artist               Artist             @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  dealOffer            DealOffer          @relation(fields: [dealOfferId], references: [id], onDelete: Cascade)
+  template             DocumentTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  snapshots            DocumentSnapshot[]
+
+  @@unique([dealOfferId, version])
+  @@index([artistId, status])
+}
+
+model DocumentSnapshot {
+  id            String      @id @default(cuid())
+  artistId      String
+  agreementId   String?
+  invoiceId     String?
+  settlementId  String?
+  kind          String
+  version       Int
+  sha256        String
+  mimeType      String      @default("application/pdf")
+  contentBase64 String
+  driveFileId   String?
+  driveUrl      String?
+  createdAt     DateTime    @default(now())
+  artist        Artist      @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  agreement     Agreement?  @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  invoice       Invoice?    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  settlement    Settlement? @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@index([artistId, kind, createdAt])
+}
+
+model Invoice {
+  id             String             @id @default(cuid())
+  artistId       String
+  dealOfferId    String?
+  eventId        String?
+  number         String
+  status         InvoiceStatus      @default(draft)
+  recipientName  String
+  recipientEmail String?
+  currency       String             @default("USD")
+  subtotalMinor  Int
+  taxMinor       Int                @default(0)
+  totalMinor     Int
+  paidMinor      Int                @default(0)
+  issuedAt       DateTime?
+  dueAt          DateTime?
+  notes          String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  artist         Artist             @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  dealOffer      DealOffer?         @relation(fields: [dealOfferId], references: [id], onDelete: SetNull)
+  event          BandEvent?         @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  payments       PaymentRecord[]
+  snapshots      DocumentSnapshot[]
+
+  @@unique([artistId, number])
+  @@index([artistId, status, dueAt])
+}
+
+model PaymentRecord {
+  id             String   @id @default(cuid())
+  artistId       String
+  invoiceId      String
+  idempotencyKey String
+  amountMinor    Int
+  currency       String   @default("USD")
+  method         String
+  reference      String?
+  evidenceUrl    String?
+  receivedAt     DateTime
+  createdAt      DateTime @default(now())
+  artist         Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@unique([artistId, idempotencyKey])
+  @@index([invoiceId, receivedAt])
+}
+
+model Expense {
+  id           String         @id @default(cuid())
+  artistId     String
+  eventId      String?
+  projectId    String?
+  settlementId String?
+  category     String
+  description  String
+  amountMinor  Int
+  currency     String         @default("USD")
+  incurredAt   DateTime
+  receiptUrl   String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  artist       Artist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  event        BandEvent?     @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  project      ArtistProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  settlement   Settlement?    @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, incurredAt])
+}
+
+model Settlement {
+  id           String             @id @default(cuid())
+  artistId     String
+  eventId      String             @unique
+  status       SettlementStatus   @default(draft)
+  currency     String             @default("USD")
+  grossMinor   Int                @default(0)
+  expenseMinor Int                @default(0)
+  netMinor     Int                @default(0)
+  finalizedAt  DateTime?
+  notes        String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  artist       Artist             @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  event        BandEvent          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  expenses     Expense[]
+  splits       MemberSplit[]
+  snapshots    DocumentSnapshot[]
+
+  @@index([artistId, status])
+}
+
+model MemberSplit {
+  id           String     @id @default(cuid())
+  settlementId String
+  bandMemberId String
+  basisPoints  Int
+  amountMinor  Int
+  paidAt       DateTime?
+  settlement   Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  bandMember   BandMember @relation(fields: [bandMemberId], references: [id], onDelete: Restrict)
+
+  @@unique([settlementId, bandMemberId])
+}
+
 model WorkflowNotification {
-  id                    String                   @id @default(cuid())
-  artistId              String
-  recipientOperatorId   String
-  kind                  WorkflowNotificationKind
-  title                 String
-  body                  String
-  readAt                DateTime?
-  metadata              Json                     @default("{}")
-  createdAt             DateTime                 @default(now())
-  artist                Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  recipient             Operator                 @relation(fields: [recipientOperatorId], references: [id], onDelete: Cascade)
+  id                  String                   @id @default(cuid())
+  artistId            String
+  recipientOperatorId String
+  kind                WorkflowNotificationKind
+  title               String
+  body                String
+  readAt              DateTime?
+  metadata            Json                     @default("{}")
+  createdAt           DateTime                 @default(now())
+  artist              Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  recipient           Operator                 @relation(fields: [recipientOperatorId], references: [id], onDelete: Cascade)
 
   @@index([recipientOperatorId, artistId, readAt])
   @@index([artistId, createdAt])

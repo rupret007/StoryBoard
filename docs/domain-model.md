@@ -8,6 +8,36 @@ The top-level tenant for MVP state. An artist owns venues, contacts, booking
 profiles, prospects, booking opportunities, campaigns, tasks, approvals, command
 runs, and integrations.
 
+### Manager operating model
+
+`ArtistOperatingProfile` stores how the band works and what it is trying to
+achieve. `BandMember` describes real performers/crew independently of app
+logins. `ManagerGoal`, `ManagerInitiative`, and `ManagerDecision` turn ambition
+into measurable, reviewable work. `ManagerMemoryFact` stores only explicit
+facts with source, confidence, sensitivity, and confirmation time.
+`ManagerRun` and `ManagerRecommendation` preserve the prompt/model version,
+facts read, structured output, safe proposed actions, outcome, and runtime
+metadata. They never store hidden reasoning.
+
+### Events, music, projects, and deals
+
+`BandEvent` is the shared spine for gigs, rehearsals, studio, releases,
+promotion, travel, and meetings. It links participants/availability, schedule,
+venue/contact, opportunity, project, setlist, advance tasks, offers, invoices,
+expenses, and one settlement. Confirmed opportunities have at most one event.
+
+`Song` and `Setlist` provide a practical artist-owned library with duration,
+key, BPM, lead vocalist, ordered songs/breaks/notes, and event linkage.
+`ArtistProject` groups release, content, tour, and business work with goals,
+assets, metrics, budget, events, tasks, and expenses.
+
+`DealOffer` and immutable versioned `DealMemo` snapshots lead into an
+`Agreement` based on an owner-activated `DocumentTemplate`. Generated
+`DocumentSnapshot` PDFs are content-addressed with SHA-256. `Invoice` balances
+derive from idempotent `PaymentRecord` rows. `Settlement` derives gross,
+expenses, net, and basis-point `MemberSplit` amounts, then becomes immutable on
+finalization. All money uses integer minor units and an explicit currency.
+
 ### Venue
 
 Represents a physical room or club only. Stores location, capacity, and
@@ -52,8 +82,8 @@ recipient; it never sends an email or advances the booking stage automatically.
 ### Task
 
 Represents a piece of operational follow-through. Tasks may exist independently
-or attach to a booking opportunity. They carry ownership labels, due dates, and
-checklist metadata.
+or attach to a booking opportunity, event, project, or manager initiative. They
+carry ownership labels, due dates, and checklist metadata.
 
 ### ApprovalRequest
 

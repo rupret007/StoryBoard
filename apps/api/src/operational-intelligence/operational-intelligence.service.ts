@@ -203,7 +203,10 @@ export class OperationalIntelligenceService {
       pendingAged,
       openTasks,
       dueCampaignFollowUps,
-      unreadBookingReplies
+      unreadBookingReplies,
+      upcomingEvents,
+      overdueInvoices,
+      overdueProjects
     ] = await Promise.all([
       this.prisma.client.bookingOpportunity.findMany({
         where: { artistId },
@@ -232,7 +235,10 @@ export class OperationalIntelligenceService {
           followUpDueAt: { lte: new Date() }
         }
       }),
-      this.prisma.client.bookingReply.count({ where: { artistId, processingStatus: "unread" } })
+      this.prisma.client.bookingReply.count({ where: { artistId, processingStatus: "unread" } }),
+      this.prisma.client.bandEvent.findMany({ where: { artistId, status: "confirmed", startsAt: { gte: new Date(), lte: new Date(Date.now() + 14 * 86400000) } }, include: { participants: true, tasks: { where: { status: { not: TaskStatus.done } } } } }),
+      this.prisma.client.invoice.count({ where: { artistId, status: { in: ["issued", "partially_paid", "overdue"] }, dueAt: { lt: new Date() }, paidMinor: { lt: this.prisma.client.invoice.fields.totalMinor } } }),
+      this.prisma.client.artistProject.count({ where: { artistId, status: "active", dueAt: { lt: new Date() } } })
     ]);
 
     const openTaskCount = openTasks.length;
@@ -310,7 +316,10 @@ export class OperationalIntelligenceService {
       meetsApprovalAgingUrgent,
       meetsOverdueClusterUrgent,
       meetsStaleClusterUrgent,
-      opportunities
+      opportunities,
+      eventReadinessRiskCount: upcomingEvents.filter((event) => event.participants.some((participant) => participant.response === "unavailable" || participant.response === "unknown") || event.tasks.length === 0).length,
+      overdueInvoiceCount: overdueInvoices,
+      overdueProjectCount: overdueProjects
     });
 
     return {
@@ -384,8 +393,14 @@ export class OperationalIntelligenceService {
     meetsOverdueClusterUrgent: boolean;
     meetsStaleClusterUrgent: boolean;
     opportunities: { id: string; title: string; stage: BookingStage }[];
+    eventReadinessRiskCount: number;
+    overdueInvoiceCount: number;
+    overdueProjectCount: number;
   }): DashboardInsights["priorityActions"] {
     const actions: DashboardInsights["priorityActions"] = [];
+    if (input.eventReadinessRiskCount > 0) actions.push({ id: "event-readiness", title: "Resolve upcoming show readiness", reason: `${input.eventReadinessRiskCount} confirmed event(s) in the next 14 days have unknown/unavailable people or no advance work.`, href: "/operations", severity: "high" });
+    if (input.overdueInvoiceCount > 0) actions.push({ id: "invoice-overdue", title: "Collect overdue balances", reason: `${input.overdueInvoiceCount} invoice(s) are overdue with money still outstanding.`, href: "/operations", severity: "high" });
+    if (input.overdueProjectCount > 0) actions.push({ id: "projects-overdue", title: "Re-plan overdue projects", reason: `${input.overdueProjectCount} active project(s) passed their deadline.`, href: "/operations", severity: "med" });
     if (input.unreadBookingReplyCount > 0) actions.push({ id: "booking-replies-unread", title: "Review new booking replies", reason: `${input.unreadBookingReplyCount} tracked campaign repl${input.unreadBookingReplyCount === 1 ? "y is" : "ies are"} waiting for a response.`, href: "/booking-inbox", severity: "high" });
     if (input.pendingAgedCount > 0 || input.pendingApprovals > 0) {
       actions.push({

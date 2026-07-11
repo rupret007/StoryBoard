@@ -21,6 +21,9 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Market sprints + approval-gated immediate campaign delivery | Done |
 | Bounded adaptive booking advisor (optional OpenAI; review-only) | Done |
 | Tracked Gmail campaign replies + approval-gated negotiation drafts | Done; deployment-gated pending restricted-scope compliance |
+| Cross-functional Manager intake, goals, memory, briefs, chat, recommendations | Done; optional OpenAI, deterministic fallback, code-owned action policy |
+| Events, availability, show advance, songs/setlists, projects | Done; structured operations workspace shipped |
+| Offers, reviewed templates, PDF snapshots, invoices/manual payments, settlements | Internal workflow done; binary Drive/Gmail attachment and provider payment/signature adapters deferred |
 | One-command local container bundle | Done (Docker Compose v2; allocate 2 GB) |
 | Approvals + execution (Gmail drafts, calendar holds, drive folder) | Done |
 | Command bar + `POST /commands/execute` (NL + structured intents) | Done |
@@ -31,7 +34,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | Compiled `node:test` unit coverage plus opt-in Postgres integration coverage for tenant links, prospect conversion, campaign draft execution/follow-up creation, role enforcement, Telegram binding, and audit rows. Chromium e2e covers profile → prospect → buyer → campaign → approval preview. |
+| Tests | Compiled `node:test` plus opt-in Postgres integration coverage for tenant links, Manager intake/memory, confirmed-event idempotency, availability/advance, prospect/campaign delivery, payment replay, settlement math/PDF snapshots, roles, Telegram binding, and audits. Chromium e2e covers booking acquisition and Manager intake/chat → event/song/project/offer → agreement PDF → invoice/deposit → expense/settlement. |
 
 ## Non-goals to preserve (unless product changes)
 
@@ -55,6 +58,8 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Booking acquisition | `apps/api/src/booking/booking-{profiles,prospects,campaigns}.*`, `apps/web/src/app/(app)/{prospects,booking-campaigns}/` |
 | Booking advisor | `apps/api/src/advisor/`, `apps/web/src/app/(app)/advisor/` |
 | Booking reply loop | `apps/api/src/booking/booking-replies.*`, `apps/web/src/app/(app)/booking-inbox/` |
+| Manager OS | `apps/api/src/manager/`, `apps/web/src/app/(app)/manager/`, `apps/api/test/fixtures/manager-evals-v1.json` |
+| Band operations | `apps/api/src/operations/`, `apps/web/src/app/(app)/operations/` |
 | Web app API client | `apps/web/src/lib/api.ts` (cookies + `x-artist-id`) |
 
 ## Environment (short list)
@@ -74,9 +79,9 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Product:** Validate the tracked reply loop with real booking teams before expanding into routing, setlists, contracts, or settlement. Keep advice review-only; do not add scraping, general inbox access, or autonomous sends.
+1. **Product:** Validate Manager briefs, show advance, and manual deal/settlement workflows with real original and cover bands. Add binary Drive/Gmail document delivery only after real provider acceptance testing. Keep external work approval-gated; do not add scraping, general inbox access, or autonomous sends.
 2. **Runtime:** Define queue-worker deployment, cursor pagination/query limits, and metrics before horizontally scaling the API. `/ready` is a dependency probe, not a monitoring system.
-3. **Tests:** Expand browser coverage only around verified operator workflows; it must continue using the explicit test database and mock providers.
+3. **Tests:** Add browser depth for confirmed booking → participant availability → generated advance and original release milestone linkage; continue using the explicit test database and mock providers.
 
 ## Cursor-only artifacts
 

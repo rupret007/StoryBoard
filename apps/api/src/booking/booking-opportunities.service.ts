@@ -87,11 +87,14 @@ export class BookingOpportunitiesService {
     actorOperatorId?: string | null
   ) {
     const existing = await this.get(artistId, id);
-    const row = await this.prisma.client.bookingOpportunity.update({
-      where: { id },
-      data: { stage },
-      include: { venue: true }
+    const { row, event } = await this.prisma.client.$transaction(async (tx) => {
+      const updated = await tx.bookingOpportunity.update({ where: { id }, data: { stage }, include: { venue: true } });
+      const linkedEvent = stage === BookingStage.confirmed ? await tx.bandEvent.upsert({ where: { opportunityId: updated.id }, create: { artistId, opportunityId: updated.id, venueId: updated.venueId, type: "gig", status: "confirmed", title: updated.title, startsAt: updated.targetDate, locationName: updated.venue?.name ?? null }, update: { status: "confirmed" } }) : null;
+      return { row: updated, event: linkedEvent };
     });
+    if (event) {
+      await this.audit.log({ artistId, aggregateType: "BandEvent", aggregateId: event.id, action: "event.confirmed_from_opportunity", actorLabel, actorOperatorId: actorOperatorId ?? null, metadata: { opportunityId: row.id } });
+    }
     await this.audit.log({
       artistId,
       aggregateType: "BookingOpportunity",

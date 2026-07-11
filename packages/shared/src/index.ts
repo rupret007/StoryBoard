@@ -6,3 +6,5 @@ export * from "./schemas/approvals";
 export * from "./schemas/workflow-notify-prefs";
 export * from "./schemas/telegram-notify-settings";
 export * from "./schemas/booking-acquisition";
+export * from "./schemas/manager";
+export * from "./schemas/operations";

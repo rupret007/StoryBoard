@@ -219,6 +219,41 @@ export type ApprovalRequest = {
   payload: unknown;
 };
 
+export type ManagerProfile = {
+  id: string;
+  bandMode: "original" | "cover_event" | "hybrid";
+  careerStage?: string | null;
+  homeCity?: string | null;
+  homeRegion?: string | null;
+  homeCountry?: string | null;
+  genres: string[];
+  businessName?: string | null;
+  currentAssets: string[];
+  revenueSources: string[];
+  constraints: string[];
+  budgetToleranceMinor?: number | null;
+  twelveMonthAmbition?: string | null;
+  communicationCadence?: string | null;
+  decisionStyle?: string | null;
+  educationTopics: string[];
+  availabilityExpectations?: string | null;
+  intakeCompletedAt?: string | null;
+};
+export type BandMember = { id: string; name: string; email?: string | null; roles: string[]; instruments: string[]; active: boolean };
+export type ManagerGoal = { id: string; workstream: string; title: string; targetValue?: number | null; targetUnit?: string | null; currentValue?: number | null; deadline?: string | null; status: string; initiatives?: ManagerInitiative[] };
+export type ManagerInitiative = { id: string; goalId?: string | null; workstream: string; title: string; description?: string | null; status: string; startsAt?: string | null; dueAt?: string | null };
+export type ManagerRecommendation = { id: string; title: string; reason: string; nextAction: string; priority: string; evidence: string[]; outcome: string; proposedAction?: { type: "create_task"; title: string } | null };
+export type ManagerRun = { id: string; cadence: string; mode: string; promptVersion: string; output: { summary: string; today: { title: string; reason: string; nextAction: string; priority: string; evidenceIds: string[] }[]; thisWeek: { title: string; reason: string; nextAction: string }[]; decisionsNeeded: { title: string; explanation: string }[]; waitingOn: { title: string; dueAt?: string | null }[]; risksAndOpportunities: { title: string; detail: string; confidence: number }[] }; recommendations: ManagerRecommendation[] };
+export type BandEvent = { id: string; type: string; status: string; title: string; startsAt?: string | null; endsAt?: string | null; locationName?: string | null; guaranteeMinor?: number | null; currency: string; participants: { id: string; response: string; bandMember: BandMember }[]; tasks?: Task[] };
+export type Song = { id: string; title: string; durationSeconds?: number | null; musicalKey?: string | null; bpm?: number | null; active: boolean };
+export type Setlist = { id: string; name: string; status: string; items: { id: string; itemType: string; label?: string | null; song?: Song | null }[] };
+export type ArtistProject = { id: string; type: string; status: string; name: string; dueAt?: string | null; budgetMinor?: number | null; currency: string };
+export type DealOffer = { id: string; title: string; status: string; offerAmountMinor?: number | null; currency: string; buyerName?: string | null; buyerEmail?: string | null; agreements: { id: string; version: number; status: string }[]; invoices: Invoice[] };
+export type Invoice = { id: string; number: string; status: string; recipientName: string; currency: string; totalMinor: number; paidMinor: number; dueAt?: string | null };
+export type Settlement = { id: string; status: string; currency: string; grossMinor: number; expenseMinor: number; netMinor: number; event: BandEvent };
+export type Expense = { id: string; eventId?: string | null; projectId?: string | null; category: string; description: string; amountMinor: number; currency: string; incurredAt: string; event?: BandEvent | null; project?: ArtistProject | null };
+export type DocumentTemplate = { id: string; kind: string; name: string; version: number; active: boolean; legalDisclaimer: string };
+
 export type AuditEvent = {
   id: string;
   action: string;

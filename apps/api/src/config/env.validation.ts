@@ -20,6 +20,7 @@ const envSchema = z
     OPENAI_COMMAND_MODEL: z.string().optional(),
     OPENAI_SUMMARY_MODEL: z.string().optional(),
     OPENAI_ADVISOR_CONTEXT: z.enum(["aggregate", "full"]).default("aggregate"),
+    OPENAI_MANAGER_MODEL: z.string().optional(),
     BOOKING_ADVISOR_AUTOMATION_ENABLED: z.string().optional().transform((value) => value === "true"),
     GMAIL_REPLY_SYNC_ENABLED: z.string().optional().transform((value) => value === "true"),
     GMAIL_REPLY_SYNC_REPEAT_MS: z.coerce.number().int().positive().optional(),

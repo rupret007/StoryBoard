@@ -186,6 +186,103 @@ const checks = [
          OR (b."id" IS NOT NULL AND x."artistId" <> b."artistId")
       ORDER BY x."id";
     `
+  },
+  {
+    relation: "BandEvent → artist-owned records",
+    query: `
+      SELECT e."id" AS "recordId", e."artistId" AS "recordArtistId",
+             COALESCE(e."opportunityId", e."venueId", e."contactId", e."projectId", e."setlistId") AS "relatedId",
+             COALESCE(o."artistId", v."artistId", c."artistId", p."artistId", s."artistId") AS "relatedArtistId"
+      FROM "BandEvent" e
+      LEFT JOIN "BookingOpportunity" o ON o."id" = e."opportunityId"
+      LEFT JOIN "Venue" v ON v."id" = e."venueId"
+      LEFT JOIN "Contact" c ON c."id" = e."contactId"
+      LEFT JOIN "ArtistProject" p ON p."id" = e."projectId"
+      LEFT JOIN "Setlist" s ON s."id" = e."setlistId"
+      WHERE (o."id" IS NOT NULL AND e."artistId" <> o."artistId")
+         OR (v."id" IS NOT NULL AND e."artistId" <> v."artistId")
+         OR (c."id" IS NOT NULL AND e."artistId" <> c."artistId")
+         OR (p."id" IS NOT NULL AND e."artistId" <> p."artistId")
+         OR (s."id" IS NOT NULL AND e."artistId" <> s."artistId")
+      ORDER BY e."id";
+    `
+  },
+  {
+    relation: "Task → event, project, and initiative",
+    query: `
+      SELECT t."id" AS "recordId", t."artistId" AS "recordArtistId",
+             COALESCE(t."eventId", t."projectId", t."initiativeId") AS "relatedId",
+             COALESCE(e."artistId", p."artistId", i."artistId") AS "relatedArtistId"
+      FROM "Task" t
+      LEFT JOIN "BandEvent" e ON e."id" = t."eventId"
+      LEFT JOIN "ArtistProject" p ON p."id" = t."projectId"
+      LEFT JOIN "ManagerInitiative" i ON i."id" = t."initiativeId"
+      WHERE (e."id" IS NOT NULL AND t."artistId" <> e."artistId")
+         OR (p."id" IS NOT NULL AND t."artistId" <> p."artistId")
+         OR (i."id" IS NOT NULL AND t."artistId" <> i."artistId")
+      ORDER BY t."id";
+    `
+  },
+  {
+    relation: "DealOffer → event, opportunity, and contact",
+    query: `
+      SELECT d."id" AS "recordId", d."artistId" AS "recordArtistId",
+             COALESCE(d."eventId", d."opportunityId", d."contactId") AS "relatedId",
+             COALESCE(e."artistId", o."artistId", c."artistId") AS "relatedArtistId"
+      FROM "DealOffer" d
+      LEFT JOIN "BandEvent" e ON e."id" = d."eventId"
+      LEFT JOIN "BookingOpportunity" o ON o."id" = d."opportunityId"
+      LEFT JOIN "Contact" c ON c."id" = d."contactId"
+      WHERE (e."id" IS NOT NULL AND d."artistId" <> e."artistId")
+         OR (o."id" IS NOT NULL AND d."artistId" <> o."artistId")
+         OR (c."id" IS NOT NULL AND d."artistId" <> c."artistId")
+      ORDER BY d."id";
+    `
+  },
+  {
+    relation: "Invoice and PaymentRecord → artist-owned records",
+    query: `
+      SELECT i."id" AS "recordId", i."artistId" AS "recordArtistId",
+             COALESCE(i."dealOfferId", i."eventId", p."invoiceId") AS "relatedId",
+             COALESCE(d."artistId", e."artistId", p."artistId") AS "relatedArtistId"
+      FROM "Invoice" i
+      LEFT JOIN "DealOffer" d ON d."id" = i."dealOfferId"
+      LEFT JOIN "BandEvent" e ON e."id" = i."eventId"
+      LEFT JOIN "PaymentRecord" p ON p."invoiceId" = i."id"
+      WHERE (d."id" IS NOT NULL AND i."artistId" <> d."artistId")
+         OR (e."id" IS NOT NULL AND i."artistId" <> e."artistId")
+         OR (p."id" IS NOT NULL AND i."artistId" <> p."artistId")
+      ORDER BY i."id";
+    `
+  },
+  {
+    relation: "Settlement and MemberSplit → event and member",
+    query: `
+      SELECT s."id" AS "recordId", s."artistId" AS "recordArtistId",
+             COALESCE(s."eventId", m."bandMemberId") AS "relatedId",
+             COALESCE(e."artistId", b."artistId") AS "relatedArtistId"
+      FROM "Settlement" s
+      INNER JOIN "BandEvent" e ON e."id" = s."eventId"
+      LEFT JOIN "MemberSplit" m ON m."settlementId" = s."id"
+      LEFT JOIN "BandMember" b ON b."id" = m."bandMemberId"
+      WHERE s."artistId" <> e."artistId"
+         OR (b."id" IS NOT NULL AND s."artistId" <> b."artistId")
+      ORDER BY s."id";
+    `
+  },
+  {
+    relation: "Agreement → deal and template",
+    query: `
+      SELECT a."id" AS "recordId", a."artistId" AS "recordArtistId",
+             COALESCE(a."dealOfferId", a."templateId") AS "relatedId",
+             COALESCE(d."artistId", t."artistId") AS "relatedArtistId"
+      FROM "Agreement" a
+      INNER JOIN "DealOffer" d ON d."id" = a."dealOfferId"
+      LEFT JOIN "DocumentTemplate" t ON t."id" = a."templateId"
+      WHERE a."artistId" <> d."artistId"
+         OR (t."id" IS NOT NULL AND a."artistId" <> t."artistId")
+      ORDER BY a."id";
+    `
   }
 ];
 

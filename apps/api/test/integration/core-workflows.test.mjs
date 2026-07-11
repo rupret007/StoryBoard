@@ -23,7 +23,9 @@ const [
   approvalsMod,
   rolesMod,
   telegramMod,
-  mockAdaptersMod
+  mockAdaptersMod,
+  managerMod,
+  operationsMod
 ] = await Promise.all([
   load("lib/prisma.js"),
   load("audit/audit.service.js"),
@@ -36,7 +38,9 @@ const [
   load("approvals/approvals.service.js"),
   load("auth/role-policy.service.js"),
   load("workflow-automation/telegram-registration.service.js"),
-  load("integrations/adapters/mock/mock-adapters.js")
+  load("integrations/adapters/mock/mock-adapters.js"),
+  load("manager/manager.service.js"),
+  load("operations/operations.service.js")
 ]);
 
 const client = prismaMod.createPrismaClient();
@@ -366,4 +370,53 @@ test("database integration: prospect conversion and approved campaign drafts sta
   assert.ok(auditActions.some((event) => event.action === "booking_prospect.converted"));
   assert.ok(auditActions.some((event) => event.action === "booking_prospect.contact_linked"));
   assert.ok(auditActions.some((event) => event.action === "booking_campaign.sent"));
+});
+
+test("database integration: manager intake, confirmed gig, payment, and settlement remain tenant-scoped and audited", async () => {
+  const [artist, foreignArtist] = await Promise.all([
+    client.artist.create({ data: { name: "Manager Test Band", slug: "manager-test-band" } }),
+    client.artist.create({ data: { name: "Foreign Manager Band", slug: "foreign-manager-band" } })
+  ]);
+  const operator = await client.operator.create({ data: { email: "manager-owner@test.invalid" } });
+  await client.artistMembership.create({ data: { artistId: artist.id, operatorId: operator.id, role: "owner" } });
+  const manager = new managerMod.ManagerService(prisma, audit, { get: () => false });
+  const intake = await manager.completeIntake(artist.id, {
+    profile: { bandMode: "hybrid", homeCity: "Chicago", homeRegion: "IL", homeCountry: "US", genres: ["rock"], revenueSources: [], currentAssets: [], constraints: ["Weeknight work schedules"], educationTopics: [], currency: "USD", twelveMonthAmbition: "Release an EP and book six profitable shows", communicationCadence: "weekly", decisionStyle: "guided" },
+    members: [{ name: "Alex", instruments: ["guitar"], roles: ["bandleader"], active: true }]
+  }, operator.email, operator.id);
+  assert.equal(intake.cadence, "intake");
+  assert.ok(await client.managerGoal.count({ where: { artistId: artist.id } }) >= 2);
+  assert.equal(await client.managerMemoryFact.count({ where: { artistId: artist.id, sourceType: "manager_intake" } }), 4);
+  const member = await client.bandMember.findFirstOrThrow({ where: { artistId: artist.id } });
+
+  const venue = await client.venue.create({ data: { artistId: artist.id, name: "Owned Room", city: "Chicago" } });
+  const foreignVenue = await client.venue.create({ data: { artistId: foreignArtist.id, name: "Foreign Room", city: "Elsewhere" } });
+  const booking = new bookingMod.BookingOpportunitiesService(prisma, audit);
+  const opportunity = await booking.create(artist.id, { title: "Friday show", venueId: venue.id, targetDate: "2026-09-18T20:00:00.000Z" }, operator.email, operator.id);
+  await booking.updateStage(artist.id, opportunity.id, "confirmed", operator.email, operator.id);
+  await booking.updateStage(artist.id, opportunity.id, "confirmed", operator.email, operator.id);
+  assert.equal(await client.bandEvent.count({ where: { artistId: artist.id, opportunityId: opportunity.id } }), 1);
+  const event = await client.bandEvent.findUniqueOrThrow({ where: { opportunityId: opportunity.id } });
+
+  const operations = new operationsMod.OperationsService(prisma, audit, {});
+  await assert.rejects(() => operations.createEvent(artist.id, { type: "gig", status: "draft", title: "Unsafe", venueId: foreignVenue.id, currency: "USD" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  await operations.participant(artist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id);
+  const advance = await operations.generateAdvance(artist.id, event.id, operator.email, operator.id);
+  assert.equal(advance.created.length, 4);
+  assert.equal((await operations.generateAdvance(artist.id, event.id, operator.email, operator.id)).created.length, 0);
+
+  const deal = await operations.createDeal(artist.id, { eventId: event.id, opportunityId: opportunity.id, status: "accepted", title: "Friday guarantee", offerAmountMinor: 100000, currency: "USD", depositMinor: 25000 }, operator.email, operator.id);
+  const invoice = await operations.createInvoice(artist.id, { dealOfferId: deal.id, eventId: event.id, number: "TEST-001", recipientName: "Owned Room", currency: "USD", subtotalMinor: 100000, taxMinor: 0 }, operator.email, operator.id);
+  const firstPayment = await operations.recordPayment(artist.id, invoice.id, { idempotencyKey: "test-deposit-001", amountMinor: 25000, currency: "USD", method: "check", receivedAt: "2026-08-01T12:00:00.000Z" }, operator.email, operator.id);
+  const replay = await operations.recordPayment(artist.id, invoice.id, { idempotencyKey: "test-deposit-001", amountMinor: 25000, currency: "USD", method: "check", receivedAt: "2026-08-01T12:00:00.000Z" }, operator.email, operator.id);
+  assert.equal(replay.id, firstPayment.id);
+  assert.equal((await client.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).paidMinor, 25000);
+  await client.expense.create({ data: { artistId: artist.id, eventId: event.id, category: "travel", description: "Van fuel", amountMinor: 10000, currency: "USD", incurredAt: new Date("2026-09-18T12:00:00.000Z") } });
+  const settlement = await operations.createSettlement(artist.id, { eventId: event.id, currency: "USD", grossMinor: 100000, splits: [{ bandMemberId: member.id, basisPoints: 10000 }] }, operator.email, operator.id);
+  assert.equal(settlement.netMinor, 90000);
+  const finalized = await operations.finalizeSettlement(artist.id, settlement.id, operator.email, operator.id);
+  assert.equal(finalized.status, "finalized");
+  assert.equal(finalized.snapshots.length, 1);
+  const actions = await client.auditEvent.findMany({ where: { artistId: artist.id }, select: { action: true } });
+  for (const expected of ["manager.intake_completed", "event.confirmed_from_opportunity", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
 });

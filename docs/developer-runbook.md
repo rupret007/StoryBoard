@@ -82,6 +82,12 @@ local Postgres and Redis data.
 Allocate at least 2 GB of memory to Docker Desktop; image compilation includes
 TypeScript, Prisma client generation, and Next.js production builds.
 
+The API image uses Nest's SWC emitter after Prisma generation to keep image
+assembly within small Docker Desktop memory limits. This does not replace the
+strict `pnpm typecheck`/`pnpm test` release gate; CI runs those before the
+container smoke. `.dockerignore` excludes workspace builds, generated Prisma
+output, and browser artifacts so local state is never copied into the image.
+
 Defaults make this runnable without a checked-in secret. To override them,
 copy `.env.compose.example` and pass it explicitly:
 
@@ -253,6 +259,59 @@ When `OPENAI_ENABLED=false`, StoryBoard uses deterministic facts. The default
 `OPENAI_ADVISOR_CONTEXT=aggregate` sends only counts and market metadata; the
 explicit `full` setting can include CRM contact context. Advisor runs never
 receive raw Gmail bodies and never perform provider actions.
+
+## Manager OS and band operations
+
+The booking advisor remains available for compatibility. New cross-functional
+work starts in **Manager** (`/manager`) and **Band operations** (`/operations`).
+Viewer access is read-only; members and owners can mutate normal workflow data;
+only owners can change Manager AI/schedule settings or create/activate legal
+document templates.
+
+Manager routes:
+
+- `GET` / `PUT /manager/profile`; `POST /manager/intake/complete`
+- `GET` / `POST` / `PATCH /manager/members`, `/manager/goals`, and
+  `/manager/initiatives`
+- `GET` / `POST /manager/decisions`
+- `GET /manager/brief?cadence=daily|weekly` and
+  `POST /manager/brief/generate`
+- `POST /manager/chat`
+- `POST /manager/recommendations/:id/accept|dismiss|complete`
+- `GET` / `PUT /manager/settings` (PUT owner-only)
+
+`OPENAI_ENABLED=false` is fully supported. With OpenAI enabled, set
+`OPENAI_MANAGER_MODEL` (default `gpt-5.6-terra`). Manager inputs are
+tenant-scoped snapshots; CRM text is treated as untrusted data; evidence IDs
+are filtered to known records. Stored traces contain facts read, policy checks,
+structured output, prompt/model version, and latency—not hidden reasoning.
+Recommendation acceptance currently permits only `create_task`. The model does
+not receive provider-write, SQL, or arbitrary tool execution.
+
+Operations routes:
+
+- `GET` / `POST` / `PATCH /events`, `GET /events/:id`,
+  `POST /events/from-opportunity/:opportunityId`, participant upsert,
+  advance generation, and logistics approval preparation
+- `GET` / `POST` / `PATCH /songs`, `/setlists`, and `/projects`
+- `GET` / `POST` / `PATCH /deals`, document generation, and approval-gated
+  delivery preparation
+- `GET` / `POST /document-templates`, `PUT /document-templates/:id/activate`
+  (owner-only writes)
+- `GET` / `POST` / `PATCH /invoices`,
+  `POST /invoices/:id/record-payment`
+- `GET` / `POST` / `PATCH /expenses` for event/project costs
+- `GET` / `POST` / `PATCH /settlements`,
+  `POST /settlements/:id/finalize`
+
+All relationships are re-checked in the service layer. Cross-artist IDs return
+a generic not-found result before write/audit. Payments require an artist-wide
+idempotency key, exact currency, positive integer minor units, and cannot
+overpay. Finalized settlements and document snapshots are immutable. Agreement
+templates include a not-legal-advice disclaimer and must be activated by an
+owner. Current Gmail delivery prepares a reviewed draft referencing the
+StoryBoard PDF snapshot; attach the PDF manually until binary Drive/Gmail
+adapters are implemented and provider-tested.
 
 ## Booking acquisition
 

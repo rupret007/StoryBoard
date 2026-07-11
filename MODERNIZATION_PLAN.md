@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-11
-Baseline: `main` at `31d2121`
+Baseline for this round: `main` at `90f7834`
 
 ## Product and current architecture
 
@@ -97,6 +97,56 @@ mock-safe provider adapters.
 - [x] Require members to apply extracted terms explicitly and route threaded reply drafts through the existing approval center. No reply is automatically sent and no opportunity stage changes automatically.
 - [ ] Enable in production only after Google restricted-scope verification, security/privacy review, and real Gmail acceptance testing. `GMAIL_REPLY_SYNC_ENABLED` remains false by default.
 
+### P0 — Manager brain and guided operating system (completed 2026-07-11)
+
+- [x] Add a guided, novice-safe Manager intake for original, cover/event, and
+  hybrid bands, with operating profile, separate band-member roster, durable
+  goals/initiatives/decisions, confirmed memory with provenance, and settings.
+- [x] Add deterministic daily/weekly briefs and optional structured Responses
+  API reasoning through one explicit read-only snapshot function, with a
+  balanced manager model, known-record evidence filtering, redacted local
+  traces, token/latency metadata, prompt/model versions, and safe fallback.
+- [x] Add conversational explanation and typed recommendation outcomes. The
+  code-owned action policy permits only low-risk internal work directly;
+  provider, legal, financial, unknown, and irreversible actions cannot bypass
+  roles or Approvals.
+- [x] Add versioned original/cover/hybrid golden scenarios and regressions for
+  strict intake, unsupported facts, adversarial text, action authorization,
+  tenant isolation, and acceptance behavior.
+- [x] Ship the Manager workspace and preserve the booking-advisor API for
+  compatibility.
+- [ ] Production scheduling of briefs remains deployment-dependent; the API
+  stores owner settings but no new scheduler is enabled in this round.
+
+### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
+
+- [x] Add the artist-scoped `BandEvent` spine, participants/availability,
+  logistics, idempotent booking-confirmation conversion, show advance offsets,
+  and approval preparation for Calendar and Drive folders.
+- [x] Add songs, setlists, release/content/tour/business projects, versioned
+  offers/memos, owner-reviewed document templates, agreement PDF snapshots,
+  invoices, idempotent manual payments, expenses, settlements, and member
+  splits using integer minor units.
+- [x] Add a responsive Band operations workspace and feed upcoming event
+  readiness, overdue invoice, and overdue project risks into dashboard actions.
+  The workspace covers owner-reviewed templates, agreement generation,
+  invoices/manual payments, expenses, and settlement finalization as well as
+  offers.
+- [x] Extend the disposable-database suite for intake memory, event
+  idempotency, availability, advance generation, payment replay, settlement
+  calculations, immutable PDF snapshots, audit rows, and cross-artist rejection.
+- [x] Extend production-mode Chromium coverage through Manager intake/chat,
+  event/song/release-project/offer creation, reviewed agreement generation,
+  invoice/deposit recording, event expense, and settlement PDF finalization.
+- [ ] Direct PDF upload/attachment to Drive/Gmail remains an adapter package:
+  current delivery creates a reviewed Gmail draft referencing the immutable
+  snapshot, and requires the human to attach it. Do not claim automatic
+  attachment until binary Drive upload and Gmail attachment adapters pass real
+  provider acceptance tests.
+- [ ] Rich schedule-item editing, project milestone/budget line-item UI,
+  technician public setlist pages, and evidence-file upload are follow-on UX
+  packages; their underlying event/project/document boundaries are in place.
+
 ### P2 — requires deployment or product decisions
 
 - [x] Add a one-command, production-built local container bundle with
@@ -108,10 +158,9 @@ mock-safe provider adapters.
   expected data volumes and API compatibility requirements are agreed. The
   existing list responses are arrays; changing them to envelopes is a public
   interface decision and should be coordinated with API consumers.
-- [ ] Assess routing, setlists, contracts, settlement, and deeper
-  private/corporate intake only with validated operator demand. Do not add
-  scraping, lead brokers, payments, contracts, or auto-send without a product
-  decision and deployment requirements.
+- [ ] Assess routing optimization, provider-backed payments/signatures,
+  merchandise, royalties, and deeper private/corporate intake only with
+  validated operator demand. Do not add scraping, lead brokers, or auto-send.
 
 ### P1 — responsive manager workspace (completed 2026-07-11)
 
@@ -128,6 +177,21 @@ Before release, run a read-only diagnostic for historical relationships whose
 artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
+
+- 2026-07-11: Added migration `20260711203445_manager_os_rounds`, the guided
+  cross-functional Manager workspace, code-owned AI action policy, memory
+  provenance, evidence-filtered briefs/chat, Manager traces, and versioned
+  scenario tests. Added the unified event/show spine, availability, advance
+  tasks, songs/setlists, projects, deal history, reviewed templates, immutable
+  PDF snapshots, invoices/manual payments, and settlements. All 17 migrations
+  and three integration workflows passed against dedicated
+  `storyboard_manager_test`; unit coverage passed 32 API tests.
+- 2026-07-11: Container smoke initially exposed API TypeScript/Prisma heap
+  pressure on a small Docker Desktop VM. The Docker context was reduced from
+  192 MB to under 400 KB, full type safety remains in the quality gate, and the
+  API image now uses Nest's SWC emitter for the already-checked source. An
+  isolated production bundle passed migrations, seed, API/worker readiness,
+  web health, and dev login on alternate ports before its volumes were removed.
 
 - 2026-07-11: Added the tracked campaign-reply and negotiation loop with migration `20260711193709_booking_reply_loop`. The implementation retains only bounded reply metadata and derived AI facts, preserves general-inbox isolation, requires owner opt-in and Google reconnection, and keeps drafted responses approval-gated. Added unit coverage for scope gating, reply deduplication, raw-body non-persistence, provider failure isolation, and disabled-by-default configuration.
 

@@ -27,8 +27,11 @@ adapter layer rather than leaking into domain modules.
 ## MVP API surface (current)
 
 Feature modules live under `apps/api/src/` as Nest modules: `venues`, `contacts`,
-`booking` (profiles, prospects, campaigns, and booking opportunities), `tasks`, `approvals`, `audit-events`,
-`commands`, `summary` (weekly aggregation), `dashboard` (stats). Global
+`booking` (profiles, prospects, campaigns, replies, and opportunities),
+`manager` (intake, operating state, brief/chat/recommendations), `operations`
+(events, songs/setlists, projects, deals, documents, invoices, settlements),
+`tasks`, `approvals`, `audit-events`, `commands`, `summary` (weekly aggregation),
+and `dashboard` (stats/intelligence). Global
 `PrismaModule`, `AuditModule`, `IntegrationsModule` support persistence and
 audit. External systems are accessed only via adapter interfaces; mocked
 implementations live under `apps/api/src/integrations/adapters/mock/`.
@@ -78,6 +81,13 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
 - Risky actions require approval objects and audit events.
 - Background work should be coordinated through BullMQ, not ad hoc timers.
 - Shared validation should live in `packages/shared`.
+- Manager model output is advisory data, never authority. Read context is
+  assembled by tenant-scoped code; known evidence IDs are enforced after model
+  output; action risk is classified by code; only allowlisted internal writes
+  can run directly.
+- Agreement templates require owner activation. Payment replay keys and
+  immutable deal/document/settlement history take precedence over destructive
+  replacement.
 
 ## Auditability Design
 

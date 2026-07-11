@@ -54,3 +54,77 @@ test("booking advisor produces reviewable, non-automated guidance", async ({ pag
   await expect(page.getByText(/never sends or changes records/i)).toBeVisible();
   await page.getByRole("button", { name: "Helpful", exact: true }).click();
 });
+
+test("novice manager intake produces grounded work and band operations records", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await page.goto("http://127.0.0.1:4000/auth/dev/login");
+  await expect(page.getByText("Your operational home base")).toBeVisible();
+  await page.goto("/manager");
+  const intake = page.getByRole("heading", { name: "Tell StoryBoard enough to manage the tradeoffs" });
+  if (await intake.isVisible().catch(() => false)) {
+    await page.getByLabel("What kind of band?").selectOption("hybrid");
+    await page.getByLabel("Career stage").fill("Local working band");
+    await page.getByLabel("Home market").fill("Chicago, IL");
+    await page.getByLabel("Genres").fill("rock, soul");
+    await page.getByLabel("What would a great next 12 months look like?").fill("Release an EP and book six profitable regional shows.");
+    await page.getByLabel("Band member names").fill("Alex\nMorgan");
+    await page.getByLabel("Constraints").fill("Weeknight work schedules");
+    await page.getByRole("button", { name: "Build my 90-day operating plan" }).click();
+  }
+  await expect(page.getByText("Today", { exact: true })).toBeVisible();
+  await page.getByPlaceholder("What should we focus on this week, and why?").fill("Explain our next priority in plain language.");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(page.getByText(/Manager brief for|recommended next step/i)).toBeVisible();
+
+  await page.goto("/operations");
+  await page.getByLabel("Title").fill(`E2E rehearsal ${suffix}`);
+  await page.getByRole("button", { name: "Add event" }).click();
+  await expect(page.getByText(`E2E rehearsal ${suffix}`)).toBeVisible();
+  await page.getByRole("tab", { name: "Music & setlists" }).click();
+  await page.getByPlaceholder("Song title").fill(`E2E song ${suffix}`);
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByText(`E2E song ${suffix}`)).toBeVisible();
+  await page.getByRole("tab", { name: "Projects" }).click();
+  await page.getByPlaceholder("Project name").fill(`E2E release ${suffix}`);
+  await page.getByRole("button", { name: "Create project" }).click();
+  await expect(page.getByText(`E2E release ${suffix}`)).toBeVisible();
+  await page.getByRole("tab", { name: "Deals" }).click();
+  await page.getByPlaceholder("Show or deal").fill(`E2E offer ${suffix}`);
+  await page.getByPlaceholder("Buyer name").fill("E2E Buyer");
+  await page.getByPlaceholder("Buyer email").fill(`buyer-${suffix}@example.test`);
+  await page.getByPlaceholder("Offer amount (USD)").fill("500");
+  await page.getByRole("button", { name: "Record offer" }).click();
+  await expect(page.getByText(`E2E offer ${suffix}`, { exact: true }).first()).toBeVisible();
+
+  const currentDeal = page.getByText(`E2E offer ${suffix}`, { exact: true }).first().locator("..").locator("..").locator("..");
+  const generateAgreement = currentDeal.getByRole("button", { name: "Generate agreement PDF" });
+  if (await generateAgreement.isDisabled()) {
+    await page.getByPlaceholder("Template name").fill(`E2E agreement ${suffix}`);
+    await page.getByRole("button", { name: "Create reviewed version" }).click();
+    await page.getByRole("button", { name: "Activate" }).last().click();
+  }
+  await generateAgreement.click();
+  await expect(currentDeal.getByText(/agreement v1/i)).toBeVisible();
+
+  const invoiceForm = page.getByLabel("Invoice deal").locator("..");
+  await page.getByLabel("Invoice deal").selectOption({ label: `E2E offer ${suffix}` });
+  await invoiceForm.getByPlaceholder("Invoice number").fill(`E2E-${suffix}`);
+  await invoiceForm.getByPlaceholder("Recipient").fill("E2E Buyer");
+  await invoiceForm.getByPlaceholder("Amount (USD)").fill("500");
+  await invoiceForm.getByRole("button", { name: "Create invoice" }).click();
+  await page.getByPlaceholder("Payment").last().fill("100");
+  await page.getByRole("button", { name: "Record", exact: true }).last().click();
+  await expect(page.getByText("Balance USD 400.00")).toBeVisible();
+
+  const expenseForm = page.getByLabel("Expense event or project").locator("..");
+  await page.getByLabel("Expense event or project").selectOption({ label: `E2E rehearsal ${suffix}` });
+  await expenseForm.getByPlaceholder("Expense description").fill("Fuel");
+  await expenseForm.getByPlaceholder("Amount (USD)").fill("25");
+  await expenseForm.getByRole("button", { name: "Record expense" }).click();
+  await expect(page.getByText(/^Fuel/).first()).toBeVisible();
+  await page.getByLabel("Settlement event").selectOption({ label: `E2E rehearsal ${suffix}` });
+  await page.getByPlaceholder("Gross USD").fill("500");
+  await page.getByRole("button", { name: "Calculate" }).click();
+  await page.getByRole("button", { name: "Finalize PDF" }).last().click();
+  await expect(page.getByText("finalized", { exact: true }).last()).toBeVisible();
+});
