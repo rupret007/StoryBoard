@@ -13,6 +13,9 @@ const env = {
   WEB_URL: "http://127.0.0.1:3000",
   NEXT_PUBLIC_API_URL: "http://127.0.0.1:4000",
   API_URL: "http://127.0.0.1:4000",
+  // A host-only cookie is required for the browser's 127.0.0.1 test origin.
+  // The developer `.env` commonly sets COOKIE_DOMAIN=localhost instead.
+  COOKIE_DOMAIN: "",
   ENABLE_QUEUE_WORKER: "false"
 };
 

@@ -70,3 +70,20 @@ jobs:
           REDIS_URL: redis://localhost:6379
           SESSION_SECRET: browser-test-session-secret
         run: pnpm test:e2e
+
+  container-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the local container bundle
+        run: docker compose -f docker-compose.app.yml up --build --wait
+      - name: Verify API readiness and local development login
+        run: |
+          curl --fail --retry 12 --retry-connrefused http://127.0.0.1:4000/ready
+          curl --fail --location --cookie-jar cookies.txt http://127.0.0.1:4000/auth/dev/login
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.app.yml logs --no-color
+      - name: Stop local container bundle
+        if: always()
+        run: docker compose -f docker-compose.app.yml down -v

@@ -40,7 +40,12 @@ const envSchema = z
       .string()
       .optional()
       .transform((value) => value === "true"),
-    SEED_OPERATOR_EMAIL: z.string().email().optional(),
+    // Local development deliberately supports `dev@localhost`, which Zod's
+    // internet-email validator rejects despite it being a valid local mailbox.
+    SEED_OPERATOR_EMAIL: z.string().trim().min(3).max(320).refine(
+      (value) => /^[^@\s]+@[^@\s]+$/.test(value),
+      "SEED_OPERATOR_EMAIL must contain a local part and domain"
+    ).optional(),
     INVITE_EXPIRY_DAYS: z.coerce.number().int().positive().max(90).default(14),
     WORKFLOW_STALE_FOLLOWUP_DAYS: z.coerce
       .number()

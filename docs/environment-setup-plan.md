@@ -52,6 +52,9 @@ Compose injects `POSTGRES_*` into the container; your app uses **`DATABASE_URL`*
 - `OPENAI_ENABLED` — set `false` to skip requiring a real key
 - `OPENAI_API_KEY` — required only when `OPENAI_ENABLED=true`
 - `OPENAI_MODEL`, `OPENAI_COMMAND_MODEL`, `OPENAI_SUMMARY_MODEL` — optional
+- `OPENAI_ADVISOR_CONTEXT` — `aggregate` by default; `full` sends artist CRM
+  context to the configured OpenAI provider for the Booking advisor. This is a
+  deployment-wide choice, not an artist-level setting.
 
 ### Integrations (not required for boot)
 
@@ -69,4 +72,3 @@ Placeholders in `.env.example` until adapters are implemented: Google OAuth, Ban
 - **Postgres / Redis**: `pnpm preflight` (after infra is up and `.env` is loaded)
 - **API**: `GET /health`
 - **Web**: open `/` on the dev or production server
-

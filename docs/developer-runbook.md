@@ -61,6 +61,44 @@ Stream logs:
 pnpm infra:logs
 ```
 
+### Containerized local demo
+
+The existing `docker-compose.yml` starts infrastructure for host-based `pnpm`
+development. To run the complete application in production-built containers,
+use the separate application bundle:
+
+```bash
+pnpm container:up
+```
+
+It runs Postgres, Redis, forward-only Prisma migrations, the idempotent seed,
+the Nest API (including the current in-process BullMQ worker), and Next.js.
+Open `http://localhost:3000` and use the development login. Stop containers
+without deleting data with `pnpm container:down`; only use
+`docker compose -f docker-compose.app.yml down -v` when intentionally removing
+local Postgres and Redis data.
+
+Allocate at least 2 GB of memory to Docker Desktop; image compilation includes
+TypeScript, Prisma client generation, and Next.js production builds.
+
+Defaults make this runnable without a checked-in secret. To override them,
+copy `.env.compose.example` and pass it explicitly:
+
+```bash
+docker compose --env-file .env.compose -f docker-compose.app.yml up --build
+```
+
+`NEXT_PUBLIC_API_URL` is browser code and is compiled into the web image. Set
+it, `WEB_URL`, and `API_URL` to public HTTPS URLs and rebuild the web image for
+any public deployment. Production must set `NODE_ENV=production`, disable
+`AUTH_DEV_BYPASS`, supply a strong `SESSION_SECRET`, and configure Google OAuth;
+the local demo profile is not appropriate for an internet-facing deployment.
+Use `docker-compose.production.yml` as the production override template:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.app.yml -f docker-compose.production.yml up --build
+```
+
 ## 5. Prisma (ORM 7)
 
 StoryBoard uses **Prisma 7**: connection URL and migration paths live in root `prisma.config.ts` (loads `.env` via `dotenv`). The schema is `prisma/schema.prisma`. The generated client is output under `apps/api/src/generated/prisma/` (gitignored); run generate after clone or schema changes.
@@ -92,6 +130,10 @@ After migrations, create the default artist, a local `Operator` (`SEED_OPERATOR_
 ```bash
 pnpm db:seed
 ```
+
+This runs the repository's idempotent `prisma/seed.mjs` directly. It does not
+use Prisma's legacy seed configuration, which Prisma 7 no longer reads from
+`package.json`.
 
 Configure `SEED_OPERATOR_EMAIL` / `SEED_OPERATOR_NAME` in `.env` if needed. Seed is optional: new operators can **create a first artist** or **accept an invite** (phase 3B) without `db:seed`.
 

@@ -91,6 +91,9 @@ mock-safe provider adapters.
 
 ### P2 — requires deployment or product decisions
 
+- [x] Add a one-command, production-built local container bundle with
+  Postgres, Redis, migrations, seed, API, and web. It intentionally preserves
+  the current single API/worker topology.
 - [ ] Define a separate queue-worker deployment and runtime metrics before
   horizontally scaling the API.
 - [ ] Add cursor pagination and query limits to high-volume list endpoints once
@@ -177,3 +180,15 @@ artist IDs disagree. Do not repair or delete such data automatically.
   or outbound-action capability. Validation passed for unit, explicit-database
   integration, Chromium advisor UI, the full quality gate, and relationship
   diagnostic (zero mismatches).
+- 2026-07-11: Added a separate production-built local container bundle with
+  API/web Dockerfiles, Compose migrations and seed, persisted Postgres/Redis,
+  local dev login, and a production override template. Repository quality gates
+  pass. End-to-end Compose startup still requires a Docker Compose v2 host with
+  at least 2 GB allocated to Docker; the current machine lacks Compose v2 and
+  its daemon kills the compiler below that threshold.
+- 2026-07-11: Release hardening corrected Prisma 7 seeding, the documented
+  local `dev@localhost` seed identity, and the isolated browser test cookie
+  domain. Added advisor full-context and environment validation regressions,
+  plus a required Compose startup smoke job on every pull request. Full unit,
+  integration, Chromium, production-build, relationship-audit, and Compose
+  configuration checks pass locally.

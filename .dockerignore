@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+node_modules
+.pnpm-store
+.next
+dist
+coverage
+apps/web/test-results
+apps/web/playwright-report
+postgres-data
+redis-data
+*.log

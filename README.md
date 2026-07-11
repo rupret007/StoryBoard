@@ -44,6 +44,23 @@ The web app loads the repo-root `.env` via `apps/web/next.config.ts` so `API_URL
 
 Stop infra: `pnpm infra:down`
 
+## Run the local container bundle
+
+For a production-built, self-contained local demo (web, API, Postgres, Redis,
+migrations, and a seeded owner), install Docker Compose v2 and run:
+
+```bash
+pnpm container:up
+```
+
+Open `http://localhost:3000`, then use **Dev login**. The bundle persists data
+in Docker volumes; stop it with `pnpm container:down`. Copy
+`.env.compose.example` to a separate Compose env file to override local
+passwords, session secret, ports, or browser-facing URLs. `NEXT_PUBLIC_API_URL`
+is embedded at web-image build time, so rebuild after changing it. This is a
+local demo profile: a public deployment must disable dev bypass and configure
+Google OAuth, real secrets, and public `WEB_URL`/API URLs.
+
 **Phase 3A:** Operator auth (Google OIDC + optional dev bypass), `Operator` / `ArtistMembership`, session-guarded routes, integration OAuth state bound to the signed-in operator, and audit rows with `actorOperatorId`. See `docs/auth-operators.md`.
 
 **Phase 3B:** Membership **invitations** (hashed tokens, audit), **`viewer`** role with a small capability map, **Team** admin UI (owners), **first-artist onboarding** without requiring seed, and minimal **Origin / Referer** checks on mutating requests (`docs/invitations.md`, `docs/auth-operators.md`).
@@ -60,7 +77,7 @@ Stop infra: `pnpm infra:down`
 
 **Booking acquisition:** A quick, artist-scoped booking profile unlocks market prospecting and pitch campaigns. **Find shows** searches one city at a time through Ticketmaster Discovery when configured, otherwise states that manual mode is active rather than inventing leads. It stores venue, festival, private-event, and corporate-event prospects; only physical-room prospects create a `Venue` on conversion. **Pitch campaigns** render only a small allowlist of variables, show every personalized email before approval, and create Gmail drafts only after approval execution — never an auto-send. Each executed draft creates one follow-up task seven days later by default. See `docs/domain-model.md` and `docs/developer-runbook.md`.
 
-**Booking advisor:** The Booking advisor turns aggregate sprint, campaign, delivery, outcome, and prior helpful/not-helpful feedback into reviewable next steps. It remains deterministic when `OPENAI_ENABLED=false`; with a configured OpenAI key it uses structured, aggregate-only advice. It never reads email, invents contacts, sends messages, or mutates booking records.
+**Booking advisor:** The Booking advisor turns sprint, campaign, delivery, outcome, and feedback into reviewable next steps. It remains deterministic when `OPENAI_ENABLED=false`. When enabled, `OPENAI_ADVISOR_CONTEXT=aggregate` (default) sends counts only; the explicit global `full` mode sends artist CRM context to the configured provider. It never sends messages or mutates booking records.
 
 Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/environment-setup-plan.md`.
 

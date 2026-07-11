@@ -20,6 +20,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Approval-gated pitch campaigns + linked follow-up tasks | Done |
 | Market sprints + approval-gated immediate campaign delivery | Done |
 | Bounded adaptive booking advisor (optional OpenAI; review-only) | Done |
+| One-command local container bundle | Done (Docker Compose v2; allocate 2 GB) |
 | Approvals + execution (Gmail drafts, calendar holds, drive folder) | Done |
 | Command bar + `POST /commands/execute` (NL + structured intents) | Done |
 | Operator auth (Google OIDC), session cookie, memberships (`owner` / `member` / `viewer`) | Done |

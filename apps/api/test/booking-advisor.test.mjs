@@ -28,3 +28,29 @@ test("booking advisor is deterministic and reviewable when OpenAI is disabled", 
   assert.equal(persisted.advice.opportunities.length, 3);
   assert.equal(persisted.inputFacts.artistName, "Test Band");
 });
+
+test("booking advisor only includes CRM records when full context is explicitly enabled", async () => {
+  let persisted;
+  const client = {
+    artist: { findUniqueOrThrow: async () => ({ name: "Test Band" }) },
+    bookingProspect: {
+      groupBy: async () => [],
+      findMany: async () => [{ id: "prospect-a", name: "Known lead", contact: { email: "buyer@example.test" } }]
+    },
+    bookingCampaignRecipient: { groupBy: async () => [] },
+    bookingCampaignDelivery: { groupBy: async () => [] },
+    bookingMarketSprint: { findMany: async () => [] },
+    bookingAdvisorFeedback: { groupBy: async () => [] },
+    bookingAdvisorRecommendation: { groupBy: async () => [] },
+    bookingAdvisorRun: { create: async ({ data }) => { persisted = data; return { id: "advisor-b", ...data, recommendations: [] }; } }
+  };
+  const service = new advisorMod.BookingAdvisorService(
+    { client },
+    { log: async () => undefined },
+    { get: (key) => key === "OPENAI_ADVISOR_CONTEXT" ? "full" : false }
+  );
+  await service.generate("artist-a", "manager@test.invalid", "operator-a");
+  assert.equal(persisted.inputFacts.contextPolicy, "full_crm");
+  assert.equal(persisted.inputFacts.records[0].id, "prospect-a");
+  assert.equal(persisted.advice.opportunities[0].evidenceIds[0], "prospect-a");
+});

@@ -1,0 +1,26 @@
+# Apply with: docker compose --env-file .env.production -f docker-compose.app.yml -f docker-compose.production.yml up --build
+# This is an override template: provide public HTTPS URLs, Google OAuth settings,
+# a strong session secret, and a non-default database password in .env.production.
+services:
+  migrate:
+    environment: &production_api_environment
+      NODE_ENV: production
+      AUTH_DEV_BYPASS: "false"
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      WEB_URL: ${WEB_URL:?WEB_URL is required}
+      API_URL: ${API_URL:?API_URL is required}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID is required}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET is required}
+      GOOGLE_OPERATOR_REDIRECT_URI: ${GOOGLE_OPERATOR_REDIRECT_URI:?GOOGLE_OPERATOR_REDIRECT_URI is required}
+  seed:
+    environment: *production_api_environment
+  api:
+    environment: *production_api_environment
+  web:
+    build:
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
+    environment:
+      NODE_ENV: production
+      API_URL: ${API_URL:?API_URL is required}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
