@@ -86,6 +86,7 @@ export default async function DashboardPage() {
     { label: "Overdue", value: s.overdueTasks, href: "/tasks" },
     { label: "Pending approvals", value: s.pendingApprovals, href: "/approvals" }
   ];
+  const isNewWorkspace = s.venues === 0 && s.contacts === 0 && s.bookingOpportunities === 0;
 
   return (
     <div className="space-y-10">
@@ -121,6 +122,22 @@ export default async function DashboardPage() {
           ))}
         </div>
       </section>
+
+      {isNewWorkspace ? (
+        <SurfaceCard elevated className="border-[var(--accent)]/20 bg-[var(--accent-muted)]/30">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--accent)]">Start your next show</p>
+              <h2 className="mt-1 text-xl font-semibold text-[var(--text-primary)]">Build one market, one deliberate step at a time.</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--text-secondary)]">Start with the booking profile, add a target, then qualify and pitch it when the details are ready.</p>
+            </div>
+            <Link href="/prospects" className="sb-btn-primary min-h-11 shrink-0">Set up booking profile<ArrowRight className="h-4 w-4" /></Link>
+          </div>
+          <ol className="mt-5 grid gap-3 border-t border-[var(--accent)]/15 pt-5 sm:grid-cols-3">
+            {["Complete profile", "Add a qualified lead", "Create a reviewed pitch"].map((step, index) => <li key={step} className="flex items-center gap-3 text-sm text-[var(--text-secondary)]"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--surface-1)] font-mono text-xs text-[var(--accent)]">{index + 1}</span>{step}</li>)}
+          </ol>
+        </SurfaceCard>
+      ) : null}
 
       {insights ? (
         <section className="grid gap-6 lg:grid-cols-2">

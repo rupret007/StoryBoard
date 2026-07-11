@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AppSidebar } from "@/components/app-sidebar";
+import { AppSidebar, MobileAppNav } from "@/components/app-sidebar";
 import { CommandBar } from "@/components/command-bar";
 import { IntegrationStatusStrip } from "@/components/integration-status-strip";
 import { WorkflowNotificationsStrip } from "@/components/workflow-notifications-strip";
@@ -32,8 +32,8 @@ export function AppShell({
         {...(showTeamLink ? { showTeamLink: true } : {})}
       />
       <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-        <main className="relative flex-1 px-6 py-8 md:px-10 lg:px-12">
-          <div className="mx-auto max-w-6xl">{children}</div>
+        <main className="relative flex-1 px-4 py-5 sm:px-6 sm:py-8 md:px-10 lg:px-12">
+          <div className="mx-auto max-w-6xl"><MobileAppNav pendingApprovals={pendingApprovals} {...(operatorEmail ? { operatorEmail } : {})} memberships={memberships ?? []} currentArtistId={currentArtistId ?? null} {...(showTeamLink ? { showTeamLink: true } : {})} />{children}</div>
         </main>
         <div className="sticky bottom-0 z-30 border-t border-[var(--border)] bg-[var(--canvas)]/90 px-6 py-4 backdrop-blur-lg md:px-10 lg:px-12">
           <div className="mx-auto flex max-w-6xl flex-col gap-3">

@@ -105,6 +105,11 @@ mock-safe provider adapters.
   scraping, lead brokers, payments, contracts, or auto-send without a product
   decision and deployment requirements.
 
+### P1 — responsive manager workspace (completed 2026-07-11)
+
+- [x] Replace the phone-width persistent sidebar with an accessible navigation drawer and touch-sized controls.
+- [x] Add a guided empty-workspace dashboard path that takes a new manager from booking profile to lead to reviewed pitch.
+
 ## Release checks
 
 Run `pnpm db:generate`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
