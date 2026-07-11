@@ -17,6 +17,36 @@ enum BookingStage {
   closed
 }
 
+enum BookingProspectKind {
+  venue
+  festival
+  private_event
+  corporate_event
+}
+
+enum BookingProspectStatus {
+  discovered
+  qualified
+  disqualified
+  converted
+}
+
+enum BookingCampaignStatus {
+  draft
+  active
+  closed
+}
+
+enum BookingCampaignRecipientStatus {
+  needs_contact
+  ready
+  approval_requested
+  drafted
+  replied
+  declined
+  booked
+}
+
 enum TaskStatus {
   todo
   in_progress
@@ -132,6 +162,9 @@ model Artist {
   commandRuns   CommandRun[]
   integrations  IntegrationConnection[]
   memberships   ArtistMembership[]
+  bookingProfile ArtistBookingProfile?
+  bookingProspects BookingProspect[]
+  bookingCampaigns BookingCampaign[]
   membershipInvites ArtistMembershipInvite[]
   workflowNotifications WorkflowNotification[]
   telegramUrgentDedupes TelegramUrgentDedupe[]
@@ -209,6 +242,7 @@ model Venue {
   artist      Artist               @relation(fields: [artistId], references: [id], onDelete: Cascade)
   contacts    Contact[]
   opportunities BookingOpportunity[]
+  bookingProspects BookingProspect[]
 }
 
 model Contact {
@@ -226,6 +260,8 @@ model Contact {
   artist      Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
   venue       Venue?    @relation(fields: [venueId], references: [id], onDelete: SetNull)
   commandRuns CommandRun[]
+  bookingProspects BookingProspect[]
+  campaignRecipients BookingCampaignRecipient[]
 }
 
 model BookingOpportunity {
@@ -245,6 +281,8 @@ model BookingOpportunity {
   tasks          Task[]
   approvals      ApprovalRequest[]
   commandRuns    CommandRun[]
+  bookingProspects BookingProspect[]
+  campaignRecipients BookingCampaignRecipient[]
 }
 
 model Task {
@@ -260,6 +298,100 @@ model Task {
   updatedAt      DateTime      @updatedAt
   artist         Artist        @relation(fields: [artistId], references: [id], onDelete: Cascade)
   opportunity    BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  bookingCampaignFollowUpFor BookingCampaignRecipient? @relation("CampaignRecipientFollowUpTask")
+}
+
+model ArtistBookingProfile {
+  id                String   @id @default(cuid())
+  artistId          String   @unique
+  homeCity          String?
+  homeRegion        String?
+  homeCountry       String?
+  genres            String[] @default([])
+  targetCapacityMin Int?
+  targetCapacityMax Int?
+  bookingPitch      String?
+  pressKitUrl       String?
+  liveVideoUrl      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  artist            Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+}
+
+model BookingProspect {
+  id             String                @id @default(cuid())
+  artistId       String
+  kind           BookingProspectKind
+  status         BookingProspectStatus @default(discovered)
+  name           String
+  city           String
+  region         String?
+  country        String?
+  capacity       Int?
+  websiteUrl     String?
+  notes          String?
+  sourceSystem   String?
+  sourceRef      String?
+  sourceMetadata Json?
+  venueId        String?
+  contactId      String?
+  opportunityId  String?
+  convertedAt    DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  artist         Artist                @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  venue          Venue?                @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  contact        Contact?              @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  opportunity    BookingOpportunity?   @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  campaignRecipients BookingCampaignRecipient[]
+
+  @@unique([artistId, sourceSystem, sourceRef])
+  @@index([artistId, status])
+  @@index([artistId, updatedAt])
+}
+
+model BookingCampaign {
+  id                  String                @id @default(cuid())
+  artistId            String
+  name                String
+  status              BookingCampaignStatus @default(draft)
+  dateWindowStart     DateTime?
+  dateWindowEnd       DateTime?
+  subjectTemplate     String
+  bodyTemplate        String
+  defaultFollowUpDays Int                   @default(7)
+  approvalRequestId   String?               @unique
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  artist              Artist                @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  approvalRequest     ApprovalRequest?      @relation("CampaignApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  recipients          BookingCampaignRecipient[]
+
+  @@index([artistId, status])
+  @@index([artistId, updatedAt])
+}
+
+model BookingCampaignRecipient {
+  id             String                         @id @default(cuid())
+  campaignId     String
+  prospectId     String
+  contactId      String?
+  opportunityId  String?
+  status         BookingCampaignRecipientStatus @default(needs_contact)
+  outcomeNote    String?
+  followUpDueAt  DateTime?
+  followUpTaskId String?                        @unique
+  createdAt      DateTime                       @default(now())
+  updatedAt      DateTime                       @updatedAt
+  campaign       BookingCampaign                @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  prospect       BookingProspect                @relation(fields: [prospectId], references: [id], onDelete: Restrict)
+  contact        Contact?                       @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  opportunity    BookingOpportunity?            @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  followUpTask   Task?                          @relation("CampaignRecipientFollowUpTask", fields: [followUpTaskId], references: [id], onDelete: SetNull)
+
+  @@unique([campaignId, prospectId])
+  @@index([campaignId, status])
+  @@index([followUpDueAt])
 }
 
 model ApprovalRequest {
@@ -278,6 +410,7 @@ model ApprovalRequest {
   updatedAt      DateTime        @updatedAt
   artist         Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
   opportunity    BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  bookingCampaign BookingCampaign? @relation("CampaignApproval")
 }
 
 model AuditEvent {

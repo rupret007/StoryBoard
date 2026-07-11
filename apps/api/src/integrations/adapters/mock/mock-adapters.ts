@@ -103,13 +103,6 @@ export class MockBandsintownAdapter implements BandsintownAdapter {
       }
     ];
   }
-
-  async searchVenuesNearCity(city: string, radiusKm: number) {
-    return [
-      { name: `${city} Basement Mock`, city, capacity: 180 },
-      { name: `${city} Hall Mock`, city, capacity: 450 }
-    ].slice(0, Math.min(2 + Math.floor(radiusKm / 50), 5));
-  }
 }
 
 export class MockTicketmasterAdapter implements TicketmasterAdapter {
@@ -147,6 +140,17 @@ export class MockTicketmasterAdapter implements TicketmasterAdapter {
         url: "https://ticketmaster.mock/event/1"
       }
     ];
+  }
+
+  async searchMarket(input: {
+    city: string;
+    region?: string;
+    country?: string;
+    keyword?: string;
+    size?: number;
+  }) {
+    void input;
+    return { venues: [], events: [] };
   }
 }
 

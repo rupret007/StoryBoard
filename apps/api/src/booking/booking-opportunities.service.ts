@@ -3,6 +3,10 @@ import { Prisma } from "../generated/prisma/client";
 import { BookingStage } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
+import type {
+  BookingOpportunityCreateInput,
+  BookingOpportunityPatchInput
+} from "./booking-opportunity.schema";
 
 @Injectable()
 export class BookingOpportunitiesService {
@@ -30,18 +34,28 @@ export class BookingOpportunitiesService {
     return row;
   }
 
+  private async assertVenueBelongsToArtist(
+    artistId: string,
+    venueId: string
+  ): Promise<void> {
+    const venue = await this.prisma.client.venue.findFirst({
+      where: { id: venueId, artistId },
+      select: { id: true }
+    });
+    if (!venue) {
+      throw new NotFoundException("Venue not found");
+    }
+  }
+
   async create(
     artistId: string,
-    data: {
-      title: string;
-      venueId?: string | null;
-      stage?: BookingStage;
-      targetDate?: string | null;
-      marketNotes?: string | null;
-    },
+    data: BookingOpportunityCreateInput,
     actorLabel?: string | null,
     actorOperatorId?: string | null
   ) {
+    if (data.venueId != null) {
+      await this.assertVenueBelongsToArtist(artistId, data.venueId);
+    }
     const row = await this.prisma.client.bookingOpportunity.create({
       data: {
         artistId,
@@ -93,16 +107,14 @@ export class BookingOpportunitiesService {
   async patch(
     artistId: string,
     id: string,
-    data: Partial<{
-      title: string;
-      venueId: string | null;
-      targetDate: string | null;
-      marketNotes: string | null;
-    }>,
+    data: BookingOpportunityPatchInput,
     actorLabel?: string | null,
     actorOperatorId?: string | null
   ) {
     await this.get(artistId, id);
+    if (data.venueId != null) {
+      await this.assertVenueBelongsToArtist(artistId, data.venueId);
+    }
     const patchData: Prisma.BookingOpportunityUncheckedUpdateInput = {};
     if (data.title !== undefined) {
       patchData.title = data.title;

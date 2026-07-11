@@ -3,7 +3,10 @@ import { Prisma } from "../generated/prisma/client";
 import { ContactKind } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
-import type { ContactPatchInput } from "./contact-patch.schema";
+import type {
+  ContactCreateInput,
+  ContactPatchInput
+} from "./contact-patch.schema";
 
 @Injectable()
 export class ContactsService {
@@ -31,20 +34,28 @@ export class ContactsService {
     return row;
   }
 
+  private async assertVenueBelongsToArtist(
+    artistId: string,
+    venueId: string
+  ): Promise<void> {
+    const venue = await this.prisma.client.venue.findFirst({
+      where: { id: venueId, artistId },
+      select: { id: true }
+    });
+    if (!venue) {
+      throw new NotFoundException("Venue not found");
+    }
+  }
+
   async create(
     artistId: string,
-    data: {
-      fullName: string;
-      contactKind?: ContactKind;
-      role?: string | null;
-      email?: string | null;
-      phone?: string | null;
-      notes?: string | null;
-      venueId?: string | null;
-    },
+    data: ContactCreateInput,
     actorLabel?: string | null,
     actorOperatorId?: string | null
   ) {
+    if (data.venueId != null) {
+      await this.assertVenueBelongsToArtist(artistId, data.venueId);
+    }
     const row = await this.prisma.client.contact.create({
       data: {
         artistId,
@@ -77,6 +88,9 @@ export class ContactsService {
     actorOperatorId?: string | null
   ) {
     await this.get(artistId, id);
+    if (data.venueId != null) {
+      await this.assertVenueBelongsToArtist(artistId, data.venueId);
+    }
     const patchData: Prisma.ContactUncheckedUpdateInput = {};
     if (data.fullName !== undefined) {
       patchData.fullName = data.fullName;

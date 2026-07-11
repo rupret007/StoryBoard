@@ -10,11 +10,7 @@ export class RealBandsintownAdapter implements BandsintownAdapter {
   readonly id = "bandsintown" as const;
   readonly mode = "real" as const;
 
-  constructor(
-    private readonly appId: string,
-    /** Optional: artist name/slug used to derive venues-in-city from upcoming shows */
-    private readonly eventArtistForCitySearch?: string
-  ) {}
+  constructor(private readonly appId: string) {}
 
   async resolveArtist(query: string): Promise<ArtistRef | null> {
     const trimmed = query.trim();
@@ -131,37 +127,4 @@ export class RealBandsintownAdapter implements BandsintownAdapter {
     return out;
   }
 
-  async searchVenuesNearCity(
-    city: string,
-    radiusKm: number
-  ): Promise<{ name: string; city: string; capacity?: number }[]> {
-    void radiusKm;
-    const artist = this.eventArtistForCitySearch?.trim();
-    if (!artist) {
-      return [];
-    }
-    const events = await this.listUpcomingEvents(artist);
-    const c = city.trim().toLowerCase();
-    if (!c) {
-      return [];
-    }
-    const seen = new Set<string>();
-    const venues: { name: string; city: string; capacity?: number }[] = [];
-    for (const e of events) {
-      const vCity = (e.city ?? "").trim().toLowerCase();
-      if (!vCity.includes(c) && c !== vCity) {
-        continue;
-      }
-      const key = `${e.venueName.toLowerCase()}|${vCity}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      venues.push({
-        name: e.venueName,
-        city: e.city ?? city
-      });
-    }
-    return venues;
-  }
 }

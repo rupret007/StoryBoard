@@ -5,13 +5,15 @@
 ### Artist
 
 The top-level tenant for MVP state. An artist owns venues, contacts, booking
-opportunities, tasks, approvals, command runs, and integrations.
+profiles, prospects, booking opportunities, campaigns, tasks, approvals, command
+runs, and integrations.
 
 ### Venue
 
-Represents a room, club, festival, or presenting organization. Stores location,
-capacity, and relationship notes. A venue may have multiple related contacts and
-booking opportunities.
+Represents a physical room or club only. Stores location, capacity, and
+relationship notes. A venue may have multiple related contacts and booking
+opportunities. Festivals, private buyers, and corporate buyers are prospects,
+not venues.
 
 ### Contact
 
@@ -22,6 +24,30 @@ Contacts include promoters, talent buyers, venue managers, and collaborators.
 
 Represents a potential or active show opportunity. Tracks stage, target date,
 market notes, and source system references.
+
+### ArtistBookingProfile
+
+An artist-scoped, one-to-one quick booking profile: home market, genres, target
+capacity range, short pitch, and optional press-kit/live-video links. It can be
+saved as an incomplete draft, but must be ready before prospect conversion or
+campaign work.
+
+### BookingProspect
+
+An artist-scoped lead discovered manually or from Ticketmaster. Types are
+`venue`, `festival`, `private_event`, and `corporate_event`; lifecycle is
+`discovered`, `qualified`, `disqualified`, or `converted`. Provider references
+dedupe imports per artist. Conversion is idempotent: a physical venue prospect
+creates a venue; other types create a venue-less booking opportunity and may
+create/link a buyer contact.
+
+### BookingCampaign and BookingCampaignRecipient
+
+An approval-gated pitch batch and its individual prospect/contact recipients.
+Campaign templates support only `artistName`, `contactName`, `prospectName`,
+`market`, `bookingPitch`, and `pressKitUrl`. Approval execution creates Gmail
+drafts, marks recipients drafted, and creates one linked follow-up task per
+recipient; it never sends an email or advances the booking stage automatically.
 
 ### Task
 
@@ -65,11 +91,14 @@ system can reason about next steps, deadlines, and approvals.
 
 ## MVP Relationships
 
-- An `Artist` has many `Venue`, `Contact`, `BookingOpportunity`, `Task`,
+- An `Artist` has one optional `ArtistBookingProfile` and many `Venue`,
+  `Contact`, `BookingProspect`, `BookingOpportunity`, `BookingCampaign`, `Task`,
   `ApprovalRequest`, and `CommandRun` records.
 - A `Venue` may have many `Contact` and `BookingOpportunity` records.
 - A `BookingOpportunity` may generate many `Task`, `ApprovalRequest`, and
   `CommandRun` records.
+- A `BookingCampaign` has many recipients; every recipient links one qualified
+  prospect and may link a contact, opportunity, and one generated follow-up task.
 - `AuditEvent` links to aggregate types and IDs generically rather than through
   deep relational coupling.
 

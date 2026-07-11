@@ -32,6 +32,7 @@ export type DashboardInsights = {
   signals: {
     overdueTaskCount: number;
     staleFollowUpCount: number;
+    dueCampaignFollowUpCount: number;
     pendingApprovalAgingCount: number;
     approvalAgingThresholdDays: number;
     overdueClusterThreshold: number;
@@ -199,7 +200,8 @@ export class OperationalIntelligenceService {
       stale,
       pendingApprovals,
       pendingAged,
-      openTasks
+      openTasks,
+      dueCampaignFollowUps
     ] = await Promise.all([
       this.prisma.client.bookingOpportunity.findMany({
         where: { artistId },
@@ -220,6 +222,13 @@ export class OperationalIntelligenceService {
       this.agedPendingApprovals(artistId, urgentAgeDays),
       this.prisma.client.task.findMany({
         where: { artistId, status: { not: TaskStatus.done } }
+      }),
+      this.prisma.client.bookingCampaignRecipient.count({
+        where: {
+          campaign: { artistId },
+          status: "drafted",
+          followUpDueAt: { lte: new Date() }
+        }
       })
     ]);
 
@@ -291,6 +300,7 @@ export class OperationalIntelligenceService {
     const priorityActions = this.buildPriorityActions({
       overdueCount: overdue.length,
       staleCount: stale.length,
+      dueCampaignFollowUpCount: dueCampaignFollowUps,
       pendingApprovals,
       pendingAgedCount: pendingAged.length,
       meetsApprovalAgingUrgent,
@@ -305,6 +315,7 @@ export class OperationalIntelligenceService {
       signals: {
         overdueTaskCount: overdue.length,
         staleFollowUpCount: stale.length,
+        dueCampaignFollowUpCount: dueCampaignFollowUps,
         pendingApprovalAgingCount: pendingAged.length,
         approvalAgingThresholdDays: urgentAgeDays,
         overdueClusterThreshold: overdueTh,
@@ -360,6 +371,7 @@ export class OperationalIntelligenceService {
   private buildPriorityActions(input: {
     overdueCount: number;
     staleCount: number;
+    dueCampaignFollowUpCount: number;
     pendingApprovals: number;
     pendingAgedCount: number;
     meetsApprovalAgingUrgent: boolean;
@@ -396,6 +408,15 @@ export class OperationalIntelligenceService {
         reason: `${input.staleCount} task(s) haven't been updated in a while — momentum is slipping.`,
         href: "/tasks",
         severity: input.meetsStaleClusterUrgent ? "high" : "med"
+      });
+    }
+    if (input.dueCampaignFollowUpCount > 0) {
+      actions.push({
+        id: "campaign-followups-due",
+        title: "Work campaign follow-ups",
+        reason: `${input.dueCampaignFollowUpCount} approved pitch follow-up(s) are due — record the reply or move the deal deliberately.`,
+        href: "/booking-campaigns",
+        severity: "med"
       });
     }
     const stuck = input.opportunities.filter(
@@ -451,4 +472,3 @@ function buildStaleClusterText(
     `Update or complete tasks to restore momentum.`
   ].join("\n");
 }
-

@@ -24,7 +24,6 @@ export type IntegrationEnvSlice = {
   GOOGLE_CALENDAR_DEFAULT_ID: string | undefined;
   GOOGLE_DRIVE_ROOT_FOLDER_ID: string | undefined;
   BANDSINTOWN_APP_ID: string | undefined;
-  BANDSINTOWN_EVENT_ARTIST: string | undefined;
   TICKETMASTER_API_KEY: string | undefined;
 };
 
@@ -96,12 +95,7 @@ export function buildAdapterRegistry(
 
   const bitConfigured = cred(env.BANDSINTOWN_APP_ID);
   const bandsintown = bitConfigured
-    ? new RealBandsintownAdapter(
-        env.BANDSINTOWN_APP_ID!,
-        cred(env.BANDSINTOWN_EVENT_ARTIST)
-          ? env.BANDSINTOWN_EVENT_ARTIST!.trim()
-          : undefined
-      )
+    ? new RealBandsintownAdapter(env.BANDSINTOWN_APP_ID!)
     : mockAdapters.bandsintown;
 
   const tmConfigured = cred(env.TICKETMASTER_API_KEY);

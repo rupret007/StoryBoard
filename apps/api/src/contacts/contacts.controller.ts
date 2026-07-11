@@ -16,8 +16,7 @@ import { MembershipService } from "../auth/membership.service";
 import { RolePolicyService } from "../auth/role-policy.service";
 import type { RequestOperator } from "../auth/request-operator";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
-import type { ContactKind } from "../generated/prisma/enums";
-import { contactPatchSchema } from "./contact-patch.schema";
+import { contactCreateSchema, contactPatchSchema } from "./contact-patch.schema";
 import { ContactsService } from "./contacts.service";
 
 @Controller("contacts")
@@ -64,23 +63,18 @@ export class ContactsController {
 
   @Post()
   async create(
-    @Body()
-    body: {
-      fullName: string;
-      contactKind?: ContactKind;
-      role?: string;
-      email?: string;
-      phone?: string;
-      notes?: string;
-      venueId?: string;
-    },
+    @Body() body: unknown,
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
     @Headers("x-artist-id") artistHeader?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
-    return this.contacts.create(artistId, body, operator.email, operator.id);
+    const parsed = contactCreateSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    return this.contacts.create(artistId, parsed.data, operator.email, operator.id);
   }
 
   @Patch(":id")

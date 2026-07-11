@@ -6,6 +6,8 @@ dist
 *.tsbuildinfo
 build
 coverage
+apps/web/test-results/
+apps/web/playwright-report/
 .DS_Store
 .env
 .env.local

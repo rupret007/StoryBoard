@@ -23,6 +23,7 @@ export type DashboardInsights = {
   signals: {
     overdueTaskCount: number;
     staleFollowUpCount: number;
+    dueCampaignFollowUpCount: number;
     pendingApprovalAgingCount: number;
     approvalAgingThresholdDays: number;
     overdueClusterThreshold: number;
@@ -74,6 +75,75 @@ export type BookingOpportunity = {
   targetDate?: string | null;
   marketNotes?: string | null;
   venue?: Venue | null;
+};
+
+export type ArtistBookingProfile = {
+  id: string;
+  homeCity?: string | null;
+  homeRegion?: string | null;
+  homeCountry?: string | null;
+  genres: string[];
+  targetCapacityMin?: number | null;
+  targetCapacityMax?: number | null;
+  bookingPitch?: string | null;
+  pressKitUrl?: string | null;
+  liveVideoUrl?: string | null;
+};
+
+export type BookingProfileResponse = {
+  profile: ArtistBookingProfile | null;
+  ready: boolean;
+  missing: string[];
+};
+
+export type BookingProspect = {
+  id: string;
+  kind: "venue" | "festival" | "private_event" | "corporate_event";
+  status: "discovered" | "qualified" | "disqualified" | "converted";
+  name: string;
+  city: string;
+  region?: string | null;
+  country?: string | null;
+  capacity?: number | null;
+  websiteUrl?: string | null;
+  notes?: string | null;
+  sourceSystem?: string | null;
+  sourceRef?: string | null;
+  venueId?: string | null;
+  contactId?: string | null;
+  opportunityId?: string | null;
+  venue?: Venue | null;
+  contact?: Contact | null;
+  opportunity?: BookingOpportunity | null;
+};
+
+export type BookingCampaignRecipient = {
+  id: string;
+  status:
+    | "needs_contact"
+    | "ready"
+    | "approval_requested"
+    | "drafted"
+    | "replied"
+    | "declined"
+    | "booked";
+  outcomeNote?: string | null;
+  followUpDueAt?: string | null;
+  followUpTaskId?: string | null;
+  prospect: BookingProspect;
+  contact?: Contact | null;
+  opportunity?: BookingOpportunity | null;
+};
+
+export type BookingCampaign = {
+  id: string;
+  name: string;
+  status: "draft" | "active" | "closed";
+  subjectTemplate: string;
+  bodyTemplate: string;
+  defaultFollowUpDays: number;
+  approvalRequestId?: string | null;
+  recipients: BookingCampaignRecipient[];
 };
 
 export type Task = {

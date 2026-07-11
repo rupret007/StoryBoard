@@ -27,7 +27,7 @@ adapter layer rather than leaking into domain modules.
 ## MVP API surface (current)
 
 Feature modules live under `apps/api/src/` as Nest modules: `venues`, `contacts`,
-`booking` (booking opportunities), `tasks`, `approvals`, `audit-events`,
+`booking` (profiles, prospects, campaigns, and booking opportunities), `tasks`, `approvals`, `audit-events`,
 `commands`, `summary` (weekly aggregation), `dashboard` (stats). Global
 `PrismaModule`, `AuditModule`, `IntegrationsModule` support persistence and
 audit. External systems are accessed only via adapter interfaces; mocked
@@ -41,6 +41,9 @@ stored `IntegrationConnection` row (`provider = "google"`) when present and
 valid, else fall back to env `GOOGLE_OAUTH_REFRESH_TOKEN` when set. **Bandsintown
 and Ticketmaster** remain env-global; **YouTube and Spotify** stay mock-only.
 Calendar/Drive real adapters honor OAuth scopes recorded on the connection.
+Bandsintown is limited to the artist's own event context. Ticketmaster powers
+bounded, city-first Find shows signals only; a missing or unavailable key leaves
+that workflow explicitly manual.
 `GET /integrations/status?artistId=` returns per-artist provider modes and Google
 connection metadata (no secrets).
 

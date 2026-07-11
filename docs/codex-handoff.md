@@ -16,6 +16,8 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 |------|--------|
 | Scaffold, infra, Prisma, migrations | Done |
 | Venues, contacts, booking opportunities, tasks | Done |
+| Booking profile, one-market prospecting, prospect conversion | Done |
+| Approval-gated pitch campaigns + linked follow-up tasks | Done |
 | Approvals + execution (Gmail drafts, calendar holds, drive folder) | Done |
 | Command bar + `POST /commands/execute` (NL + structured intents) | Done |
 | Operator auth (Google OIDC), session cookie, memberships (`owner` / `member` / `viewer`) | Done |
@@ -25,7 +27,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | **Targeted** only: `node:test` on `packages/shared/test/*.mjs`, `apps/api/test/*.mjs` (API tests run `nest build` first). Not full e2e. |
+| Tests | Compiled `node:test` unit coverage plus opt-in Postgres integration coverage for tenant links, prospect conversion, campaign draft execution/follow-up creation, role enforcement, Telegram binding, and audit rows. Chromium e2e covers profile → prospect → buyer → campaign → approval preview. |
 
 ## Non-goals to preserve (unless product changes)
 
@@ -45,6 +47,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Telegram inbound | `telegram-registration.service.ts`, `telegram-webhook.controller.ts`, `telegram-start-parse.ts` |
 | Notifications API | `workflow-settings.controller.ts`, `workflow-notifications.controller.ts` |
 | Prisma schema | `prisma/schema.prisma` (client output: `apps/api/src/generated/prisma/` — **gitignored**; run `pnpm db:generate`) |
+| Booking acquisition | `apps/api/src/booking/booking-{profiles,prospects,campaigns}.*`, `apps/web/src/app/(app)/{prospects,booking-campaigns}/` |
 | Web app API client | `apps/web/src/lib/api.ts` (cookies + `x-artist-id`) |
 
 ## Environment (short list)
@@ -64,9 +67,9 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Tests:** Integration tests with DB for registration binding, role-guarded routes, or approval execution + audit (where feasible without a giant harness).
-2. **Telegram:** Optional `getUpdates` long-polling is **not** required; webhook + secret is the prod path. Document tunneling (ngrok) for local webhook if needed.
-3. **Master plan file:** Optionally reconcile `.cursor/plans/storyboard-master-plan.md` with README phase labels so future agents are not confused.
+1. **Product:** Assess routing, setlists, contracts, settlement, and deeper private/corporate intake only with validated user needs; do not add scraping or auto-send.
+2. **Runtime:** Define queue-worker deployment, cursor pagination/query limits, and metrics before horizontally scaling the API. `/ready` is a dependency probe, not a monitoring system.
+3. **Tests:** Expand browser coverage only around verified operator workflows; it must continue using the explicit test database and mock providers.
 
 ## Cursor-only artifacts
 

@@ -8,7 +8,11 @@ import {
   driveEnsureFolderPayloadSchema,
   outboundEmailBatchPayloadSchema
 } from "@storyboard/shared";
-import { ApprovalStatus, AuditSeverity } from "../generated/prisma/enums";
+import {
+  ApprovalStatus,
+  AuditSeverity,
+  BookingCampaignRecipientStatus
+} from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { AdapterRegistryResolver } from "../integrations/adapter-registry.resolver";
 import type { CalendarHoldRequest } from "../integrations/adapters/adapter.types";
@@ -31,18 +35,19 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function parseOutboundPayload(payload: unknown): OutboundDraftPayload[] {
+function parseOutboundPayload(payload: unknown) {
   const p = outboundEmailBatchPayloadSchema.safeParse(payload);
   if (!p.success) {
     throw new BadRequestException(p.error.flatten());
   }
-  return p.data.drafts.map((d) => {
+  const drafts: OutboundDraftPayload[] = p.data.drafts.map((d) => {
     const row: OutboundDraftPayload = { message: d.message };
     if (d.venueId !== undefined) {
       row.venueId = d.venueId;
     }
     return row;
   });
+  return { drafts, campaign: p.data.campaign };
 }
 
 function parseCalendarHolds(payload: unknown): CalendarHoldRequest[] {
@@ -88,6 +93,104 @@ export class ApprovalsService {
     void this.storyboardQueue
       .enqueueApprovalNotify({ artistId, approvalId, event })
       .catch(() => undefined);
+  }
+
+  private async finalizeCampaignDrafts(
+    artistId: string,
+    approvalId: string,
+    nextPayload: object,
+    actorLabel: string,
+    actorOperatorId: string | null,
+    campaign: {
+      campaignId: string;
+      recipients: { recipientId: string; followUpDueAt: string }[];
+    } | undefined
+  ) {
+    return this.prisma.client.$transaction(async (tx) => {
+      if (campaign) {
+        const bookingCampaign = await tx.bookingCampaign.findFirst({
+          where: {
+            id: campaign.campaignId,
+            artistId,
+            approvalRequestId: approvalId
+          }
+        });
+        if (!bookingCampaign) {
+          throw new BadRequestException("Campaign approval context not found");
+        }
+        const ids = campaign.recipients.map((recipient) => recipient.recipientId);
+        if (new Set(ids).size !== ids.length) {
+          throw new BadRequestException("Campaign approval contains duplicate recipients");
+        }
+        const recipients = await tx.bookingCampaignRecipient.findMany({
+          where: {
+            id: { in: ids },
+            campaignId: campaign.campaignId,
+            status: BookingCampaignRecipientStatus.approval_requested
+          },
+          include: { prospect: true }
+        });
+        if (recipients.length !== ids.length) {
+          throw new BadRequestException("Campaign recipients are not ready for draft execution");
+        }
+        const byId = new Map(recipients.map((recipient) => [recipient.id, recipient]));
+        for (const spec of campaign.recipients) {
+          const recipient = byId.get(spec.recipientId)!;
+          const dueAt = new Date(spec.followUpDueAt);
+          if (Number.isNaN(dueAt.getTime())) {
+            throw new BadRequestException("Campaign follow-up date is invalid");
+          }
+          const task = await tx.task.create({
+            data: {
+              artistId,
+              opportunityId: recipient.opportunityId,
+              title: `Follow up with ${recipient.prospect.name}`,
+              ownerLabel: "Booking campaign",
+              dueAt
+            }
+          });
+          await tx.auditEvent.create({
+            data: {
+              artistId,
+              aggregateType: "Task",
+              aggregateId: task.id,
+              action: "task.created",
+              actorLabel,
+              actorOperatorId,
+              metadata: {
+                title: task.title,
+                campaignId: campaign.campaignId,
+                campaignRecipientId: recipient.id
+              }
+            }
+          });
+          await tx.bookingCampaignRecipient.update({
+            where: { id: recipient.id },
+            data: {
+              status: BookingCampaignRecipientStatus.drafted,
+              followUpDueAt: dueAt,
+              followUpTaskId: task.id
+            }
+          });
+        }
+        await tx.auditEvent.create({
+          data: {
+            artistId,
+            aggregateType: "BookingCampaign",
+            aggregateId: campaign.campaignId,
+            action: "booking_campaign.drafts_created",
+            metadata: { approvalId, recipientCount: recipients.length }
+          }
+        });
+      }
+      return tx.approvalRequest.update({
+        where: { id: approvalId },
+        data: {
+          status: ApprovalStatus.executed,
+          payload: nextPayload
+        }
+      });
+    });
   }
 
   list(artistId: string, status?: ApprovalStatus) {
@@ -301,7 +404,8 @@ export class ApprovalsService {
     if (dryRun) {
       let preview: Record<string, unknown> = {};
       if (approvalRow.actionType === "outbound_email_batch") {
-        const drafts = parseOutboundPayload(approvalRow.payload);
+        const outbound = parseOutboundPayload(approvalRow.payload);
+        const drafts = outbound.drafts;
         preview = {
           wouldCreateDrafts: drafts.length,
           gmailMode: adapters.gmail.mode,
@@ -348,7 +452,8 @@ export class ApprovalsService {
 
     try {
       if (approvalRow.actionType === "outbound_email_batch") {
-        const draftsSpec = parseOutboundPayload(approvalRow.payload);
+        const outbound = parseOutboundPayload(approvalRow.payload);
+        const draftsSpec = outbound.drafts;
         type CreatedDraft = {
           venueId?: string;
           draftId: string;
@@ -377,13 +482,14 @@ export class ApprovalsService {
           ...basePayload,
           executionResult
         };
-        const updated = await this.prisma.client.approvalRequest.update({
-          where: { id },
-          data: {
-            status: ApprovalStatus.executed,
-            payload: nextPayload as object
-          }
-        });
+        const updated = await this.finalizeCampaignDrafts(
+          artistId,
+          id,
+          nextPayload as object,
+          actorLabel,
+          actorOperatorId,
+          outbound.campaign
+        );
         await this.audit.log({
           artistId,
           severity: AuditSeverity.info,

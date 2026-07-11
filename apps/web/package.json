@@ -6,6 +6,7 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
+    "test:e2e": "playwright test",
     "lint": "eslint -c ../../eslint.config.mjs \"src/**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit"
   },
@@ -19,6 +20,7 @@
     "zod": "4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "1.57.0",
     "@tailwindcss/postcss": "4.2.2",
     "@types/node": "25.5.0",
     "@types/react": "19.2.14",

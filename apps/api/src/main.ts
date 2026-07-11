@@ -19,7 +19,11 @@ async function bootstrap() {
 
   await app.register(cors, {
     origin: corsOrigins,
-    credentials: true
+    credentials: true,
+    // The web app is intentionally a separate origin in local development and
+    // production deployments. Its API workflows use PATCH and PUT as well as
+    // the browser defaults, so the preflight policy must match the API surface.
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
   });
 
   await app.register(cookie, {

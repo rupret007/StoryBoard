@@ -66,10 +66,7 @@ export class IntegrationsStatusController {
       envHints: {
         gmail: gmailEnvReady,
         bandsintown: bitReady,
-        ticketmaster: tmReady,
-        bandsintownEventArtistConfigured: cred(
-          c.get<string>("BANDSINTOWN_EVENT_ARTIST")
-        )
+        ticketmaster: tmReady
       }
     };
   }

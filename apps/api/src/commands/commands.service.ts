@@ -284,12 +284,6 @@ export class CommandsService {
     const venues = await this.prisma.client.venue.findMany({
       where: { artistId }
     });
-    const searchCity = venues[0]?.city ?? "Nashville";
-    const radiusKm = 120;
-    const near = await adapters.bandsintown.searchVenuesNearCity(
-      searchCity,
-      radiusKm
-    );
     const ranked = [...venues].sort(
       (a, b) => (b.fitScore ?? 0) - (a.fitScore ?? 0)
     );
@@ -303,12 +297,9 @@ export class CommandsService {
           fitScore: v.fitScore,
           driveMinutesFromBase: v.driveMinutesFromBase
         })),
-        intelVenuesNearCity: near,
-        searchCity,
-        radiusKm,
         providerModes: providerModes(adapters),
         note:
-          "Ranking orders stored venues by fitScore. Venue discovery uses the configured Bandsintown adapter; without BANDSINTOWN_EVENT_ARTIST, real mode may return no rows for city search."
+          "Ranking orders only artist-owned CRM venues by fitScore. Use Find shows for Ticketmaster or manual market prospecting."
       }
     };
   }
@@ -339,15 +330,6 @@ export class CommandsService {
     const events = resolved
       ? await adapters.bandsintown.listUpcomingEvents(resolved.name)
       : await adapters.bandsintown.listUpcomingEvents(artistNameForBit);
-    const radiusRaw = payload?.["radiusKm"];
-    const radiusKm =
-      typeof radiusRaw === "number" && Number.isFinite(radiusRaw)
-        ? Math.min(500, Math.max(20, Math.trunc(radiusRaw)))
-        : 120;
-    const venuesNear = await adapters.bandsintown.searchVenuesNearCity(
-      city,
-      radiusKm
-    );
     const tmVenues = await adapters.ticketmaster.searchVenues(city, {
       size: 8
     });
@@ -360,9 +342,10 @@ export class CommandsService {
         city,
         bandsintownArtist: resolved,
         bandsintownUpcomingEvents: events,
-        bandsintownVenuesNearCity: venuesNear,
         ticketmasterVenues: tmVenues,
         ticketmasterEvents: tmEvents,
+        note:
+          "Bandsintown is limited to the selected artist's own event context. Ticketmaster or manual entry supplies market discovery.",
         providerModes: providerModes(adapters)
       },
       providerModes: providerModes(adapters)

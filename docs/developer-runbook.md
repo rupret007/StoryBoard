@@ -138,8 +138,14 @@ Smoke:
 
 ```bash
 curl -s http://localhost:4000/health
+curl -s http://localhost:4000/ready
 curl -s http://localhost:4000/meta | head
 ```
+
+`/health` only confirms that the HTTP process is responding. `/ready` is a
+safe, unauthenticated dependency probe: it checks Postgres and Redis and
+returns `503` until either is ready. Its response contains only boolean
+database/Redis/worker state; it never returns URLs, credentials, or queue data.
 
 **Tasks API semantics:**
 
@@ -159,9 +165,9 @@ The body is JSON validated with Zod. Provide **either** natural language **`text
 | `list_stale_followups` | `{ "days": 7 }` optional | Incomplete tasks with `updatedAt` older than `days` (default 7) |
 | `booking_pipeline_health` | — | Stage counts for booking opportunities |
 | `draft_venue_outreach` | — | Draft email previews + **approval** row (no send) |
-| `rank_venues_by_fit` | — | Rank by `fitScore`; mock discovery note in result |
+| `rank_venues_by_fit` | — | Rank only stored artist-owned venues by `fitScore` |
 | `draft_release_checklist` | — | Checklist steps + **approval** row |
-| `research_booking_intel` | `{ "city"?, "artistName"?, "radiusKm"? }` | Read-only Bandsintown + Ticketmaster intel (`providerModes` in result) |
+| `research_booking_intel` | `{ "city"?, "artistName"? }` | Read-only artist event context from Bandsintown plus Ticketmaster intel (`providerModes` in result) |
 | `enqueue_research_refresh` | `{ "city"?: string }` optional | Enqueues BullMQ job `research.refresh` on `storyboard-enrichment` when Redis is up |
 
 Optional body field **`dryRun`** (boolean, default **`true`**): stored on `CommandRun`; keeps commands non-destructive unless you pass `dryRun: false`.
@@ -175,8 +181,8 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 | Provider | Credentials | Behavior |
 | -------- | ----------- | -------- |
 | Gmail / Calendar / Drive | Per-artist DB connection **or** env `GOOGLE_*` trio (refresh optional if DB only) | Gmail: draft after execute. Calendar: hold events via approval `calendar_hold_batch`. Drive: `drive_ensure_folder` approval. Connect flow: `docs/integrations-google-oauth.md` (`INTEGRATION_SECRETS_ENCRYPTION_KEY` required to persist). |
-| Bandsintown | `BANDSINTOWN_APP_ID` | Unchanged (env-global) |
-| Ticketmaster | `TICKETMASTER_API_KEY` | Unchanged (env-global) |
+| Bandsintown | `BANDSINTOWN_APP_ID` | Artist-owned event context only; never market/competitor venue discovery. |
+| Ticketmaster | `TICKETMASTER_API_KEY` | Bounded city-first venue/event signals for Find shows; unavailable mode is manual, with no synthetic rows. |
 
 `GET /integrations/status?artistId=` — requires a signed-in operator and membership; returns `providers` modes plus `googleConnection` summary. Artist context is resolved like other modules (`artistId` query, `x-artist-id`, session current artist, or first membership).
 
@@ -197,6 +203,38 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 
 - `GET /dashboard/insights` — session + artist context; returns deterministic **booking health**, **opportunity risk** levels, **priority actions**, and **urgent signal** counts (used by the dashboard, booking pipeline badges, and weekly briefing snapshot).
 
+## Booking acquisition
+
+All routes below require a signed-in artist member. `GET` is available to
+viewers; `POST`, `PUT`, and `PATCH` require an owner or member. Every write is
+audited and rejects cross-artist relationship IDs with a generic not-found
+response.
+
+- `GET` / `PUT /booking-profile` — quick profile draft/readiness. A ready profile
+  has a home city, genres, capacity min/max, and booking pitch; press kit and
+  live video remain optional.
+- `GET /booking-prospects` / `POST /booking-prospects` / `PATCH /booking-prospects/:id`
+  — artist-scoped venue, festival, private-event, and corporate-event leads.
+- `GET /booking-prospects/discover?city=&region=&country=&keyword=` — bounded
+  Ticketmaster venue/event signals when configured. Otherwise returns
+  `{ mode: "manual" }` and no generated leads.
+- `POST /booking-prospects/:id/convert` — qualified prospect → idempotent target
+  opportunity. Only a `venue` prospect creates a physical `Venue`; private and
+  corporate leads remain venue-less and can create/link a buyer contact.
+- `GET` / `POST` / `PATCH /booking-campaigns` and
+  `POST /booking-campaigns/:id/recipients` /
+  `PATCH /booking-campaigns/:id/recipients/:recipientId` — draft campaign and
+  recipient management. Only qualified prospects can be recipients.
+- `POST /booking-campaigns/:id/prepare-approval` — renders and returns every
+  recipient-specific preview, then creates an `outbound_email_batch` approval;
+  it makes no Gmail API call.
+
+Campaign templates permit only `{{artistName}}`, `{{contactName}}`,
+`{{prospectName}}`, `{{market}}`, `{{bookingPitch}}`, and `{{pressKitUrl}}`.
+When an approved campaign batch executes, StoryBoard creates Gmail **drafts**,
+marks recipients `drafted`, and makes one linked follow-up task (seven days by
+default, editable per recipient). It never sends email or moves a booking stage.
+
 ## Approvals execution
 
 - `GET /approvals/pending` — needs review  
@@ -204,7 +242,7 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 - `POST /approvals/:id/approve` — moves pending/proposed → approved (audited)  
 - `POST /approvals/:id/execute` — body `{ "dryRun": true }` for preview only (no provider calls; stays **approved**), or omit/`false` to run provider work and set status **executed**/**failed**  
 
-`draft_venue_outreach` stores full per-recipient **Gmail** fields in the approval payload; **no** Gmail API call happens until **execute** (avoids pre-approval drafts when using real Gmail).
+`draft_venue_outreach` and prepared campaign batches store full per-recipient **Gmail** fields in the approval payload; **no** Gmail API call happens until **execute** (avoids pre-approval drafts when using real Gmail). Campaign execution additionally creates its linked follow-up tasks atomically with the executed approval record.
 
 Audited actions include `approval.execution.started`, `approval.execution.dry_run`, `approval.execution.succeeded`, `approval.execution.failed`.
 
@@ -234,7 +272,8 @@ Open http://localhost:3000 (home redirects to the dashboard shell).
 **Web ↔ API URL:** `apps/web/next.config.ts` loads `../../.env` so `API_URL` and
 `NEXT_PUBLIC_API_URL` (see `.env.example`) resolve to the Nest API
 (`http://localhost:4000` by default). The shell calls REST routes such as
-`/venues`, `/booking-opportunities`, `/commands/execute`, and `/weekly-summary`.
+`/venues`, `/booking-opportunities`, `/booking-prospects`, `/booking-campaigns`,
+`/commands/execute`, and `/weekly-summary`.
 
 ## 9. Run both apps
 
@@ -253,7 +292,36 @@ pnpm test
 pnpm build
 ```
 
-**Tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (`nest build` then `node --test` on `apps/api/test/**/*.test.mjs`). The API suite includes Telegram **start-payload** parsing and registration-token **hash** checks.
+**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (`nest build` then `node --test` on `apps/api/test/*.test.mjs`). The API suite covers tenant links, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database.
+
+**Database integration tests:** Set `STORYBOARD_TEST_DATABASE_URL` to a disposable PostgreSQL database whose name contains `test`, then run:
+
+```bash
+STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/storyboard_test?schema=public' \
+  pnpm test:integration
+```
+
+The command refuses to fall back to `DATABASE_URL`, runs `prisma generate` and
+`prisma migrate deploy` against that explicit test database, and then verifies
+tenant links, role enforcement, Telegram registration binding, and audit rows.
+Before a release, run the read-only relationship diagnostic against the target
+database; it exits non-zero if it finds a mismatch and never changes data:
+
+```bash
+pnpm db:audit-relationships
+```
+
+**Browser workflow test:** Install Chromium once, then point the opt-in runner
+at the same kind of explicit disposable test database. It applies migrations,
+builds the current production artifacts, starts the API/web pair with dev auth
+and mock-safe providers, and verifies profile → prospect → buyer → campaign →
+approval preview. It never falls back to `DATABASE_URL`.
+
+```bash
+pnpm --filter @storyboard/web exec playwright install --with-deps chromium
+STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/storyboard_test?schema=public' \
+  pnpm test:e2e
+```
 
 Optional after infra and `.env` are up:
 
@@ -274,4 +342,3 @@ pnpm preflight
 - Forward-only migrations in `prisma/migrations/`
 - Never hand-edit applied migration SQL in shared branches
 - Production deploys should use `prisma migrate deploy` (CI/CD), not `migrate dev`
-

@@ -181,6 +181,14 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
     await this.queue.add("integration.connection_changed", input);
   }
 
+  readiness() {
+    return {
+      redis: this.connection?.status === "ready",
+      workerEnabled: this.config.get<string>("ENABLE_QUEUE_WORKER") !== "false",
+      workerRunning: Boolean(this.worker)
+    };
+  }
+
   async onModuleDestroy() {
     await this.worker?.close();
     await this.queue?.close();

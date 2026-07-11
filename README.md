@@ -37,7 +37,7 @@ pnpm db:seed
 pnpm dev
 ```
 
-- Web: http://localhost:3000 — sign in with Google (or dev login when enabled). New operators without memberships go through **onboarding** (create an artist or accept an invite). Owners manage team invites from **Team** in the sidebar. Then: dashboard (including booking health + priority actions), CRM, booking, tasks, approvals, command bar, weekly summary, **Notifications** (preferences, optional **Telegram** urgent settings for owners, escalation), activity  
+- Web: http://localhost:3000 — sign in with Google (or dev login when enabled). New operators without memberships go through **onboarding** (create an artist or accept an invite). Owners manage team invites from **Team** in the sidebar. Then: dashboard (including booking health + priority actions), CRM, **Find shows**, booking, **Pitch campaigns**, tasks, approvals, command bar, weekly summary, **Notifications** (preferences, optional **Telegram** urgent settings for owners, escalation), activity
 - API: http://localhost:4000/health  
 
 The web app loads the repo-root `.env` via `apps/web/next.config.ts` so `API_URL` / `NEXT_PUBLIC_API_URL` stay in sync (see `.env.example`). API requests use `credentials: "include"`; optional **`COOKIE_DOMAIN=localhost`** helps the session cookie work across Next (3000) and the API (4000) in local development.
@@ -57,6 +57,8 @@ Stop infra: `pnpm infra:down`
 **Phase 5A:** **Telegram** urgent outbound channel (`sendMessage` only, narrow adapter; **mock** when `TELEGRAM_BOT_TOKEN` is unset), **owner-only** per-artist routing (`GET`/`PATCH /workflow/telegram`), repeatable **`urgent.telegram.scan`** job plus **approval execution failed** hook, **`TelegramUrgentDedupe`** for idempotency, and deterministic **operational intelligence** (`GET /dashboard/insights`: booking health, pipeline risk, priority actions). UI: Notifications (Telegram card), dashboard health + actions, pipeline risk badges, weekly briefing snapshot. See `docs/telegram-alerts.md`, `docs/workflow-automation.md`, and `docs/architecture.md`.
 
 **Phase 5B:** **Telegram inbound registration** — owners issue short-lived **`POST /workflow/telegram/registration-token`** links; **`POST /integrations/telegram/webhook`** handles **`/start`** payloads only, binds **`telegramChatId`** with one-time **`TelegramRegistrationToken`** rows, full audit trail, optional **`TELEGRAM_WEBHOOK_SECRET`**, and minimal Notifications UI (deep link / copy / manual chat id fallback). Expanded **`pnpm test`** coverage (shared + API). See `docs/telegram-alerts.md`.
+
+**Booking acquisition:** A quick, artist-scoped booking profile unlocks market prospecting and pitch campaigns. **Find shows** searches one city at a time through Ticketmaster Discovery when configured, otherwise states that manual mode is active rather than inventing leads. It stores venue, festival, private-event, and corporate-event prospects; only physical-room prospects create a `Venue` on conversion. **Pitch campaigns** render only a small allowlist of variables, show every personalized email before approval, and create Gmail drafts only after approval execution — never an auto-send. Each executed draft creates one follow-up task seven days later by default. See `docs/domain-model.md` and `docs/developer-runbook.md`.
 
 Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/environment-setup-plan.md`.
 
@@ -93,21 +95,23 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm build` | Build packages and apps |
 | `pnpm typecheck` | TypeScript check |
 | `pnpm lint` | ESLint (API + web) |
-| `pnpm test` | Tests (`@storyboard/shared` + `@storyboard/api`; API runs `nest build` then Node test runner) |
+| `pnpm test` | Unit tests (`@storyboard/shared` + compiled API tests); does not require a database |
+| `pnpm test:integration` | Migrates and tests a dedicated DB named by `STORYBOARD_TEST_DATABASE_URL` (must contain `test`) |
 | `pnpm infra:up` / `infra:down` | Docker Postgres + Redis |
 | `pnpm db:generate` | `prisma generate` (root config) |
 | `pnpm db:migrate` | `prisma migrate dev` (needs Postgres) |
 | `pnpm db:seed` | Seed default artist + operator membership (needs migrate) |
 | `pnpm db:studio` | Prisma Studio |
+| `pnpm db:audit-relationships` | Read-only check for historical cross-artist record links |
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
 
 ## Phase 2A providers
 
-Gmail (OAuth draft-only), Bandsintown (read), and Ticketmaster Discovery (read) can run as **real** adapters when env vars are set; otherwise **mocks** keep local development safe. Approval **execute** creates Gmail drafts only after explicit approval. See `docs/developer-runbook.md`; `GET /integrations/status` (authenticated) reports provider modes.
+Gmail (OAuth draft-only), Bandsintown (the artist's own event context only), and Ticketmaster Discovery (city-first venue/event signals) can run as **real** adapters when env vars are set. Ticketmaster absence or failure puts Find shows in explicit manual mode; it never creates synthetic leads. Approval **execute** creates Gmail drafts only after explicit approval. See `docs/developer-runbook.md`; `GET /integrations/status` (authenticated) reports provider modes.
 
 ## MVP Scope
 
-- Venue CRM, contact/promoter CRM, booking pipeline, task engine, approval center with post-approval **execution**, command bar, weekly summary, and adapter layer (real Gmail/Bandsintown/Ticketmaster when configured; Calendar, Drive, YouTube, Spotify still mock-first).
+- Venue CRM, contact/promoter CRM, booking profiles, market prospects, booking pipeline, approval-gated pitch campaigns, task engine, approval center with post-approval **execution**, command bar, weekly summary, and adapter layer (real Gmail/Bandsintown/Ticketmaster when configured; Calendar, Drive, YouTube, Spotify still mock-first).
 
 ## Commands API
 

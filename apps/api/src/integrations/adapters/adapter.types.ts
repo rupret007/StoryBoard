@@ -77,15 +77,6 @@ export interface BandsintownAdapter {
   resolveArtist(query: string): Promise<ArtistRef | null>;
   /** Upcoming events for an artist identifier (same slug/name as used on Bandsintown URLs) */
   listUpcomingEvents(artistIdentifier: string): Promise<EventIntel[]>;
-  /**
-   * Best-effort “venues near a market”: when a default artist is configured in env,
-   * derives venue names from that artist’s upcoming events filtered by city match.
-   * Otherwise returns an empty list (see note in implementation).
-   */
-  searchVenuesNearCity(
-    city: string,
-    radiusKm: number
-  ): Promise<{ name: string; city: string; capacity?: number }[]>;
 }
 
 export interface TicketmasterVenueHit {
@@ -93,6 +84,8 @@ export interface TicketmasterVenueHit {
   name: string;
   city: string;
   state?: string;
+  country?: string;
+  capacity?: number;
   url?: string;
 }
 
@@ -102,7 +95,22 @@ export interface TicketmasterEventHit {
   startAt: string;
   venueName: string;
   city?: string;
+  state?: string;
+  country?: string;
   url?: string;
+}
+
+export interface TicketmasterMarketSearch {
+  city: string;
+  region?: string;
+  country?: string;
+  keyword?: string;
+  size?: number;
+}
+
+export interface TicketmasterMarketSignals {
+  venues: TicketmasterVenueHit[];
+  events: TicketmasterEventHit[];
 }
 
 export interface TicketmasterAdapter {
@@ -118,6 +126,8 @@ export interface TicketmasterAdapter {
     keywordOrCity: string,
     opts?: { size?: number }
   ): Promise<TicketmasterEventHit[]>;
+  /** Bounded, city-first Discovery API request used for booking prospecting. */
+  searchMarket(input: TicketmasterMarketSearch): Promise<TicketmasterMarketSignals>;
 }
 
 export interface YoutubeAdapter {

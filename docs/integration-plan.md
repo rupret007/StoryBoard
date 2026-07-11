@@ -29,13 +29,15 @@ HTTP payloads.
 
 ### Bandsintown
 
-- Read artist or venue event context
-- Support market research and booking intelligence
+- Read the current artist's own event context
+- Do not use it for competitor crawling or general market/venue discovery
 
 ### Ticketmaster Discovery
 
-- Read venue and market discovery data
-- Enrich booking opportunities and market targeting
+- Read bounded, city-first venue and event signals for Find shows
+- Keep provider references for artist-scoped import deduplication
+- Treat unavailable credentials or provider failures as explicit manual mode; do
+  not create synthetic leads
 
 ### YouTube Data API
 

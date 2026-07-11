@@ -1,0 +1,149 @@
+# StoryBoard Modernization Plan
+
+Last reviewed: 2026-07-10  
+Baseline: `main` at `8ebbc4e6421f130829e9bac20140ac097273a6b4`
+
+## Product and current architecture
+
+StoryBoard is an operator-facing management system for bands and artists. It
+combines venue and contact CRM, booking opportunities, tasks, approvals,
+workflow notifications, and constrained external integrations. The pnpm
+monorepo contains a Next.js web app, NestJS/Fastify API, Prisma/PostgreSQL data
+model, Redis/BullMQ automation, shared Zod contracts, and reusable UI
+components.
+
+Preserve the API-only write boundary, per-artist membership roles, audit trail,
+approval-gated provider side effects, encrypted integration credentials, and
+mock-safe provider adapters.
+
+## Priorities
+
+### P0 — security and tenant integrity
+
+- [x] Prevent cross-artist references when contacts link to venues, booking
+  opportunities link to venues, and tasks link to opportunities. Validate input
+  at the HTTP boundary and re-check the related record in the domain service on
+  create and update. Return a generic not-found result for inaccessible IDs.
+- [x] Bind the operator Google OAuth callback to the browser that initiated the
+  flow with a short-lived, single-use, HttpOnly `SameSite=Lax` state cookie.
+- [x] Replace the API placeholder test with regression coverage for tenant
+  isolation and request schemas. OAuth coverage remains with the OAuth task.
+
+### P1 — reliable delivery verification
+
+- [x] Add an opt-in integration suite that only accepts
+  `STORYBOARD_TEST_DATABASE_URL`; it must never use `DATABASE_URL`.
+- [x] Add CI for Prisma generation, type checking, linting, tests, and builds
+  on Node 22 and pnpm 10.
+- [x] Verify registration binding, role enforcement, and audit writes against
+  the explicit test database.
+
+### P0 — booking acquisition (completed 2026-07-10)
+
+- [x] Add a forward-only booking profile/prospect model. Profiles support
+  incomplete drafts but must contain a home market, genre, capacity range, and
+  pitch before conversion or campaigns.
+- [x] Add artist-scoped venue, festival, private-event, and corporate-event
+  prospects with audited, tenant-safe relationship links and Ticketmaster
+  provider-reference deduplication.
+- [x] Implement one-city-at-a-time Find shows. Ticketmaster returns bounded,
+  normalized venue/event signals when configured; absent or failed provider
+  calls return explicit manual mode with no generated leads.
+- [x] Convert qualified prospects atomically and idempotently. Only physical
+  venue prospects create `Venue` rows; private/corporate/festival prospects
+  create venue-less target opportunities and optional buyer contacts.
+- [x] Add approval-gated pitch campaigns with a strict template-variable
+  allowlist, recipient state machine, recipient previews, and Gmail draft-only
+  execution. Successful execution creates one linked, editable follow-up task
+  per recipient (seven days by default), without automatic stage changes.
+- [x] Remove Bandsintown market/competitor venue derivation. It is now limited
+  to artist-owned event context; stored venue ranking remains CRM-only.
+- [x] Add Find shows and Pitch campaigns responsive workspaces and surface due
+  campaign follow-ups in dashboard priority actions.
+
+### P1 — release confidence (completed 2026-07-10)
+
+- [x] Add a Chromium Playwright booking workflow test and make `pnpm test:e2e`
+  self-contained: it requires the explicit test database URL, applies only
+  forward migrations, builds current production artifacts, and starts isolated
+  API/web servers with dev authentication and mock-safe providers.
+- [x] Correct browser-facing API integration defects exposed by that test:
+  explicit 302 redirects for login/callback responses and a CORS preflight
+  policy that permits the API's PUT/PATCH/DELETE mutations.
+- [x] Add a safe unauthenticated `GET /ready` dependency probe. It reports
+  boolean database/Redis/worker state without configuration or credentials and
+  returns 503 while database or Redis is unavailable.
+
+### P2 — requires deployment or product decisions
+
+- [ ] Define a separate queue-worker deployment and runtime metrics before
+  horizontally scaling the API.
+- [ ] Add cursor pagination and query limits to high-volume list endpoints once
+  expected data volumes and API compatibility requirements are agreed. The
+  existing list responses are arrays; changing them to envelopes is a public
+  interface decision and should be coordinated with API consumers.
+- [ ] Assess routing, setlists, contracts, settlement, and deeper
+  private/corporate intake only with validated operator demand. Do not add
+  scraping, lead brokers, payments, contracts, or auto-send without a product
+  decision and deployment requirements.
+
+## Release checks
+
+Run `pnpm db:generate`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
+`pnpm build`. Run database integration tests only with a disposable database
+identified by `STORYBOARD_TEST_DATABASE_URL`.
+
+Before release, run a read-only diagnostic for historical relationships whose
+artist IDs disagree. Do not repair or delete such data automatically.
+
+## Progress log
+
+- 2026-07-10: Created after verifying that the older Cursor master plan is
+  historical and that no root modernization plan existed. The local worktree
+  was cloned cleanly from `main`; no remote history has been changed.
+- 2026-07-10: Added strict booking, task, and contact request schemas; added
+  service-level tenant ownership checks for Contact → Venue,
+  BookingOpportunity → Venue, and Task → BookingOpportunity. Added compiled
+  API regression tests and the read-only `pnpm db:audit-relationships` release
+  diagnostic. API typecheck, lint, and tests pass.
+- 2026-07-10: Added signed, single-use operator OAuth state cookies and callback
+  regression tests. Added an explicit, test-only database integration suite for
+  tenant links, role enforcement, Telegram registration binding, and audit rows;
+  added Node 22/pnpm 10 GitHub Actions quality checks.
+- 2026-07-10: Ran the integration suite against an isolated, fresh
+  `storyboard_test` Postgres database and verified the relationship diagnostic
+  reports zero mismatches. Unit tests intentionally exclude the opt-in
+  integration directory so `pnpm test` never requires a database.
+- 2026-07-10: Final validation passed: `pnpm typecheck`, `pnpm lint`,
+  `pnpm test`, and `pnpm build`; the CI workflow YAML and Git diff whitespace
+  checks also passed. The temporary test database container was removed.
+- 2026-07-10: Independently researched GitHub references for the requested
+  next rounds. SongDrive and Setlyst validate later setlist demand but do not
+  fit this stack; ChordSheetJS is GPL and was excluded. No external code was
+  copied. Ticketmaster Discovery was selected for city-first venue/event
+  signals; Bandsintown is kept only for the artist's own events.
+- 2026-07-10: Added migrations `20260710174910_booking_acquisition` and
+  `20260710180946_booking_campaign_approval_relation`; implemented booking
+  profiles, prospects, conversion, campaigns, approval execution follow-ups,
+  dashboard actions, strict shared schemas, and responsive web workspaces.
+  Unit coverage now includes profile/template validation, manual mode,
+  Ticketmaster normalization, source dedupe, and tenant rejection. The opt-in
+  database suite covers private/venue conversion, campaign approval execution,
+  recipient outcomes, generated follow-up tasks, and audit rows.
+- 2026-07-10: Validation passed against a fresh dedicated `storyboard_test`
+  database: migrations, `pnpm test:integration`, full `pnpm typecheck`,
+  `pnpm lint`, `pnpm test`, and `pnpm build`. The read-only relationship audit
+  was extended to all new relationships and reported zero mismatches on the
+  local validation database.
+- 2026-07-10: Added and executed Chromium browser coverage for the complete
+  manual booking-acquisition path. The flow found and fixed Fastify's implicit
+  200 redirect behavior and missing non-POST CORS preflight methods. The
+  opt-in runner now builds production artifacts before testing and test/report
+  artifacts are ignored. Added `/ready` with focused unit coverage; it is safe
+  for infrastructure probes and does not disclose secrets.
+- 2026-07-10: Final release-confidence validation passed: `pnpm typecheck`,
+  `pnpm lint`, `pnpm test`, `pnpm build`, `git diff --check`, the opt-in
+  Postgres integration suite, the Chromium production-mode workflow, and the
+  read-only relationship audit (zero mismatches). The CI browser job uses the
+  same explicit Postgres/Redis/mock-provider setup; it has not been dispatched
+  from this uncommitted worktree.

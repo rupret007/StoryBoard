@@ -14,7 +14,21 @@ export const outboundEmailBatchPayloadSchema = z.object({
         message: gmailDraftSchema
       })
     )
-    .min(1)
+    .min(1),
+  campaign: z
+    .object({
+      campaignId: z.string().min(1),
+      recipients: z
+        .array(
+          z.object({
+            recipientId: z.string().min(1),
+            followUpDueAt: z.string().datetime({ offset: true })
+          })
+        )
+        .min(1)
+    })
+    .strict()
+    .optional()
 });
 
 export const calendarHoldItemSchema = z.object({

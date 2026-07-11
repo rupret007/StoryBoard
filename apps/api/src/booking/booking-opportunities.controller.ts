@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -15,7 +16,11 @@ import { MembershipService } from "../auth/membership.service";
 import { RolePolicyService } from "../auth/role-policy.service";
 import type { RequestOperator } from "../auth/request-operator";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
-import { BookingStage } from "../generated/prisma/enums";
+import {
+  bookingOpportunityCreateSchema,
+  bookingOpportunityPatchSchema,
+  bookingOpportunityStageSchema
+} from "./booking-opportunity.schema";
 import { BookingOpportunitiesService } from "./booking-opportunities.service";
 
 @Controller("booking-opportunities")
@@ -62,37 +67,38 @@ export class BookingOpportunitiesController {
 
   @Post()
   async create(
-    @Body()
-    body: {
-      title: string;
-      venueId?: string;
-      stage?: BookingStage;
-      targetDate?: string;
-      marketNotes?: string;
-    },
+    @Body() body: unknown,
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
     @Headers("x-artist-id") artistHeader?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
-    return this.booking.create(artistId, body, operator.email, operator.id);
+    const parsed = bookingOpportunityCreateSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    return this.booking.create(artistId, parsed.data, operator.email, operator.id);
   }
 
   @Patch(":id/stage")
   async stage(
     @Param("id") id: string,
-    @Body() body: { stage: BookingStage },
+    @Body() body: unknown,
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
     @Headers("x-artist-id") artistHeader?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    const parsed = bookingOpportunityStageSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
     return this.booking.updateStage(
       artistId,
       id,
-      body.stage,
+      parsed.data.stage,
       operator.email,
       operator.id
     );
@@ -101,17 +107,21 @@ export class BookingOpportunitiesController {
   @Patch(":id")
   async patch(
     @Param("id") id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: unknown,
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
     @Headers("x-artist-id") artistHeader?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    const parsed = bookingOpportunityPatchSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
     return this.booking.patch(
       artistId,
       id,
-      body,
+      parsed.data,
       operator.email,
       operator.id
     );

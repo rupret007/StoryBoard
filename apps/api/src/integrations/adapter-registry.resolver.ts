@@ -34,9 +34,6 @@ export class AdapterRegistryResolver {
       BANDSINTOWN_APP_ID: this.config.get<string | undefined>(
         "BANDSINTOWN_APP_ID"
       ),
-      BANDSINTOWN_EVENT_ARTIST: this.config.get<string | undefined>(
-        "BANDSINTOWN_EVENT_ARTIST"
-      ),
       TICKETMASTER_API_KEY: this.config.get<string | undefined>(
         "TICKETMASTER_API_KEY"
       )

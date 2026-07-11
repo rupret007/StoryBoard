@@ -13,6 +13,16 @@ Use separate redirect URIs. Register **both** in your Google Cloud OAuth client.
 - HttpOnly, `SameSite=Lax`, path `/`
 - Optional **`COOKIE_DOMAIN`** (e.g. `localhost`) so the cookie can be reused when the Next app and API run on different ports locally.
 
+## Operator OAuth state
+
+`GET /auth/operator/google/start` creates a cryptographically random, signed
+state nonce, stores it in a short-lived (10 minute) HttpOnly, `SameSite=Lax`
+cookie scoped to `/auth/operator/google/callback`, and includes it in the Google
+authorization request. The callback only exchanges a code when the returned
+state matches that signed cookie with a timing-safe comparison. A matching state
+cookie is cleared before token exchange, making it single-use; missing,
+invalid, or replayed callbacks redirect with `authError=invalid_state`.
+
 ## Membership and roles (phase 3B)
 
 - Tables: **`Operator`**, **`ArtistMembership`** (`owner` | `member` | **`viewer`**), linked to **`Artist`**.
@@ -50,7 +60,7 @@ Enforced in the API via **`RolePolicyService`** (not a generic permissions engin
 All artist-scoped HTTP routes require a valid session and membership **except**:
 
 - `GET /health`, `GET /meta`
-- `GET /auth/operator/google/start`, `GET /auth/operator/google/callback`, `GET /auth/dev/login`
+- `GET /auth/operator/google/start`, `GET /auth/operator/google/callback` (state-bound), `GET /auth/dev/login`
 - `GET /auth/google/callback` (integration OAuth return)
 
 ## CSRF posture (minimal)

@@ -5,3 +5,4 @@ export * from "./schemas/command-execute";
 export * from "./schemas/approvals";
 export * from "./schemas/workflow-notify-prefs";
 export * from "./schemas/telegram-notify-settings";
+export * from "./schemas/booking-acquisition";

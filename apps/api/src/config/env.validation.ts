@@ -29,7 +29,6 @@ const envSchema = z
     ENABLE_QUEUE_WORKER: z.string().optional(),
     GMAIL_USER_EMAIL: z.string().optional(),
     BANDSINTOWN_APP_ID: z.string().optional(),
-    BANDSINTOWN_EVENT_ARTIST: z.string().optional(),
     TICKETMASTER_API_KEY: z.string().optional(),
     GOOGLE_OPERATOR_REDIRECT_URI: z
       .string()

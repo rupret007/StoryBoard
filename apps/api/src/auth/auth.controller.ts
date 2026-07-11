@@ -17,6 +17,10 @@ import { MembershipService } from "./membership.service";
 import { RolePolicyService } from "./role-policy.service";
 import type { RequestOperator } from "./request-operator";
 import { SessionAuthGuard } from "./session-auth.guard";
+import {
+  createOperatorOAuthState,
+  operatorOAuthStateMatches
+} from "./operator-oauth-state";
 
 @Controller("auth")
 export class AuthController {
@@ -29,19 +33,28 @@ export class AuthController {
 
   @Get("operator/google/start")
   startGoogle(@Res({ passthrough: false }) reply: FastifyReply) {
-    const url = this.auth.buildGoogleOperatorAuthUrl();
-    return reply.redirect(url);
+    const state = createOperatorOAuthState();
+    this.auth.applyOperatorOAuthStateCookie(reply, state);
+    const url = this.auth.buildGoogleOperatorAuthUrl(state);
+    return reply.code(302).redirect(url);
   }
 
   @Get("operator/google/callback")
   async googleCallback(
     @Query("code") code: string | undefined,
+    @Query("state") state: string | undefined,
     @Query("error") oauthError: string | undefined,
+    @Req() req: FastifyRequest,
     @Res({ passthrough: false }) reply: FastifyReply
   ) {
     const webUrl = this.config.getOrThrow<string>("WEB_URL");
     const fail = (reason: string) =>
-      reply.redirect(`${webUrl}/?authError=${encodeURIComponent(reason)}`);
+      reply.code(302).redirect(`${webUrl}/?authError=${encodeURIComponent(reason)}`);
+    const expectedState = this.auth.readOperatorOAuthStateFromRequest(req);
+    if (!operatorOAuthStateMatches(expectedState, state)) {
+      return fail("invalid_state");
+    }
+    this.auth.clearOperatorOAuthStateCookie(reply);
     if (oauthError) {
       return fail(oauthError);
     }
@@ -53,7 +66,7 @@ export class AuthController {
     } catch {
       return fail("operator_login_failed");
     }
-    return reply.redirect(`${webUrl}/?signedIn=1`);
+    return reply.code(302).redirect(`${webUrl}/?signedIn=1`);
   }
 
   @Get("dev/login")
@@ -62,11 +75,11 @@ export class AuthController {
     try {
       await this.auth.devBypassLogin(reply);
     } catch {
-      return reply.redirect(
+      return reply.code(302).redirect(
         `${webUrl}/?authError=${encodeURIComponent("dev_login_unavailable")}`
       );
     }
-    return reply.redirect(`${webUrl}/?signedIn=1`);
+    return reply.code(302).redirect(`${webUrl}/?signedIn=1`);
   }
 
   @Post("logout")

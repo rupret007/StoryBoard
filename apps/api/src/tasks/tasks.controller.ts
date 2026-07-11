@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -16,7 +17,7 @@ import { MembershipService } from "../auth/membership.service";
 import { RolePolicyService } from "../auth/role-policy.service";
 import type { RequestOperator } from "../auth/request-operator";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
-import { TaskStatus } from "../generated/prisma/enums";
+import { taskCreateSchema, taskPatchSchema } from "./task.schema";
 import { TasksService } from "./tasks.service";
 
 @Controller("tasks")
@@ -86,33 +87,34 @@ export class TasksController {
 
   @Post()
   async create(
-    @Body()
-    body: {
-      title: string;
-      opportunityId?: string;
-      status?: TaskStatus;
-      ownerLabel?: string;
-      dueAt?: string;
-    },
+    @Body() body: unknown,
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
     @Headers("x-artist-id") artistHeader?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
-    return this.tasks.create(artistId, body, operator.email, operator.id);
+    const parsed = taskCreateSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    return this.tasks.create(artistId, parsed.data, operator.email, operator.id);
   }
 
   @Patch(":id")
   async patch(
     @Param("id") id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: unknown,
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
     @Headers("x-artist-id") artistHeader?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
-    return this.tasks.patch(artistId, id, body, operator.email, operator.id);
+    const parsed = taskPatchSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    return this.tasks.patch(artistId, id, parsed.data, operator.email, operator.id);
   }
 }

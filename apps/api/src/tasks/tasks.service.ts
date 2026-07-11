@@ -3,6 +3,7 @@ import { Prisma } from "../generated/prisma/client";
 import { TaskStatus } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
+import type { TaskCreateInput, TaskPatchInput } from "./task.schema";
 
 @Injectable()
 export class TasksService {
@@ -67,18 +68,31 @@ export class TasksService {
     return row;
   }
 
+  private async assertOpportunityBelongsToArtist(
+    artistId: string,
+    opportunityId: string
+  ): Promise<void> {
+    const opportunity = await this.prisma.client.bookingOpportunity.findFirst({
+      where: { id: opportunityId, artistId },
+      select: { id: true }
+    });
+    if (!opportunity) {
+      throw new NotFoundException("Booking opportunity not found");
+    }
+  }
+
   async create(
     artistId: string,
-    data: {
-      title: string;
-      opportunityId?: string | null;
-      status?: TaskStatus;
-      ownerLabel?: string | null;
-      dueAt?: string | null;
-    },
+    data: TaskCreateInput,
     actorLabel?: string | null,
     actorOperatorId?: string | null
   ) {
+    if (data.opportunityId != null) {
+      await this.assertOpportunityBelongsToArtist(
+        artistId,
+        data.opportunityId
+      );
+    }
     const row = await this.prisma.client.task.create({
       data: {
         artistId,
@@ -104,17 +118,17 @@ export class TasksService {
   async patch(
     artistId: string,
     id: string,
-    data: Partial<{
-      title: string;
-      status: TaskStatus;
-      ownerLabel: string | null;
-      dueAt: string | null;
-      opportunityId: string | null;
-    }>,
+    data: TaskPatchInput,
     actorLabel?: string | null,
     actorOperatorId?: string | null
   ) {
     await this.get(artistId, id);
+    if (data.opportunityId != null) {
+      await this.assertOpportunityBelongsToArtist(
+        artistId,
+        data.opportunityId
+      );
+    }
     const patchData: Prisma.TaskUncheckedUpdateInput = {};
     if (data.title !== undefined) {
       patchData.title = data.title;

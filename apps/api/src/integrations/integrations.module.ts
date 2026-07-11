@@ -46,9 +46,6 @@ export const MOCK_ADAPTERS = "MOCK_ADAPTERS";
           BANDSINTOWN_APP_ID: config.get<string | undefined>(
             "BANDSINTOWN_APP_ID"
           ),
-          BANDSINTOWN_EVENT_ARTIST: config.get<string | undefined>(
-            "BANDSINTOWN_EVENT_ARTIST"
-          ),
           TICKETMASTER_API_KEY: config.get<string | undefined>(
             "TICKETMASTER_API_KEY"
           )

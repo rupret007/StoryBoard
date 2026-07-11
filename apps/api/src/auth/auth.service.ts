@@ -16,6 +16,10 @@ import {
   signSessionPayload,
   verifySessionPayload
 } from "./session-cookie";
+import {
+  OPERATOR_OAUTH_STATE_COOKIE,
+  OPERATOR_OAUTH_STATE_TTL_SECONDS
+} from "./operator-oauth-state";
 
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -62,6 +66,41 @@ export class AuthService {
     const domain = this.config.get<string>("COOKIE_DOMAIN")?.trim();
     reply.clearCookie(SESSION_COOKIE_NAME, {
       path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure,
+      ...(domain ? { domain } : {})
+    });
+  }
+
+  applyOperatorOAuthStateCookie(reply: FastifyReply, state: string) {
+    const secure = this.config.get<string>("NODE_ENV") === "production";
+    const domain = this.config.get<string>("COOKIE_DOMAIN")?.trim();
+    reply.setCookie(OPERATOR_OAUTH_STATE_COOKIE, state, {
+      path: "/auth/operator/google/callback",
+      httpOnly: true,
+      sameSite: "lax",
+      secure,
+      signed: true,
+      maxAge: OPERATOR_OAUTH_STATE_TTL_SECONDS,
+      ...(domain ? { domain } : {})
+    });
+  }
+
+  readOperatorOAuthStateFromRequest(req: FastifyRequest): string | null {
+    const raw = req.cookies?.[OPERATOR_OAUTH_STATE_COOKIE];
+    if (!raw) {
+      return null;
+    }
+    const unsigned = req.unsignCookie(raw);
+    return unsigned.valid ? unsigned.value : null;
+  }
+
+  clearOperatorOAuthStateCookie(reply: FastifyReply) {
+    const secure = this.config.get<string>("NODE_ENV") === "production";
+    const domain = this.config.get<string>("COOKIE_DOMAIN")?.trim();
+    reply.clearCookie(OPERATOR_OAUTH_STATE_COOKIE, {
+      path: "/auth/operator/google/callback",
       httpOnly: true,
       sameSite: "lax",
       secure,
@@ -141,7 +180,7 @@ export class AuthService {
     };
   }
 
-  buildGoogleOperatorAuthUrl(): string {
+  buildGoogleOperatorAuthUrl(state: string): string {
     const clientId = this.config.get<string | undefined>("GOOGLE_CLIENT_ID");
     const redirectUri = this.config.getOrThrow<string>(
       "GOOGLE_OPERATOR_REDIRECT_URI"
@@ -157,7 +196,8 @@ export class AuthService {
       response_type: "code",
       scope: "openid email profile",
       access_type: "online",
-      prompt: "select_account"
+      prompt: "select_account",
+      state
     });
     return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
   }
