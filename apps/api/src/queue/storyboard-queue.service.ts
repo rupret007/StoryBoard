@@ -41,6 +41,7 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
       this.config.get<number>("WORKFLOW_DIGEST_DAILY_MS") ?? ONE_DAY_MS;
     const digestWeeklyMs =
       this.config.get<number>("WORKFLOW_DIGEST_WEEKLY_MS") ?? SEVEN_DAYS_MS;
+    const replySyncMs = this.config.get<number>("GMAIL_REPLY_SYNC_REPEAT_MS") ?? 15 * 60 * 1000;
 
     if (this.config.get<string>("ENABLE_QUEUE_WORKER") !== "false") {
       void this.queue
@@ -55,6 +56,7 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
         .catch((e) =>
           this.log.warn(`schedule task.check-overdue failed: ${String(e)}`)
         );
+      if (this.config.get<boolean>("GMAIL_REPLY_SYNC_ENABLED")) void this.queue.add("booking-replies.sync", {}, { repeat: { every: replySyncMs }, jobId: "repeat-booking-replies-sync" }).catch((e) => this.log.warn(`schedule booking-replies.sync failed: ${String(e)}`));
       void this.queue
         .add(
           "followup.check-stale",

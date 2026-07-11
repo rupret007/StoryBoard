@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { ModuleRef } from "@nestjs/core";
 import { ConfigService } from "@nestjs/config";
 import type { Job } from "bullmq";
 import { AuditService } from "../audit/audit.service";
@@ -14,6 +15,7 @@ import { AdapterRegistryResolver } from "../integrations/adapter-registry.resolv
 import { PrismaService } from "../prisma/prisma.service";
 import { TasksService } from "../tasks/tasks.service";
 import { OperationalIntelligenceService } from "../operational-intelligence/operational-intelligence.service";
+import { BOOKING_REPLIES_SYNC, type BookingRepliesSyncPort } from "../booking/booking-replies.tokens";
 import { MembershipNotifyTargetsService } from "./membership-notify-targets.service";
 import { WorkflowEmailService } from "./workflow-email.service";
 import { WorkflowNotificationService } from "./workflow-notification.service";
@@ -59,6 +61,7 @@ export class WorkflowJobProcessorService {
     private readonly prefs: WorkflowNotifyPreferenceService,
     private readonly telegram: WorkflowTelegramService,
     private readonly operationalIntelligence: OperationalIntelligenceService
+    , private readonly moduleRef: ModuleRef
   ) {}
 
   async process(job: Job): Promise<Record<string, unknown>> {
@@ -85,10 +88,20 @@ export class WorkflowJobProcessorService {
         return this.digestGenerate(job, "weekly");
       case "urgent.telegram.scan":
         return this.urgentTelegramScan(job);
+      case "booking-replies.sync":
+        return this.bookingRepliesSync();
       default:
         this.log.warn(`unknown job: ${job.name}`);
         return { ok: false, unknown: job.name };
     }
+  }
+
+  private async bookingRepliesSync() {
+    const service = this.moduleRef.get<BookingRepliesSyncPort>(BOOKING_REPLIES_SYNC, { strict: false });
+    const settings = await this.prisma.client.artistBookingReplySettings.findMany({ where: { syncEnabled: true }, select: { artistId: true }, take: 100 });
+    let created = 0; let failed = 0;
+    for (const row of settings) { try { created += (await service.sync(row.artistId)).created; } catch { failed += 1; } }
+    return { ok: failed === 0, artists: settings.length, created, failed };
   }
 
   private async venueEnrich(job: Job) {

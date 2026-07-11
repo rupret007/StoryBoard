@@ -33,6 +33,7 @@ export type DashboardInsights = {
     overdueTaskCount: number;
     staleFollowUpCount: number;
     dueCampaignFollowUpCount: number;
+    unreadBookingReplyCount: number;
     pendingApprovalAgingCount: number;
     approvalAgingThresholdDays: number;
     overdueClusterThreshold: number;
@@ -201,7 +202,8 @@ export class OperationalIntelligenceService {
       pendingApprovals,
       pendingAged,
       openTasks,
-      dueCampaignFollowUps
+      dueCampaignFollowUps,
+      unreadBookingReplies
     ] = await Promise.all([
       this.prisma.client.bookingOpportunity.findMany({
         where: { artistId },
@@ -229,7 +231,8 @@ export class OperationalIntelligenceService {
           status: "drafted",
           followUpDueAt: { lte: new Date() }
         }
-      })
+      }),
+      this.prisma.client.bookingReply.count({ where: { artistId, processingStatus: "unread" } })
     ]);
 
     const openTaskCount = openTasks.length;
@@ -301,6 +304,7 @@ export class OperationalIntelligenceService {
       overdueCount: overdue.length,
       staleCount: stale.length,
       dueCampaignFollowUpCount: dueCampaignFollowUps,
+      unreadBookingReplyCount: unreadBookingReplies,
       pendingApprovals,
       pendingAgedCount: pendingAged.length,
       meetsApprovalAgingUrgent,
@@ -316,6 +320,7 @@ export class OperationalIntelligenceService {
         overdueTaskCount: overdue.length,
         staleFollowUpCount: stale.length,
         dueCampaignFollowUpCount: dueCampaignFollowUps,
+        unreadBookingReplyCount: unreadBookingReplies,
         pendingApprovalAgingCount: pendingAged.length,
         approvalAgingThresholdDays: urgentAgeDays,
         overdueClusterThreshold: overdueTh,
@@ -372,6 +377,7 @@ export class OperationalIntelligenceService {
     overdueCount: number;
     staleCount: number;
     dueCampaignFollowUpCount: number;
+    unreadBookingReplyCount: number;
     pendingApprovals: number;
     pendingAgedCount: number;
     meetsApprovalAgingUrgent: boolean;
@@ -380,6 +386,7 @@ export class OperationalIntelligenceService {
     opportunities: { id: string; title: string; stage: BookingStage }[];
   }): DashboardInsights["priorityActions"] {
     const actions: DashboardInsights["priorityActions"] = [];
+    if (input.unreadBookingReplyCount > 0) actions.push({ id: "booking-replies-unread", title: "Review new booking replies", reason: `${input.unreadBookingReplyCount} tracked campaign repl${input.unreadBookingReplyCount === 1 ? "y is" : "ies are"} waiting for a response.`, href: "/booking-inbox", severity: "high" });
     if (input.pendingAgedCount > 0 || input.pendingApprovals > 0) {
       actions.push({
         id: "approvals-queue",

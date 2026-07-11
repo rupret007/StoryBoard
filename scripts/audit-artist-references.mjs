@@ -170,6 +170,22 @@ const checks = [
       WHERE d."artistId" <> a."artistId" OR d."artistId" <> k."artistId"
       ORDER BY d."id";
     `
+  },
+  {
+    relation: "BookingReply → Recipient, Delivery, and Opportunity",
+    query: `
+      SELECT x."id" AS "recordId", x."artistId" AS "recordArtistId",
+             x."recipientId" AS "relatedId", k."artistId" AS "relatedArtistId"
+      FROM "BookingReply" x
+      INNER JOIN "BookingCampaignRecipient" r ON r."id" = x."recipientId"
+      INNER JOIN "BookingCampaign" k ON k."id" = r."campaignId"
+      LEFT JOIN "BookingCampaignDelivery" d ON d."id" = x."deliveryId"
+      LEFT JOIN "BookingOpportunity" b ON b."id" = x."opportunityId"
+      WHERE x."artistId" <> k."artistId"
+         OR (d."id" IS NOT NULL AND x."artistId" <> d."artistId")
+         OR (b."id" IS NOT NULL AND x."artistId" <> b."artistId")
+      ORDER BY x."id";
+    `
   }
 ];
 

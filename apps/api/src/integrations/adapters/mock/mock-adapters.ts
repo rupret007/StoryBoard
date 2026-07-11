@@ -23,6 +23,8 @@ export class MockGmailAdapter implements GmailAdapter {
     const preview = `To: ${input.to}\nSubject: ${input.subject}\n\n${input.body}`;
     return { messageId: `mock-sent-${Date.now()}`, preview };
   }
+
+  async getTrackedThread() { return []; }
 }
 
 export class MockGoogleCalendarAdapter implements GoogleCalendarAdapter {

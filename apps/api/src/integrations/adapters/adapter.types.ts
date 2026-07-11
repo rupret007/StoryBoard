@@ -11,13 +11,29 @@ export interface GmailDraft {
   to: string;
   subject: string;
   body: string;
+  threadId?: string | undefined;
+  inReplyTo?: string | undefined;
+}
+
+export interface GmailThreadMessage {
+  messageId: string;
+  threadId: string;
+  rfcMessageId?: string | undefined;
+  fromEmail: string;
+  fromName?: string | undefined;
+  subject?: string | undefined;
+  snippet?: string | undefined;
+  bodyText?: string | undefined;
+  receivedAt: string;
+  isFromUser: boolean;
 }
 
 export interface GmailAdapter {
   readonly id: AdapterId;
   readonly mode: "mock" | "real";
-  draftMessage(input: GmailDraft): Promise<{ draftId: string; preview: string }>;
-  sendMessage(input: GmailDraft): Promise<{ messageId: string; preview: string }>;
+  draftMessage(input: GmailDraft): Promise<{ draftId: string; messageId?: string | undefined; threadId?: string | undefined; preview: string }>;
+  sendMessage(input: GmailDraft): Promise<{ messageId: string; threadId?: string | undefined; preview: string }>;
+  getTrackedThread(threadId: string): Promise<GmailThreadMessage[]>;
 }
 
 export interface CalendarHoldRequest {

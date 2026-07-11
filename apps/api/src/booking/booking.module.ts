@@ -11,6 +11,9 @@ import { BookingProfilesController } from "./booking-profiles.controller";
 import { BookingProfilesService } from "./booking-profiles.service";
 import { BookingProspectsController } from "./booking-prospects.controller";
 import { BookingProspectsService } from "./booking-prospects.service";
+import { BookingRepliesController } from "./booking-replies.controller";
+import { BookingRepliesService } from "./booking-replies.service";
+import { BOOKING_REPLIES_SYNC } from "./booking-replies.tokens";
 
 @Module({
   imports: [AuthModule, ApprovalsModule],
@@ -19,15 +22,18 @@ import { BookingProspectsService } from "./booking-prospects.service";
     BookingProfilesController,
     BookingProspectsController,
     BookingCampaignsController,
-    BookingMarketSprintsController
+    BookingMarketSprintsController,
+    BookingRepliesController
   ],
   providers: [
     BookingOpportunitiesService,
     BookingProfilesService,
     BookingProspectsService,
     BookingCampaignsService,
-    BookingMarketSprintsService
+    BookingMarketSprintsService,
+    BookingRepliesService,
+    { provide: BOOKING_REPLIES_SYNC, useExisting: BookingRepliesService }
   ],
-  exports: [BookingProfilesService, BookingProspectsService]
+  exports: [BookingProfilesService, BookingProspectsService, BookingRepliesService, BOOKING_REPLIES_SYNC]
 })
 export class BookingModule {}

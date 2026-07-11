@@ -433,8 +433,7 @@ export class BookingCampaignsService {
         where: { id: { in: drafts.map((draft) => draft.recipientId) }, campaignId },
         data: { status: BookingCampaignRecipientStatus.approval_requested }
       }),
-      ...(campaign.deliveryMode === BookingCampaignDeliveryMode.send_on_execution
-        ? [
+      ...[
             this.prisma.client.bookingCampaignDelivery.createMany({
               data: drafts.map((draft) => ({
                 artistId,
@@ -444,7 +443,6 @@ export class BookingCampaignsService {
               }))
             })
           ]
-        : [])
     ]);
     await this.audit.log({
       artistId,

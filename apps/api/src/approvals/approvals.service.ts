@@ -106,7 +106,8 @@ export class ApprovalsService {
     campaign: {
       campaignId: string;
       recipients: { recipientId: string; followUpDueAt: string }[];
-    } | undefined
+    } | undefined,
+    createdDrafts: { draftId: string; messageId?: string; threadId?: string }[] = []
   ) {
     return this.prisma.client.$transaction(async (tx) => {
       if (campaign) {
@@ -136,7 +137,7 @@ export class ApprovalsService {
           throw new BadRequestException("Campaign recipients are not ready for draft execution");
         }
         const byId = new Map(recipients.map((recipient) => [recipient.id, recipient]));
-        for (const spec of campaign.recipients) {
+        for (const [index, spec] of campaign.recipients.entries()) {
           const recipient = byId.get(spec.recipientId)!;
           const dueAt = new Date(spec.followUpDueAt);
           if (Number.isNaN(dueAt.getTime())) {
@@ -174,6 +175,11 @@ export class ApprovalsService {
               followUpTaskId: task.id
             }
           });
+          const created = createdDrafts[index];
+          if (created) await tx.bookingCampaignDelivery.update({
+            where: { approvalId_recipientId: { approvalId, recipientId: recipient.id } },
+            data: { status: BookingCampaignDeliveryStatus.drafted, providerDraftId: created.draftId, providerMessageId: created.messageId ?? null, providerThreadId: created.threadId ?? null }
+          });
         }
         await tx.auditEvent.create({
           data: {
@@ -202,7 +208,7 @@ export class ApprovalsService {
     actorLabel: string,
     actorOperatorId: string | null,
     campaign: { campaignId: string; recipients: { recipientId: string; followUpDueAt: string }[] } | undefined,
-    results: { recipientId: string; status: "sent" | "failed" | "unknown"; messageId?: string; error?: string }[]
+    results: { recipientId: string; status: "sent" | "failed" | "unknown"; messageId?: string; threadId?: string; error?: string }[]
   ) {
     return this.prisma.client.$transaction(async (tx) => {
       if (!campaign) throw new BadRequestException("Campaign send approval context not found");
@@ -217,7 +223,7 @@ export class ApprovalsService {
       for (const result of results) {
         await tx.bookingCampaignDelivery.update({ where: { approvalId_recipientId: { approvalId, recipientId: result.recipientId } }, data: {
           status: result.status === "sent" ? BookingCampaignDeliveryStatus.sent : result.status === "unknown" ? BookingCampaignDeliveryStatus.unknown : BookingCampaignDeliveryStatus.failed,
-          providerMessageId: result.messageId ?? null, error: result.error ?? null, sentAt: result.status === "sent" ? new Date() : null
+          providerMessageId: result.messageId ?? null, providerThreadId: result.threadId ?? null, error: result.error ?? null, sentAt: result.status === "sent" ? new Date() : null
         }});
         if (result.status !== "sent") continue;
         const recipient = byId.get(result.recipientId)!;
@@ -496,7 +502,7 @@ export class ApprovalsService {
         if (!outbound.campaign) throw new BadRequestException("Campaign send approval context not found");
         const deliveryRows = await this.prisma.client.bookingCampaignDelivery.findMany({ where: { approvalId: id }, select: { recipientId: true, status: true } });
         if (deliveryRows.length !== outbound.campaign.recipients.length) throw new BadRequestException("Campaign delivery context not found");
-        const results: { recipientId: string; status: "sent" | "failed" | "unknown"; messageId?: string; error?: string }[] = [];
+        const results: { recipientId: string; status: "sent" | "failed" | "unknown"; messageId?: string; threadId?: string; error?: string }[] = [];
         for (let index = 0; index < outbound.drafts.length; index += 1) {
           const recipientId = outbound.campaign.recipients[index]!.recipientId;
           const delivery = deliveryRows.find((row) => row.recipientId === recipientId);
@@ -504,7 +510,7 @@ export class ApprovalsService {
           await this.prisma.client.bookingCampaignDelivery.update({ where: { approvalId_recipientId: { approvalId: id, recipientId } }, data: { status: BookingCampaignDeliveryStatus.sending, attemptedAt: new Date() } });
           try {
             const sent = await adapters.gmail.sendMessage(outbound.drafts[index]!.message);
-            results.push({ recipientId, status: "sent", messageId: sent.messageId });
+            results.push({ recipientId, status: "sent", messageId: sent.messageId, ...(sent.threadId ? { threadId: sent.threadId } : {}) });
           } catch (error) {
             results.push({ recipientId, status: "unknown", error: error instanceof Error ? error.message : String(error) });
           }
@@ -523,6 +529,8 @@ export class ApprovalsService {
           draftId: string;
           preview: string;
           providerMode: string;
+          messageId?: string;
+          threadId?: string;
         };
         const created: CreatedDraft[] = [];
         for (const d of draftsSpec) {
@@ -532,6 +540,8 @@ export class ApprovalsService {
             preview: r.preview,
             providerMode: adapters.gmail.mode
           };
+          if (r.messageId) entry.messageId = r.messageId;
+          if (r.threadId) entry.threadId = r.threadId;
           if (d.venueId !== undefined) {
             entry.venueId = d.venueId;
           }
@@ -552,7 +562,8 @@ export class ApprovalsService {
           nextPayload as object,
           actorLabel,
           actorOperatorId,
-          outbound.campaign
+          outbound.campaign,
+          created
         );
         await this.audit.log({
           artistId,

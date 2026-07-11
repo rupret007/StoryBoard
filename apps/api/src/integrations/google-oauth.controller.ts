@@ -16,7 +16,7 @@ import type { RequestOperator } from "../auth/request-operator";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
 import { SecretBox } from "./crypto/secret-box";
-import { GOOGLE_OAUTH_SCOPES } from "./google-oauth.constants";
+import { GMAIL_READONLY_SCOPE, GOOGLE_OAUTH_SCOPES } from "./google-oauth.constants";
 import { signOAuthState } from "./oauth-state";
 
 @Controller("integrations")
@@ -74,7 +74,7 @@ export class IntegrationsGoogleLinkController {
       client_id: clientId.trim(),
       redirect_uri: redirectUri.trim(),
       response_type: "code",
-      scope: GOOGLE_OAUTH_SCOPES,
+      scope: [GOOGLE_OAUTH_SCOPES, ...(this.config.get<boolean>("GMAIL_REPLY_SYNC_ENABLED") ? [GMAIL_READONLY_SCOPE] : [])].join(" "),
       access_type: "offline",
       prompt: "consent",
       state

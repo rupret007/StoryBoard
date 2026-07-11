@@ -23,3 +23,8 @@ test("environment validation accepts the documented local development seed email
 test("environment validation rejects malformed seed emails", () => {
   assert.throws(() => envMod.validateEnv(base({ SEED_OPERATOR_EMAIL: "not-an-email" })), /SEED_OPERATOR_EMAIL/);
 });
+
+test("Gmail reply synchronization remains disabled unless explicitly enabled", () => {
+  assert.equal(envMod.validateEnv(base()).GMAIL_REPLY_SYNC_ENABLED, false);
+  assert.equal(envMod.validateEnv(base({ GMAIL_REPLY_SYNC_ENABLED: "true" })).GMAIL_REPLY_SYNC_ENABLED, true);
+});

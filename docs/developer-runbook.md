@@ -29,6 +29,7 @@ cp .env.example .env
 Edit `.env` only as needed. For local boot **without** OpenAI or other live APIs:
 
 - Keep `OPENAI_ENABLED=false` (default in `.env.example`)
+- Keep `GMAIL_REPLY_SYNC_ENABLED=false` unless the Google project is prepared for restricted Gmail scopes. Enabling it requires owners to reconnect Google before per-artist synchronization can be enabled.
 - Placeholders like `replace-me` for unused integrations are OK until you implement those adapters
 
 The API validates required vars at startup (see `apps/api/src/config/env.validation.ts`). If boot fails, the error message points you at `.env.example`.
@@ -248,10 +249,10 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 **Booking advisor:** `POST /booking-advisor/generate` creates a reviewable
 booking brief and `GET /booking-advisor/latest` returns it. Members can record
 `POST /booking-advisor/:id/feedback` with `{ "helpful": true | false }`.
-When `OPENAI_ENABLED=false`, StoryBoard uses deterministic facts; when enabled,
-it sends only aggregate booking counts, active-market metadata, and aggregate
-advice feedback to OpenAI. It does not send contact details, email bodies, or
-perform provider actions.
+When `OPENAI_ENABLED=false`, StoryBoard uses deterministic facts. The default
+`OPENAI_ADVISOR_CONTEXT=aggregate` sends only counts and market metadata; the
+explicit `full` setting can include CRM contact context. Advisor runs never
+receive raw Gmail bodies and never perform provider actions.
 
 ## Booking acquisition
 
@@ -290,8 +291,22 @@ default, editable per recipient). Campaigns may instead select **send on
 execution**: approval and a separate Execute action remain mandatory, then
 StoryBoard sends at most 25 ready recipients immediately and creates follow-up
 tasks only for confirmed successful sends. Existing and draft-only campaigns
-continue to create Gmail drafts. StoryBoard never reads Gmail replies or retries
-an unknown delivery automatically.
+continue to create Gmail drafts. Unknown delivery is never retried automatically.
+
+When the deployment explicitly enables `GMAIL_REPLY_SYNC_ENABLED`, an owner can
+reconnect Google with `gmail.readonly` and opt the artist into tracked replies:
+
+- `GET /booking-replies` and `GET /booking-replies/:id` — known campaign-thread replies.
+- `GET` / `PATCH /booking-replies/settings` — readiness plus owner-only sync/AI consent.
+- `POST /booking-replies/sync` — bounded manual check of StoryBoard-created threads.
+- `POST /booking-replies/:id/analyze` — transient, explicitly enabled AI analysis.
+- `POST /booking-replies/:id/apply-terms` — explicitly apply reviewed facts to the linked opportunity.
+- `POST /booking-replies/:id/prepare-approval` — prepare a threaded Gmail draft through Approvals; never sends.
+
+The periodic worker uses `GMAIL_REPLY_SYNC_REPEAT_MS` (15 minutes by default),
+checks at most 50 threads per artist from the prior 180 days, and stores no raw
+message body or attachment. `gmail.readonly` is restricted by Google; production
+enablement requires the applicable OAuth verification and security review.
 
 ## Approvals execution
 

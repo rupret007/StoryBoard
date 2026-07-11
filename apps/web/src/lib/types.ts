@@ -24,6 +24,7 @@ export type DashboardInsights = {
     overdueTaskCount: number;
     staleFollowUpCount: number;
     dueCampaignFollowUpCount: number;
+    unreadBookingReplyCount: number;
     pendingApprovalAgingCount: number;
     approvalAgingThresholdDays: number;
     overdueClusterThreshold: number;
@@ -149,6 +150,41 @@ export type BookingCampaign = {
   marketSprintId?: string | null;
   approvalRequestId?: string | null;
   recipients: BookingCampaignRecipient[];
+};
+
+export type BookingReplySettings = {
+  syncEnabled: boolean;
+  aiAnalysisEnabled: boolean;
+  lastSyncedAt?: string | null;
+  lastSyncError?: string | null;
+  deploymentEnabled: boolean;
+  scopeReady: boolean;
+  reconnectRequired: boolean;
+};
+
+export type BookingReply = {
+  id: string;
+  fromEmail: string;
+  fromName?: string | null;
+  subject?: string | null;
+  snippet?: string | null;
+  receivedAt: string;
+  processingStatus: "unread" | "reviewed" | "archived";
+  intent?: "interested" | "offer" | "needs_info" | "decline" | "out_of_office" | "unknown" | null;
+  summary?: string | null;
+  proposedDate?: string | null;
+  proposedFeeMinor?: number | null;
+  proposedCurrency?: string | null;
+  proposedVenue?: string | null;
+  materialConditions?: string | null;
+  questions?: string[] | null;
+  recommendedNextAction?: string | null;
+  suggestedReplySubject?: string | null;
+  suggestedReplyBody?: string | null;
+  confidence?: number | null;
+  analyzedAt?: string | null;
+  termsAppliedAt?: string | null;
+  recipient: BookingCampaignRecipient & { campaign: BookingCampaign };
 };
 
 export type BookingMarketSprint = {

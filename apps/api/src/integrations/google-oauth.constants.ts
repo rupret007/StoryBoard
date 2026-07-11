@@ -9,6 +9,7 @@ export const GOOGLE_OAUTH_SCOPES = [
 ].join(" ");
 
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
+export const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 export const CALENDAR_EVENTS_SCOPE =
   "https://www.googleapis.com/auth/calendar.events";
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";

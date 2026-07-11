@@ -62,9 +62,25 @@ enum BookingCampaignRecipientStatus {
 
 enum BookingCampaignDeliveryStatus {
   pending
+  drafted
   sending
   sent
   failed
+  unknown
+}
+
+enum BookingReplyProcessingStatus {
+  unread
+  reviewed
+  archived
+}
+
+enum BookingReplyIntent {
+  interested
+  offer
+  needs_info
+  decline
+  out_of_office
   unknown
 }
 
@@ -144,6 +160,7 @@ enum WorkflowNotificationKind {
   followup_stale_digest
   digest_daily
   digest_weekly
+  booking_reply_detected
 }
 
 model Operator {
@@ -202,6 +219,8 @@ model Artist {
   bookingCampaigns BookingCampaign[]
   bookingMarketSprints BookingMarketSprint[]
   bookingCampaignDeliveries BookingCampaignDelivery[]
+  bookingReplySettings ArtistBookingReplySettings?
+  bookingReplies BookingReply[]
   advisorRuns             BookingAdvisorRun[]
   bookingAdvisorSettings  BookingAdvisorSettings?
   membershipInvites ArtistMembershipInvite[]
@@ -372,6 +391,11 @@ model BookingOpportunity {
   marketNotes    String?
   sourceSystem   String?
   sourceRef      String?
+  proposedFeeMinor Int?
+  proposedCurrency String?
+  depositDueAt DateTime?
+  paymentTerms String?
+  negotiationConditions String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   artist         Artist       @relation(fields: [artistId], references: [id], onDelete: Cascade)
@@ -381,6 +405,7 @@ model BookingOpportunity {
   commandRuns    CommandRun[]
   bookingProspects BookingProspect[]
   campaignRecipients BookingCampaignRecipient[]
+  bookingReplies BookingReply[]
 }
 
 model Task {
@@ -519,6 +544,7 @@ model BookingCampaignRecipient {
   opportunity    BookingOpportunity?            @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   followUpTask   Task?                          @relation("CampaignRecipientFollowUpTask", fields: [followUpTaskId], references: [id], onDelete: SetNull)
   deliveries     BookingCampaignDelivery[]
+  replies        BookingReply[]
 
   @@unique([campaignId, prospectId])
   @@index([campaignId, status])
@@ -532,6 +558,8 @@ model BookingCampaignDelivery {
   recipientId String
   status      BookingCampaignDeliveryStatus @default(pending)
   providerMessageId String?
+  providerThreadId String?
+  providerDraftId String?
   error       String?
   attemptedAt DateTime?
   sentAt      DateTime?
@@ -540,10 +568,67 @@ model BookingCampaignDelivery {
   artist      Artist                        @relation(fields: [artistId], references: [id], onDelete: Cascade)
   approval    ApprovalRequest               @relation(fields: [approvalId], references: [id], onDelete: Cascade)
   recipient   BookingCampaignRecipient      @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  replies     BookingReply[]
 
   @@unique([approvalId, recipientId])
   @@index([artistId, status])
   @@index([recipientId])
+}
+
+model ArtistBookingReplySettings {
+  id                String   @id @default(cuid())
+  artistId          String   @unique
+  syncEnabled       Boolean  @default(false)
+  aiAnalysisEnabled Boolean  @default(false)
+  lastSyncedAt      DateTime?
+  lastSyncError     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  artist            Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+}
+
+model BookingReply {
+  id                String                       @id @default(cuid())
+  artistId          String
+  recipientId       String
+  deliveryId        String?
+  providerMessageId String
+  providerThreadId  String
+  fromEmail         String
+  fromName          String?
+  subject           String?
+  snippet           String?
+  receivedAt        DateTime
+  processingStatus  BookingReplyProcessingStatus @default(unread)
+  intent            BookingReplyIntent?
+  summary           String?
+  proposedDate      DateTime?
+  proposedFeeMinor  Int?
+  proposedCurrency  String?
+  proposedVenue     String?
+  materialConditions String?
+  questions         Json?
+  recommendedNextAction String?
+  suggestedReplySubject String?
+  suggestedReplyBody String?
+  confidence        Float?
+  evidence          Json?
+  analysisMode      String?
+  analysisModel     String?
+  promptVersion     String?
+  analyzedAt        DateTime?
+  termsAppliedAt    DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  artist            Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  recipient         BookingCampaignRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  delivery          BookingCampaignDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  opportunity       BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  opportunityId     String?
+
+  @@unique([artistId, providerMessageId])
+  @@index([artistId, processingStatus, receivedAt])
+  @@index([recipientId, receivedAt])
 }
 
 model ApprovalRequest {

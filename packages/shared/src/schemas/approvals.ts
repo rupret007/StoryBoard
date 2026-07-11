@@ -3,7 +3,9 @@ import { z } from "zod";
 export const gmailDraftSchema = z.object({
   to: z.string().min(1),
   subject: z.string().min(1),
-  body: z.string().min(1)
+  body: z.string().min(1),
+  threadId: z.string().min(1).optional(),
+  inReplyTo: z.string().min(1).optional()
 });
 
 export const outboundEmailBatchPayloadSchema = z.object({

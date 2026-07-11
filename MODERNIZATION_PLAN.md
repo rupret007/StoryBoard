@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
-Last reviewed: 2026-07-10  
-Baseline: `main` at `8ebbc4e6421f130829e9bac20140ac097273a6b4`
+Last reviewed: 2026-07-11
+Baseline: `main` at `31d2121`
 
 ## Product and current architecture
 
@@ -89,6 +89,14 @@ mock-safe provider adapters.
   helpful/not-helpful feedback so subsequent advice can improve from outcomes.
 - [x] Complete UI/browser validation and final release checks.
 
+### P1 — tracked booking replies and negotiation assistance (completed 2026-07-11)
+
+- [x] Persist Gmail thread identity for approved campaign drafts and sends, then poll only those known threads through an owner-enabled, deployment-gated integration.
+- [x] Add the Booking inbox with bounded reply metadata, manual synchronization, periodic BullMQ checks, reconnect status, outcome review, and tenant-safe audit events.
+- [x] Add explicit per-artist AI email-analysis consent. Full message bodies are fetched transiently for a selected reply; only structured analysis, confidence, and proposed deal facts are retained.
+- [x] Require members to apply extracted terms explicitly and route threaded reply drafts through the existing approval center. No reply is automatically sent and no opportunity stage changes automatically.
+- [ ] Enable in production only after Google restricted-scope verification, security/privacy review, and real Gmail acceptance testing. `GMAIL_REPLY_SYNC_ENABLED` remains false by default.
+
 ### P2 — requires deployment or product decisions
 
 - [x] Add a one-command, production-built local container bundle with
@@ -120,6 +128,8 @@ Before release, run a read-only diagnostic for historical relationships whose
 artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
+
+- 2026-07-11: Added the tracked campaign-reply and negotiation loop with migration `20260711193709_booking_reply_loop`. The implementation retains only bounded reply metadata and derived AI facts, preserves general-inbox isolation, requires owner opt-in and Google reconnection, and keeps drafted responses approval-gated. Added unit coverage for scope gating, reply deduplication, raw-body non-persistence, provider failure isolation, and disabled-by-default configuration.
 
 - 2026-07-10: Created after verifying that the older Cursor master plan is
   historical and that no root modernization plan existed. The local worktree

@@ -20,6 +20,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Approval-gated pitch campaigns + linked follow-up tasks | Done |
 | Market sprints + approval-gated immediate campaign delivery | Done |
 | Bounded adaptive booking advisor (optional OpenAI; review-only) | Done |
+| Tracked Gmail campaign replies + approval-gated negotiation drafts | Done; deployment-gated pending restricted-scope compliance |
 | One-command local container bundle | Done (Docker Compose v2; allocate 2 GB) |
 | Approvals + execution (Gmail drafts, calendar holds, drive folder) | Done |
 | Command bar + `POST /commands/execute` (NL + structured intents) | Done |
@@ -39,6 +40,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 - Keep **mock fallbacks** when integrations are unset.
 - Keep **owner-only** rules for escalation, Telegram settings, and registration-token issuance.
 - Keep mutations **auditable** (`AuditService`).
+- Gmail reads are limited to StoryBoard-created campaign threads; do not expand this into general inbox access.
 
 ## High-value entry points
 
@@ -52,6 +54,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Prisma schema | `prisma/schema.prisma` (client output: `apps/api/src/generated/prisma/` — **gitignored**; run `pnpm db:generate`) |
 | Booking acquisition | `apps/api/src/booking/booking-{profiles,prospects,campaigns}.*`, `apps/web/src/app/(app)/{prospects,booking-campaigns}/` |
 | Booking advisor | `apps/api/src/advisor/`, `apps/web/src/app/(app)/advisor/` |
+| Booking reply loop | `apps/api/src/booking/booking-replies.*`, `apps/web/src/app/(app)/booking-inbox/` |
 | Web app API client | `apps/web/src/lib/api.ts` (cookies + `x-artist-id`) |
 
 ## Environment (short list)
@@ -71,7 +74,7 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Product:** Assess routing, setlists, contracts, settlement, and deeper private/corporate intake only with validated user needs. Keep advice review-only; do not add scraping, inbox synchronization, or autonomous sends.
+1. **Product:** Validate the tracked reply loop with real booking teams before expanding into routing, setlists, contracts, or settlement. Keep advice review-only; do not add scraping, general inbox access, or autonomous sends.
 2. **Runtime:** Define queue-worker deployment, cursor pagination/query limits, and metrics before horizontally scaling the API. `/ready` is a dependency probe, not a monitoring system.
 3. **Tests:** Expand browser coverage only around verified operator workflows; it must continue using the explicit test database and mock providers.
 
