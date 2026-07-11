@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { BuyerContactLinker } from "@/components/buyer-contact-linker";
-import type { BookingProfileResponse, BookingProspect, Contact } from "@/lib/types";
+import type { BookingMarketSprint, BookingProfileResponse, BookingProspect, Contact } from "@/lib/types";
 
 type DiscoverySignal = Omit<BookingProspect, "id"> & {
   sourceMetadata?: Record<string, unknown>;
@@ -29,11 +29,13 @@ function messageFrom(error: unknown) {
 export function ProspectsClient({
   initialProfile,
   initialProspects,
-  contacts
+  contacts,
+  sprints
 }: {
   initialProfile: BookingProfileResponse;
   initialProspects: BookingProspect[];
   contacts: Contact[];
+  sprints: BookingMarketSprint[];
 }) {
   const router = useRouter();
   const profile = initialProfile.profile;
@@ -63,7 +65,8 @@ export function ProspectsClient({
     country: profile?.homeCountry ?? "US",
     websiteUrl: "",
     capacity: "",
-    notes: ""
+    notes: "",
+    marketSprintId: ""
   });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -155,7 +158,8 @@ export function ProspectsClient({
         country: manual.country || null,
         websiteUrl: manual.websiteUrl || null,
         capacity: manual.capacity ? Number(manual.capacity) : null,
-        notes: manual.notes || null
+        notes: manual.notes || null,
+        marketSprintId: manual.marketSprintId || null
       },
       "manual"
     );
@@ -269,6 +273,7 @@ export function ProspectsClient({
               <FormInput label="Region" value={manual.region} onChange={(region) => setManual({ ...manual, region })} />
               <FormInput label="Website (optional)" type="url" value={manual.websiteUrl} onChange={(websiteUrl) => setManual({ ...manual, websiteUrl })} />
               <FormInput label="Capacity (optional)" type="number" value={manual.capacity} onChange={(capacity) => setManual({ ...manual, capacity })} />
+              <label className="block"><span className="sb-label">Market sprint</span><select className="sb-select mt-1.5" value={manual.marketSprintId} onChange={(event) => setManual({ ...manual, marketSprintId: event.target.value })}><option value="">Unassigned</option>{sprints.map((sprint) => <option key={sprint.id} value={sprint.id}>{sprint.name}</option>)}</select></label>
               <label className="block"><span className="sb-label">Research notes</span><textarea className="sb-input mt-1.5 min-h-20" value={manual.notes} onChange={(event) => setManual({ ...manual, notes: event.target.value })} /></label>
               <button className="sb-btn-primary" disabled={busy === "manual"} type="submit"><Plus className="h-4 w-4" />Save lead</button>
             </form>

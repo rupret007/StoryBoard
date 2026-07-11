@@ -19,8 +19,9 @@ export class MockGmailAdapter implements GmailAdapter {
     return { draftId: `mock-draft-${Date.now()}`, preview };
   }
 
-  async sendMessage(draftId: string) {
-    return { messageId: `mock-sent-${draftId}` };
+  async sendMessage(input: GmailDraft) {
+    const preview = `To: ${input.to}\nSubject: ${input.subject}\n\n${input.body}`;
+    return { messageId: `mock-sent-${Date.now()}`, preview };
   }
 }
 

@@ -112,6 +112,7 @@ export type BookingProspect = {
   venueId?: string | null;
   contactId?: string | null;
   opportunityId?: string | null;
+  marketSprintId?: string | null;
   venue?: Venue | null;
   contact?: Contact | null;
   opportunity?: BookingOpportunity | null;
@@ -124,10 +125,12 @@ export type BookingCampaignRecipient = {
     | "ready"
     | "approval_requested"
     | "drafted"
+    | "sent"
     | "replied"
     | "declined"
     | "booked";
   outcomeNote?: string | null;
+  outcomeKind?: string | null;
   followUpDueAt?: string | null;
   followUpTaskId?: string | null;
   prospect: BookingProspect;
@@ -142,8 +145,22 @@ export type BookingCampaign = {
   subjectTemplate: string;
   bodyTemplate: string;
   defaultFollowUpDays: number;
+  deliveryMode: "draft_only" | "send_on_execution";
+  marketSprintId?: string | null;
   approvalRequestId?: string | null;
   recipients: BookingCampaignRecipient[];
+};
+
+export type BookingMarketSprint = {
+  id: string;
+  name: string;
+  city: string;
+  region?: string | null;
+  country?: string | null;
+  status: "draft" | "active" | "completed" | "abandoned";
+  targetQualifiedCount?: number | null;
+  targetOutreachCount?: number | null;
+  targetBookedCount?: number | null;
 };
 
 export type Task = {
@@ -195,4 +212,14 @@ export type WeeklySummary = {
   recentAudit: AuditEvent[];
   recentCommands: CommandRun[];
   recommendations: string[];
+};
+
+export type BookingAdvisorRun = {
+  id: string;
+  mode: string;
+  model?: string | null;
+  promptVersion: string;
+  createdAt: string;
+  advice: { summary: string; opportunities: { title: string; reason: string; nextAction: string; priority: "low" | "med" | "high" }[]; promptImprovements: string[] };
+  feedback: { helpful: boolean }[];
 };

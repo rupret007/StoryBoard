@@ -203,6 +203,14 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 
 - `GET /dashboard/insights` — session + artist context; returns deterministic **booking health**, **opportunity risk** levels, **priority actions**, and **urgent signal** counts (used by the dashboard, booking pipeline badges, and weekly briefing snapshot).
 
+**Booking advisor:** `POST /booking-advisor/generate` creates a reviewable
+booking brief and `GET /booking-advisor/latest` returns it. Members can record
+`POST /booking-advisor/:id/feedback` with `{ "helpful": true | false }`.
+When `OPENAI_ENABLED=false`, StoryBoard uses deterministic facts; when enabled,
+it sends only aggregate booking counts, active-market metadata, and aggregate
+advice feedback to OpenAI. It does not send contact details, email bodies, or
+perform provider actions.
+
 ## Booking acquisition
 
 All routes below require a signed-in artist member. `GET` is available to
@@ -221,6 +229,9 @@ response.
 - `POST /booking-prospects/:id/convert` — qualified prospect → idempotent target
   opportunity. Only a `venue` prospect creates a physical `Venue`; private and
   corporate leads remain venue-less and can create/link a buyer contact.
+- `GET` / `POST` / `PATCH /market-sprints` and `GET /market-sprints/:id` — a
+  city-focused booking workspace. Sprints link prospects and campaigns and
+  return funnel counts plus overdue campaign follow-ups.
 - `GET` / `POST` / `PATCH /booking-campaigns` and
   `POST /booking-campaigns/:id/recipients` /
   `PATCH /booking-campaigns/:id/recipients/:recipientId` — draft campaign and
@@ -233,7 +244,12 @@ Campaign templates permit only `{{artistName}}`, `{{contactName}}`,
 `{{prospectName}}`, `{{market}}`, `{{bookingPitch}}`, and `{{pressKitUrl}}`.
 When an approved campaign batch executes, StoryBoard creates Gmail **drafts**,
 marks recipients `drafted`, and makes one linked follow-up task (seven days by
-default, editable per recipient). It never sends email or moves a booking stage.
+default, editable per recipient). Campaigns may instead select **send on
+execution**: approval and a separate Execute action remain mandatory, then
+StoryBoard sends at most 25 ready recipients immediately and creates follow-up
+tasks only for confirmed successful sends. Existing and draft-only campaigns
+continue to create Gmail drafts. StoryBoard never reads Gmail replies or retries
+an unknown delivery automatically.
 
 ## Approvals execution
 

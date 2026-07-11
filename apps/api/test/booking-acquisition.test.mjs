@@ -51,6 +51,25 @@ test("booking profile and campaign templates reject incomplete ranges and unknow
     }),
     "Hi Morgan"
   );
+  assert.equal(
+    acquisitionSchemaMod.bookingMarketSprintCreateSchema.safeParse({
+      name: "Austin fall rooms",
+      city: "Austin",
+      targetDateWindowStart: "2026-09-01T00:00:00.000Z",
+      targetDateWindowEnd: "2026-08-01T00:00:00.000Z"
+    }).success,
+    false
+  );
+  assert.equal(
+    acquisitionSchemaMod.bookingCampaignCreateSchema.safeParse({
+      name: "Send batch",
+      subjectTemplate: "Hi {{contactName}}",
+      bodyTemplate: "{{bookingPitch}}",
+      deliveryMode: "send_on_execution",
+      unexpected: true
+    }).success,
+    false
+  );
 });
 
 test("prospects reject cross-artist links and dedupe provider imports", async () => {

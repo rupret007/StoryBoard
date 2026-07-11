@@ -21,6 +21,7 @@ import { QueueModule } from "./queue/queue.module";
 import { AuthModule } from "./auth/auth.module";
 import { CsrfOriginGuard } from "./auth/csrf-origin.guard";
 import { MembershipsModule } from "./memberships/memberships.module";
+import { BookingAdvisorModule } from "./advisor/booking-advisor.module";
 
 @Module({
   imports: [
@@ -45,7 +46,8 @@ import { MembershipsModule } from "./memberships/memberships.module";
     WeeklySummaryModule,
     DashboardModule,
     QueueModule,
-    GoogleOAuthCallbackModule
+    GoogleOAuthCallbackModule,
+    BookingAdvisorModule
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: CsrfOriginGuard }]

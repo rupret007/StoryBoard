@@ -11,6 +11,7 @@ import {
 import {
   ApprovalStatus,
   AuditSeverity,
+  BookingCampaignDeliveryStatus,
   BookingCampaignRecipientStatus
 } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
@@ -22,6 +23,7 @@ import { StoryboardQueueService } from "../queue/storyboard-queue.service";
 
 const EXECUTABLE_ACTIONS = new Set([
   "outbound_email_batch",
+  "outbound_email_send_batch",
   "calendar_hold_batch",
   "drive_ensure_folder"
 ]);
@@ -190,6 +192,43 @@ export class ApprovalsService {
           payload: nextPayload
         }
       });
+    });
+  }
+
+  private async finalizeCampaignSends(
+    artistId: string,
+    approvalId: string,
+    nextPayload: object,
+    actorLabel: string,
+    actorOperatorId: string | null,
+    campaign: { campaignId: string; recipients: { recipientId: string; followUpDueAt: string }[] } | undefined,
+    results: { recipientId: string; status: "sent" | "failed" | "unknown"; messageId?: string; error?: string }[]
+  ) {
+    return this.prisma.client.$transaction(async (tx) => {
+      if (!campaign) throw new BadRequestException("Campaign send approval context not found");
+      const ids = campaign.recipients.map((row) => row.recipientId);
+      const recipients = await tx.bookingCampaignRecipient.findMany({
+        where: { id: { in: ids }, campaignId: campaign.campaignId, status: BookingCampaignRecipientStatus.approval_requested },
+        include: { prospect: true }
+      });
+      if (recipients.length !== ids.length) throw new BadRequestException("Campaign recipients are not ready for sending");
+      const byId = new Map(recipients.map((recipient) => [recipient.id, recipient]));
+      const dueById = new Map(campaign.recipients.map((row) => [row.recipientId, new Date(row.followUpDueAt)]));
+      for (const result of results) {
+        await tx.bookingCampaignDelivery.update({ where: { approvalId_recipientId: { approvalId, recipientId: result.recipientId } }, data: {
+          status: result.status === "sent" ? BookingCampaignDeliveryStatus.sent : result.status === "unknown" ? BookingCampaignDeliveryStatus.unknown : BookingCampaignDeliveryStatus.failed,
+          providerMessageId: result.messageId ?? null, error: result.error ?? null, sentAt: result.status === "sent" ? new Date() : null
+        }});
+        if (result.status !== "sent") continue;
+        const recipient = byId.get(result.recipientId)!;
+        const dueAt = dueById.get(result.recipientId)!;
+        const task = await tx.task.create({ data: { artistId, opportunityId: recipient.opportunityId, title: `Follow up with ${recipient.prospect.name}`, ownerLabel: "Booking campaign", dueAt } });
+        await tx.bookingCampaignRecipient.update({ where: { id: recipient.id }, data: { status: BookingCampaignRecipientStatus.sent, followUpDueAt: dueAt, followUpTaskId: task.id } });
+        await tx.auditEvent.create({ data: { artistId, aggregateType: "Task", aggregateId: task.id, action: "task.created", actorLabel, actorOperatorId, metadata: { title: task.title, campaignId: campaign.campaignId, campaignRecipientId: recipient.id } } });
+      }
+      const failed = results.some((result) => result.status !== "sent");
+      await tx.auditEvent.create({ data: { artistId, aggregateType: "BookingCampaign", aggregateId: campaign.campaignId, action: failed ? "booking_campaign.send_partially_failed" : "booking_campaign.sent", actorLabel, actorOperatorId, metadata: { approvalId, sentCount: results.filter((result) => result.status === "sent").length, failedCount: results.filter((result) => result.status !== "sent").length } } });
+      return tx.approvalRequest.update({ where: { id: approvalId }, data: { status: failed ? ApprovalStatus.failed : ApprovalStatus.executed, payload: nextPayload } });
     });
   }
 
@@ -403,11 +442,11 @@ export class ApprovalsService {
 
     if (dryRun) {
       let preview: Record<string, unknown> = {};
-      if (approvalRow.actionType === "outbound_email_batch") {
+      if (approvalRow.actionType === "outbound_email_batch" || approvalRow.actionType === "outbound_email_send_batch") {
         const outbound = parseOutboundPayload(approvalRow.payload);
         const drafts = outbound.drafts;
         preview = {
-          wouldCreateDrafts: drafts.length,
+          ...(approvalRow.actionType === "outbound_email_send_batch" ? { wouldSendEmails: drafts.length } : { wouldCreateDrafts: drafts.length }),
           gmailMode: adapters.gmail.mode,
           samples: drafts.map((d) => ({
             venueId: d.venueId,
@@ -451,6 +490,31 @@ export class ApprovalsService {
     }
 
     try {
+      if (approvalRow.actionType === "outbound_email_send_batch") {
+        const outbound = parseOutboundPayload(approvalRow.payload);
+        if (outbound.drafts.length > 25) throw new BadRequestException("A send batch may contain at most 25 recipients");
+        if (!outbound.campaign) throw new BadRequestException("Campaign send approval context not found");
+        const deliveryRows = await this.prisma.client.bookingCampaignDelivery.findMany({ where: { approvalId: id }, select: { recipientId: true, status: true } });
+        if (deliveryRows.length !== outbound.campaign.recipients.length) throw new BadRequestException("Campaign delivery context not found");
+        const results: { recipientId: string; status: "sent" | "failed" | "unknown"; messageId?: string; error?: string }[] = [];
+        for (let index = 0; index < outbound.drafts.length; index += 1) {
+          const recipientId = outbound.campaign.recipients[index]!.recipientId;
+          const delivery = deliveryRows.find((row) => row.recipientId === recipientId);
+          if (!delivery || delivery.status !== BookingCampaignDeliveryStatus.pending) throw new BadRequestException("Campaign delivery was already attempted; create a new approval to resend");
+          await this.prisma.client.bookingCampaignDelivery.update({ where: { approvalId_recipientId: { approvalId: id, recipientId } }, data: { status: BookingCampaignDeliveryStatus.sending, attemptedAt: new Date() } });
+          try {
+            const sent = await adapters.gmail.sendMessage(outbound.drafts[index]!.message);
+            results.push({ recipientId, status: "sent", messageId: sent.messageId });
+          } catch (error) {
+            results.push({ recipientId, status: "unknown", error: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        const executionResult = { at: now.toISOString(), sent: results, gmailMode: adapters.gmail.mode };
+        const updated = await this.finalizeCampaignSends(artistId, id, { ...basePayload, executionResult } as object, actorLabel, actorOperatorId, outbound.campaign, results);
+        await this.audit.log({ artistId, severity: results.some((result) => result.status !== "sent") ? AuditSeverity.warning : AuditSeverity.info, aggregateType: "ApprovalRequest", aggregateId: id, action: results.some((result) => result.status !== "sent") ? "approval.execution.failed" : "approval.execution.succeeded", actorLabel, actorOperatorId, metadata: { actionType: approvalRow.actionType, sentCount: results.filter((result) => result.status === "sent").length, failedCount: results.filter((result) => result.status !== "sent").length, gmailMode: adapters.gmail.mode } });
+        this.notifyApproval(artistId, id, updated.status === ApprovalStatus.executed ? "executed" : "failed");
+        return updated;
+      }
       if (approvalRow.actionType === "outbound_email_batch") {
         const outbound = parseOutboundPayload(approvalRow.payload);
         const draftsSpec = outbound.drafts;

@@ -9,6 +9,7 @@ import {
 } from "@storyboard/shared";
 import {
   ApprovalStatus,
+  BookingCampaignDeliveryMode,
   BookingCampaignRecipientStatus,
   BookingCampaignStatus
 } from "../generated/prisma/enums";
@@ -18,6 +19,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { BookingProfilesService } from "./booking-profiles.service";
 
 const campaignInclude = {
+  marketSprint: true,
   recipients: {
     include: {
       prospect: true,
@@ -73,6 +75,14 @@ export class BookingCampaignsService {
     return opportunity;
   }
 
+  private async assertMarketSprint(artistId: string, id: string) {
+    const sprint = await this.prisma.client.bookingMarketSprint.findFirst({
+      where: { id, artistId }, select: { id: true }
+    });
+    if (!sprint) throw new NotFoundException("Booking market sprint not found");
+    return sprint;
+  }
+
   async create(
     artistId: string,
     input: BookingCampaignCreateInput,
@@ -83,6 +93,7 @@ export class BookingCampaignsService {
     if (input.status && input.status !== BookingCampaignStatus.draft) {
       throw new BadRequestException("New campaigns must start as drafts");
     }
+    if (input.marketSprintId) await this.assertMarketSprint(artistId, input.marketSprintId);
     const campaign = await this.prisma.client.bookingCampaign.create({
       data: {
         artistId,
@@ -94,7 +105,9 @@ export class BookingCampaignsService {
         dateWindowEnd: input.dateWindowEnd ? new Date(input.dateWindowEnd) : null,
         subjectTemplate: input.subjectTemplate,
         bodyTemplate: input.bodyTemplate,
-        defaultFollowUpDays: input.defaultFollowUpDays ?? 7
+        defaultFollowUpDays: input.defaultFollowUpDays ?? 7,
+        deliveryMode: input.deliveryMode ?? BookingCampaignDeliveryMode.draft_only,
+        marketSprintId: input.marketSprintId ?? null
       },
       include: campaignInclude
     });
@@ -126,6 +139,7 @@ export class BookingCampaignsService {
         "Email templates cannot change after an approval batch has been prepared"
       );
     }
+    if (input.marketSprintId != null) await this.assertMarketSprint(artistId, input.marketSprintId);
     if (
       input.status === BookingCampaignStatus.active &&
       !current.approvalRequestId
@@ -164,7 +178,9 @@ export class BookingCampaignsService {
       ...(input.bodyTemplate !== undefined ? { bodyTemplate: input.bodyTemplate } : {}),
       ...(input.defaultFollowUpDays !== undefined
         ? { defaultFollowUpDays: input.defaultFollowUpDays }
-        : {})
+        : {}),
+      ...(input.deliveryMode !== undefined ? { deliveryMode: input.deliveryMode } : {}),
+      ...(input.marketSprintId !== undefined ? { marketSprintId: input.marketSprintId } : {})
     };
     const campaign = await this.prisma.client.bookingCampaign.update({
       where: { id },
@@ -274,6 +290,7 @@ export class BookingCampaignsService {
         ...(input.contactId !== undefined ? { contactId } : {}),
         ...(input.opportunityId !== undefined ? { opportunityId } : {}),
         ...(input.outcomeNote !== undefined ? { outcomeNote: input.outcomeNote } : {}),
+        ...(input.outcomeKind !== undefined ? { outcomeKind: input.outcomeKind } : {}),
         ...(input.followUpDueAt !== undefined
           ? {
               followUpDueAt: input.followUpDueAt
@@ -387,12 +404,13 @@ export class BookingCampaignsService {
       };
     });
     const approval = await this.approvals.create(artistId, {
-      title: `Draft ${drafts.length} pitch email(s) — ${campaign.name}`,
-      actionType: "outbound_email_batch",
+      title: `${campaign.deliveryMode === BookingCampaignDeliveryMode.send_on_execution ? "Send" : "Draft"} ${drafts.length} pitch email(s) — ${campaign.name}`,
+      actionType: campaign.deliveryMode === BookingCampaignDeliveryMode.send_on_execution ? "outbound_email_send_batch" : "outbound_email_batch",
       payload: {
         drafts: drafts.map((draft) => ({ message: draft.message })),
         campaign: {
           campaignId,
+          deliveryMode: campaign.deliveryMode,
           recipients: drafts.map((draft) => ({
             recipientId: draft.recipientId,
             followUpDueAt: draft.followUpDueAt.toISOString()
@@ -414,7 +432,19 @@ export class BookingCampaignsService {
       this.prisma.client.bookingCampaignRecipient.updateMany({
         where: { id: { in: drafts.map((draft) => draft.recipientId) }, campaignId },
         data: { status: BookingCampaignRecipientStatus.approval_requested }
-      })
+      }),
+      ...(campaign.deliveryMode === BookingCampaignDeliveryMode.send_on_execution
+        ? [
+            this.prisma.client.bookingCampaignDelivery.createMany({
+              data: drafts.map((draft) => ({
+                artistId,
+                approvalId: approval.id,
+                recipientId: draft.recipientId,
+                status: "pending"
+              }))
+            })
+          ]
+        : [])
     ]);
     await this.audit.log({
       artistId,

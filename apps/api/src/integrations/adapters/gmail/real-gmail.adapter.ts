@@ -38,10 +38,15 @@ export class RealGmailAdapter implements GmailAdapter {
     return { draftId, preview };
   }
 
-  async sendMessage(draftId: string): Promise<{ messageId: string }> {
-    void draftId;
-    throw new Error(
-      "storyboard:gmail_send_disabled — only draft creation is enabled in phase 2A"
-    );
+  async sendMessage(input: GmailDraft): Promise<{ messageId: string; preview: string }> {
+    const oauth2 = new google.auth.OAuth2(this.clientId, this.clientSecret);
+    oauth2.setCredentials({ refresh_token: this.refreshToken });
+    const gmail = google.gmail({ version: "v1", auth: oauth2 });
+    const raw = Buffer.from(rfc822(input), "utf8").toString("base64url");
+    const res = await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
+    return {
+      messageId: res.data.id ?? "unknown",
+      preview: `To: ${input.to}\nSubject: ${input.subject}\n\n${input.body}`
+    };
   }
 }

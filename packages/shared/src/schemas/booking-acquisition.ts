@@ -15,12 +15,31 @@ export const bookingProspectStatuses = [
 ] as const;
 
 export const bookingCampaignStatuses = ["draft", "active", "closed"] as const;
+export const bookingMarketSprintStatuses = [
+  "draft",
+  "active",
+  "completed",
+  "abandoned"
+] as const;
+export const bookingCampaignDeliveryModes = [
+  "draft_only",
+  "send_on_execution"
+] as const;
+export const bookingRecipientOutcomeKinds = [
+  "no_response",
+  "wrong_fit",
+  "date_unavailable",
+  "budget",
+  "booked_elsewhere",
+  "other"
+] as const;
 
 export const bookingCampaignRecipientStatuses = [
   "needs_contact",
   "ready",
   "approval_requested",
   "drafted",
+  "sent",
   "replied",
   "declined",
   "booked"
@@ -79,7 +98,8 @@ const prospectFields = {
   sourceMetadata: z.record(z.string(), z.unknown()).nullable().optional(),
   venueId: nullableId,
   contactId: nullableId,
-  opportunityId: nullableId
+  opportunityId: nullableId,
+  marketSprintId: nullableId
 };
 
 function sourcePairCheck(
@@ -119,7 +139,8 @@ export const bookingProspectPatchSchema = z
     sourceMetadata: z.record(z.string(), z.unknown()).nullable().optional(),
     venueId: nullableId,
     contactId: nullableId,
-    opportunityId: nullableId
+    opportunityId: nullableId,
+    marketSprintId: nullableId
   })
   .strict();
 
@@ -234,8 +255,41 @@ const campaignFields = {
   dateWindowEnd: isoDate.nullable().optional(),
   subjectTemplate: z.string().trim().min(1).max(240),
   bodyTemplate: z.string().trim().min(1).max(12_000),
-  defaultFollowUpDays: z.int().min(1).max(90).optional()
+  defaultFollowUpDays: z.int().min(1).max(90).optional(),
+  deliveryMode: z.enum(bookingCampaignDeliveryModes).optional(),
+  marketSprintId: nullableId
 };
+
+const sprintFields = {
+  name: z.string().trim().min(1).max(160),
+  city: z.string().trim().min(1).max(120),
+  region: nullableText,
+  country: nullableText,
+  targetDateWindowStart: isoDate.nullable().optional(),
+  targetDateWindowEnd: isoDate.nullable().optional(),
+  targetQualifiedCount: nullablePositiveInt,
+  targetOutreachCount: nullablePositiveInt,
+  targetBookedCount: nullablePositiveInt,
+  status: z.enum(bookingMarketSprintStatuses).optional()
+};
+
+function sprintWindowCheck(
+  value: { targetDateWindowStart?: string | null | undefined; targetDateWindowEnd?: string | null | undefined },
+  ctx: z.RefinementCtx
+) {
+  if (value.targetDateWindowStart && value.targetDateWindowEnd && new Date(value.targetDateWindowStart) > new Date(value.targetDateWindowEnd)) {
+    ctx.addIssue({ code: "custom", path: ["targetDateWindowEnd"], message: "Sprint date window end must be on or after its start." });
+  }
+}
+
+export const bookingMarketSprintCreateSchema = z.object(sprintFields).strict().superRefine(sprintWindowCheck);
+export const bookingMarketSprintPatchSchema = z.object({
+  name: sprintFields.name.optional(), city: sprintFields.city.optional(), region: nullableText,
+  country: nullableText, targetDateWindowStart: isoDate.nullable().optional(),
+  targetDateWindowEnd: isoDate.nullable().optional(), targetQualifiedCount: nullablePositiveInt,
+  targetOutreachCount: nullablePositiveInt, targetBookedCount: nullablePositiveInt,
+  status: z.enum(bookingMarketSprintStatuses).optional()
+}).strict().superRefine(sprintWindowCheck);
 
 function templateCheck(
   value: {
@@ -278,7 +332,9 @@ export const bookingCampaignPatchSchema = z
     dateWindowEnd: isoDate.nullable().optional(),
     subjectTemplate: campaignFields.subjectTemplate.optional(),
     bodyTemplate: campaignFields.bodyTemplate.optional(),
-    defaultFollowUpDays: z.int().min(1).max(90).optional()
+    defaultFollowUpDays: z.int().min(1).max(90).optional(),
+    deliveryMode: z.enum(bookingCampaignDeliveryModes).optional(),
+    marketSprintId: nullableId
   })
   .strict()
   .superRefine(templateCheck);
@@ -297,6 +353,7 @@ export const bookingCampaignRecipientPatchSchema = z
     contactId: nullableId,
     opportunityId: nullableId,
     outcomeNote: nullableText,
+    outcomeKind: z.enum(bookingRecipientOutcomeKinds).nullable().optional(),
     followUpDueAt: isoDate.nullable().optional(),
     status: z.enum(["replied", "declined", "booked"]).optional()
   })
@@ -328,6 +385,8 @@ export type BookingProspectConversionInput = z.infer<typeof bookingProspectConve
 export type BookingProspectContactInput = z.infer<typeof bookingProspectContactSchema>;
 export type BookingCampaignCreateInput = z.infer<typeof bookingCampaignCreateSchema>;
 export type BookingCampaignPatchInput = z.infer<typeof bookingCampaignPatchSchema>;
+export type BookingMarketSprintCreateInput = z.infer<typeof bookingMarketSprintCreateSchema>;
+export type BookingMarketSprintPatchInput = z.infer<typeof bookingMarketSprintPatchSchema>;
 export type BookingCampaignRecipientCreateInput = z.infer<typeof bookingCampaignRecipientCreateSchema>;
 export type BookingCampaignRecipientPatchInput = z.infer<typeof bookingCampaignRecipientPatchSchema>;
 export type BookingCampaignPrepareApprovalInput = z.infer<typeof bookingCampaignPrepareApprovalSchema>;

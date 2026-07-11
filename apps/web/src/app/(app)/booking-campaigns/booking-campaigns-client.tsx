@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/api";
 import { BuyerContactLinker } from "@/components/buyer-contact-linker";
 import type {
   BookingCampaign,
+  BookingMarketSprint,
   BookingCampaignRecipient,
   BookingProspect,
   Contact
@@ -39,18 +40,22 @@ function messageFrom(error: unknown) {
 export function BookingCampaignsClient({
   initialCampaigns,
   qualifiedProspects,
-  contacts
+  contacts,
+  sprints
 }: {
   initialCampaigns: BookingCampaign[];
   qualifiedProspects: BookingProspect[];
   contacts: Contact[];
+  sprints: BookingMarketSprint[];
 }) {
   const router = useRouter();
   const [form, setForm] = useState({
     name: "",
     subjectTemplate: defaultSubject,
     bodyTemplate: defaultBody,
-    defaultFollowUpDays: "7"
+    defaultFollowUpDays: "7",
+    deliveryMode: "send_on_execution" as "draft_only" | "send_on_execution",
+    marketSprintId: ""
   });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +72,9 @@ export function BookingCampaignsClient({
           name: form.name,
           subjectTemplate: form.subjectTemplate,
           bodyTemplate: form.bodyTemplate,
-          defaultFollowUpDays: Number(form.defaultFollowUpDays)
+          defaultFollowUpDays: Number(form.defaultFollowUpDays),
+          deliveryMode: form.deliveryMode,
+          marketSprintId: form.marketSprintId || null
         }
       });
       setForm({ ...form, name: "" });
@@ -143,6 +150,8 @@ export function BookingCampaignsClient({
         <form className="mt-4 grid gap-3" onSubmit={(event) => void create(event)}>
           <label className="block"><span className="sb-label">Campaign name</span><input required className="sb-input mt-1.5" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Fall rooms — Chicago" /></label>
           <div className="grid gap-3 md:grid-cols-[1fr_160px]"><label className="block"><span className="sb-label">Subject template</span><input required className="sb-input mt-1.5" value={form.subjectTemplate} onChange={(event) => setForm({ ...form, subjectTemplate: event.target.value })} /></label><label className="block"><span className="sb-label">Follow-up days</span><input required min="1" max="90" type="number" className="sb-input mt-1.5" value={form.defaultFollowUpDays} onChange={(event) => setForm({ ...form, defaultFollowUpDays: event.target.value })} /></label></div>
+          <label className="block"><span className="sb-label">Delivery after approval</span><select className="sb-select mt-1.5" value={form.deliveryMode} onChange={(event) => setForm({ ...form, deliveryMode: event.target.value as typeof form.deliveryMode })}><option value="send_on_execution">Send immediately when an approved batch is executed</option><option value="draft_only">Create Gmail drafts only</option></select><span className="mt-1 block text-xs text-[var(--text-muted)]">Approval and a separate Execute action are always required.</span></label>
+          <label className="block"><span className="sb-label">Market sprint</span><select className="sb-select mt-1.5" value={form.marketSprintId} onChange={(event) => setForm({ ...form, marketSprintId: event.target.value })}><option value="">Unassigned</option>{sprints.map((sprint) => <option key={sprint.id} value={sprint.id}>{sprint.name}</option>)}</select></label>
           <label className="block"><span className="sb-label">Email template</span><textarea required className="sb-input mt-1.5 min-h-48 font-mono text-sm" value={form.bodyTemplate} onChange={(event) => setForm({ ...form, bodyTemplate: event.target.value })} /></label>
           <div><button className="sb-btn-primary" disabled={busy === "create"} type="submit"><Plus className="h-4 w-4" />Create campaign</button></div>
         </form>

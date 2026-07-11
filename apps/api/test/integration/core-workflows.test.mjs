@@ -282,6 +282,10 @@ test("database integration: prospect conversion and approved campaign drafts sta
     name: "Useful Festival",
     city: "Austin"
   });
+  const sprint = await client.bookingMarketSprint.create({
+    data: { artistId: artistA.id, name: "Austin fall sprint", city: "Austin", status: "active" }
+  });
+  await prospects.patch(artistA.id, campaignLead.id, { marketSprintId: sprint.id });
   const linkedBuyer = await prospects.attachContact(artistA.id, campaignLead.id, {
     contact: {
       fullName: "Morgan Promoter",
@@ -308,7 +312,9 @@ test("database integration: prospect conversion and approved campaign drafts sta
     name: "Austin fall rooms",
     subjectTemplate: "Booking inquiry — {{artistName}}",
     bodyTemplate: "Hi {{contactName}}, {{bookingPitch}} {{pressKitUrl}}",
-    defaultFollowUpDays: 7
+    defaultFollowUpDays: 7,
+    deliveryMode: "send_on_execution",
+    marketSprintId: sprint.id
   });
   const recipient = await campaigns.addRecipient(artistA.id, campaign.id, {
     prospectId: campaignLead.id
@@ -331,16 +337,20 @@ test("database integration: prospect conversion and approved campaign drafts sta
     { actorOperatorId: operator.id }
   );
   assert.equal(executed.status, "executed");
-  const draftedRecipient = await client.bookingCampaignRecipient.findUniqueOrThrow({
+  const sentRecipient = await client.bookingCampaignRecipient.findUniqueOrThrow({
     where: { id: recipient.id }
   });
-  assert.equal(draftedRecipient.status, "drafted");
-  assert.ok(draftedRecipient.followUpTaskId);
+  assert.equal(sentRecipient.status, "sent");
+  assert.ok(sentRecipient.followUpTaskId);
   const followUp = await client.task.findUniqueOrThrow({
-    where: { id: draftedRecipient.followUpTaskId }
+    where: { id: sentRecipient.followUpTaskId }
   });
   assert.equal(followUp.artistId, artistA.id);
   assert.equal(followUp.title, "Follow up with Useful Festival");
+  const delivery = await client.bookingCampaignDelivery.findUniqueOrThrow({
+    where: { approvalId_recipientId: { approvalId: prepared.approval.id, recipientId: recipient.id } }
+  });
+  assert.equal(delivery.status, "sent");
   await campaigns.patchRecipient(artistA.id, campaign.id, recipient.id, {
     status: "replied",
     outcomeNote: "Asked for a routing hold"
@@ -355,5 +365,5 @@ test("database integration: prospect conversion and approved campaign drafts sta
   });
   assert.ok(auditActions.some((event) => event.action === "booking_prospect.converted"));
   assert.ok(auditActions.some((event) => event.action === "booking_prospect.contact_linked"));
-  assert.ok(auditActions.some((event) => event.action === "booking_campaign.drafts_created"));
+  assert.ok(auditActions.some((event) => event.action === "booking_campaign.sent"));
 });

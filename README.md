@@ -60,6 +60,8 @@ Stop infra: `pnpm infra:down`
 
 **Booking acquisition:** A quick, artist-scoped booking profile unlocks market prospecting and pitch campaigns. **Find shows** searches one city at a time through Ticketmaster Discovery when configured, otherwise states that manual mode is active rather than inventing leads. It stores venue, festival, private-event, and corporate-event prospects; only physical-room prospects create a `Venue` on conversion. **Pitch campaigns** render only a small allowlist of variables, show every personalized email before approval, and create Gmail drafts only after approval execution — never an auto-send. Each executed draft creates one follow-up task seven days later by default. See `docs/domain-model.md` and `docs/developer-runbook.md`.
 
+**Booking advisor:** The Booking advisor turns aggregate sprint, campaign, delivery, outcome, and prior helpful/not-helpful feedback into reviewable next steps. It remains deterministic when `OPENAI_ENABLED=false`; with a configured OpenAI key it uses structured, aggregate-only advice. It never reads email, invents contacts, sends messages, or mutates booking records.
+
 Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/environment-setup-plan.md`.
 
 **Agents (Codex, Cursor, etc.):** read [`AGENTS.md`](AGENTS.md) and [`docs/codex-handoff.md`](docs/codex-handoff.md) for the current delivery snapshot, file map, and quality gate.

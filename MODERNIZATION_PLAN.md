@@ -74,6 +74,21 @@ mock-safe provider adapters.
   boolean database/Redis/worker state without configuration or credentials and
   returns 503 while database or Redis is unavailable.
 
+### P0 — booking market sprints and approved delivery (completed 2026-07-11)
+
+- [x] Add tenant-safe market sprints that connect city-focused prospects and campaigns, with funnel counts and overdue follow-ups.
+- [x] Add explicit campaign delivery modes. Existing campaigns retain draft-only behavior; a send-on-execution campaign remains approval-gated and sends only after a separate Execute action.
+- [x] Persist per-recipient delivery state and create follow-up work only after a successful send. Unknown delivery results are not retried automatically.
+- [x] Complete browser coverage, documentation, and final release validation.
+
+### P1 — bounded adaptive booking advisor (completed 2026-07-11)
+
+- [x] Add an opt-in, structured booking advisor that is useful without external
+  credentials and never mutates data or sends messages.
+- [x] Persist aggregate facts, prompt version, advice, and explicit
+  helpful/not-helpful feedback so subsequent advice can improve from outcomes.
+- [x] Complete UI/browser validation and final release checks.
+
 ### P2 — requires deployment or product decisions
 
 - [ ] Define a separate queue-worker deployment and runtime metrics before
@@ -147,3 +162,18 @@ artist IDs disagree. Do not repair or delete such data automatically.
   read-only relationship audit (zero mismatches). The CI browser job uses the
   same explicit Postgres/Redis/mock-provider setup; it has not been dispatched
   from this uncommitted worktree.
+- 2026-07-11: Added the self-managed-band market-sprint workflow and a
+  forward-only migration for sprint links and per-recipient campaign delivery
+  records. Campaigns can preserve draft-only execution or use immediate send on
+  a separate approved Execute action. Successful sends create follow-up work;
+  failed or unknown deliveries are retained and never auto-retried. Validation
+  passed for unit, database integration, Chromium browser, build, and expanded
+  relationship-audit coverage.
+- 2026-07-11: Added a bounded Booking advisor with a forward-only migration.
+  It persists aggregate booking facts, structured advice, prompt version, and
+  per-operator helpful/not-helpful feedback. The default path is deterministic;
+  the optional OpenAI path is aggregate-only, structured, non-persistent at the
+  provider, and falls back safely on error. It has no mutation, inbox-reading,
+  or outbound-action capability. Validation passed for unit, explicit-database
+  integration, Chromium advisor UI, the full quality gate, and relationship
+  diagnostic (zero mismatches).

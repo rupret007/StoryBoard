@@ -19,6 +19,8 @@ const envSchema = z
     OPENAI_MODEL: z.string().optional(),
     OPENAI_COMMAND_MODEL: z.string().optional(),
     OPENAI_SUMMARY_MODEL: z.string().optional(),
+    OPENAI_ADVISOR_CONTEXT: z.enum(["aggregate", "full"]).default("aggregate"),
+    BOOKING_ADVISOR_AUTOMATION_ENABLED: z.string().optional().transform((value) => value === "true"),
     GOOGLE_CLIENT_ID: z.string().optional(),
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     GOOGLE_OAUTH_REFRESH_TOKEN: z.string().optional(),

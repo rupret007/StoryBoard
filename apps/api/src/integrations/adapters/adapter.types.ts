@@ -17,7 +17,7 @@ export interface GmailAdapter {
   readonly id: AdapterId;
   readonly mode: "mock" | "real";
   draftMessage(input: GmailDraft): Promise<{ draftId: string; preview: string }>;
-  sendMessage(_draftId: string): Promise<{ messageId: string }>;
+  sendMessage(input: GmailDraft): Promise<{ messageId: string; preview: string }>;
 }
 
 export interface CalendarHoldRequest {

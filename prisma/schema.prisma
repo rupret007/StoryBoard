@@ -37,14 +37,48 @@ enum BookingCampaignStatus {
   closed
 }
 
+enum BookingMarketSprintStatus {
+  draft
+  active
+  completed
+  abandoned
+}
+
+enum BookingCampaignDeliveryMode {
+  draft_only
+  send_on_execution
+}
+
 enum BookingCampaignRecipientStatus {
   needs_contact
   ready
   approval_requested
   drafted
+  sent
   replied
   declined
   booked
+}
+
+enum BookingCampaignDeliveryStatus {
+  pending
+  sending
+  sent
+  failed
+  unknown
+}
+
+enum BookingAdvisorTrigger {
+  manual
+  scheduled
+}
+
+enum BookingAdvisorRecommendationOutcome {
+  suggested
+  accepted
+  dismissed
+  completed
+  blocked
 }
 
 enum TaskStatus {
@@ -126,6 +160,7 @@ model Operator {
   invitesAccepted ArtistMembershipInvite[] @relation("InviteAcceptor")
   workflowNotifications WorkflowNotification[]
   telegramRegistrationTokensCreated TelegramRegistrationToken[] @relation("TelegramRegistrationCreator")
+  advisorFeedback BookingAdvisorFeedback[]
 }
 
 model ArtistMembership {
@@ -165,10 +200,73 @@ model Artist {
   bookingProfile ArtistBookingProfile?
   bookingProspects BookingProspect[]
   bookingCampaigns BookingCampaign[]
+  bookingMarketSprints BookingMarketSprint[]
+  bookingCampaignDeliveries BookingCampaignDelivery[]
+  advisorRuns             BookingAdvisorRun[]
+  bookingAdvisorSettings  BookingAdvisorSettings?
   membershipInvites ArtistMembershipInvite[]
   workflowNotifications WorkflowNotification[]
   telegramUrgentDedupes TelegramUrgentDedupe[]
   telegramRegistrationTokens TelegramRegistrationToken[]
+}
+
+model BookingAdvisorRun {
+  id            String   @id @default(cuid())
+  artistId      String
+  mode          String
+  model         String?
+  promptVersion String
+  trigger       BookingAdvisorTrigger @default(manual)
+  scheduledLocalDate String?
+  inputFacts    Json
+  advice        Json
+  createdAt     DateTime @default(now())
+  artist        Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  feedback      BookingAdvisorFeedback[]
+  recommendations BookingAdvisorRecommendation[]
+
+  @@index([artistId, createdAt])
+  @@unique([artistId, trigger, scheduledLocalDate])
+}
+
+model BookingAdvisorSettings {
+  id              String   @id @default(cuid())
+  artistId        String   @unique
+  scheduleEnabled Boolean  @default(false)
+  timezone        String?
+  dailyHour       Int      @default(9)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  artist          Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+}
+
+model BookingAdvisorRecommendation {
+  id          String   @id @default(cuid())
+  advisorRunId String
+  stableKey   String
+  title       String
+  priority    String
+  evidence    Json
+  outcome     BookingAdvisorRecommendationOutcome @default(suggested)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  advisorRun  BookingAdvisorRun @relation(fields: [advisorRunId], references: [id], onDelete: Cascade)
+
+  @@unique([advisorRunId, stableKey])
+  @@index([advisorRunId, outcome])
+}
+
+model BookingAdvisorFeedback {
+  id           String   @id @default(cuid())
+  advisorRunId String
+  operatorId   String
+  helpful      Boolean
+  createdAt    DateTime @default(now())
+  advisorRun   BookingAdvisorRun @relation(fields: [advisorRunId], references: [id], onDelete: Cascade)
+  operator     Operator @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@unique([advisorRunId, operatorId])
+  @@index([advisorRunId])
 }
 
 model TelegramRegistrationToken {
@@ -336,6 +434,7 @@ model BookingProspect {
   venueId        String?
   contactId      String?
   opportunityId  String?
+  marketSprintId String?
   convertedAt    DateTime?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
@@ -343,9 +442,34 @@ model BookingProspect {
   venue          Venue?                @relation(fields: [venueId], references: [id], onDelete: SetNull)
   contact        Contact?              @relation(fields: [contactId], references: [id], onDelete: SetNull)
   opportunity    BookingOpportunity?   @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  marketSprint   BookingMarketSprint?  @relation(fields: [marketSprintId], references: [id], onDelete: SetNull)
   campaignRecipients BookingCampaignRecipient[]
 
   @@unique([artistId, sourceSystem, sourceRef])
+  @@index([artistId, status])
+  @@index([artistId, updatedAt])
+  @@index([marketSprintId, status])
+}
+
+model BookingMarketSprint {
+  id                    String                   @id @default(cuid())
+  artistId              String
+  name                  String
+  city                  String
+  region                String?
+  country               String?
+  targetDateWindowStart DateTime?
+  targetDateWindowEnd   DateTime?
+  targetQualifiedCount  Int?
+  targetOutreachCount   Int?
+  targetBookedCount     Int?
+  status                BookingMarketSprintStatus @default(draft)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  artist                Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  prospects             BookingProspect[]
+  campaigns             BookingCampaign[]
+
   @@index([artistId, status])
   @@index([artistId, updatedAt])
 }
@@ -360,15 +484,20 @@ model BookingCampaign {
   subjectTemplate     String
   bodyTemplate        String
   defaultFollowUpDays Int                   @default(7)
+  deliveryMode        BookingCampaignDeliveryMode @default(draft_only)
+  aiAutomationEnabled Boolean @default(false)
+  marketSprintId      String?
   approvalRequestId   String?               @unique
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
   artist              Artist                @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  marketSprint        BookingMarketSprint?  @relation(fields: [marketSprintId], references: [id], onDelete: SetNull)
   approvalRequest     ApprovalRequest?      @relation("CampaignApproval", fields: [approvalRequestId], references: [id], onDelete: SetNull)
   recipients          BookingCampaignRecipient[]
 
   @@index([artistId, status])
   @@index([artistId, updatedAt])
+  @@index([marketSprintId, status])
 }
 
 model BookingCampaignRecipient {
@@ -379,6 +508,7 @@ model BookingCampaignRecipient {
   opportunityId  String?
   status         BookingCampaignRecipientStatus @default(needs_contact)
   outcomeNote    String?
+  outcomeKind    String?
   followUpDueAt  DateTime?
   followUpTaskId String?                        @unique
   createdAt      DateTime                       @default(now())
@@ -388,10 +518,32 @@ model BookingCampaignRecipient {
   contact        Contact?                       @relation(fields: [contactId], references: [id], onDelete: SetNull)
   opportunity    BookingOpportunity?            @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   followUpTask   Task?                          @relation("CampaignRecipientFollowUpTask", fields: [followUpTaskId], references: [id], onDelete: SetNull)
+  deliveries     BookingCampaignDelivery[]
 
   @@unique([campaignId, prospectId])
   @@index([campaignId, status])
   @@index([followUpDueAt])
+}
+
+model BookingCampaignDelivery {
+  id          String                        @id @default(cuid())
+  artistId    String
+  approvalId  String
+  recipientId String
+  status      BookingCampaignDeliveryStatus @default(pending)
+  providerMessageId String?
+  error       String?
+  attemptedAt DateTime?
+  sentAt      DateTime?
+  createdAt   DateTime                      @default(now())
+  updatedAt   DateTime                      @updatedAt
+  artist      Artist                        @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  approval    ApprovalRequest               @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  recipient   BookingCampaignRecipient      @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([approvalId, recipientId])
+  @@index([artistId, status])
+  @@index([recipientId])
 }
 
 model ApprovalRequest {
@@ -411,6 +563,7 @@ model ApprovalRequest {
   artist         Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
   opportunity    BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   bookingCampaign BookingCampaign? @relation("CampaignApproval")
+  campaignDeliveries BookingCampaignDelivery[]
 }
 
 model AuditEvent {

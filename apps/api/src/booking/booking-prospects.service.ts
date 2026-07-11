@@ -57,6 +57,7 @@ export class BookingProspectsService {
       venueId?: string | null | undefined;
       contactId?: string | null | undefined;
       opportunityId?: string | null | undefined;
+      marketSprintId?: string | null | undefined;
     }
   ) {
     if (input.venueId != null) {
@@ -79,6 +80,12 @@ export class BookingProspectsService {
         select: { id: true }
       });
       if (!opportunity) throw new NotFoundException("Booking opportunity not found");
+    }
+    if (input.marketSprintId != null) {
+      const sprint = await this.prisma.client.bookingMarketSprint.findFirst({
+        where: { id: input.marketSprintId, artistId }, select: { id: true }
+      });
+      if (!sprint) throw new NotFoundException("Booking market sprint not found");
     }
   }
 
@@ -139,6 +146,7 @@ export class BookingProspectsService {
         venueId: data.venueId ?? null,
         contactId: data.contactId ?? null,
         opportunityId: data.opportunityId ?? null
+        ,marketSprintId: data.marketSprintId ?? null
       },
       include: prospectInclude
     });
@@ -199,6 +207,7 @@ export class BookingProspectsService {
     if (data.venueId !== undefined) patch.venueId = data.venueId;
     if (data.contactId !== undefined) patch.contactId = data.contactId;
     if (data.opportunityId !== undefined) patch.opportunityId = data.opportunityId;
+    if (data.marketSprintId !== undefined) patch.marketSprintId = data.marketSprintId;
     const prospect = await this.prisma.client.bookingProspect.update({
       where: { id },
       data: patch,

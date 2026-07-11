@@ -21,6 +21,11 @@ execFileSync("node", ["scripts/prepare-test-database.mjs"], {
   env,
   stdio: "inherit"
 });
+execFileSync("node", ["prisma/seed.mjs"], {
+  cwd: root,
+  env,
+  stdio: "inherit"
+});
 // Playwright starts the production servers, so make this command self-contained:
 // it must not accidentally exercise a stale API or Next build from a prior run.
 execFileSync("pnpm", ["build"], {

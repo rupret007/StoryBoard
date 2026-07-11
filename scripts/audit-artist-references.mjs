@@ -78,6 +78,28 @@ const checks = [
     `
   },
   {
+    relation: "BookingProspect → BookingMarketSprint",
+    query: `
+      SELECT p."id" AS "recordId", p."artistId" AS "recordArtistId",
+             p."marketSprintId" AS "relatedId", s."artistId" AS "relatedArtistId"
+      FROM "BookingProspect" p
+      INNER JOIN "BookingMarketSprint" s ON s."id" = p."marketSprintId"
+      WHERE p."artistId" <> s."artistId"
+      ORDER BY p."id";
+    `
+  },
+  {
+    relation: "BookingCampaign → BookingMarketSprint",
+    query: `
+      SELECT k."id" AS "recordId", k."artistId" AS "recordArtistId",
+             k."marketSprintId" AS "relatedId", s."artistId" AS "relatedArtistId"
+      FROM "BookingCampaign" k
+      INNER JOIN "BookingMarketSprint" s ON s."id" = k."marketSprintId"
+      WHERE k."artistId" <> s."artistId"
+      ORDER BY k."id";
+    `
+  },
+  {
     relation: "BookingCampaign → ApprovalRequest",
     query: `
       SELECT k."id" AS "recordId", k."artistId" AS "recordArtistId",
@@ -134,6 +156,19 @@ const checks = [
       INNER JOIN "Task" t ON t."id" = r."followUpTaskId"
       WHERE k."artistId" <> t."artistId"
       ORDER BY r."id";
+    `
+  },
+  {
+    relation: "BookingCampaignDelivery → ApprovalRequest and Recipient",
+    query: `
+      SELECT d."id" AS "recordId", d."artistId" AS "recordArtistId",
+             d."approvalId" AS "relatedId", a."artistId" AS "relatedArtistId"
+      FROM "BookingCampaignDelivery" d
+      INNER JOIN "ApprovalRequest" a ON a."id" = d."approvalId"
+      INNER JOIN "BookingCampaignRecipient" r ON r."id" = d."recipientId"
+      INNER JOIN "BookingCampaign" k ON k."id" = r."campaignId"
+      WHERE d."artistId" <> a."artistId" OR d."artistId" <> k."artistId"
+      ORDER BY d."id";
     `
   }
 ];

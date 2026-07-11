@@ -1,6 +1,6 @@
 import { PageHeader } from "@storyboard/ui";
 import { serverApiFetch } from "@/lib/api-server";
-import type { BookingProfileResponse, BookingProspect, Contact } from "@/lib/types";
+import type { BookingMarketSprint, BookingProfileResponse, BookingProspect, Contact } from "@/lib/types";
 import { ProspectsClient } from "./prospects-client";
 
 export default async function ProspectsPage() {
@@ -11,8 +11,9 @@ export default async function ProspectsPage() {
   };
   let prospects: BookingProspect[] = [];
   let contacts: Contact[] = [];
+  let sprints: BookingMarketSprint[] = [];
   try {
-    [profile, prospects, contacts] = await Promise.all([
+    [profile, prospects, contacts, sprints] = await Promise.all([
       serverApiFetch<BookingProfileResponse>("/booking-profile", {
         cache: "no-store"
       }),
@@ -21,7 +22,8 @@ export default async function ProspectsPage() {
       }),
       serverApiFetch<Contact[]>("/contacts", {
         cache: "no-store"
-      })
+      }),
+      serverApiFetch<BookingMarketSprint[]>("/market-sprints", { cache: "no-store" })
     ]);
   } catch {
     // The client renders a usable empty/manual state if the API is unavailable.
@@ -37,6 +39,7 @@ export default async function ProspectsPage() {
         initialProfile={profile}
         initialProspects={prospects}
         contacts={contacts}
+        sprints={sprints}
       />
     </div>
   );

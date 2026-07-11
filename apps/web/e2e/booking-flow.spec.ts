@@ -42,3 +42,15 @@ test("manual prospect can gain a buyer and enter an approval-ready campaign", as
   await expect(page.getByText("Personalized draft preview")).toBeVisible();
   await expect(page.getByText(`morgan-${suffix}@example.test`, { exact: true })).toBeVisible();
 });
+
+test("booking advisor produces reviewable, non-automated guidance", async ({ page }) => {
+  await page.goto("http://127.0.0.1:4000/auth/dev/login");
+  await expect(page.getByText("Your operational home base")).toBeVisible();
+
+  await page.goto("/advisor");
+  const generate = page.getByRole("button", { name: "Generate booking brief" });
+  if (await generate.isVisible().catch(() => false)) await generate.click();
+  await expect(page.getByRole("heading", { name: "Current booking brief" })).toBeVisible();
+  await expect(page.getByText(/never sends or changes records/i)).toBeVisible();
+  await page.getByRole("button", { name: "Helpful", exact: true }).click();
+});

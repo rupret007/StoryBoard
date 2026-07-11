@@ -18,6 +18,8 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Venues, contacts, booking opportunities, tasks | Done |
 | Booking profile, one-market prospecting, prospect conversion | Done |
 | Approval-gated pitch campaigns + linked follow-up tasks | Done |
+| Market sprints + approval-gated immediate campaign delivery | Done |
+| Bounded adaptive booking advisor (optional OpenAI; review-only) | Done |
 | Approvals + execution (Gmail drafts, calendar holds, drive folder) | Done |
 | Command bar + `POST /commands/execute` (NL + structured intents) | Done |
 | Operator auth (Google OIDC), session cookie, memberships (`owner` / `member` / `viewer`) | Done |
@@ -48,6 +50,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications API | `workflow-settings.controller.ts`, `workflow-notifications.controller.ts` |
 | Prisma schema | `prisma/schema.prisma` (client output: `apps/api/src/generated/prisma/` — **gitignored**; run `pnpm db:generate`) |
 | Booking acquisition | `apps/api/src/booking/booking-{profiles,prospects,campaigns}.*`, `apps/web/src/app/(app)/{prospects,booking-campaigns}/` |
+| Booking advisor | `apps/api/src/advisor/`, `apps/web/src/app/(app)/advisor/` |
 | Web app API client | `apps/web/src/lib/api.ts` (cookies + `x-artist-id`) |
 
 ## Environment (short list)
@@ -67,7 +70,7 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Product:** Assess routing, setlists, contracts, settlement, and deeper private/corporate intake only with validated user needs; do not add scraping or auto-send.
+1. **Product:** Assess routing, setlists, contracts, settlement, and deeper private/corporate intake only with validated user needs. Keep advice review-only; do not add scraping, inbox synchronization, or autonomous sends.
 2. **Runtime:** Define queue-worker deployment, cursor pagination/query limits, and metrics before horizontally scaling the API. `/ready` is a dependency probe, not a monitoring system.
 3. **Tests:** Expand browser coverage only around verified operator workflows; it must continue using the explicit test database and mock providers.
 

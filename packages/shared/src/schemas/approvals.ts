@@ -25,7 +25,8 @@ export const outboundEmailBatchPayloadSchema = z.object({
             followUpDueAt: z.string().datetime({ offset: true })
           })
         )
-        .min(1)
+        .min(1),
+      deliveryMode: z.enum(["draft_only", "send_on_execution"]).optional()
     })
     .strict()
     .optional()
