@@ -1,5 +1,6 @@
-import type { ManagerWorkstream } from "../generated/prisma/enums";
+import type { ManagerGoalTargetDirection, ManagerWorkstream } from "../generated/prisma/enums";
 import type { ManagerGoalMeasurement } from "./manager-goal-measurement";
+import { deterministicManagerGoalTarget, type ManagerGoalTargetAssessment } from "./manager-goal-target";
 import type { ManagerWorkSequence, ManagerWorkSequenceItem } from "./manager-work-sequence";
 
 export const MANAGER_GOAL_PATH_POLICY_VERSION = "manager_goal_path_v1" as const;
@@ -12,6 +13,8 @@ type GoalInput = {
   deadline: Date | null;
   currentValue: number | null;
   targetValue: number | null;
+  targetUnit?: string | null;
+  targetDirection?: ManagerGoalTargetDirection;
 };
 
 type InitiativeInput = {
@@ -35,8 +38,9 @@ export type ManagerGoalPathItem = {
   goalTitle: string;
   workstream: ManagerWorkstream;
   deadline: string | null;
+  target: ManagerGoalTargetAssessment;
   progressRatio: number | null;
-  status: "ready" | "in_progress" | "waiting" | "blocked" | "conflicted" | "missing_initiative" | "missing_task" | "needs_measurement" | "target_reached";
+  status: "ready" | "in_progress" | "waiting" | "blocked" | "conflicted" | "missing_initiative" | "missing_task" | "needs_measurement" | "target_monitoring" | "target_reached";
   initiativeIds: string[];
   nextTask: null | {
     taskId: string;
@@ -59,18 +63,12 @@ export type ManagerGoalPath = {
   observedAt: string;
   status: "clear" | "needs_attention" | "blocked" | "conflicted" | "empty";
   summary: string;
-  counts: { activeGoals: number; ready: number; waiting: number; blocked: number; missingPlan: number; needsMeasurement: number; targetReached: number; conflicted: number };
+  counts: { activeGoals: number; ready: number; waiting: number; blocked: number; missingPlan: number; needsMeasurement: number; targetMonitoring: number; targetReached: number; conflicted: number };
   goals: ManagerGoalPathItem[];
   evidenceIds: string[];
 };
 
 function unique(values: string[]) { return [...new Set(values)]; }
-
-function progressRatio(goal: GoalInput) {
-  return goal.currentValue !== null && goal.targetValue !== null && goal.targetValue > 0
-    ? Math.max(0, goal.currentValue / goal.targetValue)
-    : null;
-}
 
 function asNextTask(item: ManagerWorkSequenceItem, linkedTaskIds: Set<string>): NonNullable<ManagerGoalPathItem["nextTask"]> {
   return {
@@ -102,15 +100,16 @@ export function deterministicManagerGoalPath(input: {
 }, now = new Date()): ManagerGoalPath {
   const activeGoals = input.goals.filter((goal) => goal.status === "active");
   const paths = activeGoals.map((goal): ManagerGoalPathItem => {
+    const target = deterministicManagerGoalTarget(goal, now);
     const measurement = input.measurements.find((item) => item.goalId === goal.id);
     const initiatives = input.initiatives.filter((initiative) => initiative.goalId === goal.id && !["completed", "abandoned"].includes(initiative.status));
     const initiativeIds = new Set(initiatives.map((initiative) => initiative.id));
     const allTasks = input.tasks.filter((task) => Boolean(task.initiativeId && initiativeIds.has(task.initiativeId)));
     const openTasks = allTasks.filter((task) => task.status !== "done");
     const openTaskIds = new Set(openTasks.map((task) => task.id));
-    const ratio = progressRatio(goal);
+    const ratio = target.progressRatio;
     const contradictions: ManagerGoalPathItem["contradictions"] = [];
-    if (goal.deadline && goal.deadline < now && (ratio === null || ratio < 1)) contradictions.push({ code: "goal_deadline_passed", detail: "The goal deadline has passed without recorded target completion.", evidenceIds: [goal.id] });
+    if (goal.deadline && goal.deadline < now && target.state !== "met") contradictions.push({ code: "goal_deadline_passed", detail: "The goal deadline has passed without a recorded value that meets its target direction.", evidenceIds: [goal.id] });
     if (goal.deadline) {
       for (const initiative of initiatives.filter((item) => item.dueAt && item.dueAt > goal.deadline!)) {
         contradictions.push({ code: "initiative_after_goal", detail: `“${initiative.title}” is due after the goal deadline.`, evidenceIds: [goal.id, initiative.id] });
@@ -132,7 +131,8 @@ export function deterministicManagerGoalPath(input: {
     if (goal.deadline && nextTask?.pathType === "prerequisite" && nextTask.dueAt && new Date(nextTask.dueAt) > goal.deadline) contradictions.push({ code: "task_after_goal", detail: `The prerequisite “${nextTask.title}” is due after the goal deadline.`, evidenceIds: [goal.id, nextTask.taskId] });
     const linkedWaiting = input.workSequence.items.filter((item) => openTaskIds.has(item.taskId) && ["waiting_on_prerequisites", "manually_blocked", "conflicted"].includes(item.state));
     const measurementDrift = Boolean(measurement && !["manual", "in_sync"].includes(measurement.status));
-    const targetReached = ratio !== null && ratio >= 1;
+    const targetReached = target.state === "met" && target.finality === "final";
+    const targetMonitoring = target.state === "met" && target.finality === "provisional";
     const blockedInitiatives = initiatives.filter((initiative) => initiative.status === "blocked");
     let status: ManagerGoalPathItem["status"];
     let reason: string;
@@ -141,14 +141,18 @@ export function deterministicManagerGoalPath(input: {
       status = "conflicted";
       reason = contradictions[0]!.detail;
       nextAction = "Correct the dates or task order before treating this goal plan as credible.";
-    } else if (measurementDrift) {
+    } else if (measurementDrift || ["not_configured", "current_unknown", "invalid"].includes(target.state)) {
       status = "needs_measurement";
-      reason = measurement!.summary;
-      nextAction = measurement!.nextAction;
+      reason = measurementDrift ? measurement!.summary : target.summary;
+      nextAction = measurementDrift ? measurement!.nextAction : target.nextAction;
     } else if (targetReached) {
       status = "target_reached";
-      reason = "The recorded current value has reached the goal target.";
-      nextAction = "Review the evidence, then complete, extend, or replace the goal deliberately.";
+      reason = target.summary;
+      nextAction = target.nextAction;
+    } else if (targetMonitoring) {
+      status = "target_monitoring";
+      reason = target.summary;
+      nextAction = target.nextAction;
     } else if (!initiatives.length) {
       status = "missing_initiative";
       reason = "No active initiative connects this goal to a plan.";
@@ -186,6 +190,7 @@ export function deterministicManagerGoalPath(input: {
       goalTitle: goal.title,
       workstream: goal.workstream,
       deadline: goal.deadline?.toISOString() ?? null,
+      target,
       progressRatio: ratio,
       status,
       initiativeIds: [...initiativeIds],
@@ -196,7 +201,7 @@ export function deterministicManagerGoalPath(input: {
       evidenceIds
     };
   }).sort((left, right) => {
-    const statusRank: Record<ManagerGoalPathItem["status"], number> = { conflicted: 0, blocked: 1, needs_measurement: 2, missing_initiative: 3, missing_task: 4, waiting: 5, ready: 6, in_progress: 7, target_reached: 8 };
+    const statusRank: Record<ManagerGoalPathItem["status"], number> = { conflicted: 0, blocked: 1, needs_measurement: 2, missing_initiative: 3, missing_task: 4, waiting: 5, ready: 6, in_progress: 7, target_monitoring: 8, target_reached: 9 };
     const leftDate = left.deadline ? new Date(left.deadline).getTime() : Number.POSITIVE_INFINITY;
     const rightDate = right.deadline ? new Date(right.deadline).getTime() : Number.POSITIVE_INFINITY;
     return statusRank[left.status] - statusRank[right.status] || leftDate - rightDate || left.goalTitle.localeCompare(right.goalTitle);
@@ -208,6 +213,7 @@ export function deterministicManagerGoalPath(input: {
     blocked: paths.filter((path) => path.status === "blocked").length,
     missingPlan: paths.filter((path) => ["missing_initiative", "missing_task"].includes(path.status)).length,
     needsMeasurement: paths.filter((path) => path.status === "needs_measurement").length,
+    targetMonitoring: paths.filter((path) => path.status === "target_monitoring").length,
     targetReached: paths.filter((path) => path.status === "target_reached").length,
     conflicted: paths.filter((path) => path.status === "conflicted").length
   };
@@ -229,8 +235,10 @@ export function deterministicManagerGoalPath(input: {
         : status === "needs_attention"
           ? `${counts.ready} active goal path${counts.ready === 1 ? " has" : "s have"} a credible next move; ${counts.missingPlan + counts.needsMeasurement + counts.waiting} need a plan, measurement, or prerequisite review.`
           : counts.ready
-            ? `${counts.ready} active goal path${counts.ready === 1 ? " has" : "s have"} a recorded next move${counts.targetReached ? `; ${counts.targetReached} target${counts.targetReached === 1 ? " is" : "s are"} ready for review` : ""}.`
-            : `${counts.targetReached} active goal target${counts.targetReached === 1 ? " is" : "s are"} recorded as reached and ready for deliberate review.`;
+            ? `${counts.ready} active goal path${counts.ready === 1 ? " has" : "s have"} a recorded next move${counts.targetReached ? `; ${counts.targetReached} target${counts.targetReached === 1 ? " is" : "s are"} ready for review` : ""}${counts.targetMonitoring ? `; ${counts.targetMonitoring} bounded target${counts.targetMonitoring === 1 ? " is" : "s are"} currently within range and still being monitored` : ""}.`
+            : counts.targetReached
+              ? `${counts.targetReached} active goal target${counts.targetReached === 1 ? " is" : "s are"} recorded as reached and ready for deliberate review.`
+              : `${counts.targetMonitoring} active bounded target${counts.targetMonitoring === 1 ? " is" : "s are"} currently within range; keep recording the same source through the deadline.`;
   return {
     policyVersion: MANAGER_GOAL_PATH_POLICY_VERSION,
     observedAt: now.toISOString(),

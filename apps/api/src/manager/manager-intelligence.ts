@@ -1,4 +1,4 @@
-import type { ManagerWorkstream } from "../generated/prisma/enums";
+import type { ManagerGoalTargetDirection, ManagerWorkstream } from "../generated/prisma/enums";
 import type { ShowReadiness } from "../operations/event-readiness";
 import type { EventDayOfView } from "../operations/event-day-of";
 import type { ProjectReadiness } from "../operations/project-plan";
@@ -13,6 +13,7 @@ import { managerQuestionAsksAboutTeamLoad, type ManagerTeamLoad } from "./manage
 import { calibrateManagerChatResult, type ManagerEvidenceHealth } from "./manager-evidence-health";
 import { managerQuestionAsksAboutWorkSequence, type ManagerWorkSequence } from "./manager-work-sequence";
 import { managerQuestionAsksAboutGoalPath, type ManagerGoalPath } from "./manager-goal-path";
+import { deterministicManagerGoalTarget, type ManagerGoalTargetAssessment } from "./manager-goal-target";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -75,7 +76,7 @@ export type ManagerFacts = {
     educationTopics?: string[];
   } | null;
   members: { id: string; name: string; roles?: string[]; instruments?: string[] }[];
-  goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; measurementKind?: string; createdAt?: Date; updatedAt?: Date }[];
+  goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; targetUnit?: string | null; targetDirection?: ManagerGoalTargetDirection; measurementKind?: string; createdAt?: Date; updatedAt?: Date }[];
   goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
   tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null; prerequisites?: { prerequisiteTask: { id: string; title: string; status: string; dueAt: Date | null } }[] }[];
@@ -117,13 +118,17 @@ export type ManagerChatResult = {
 };
 
 export type ManagerPlanHealth = {
+  policyVersion: "manager_plan_health_v2";
+  observedAt: string;
+  forecast: false;
   score: number;
   status: "on_track" | "at_risk" | "off_track" | "needs_plan";
   summary: string;
   goals: {
     goalId: string;
     title: string;
-    status: "on_track" | "at_risk" | "off_track" | "needs_measurement";
+    status: "on_track" | "at_risk" | "off_track" | "needs_measurement" | "target_reached";
+    target: ManagerGoalTargetAssessment;
     progressRatio: number | null;
     completedTasks: number;
     openTasks: number;
@@ -428,6 +433,9 @@ function decisionDraftFromQuestion(question: string): ManagerRecommendationDraft
 export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Date()): ManagerPlanHealth {
   const activeGoals = facts.goals.filter((goal) => goal.status === "active");
   if (!activeGoals.length) return {
+    policyVersion: "manager_plan_health_v2",
+    observedAt: now.toISOString(),
+    forecast: false,
     score: 0,
     status: "needs_plan",
     summary: "There is no active goal to manage against yet.",
@@ -437,6 +445,7 @@ export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Da
 
   const gaps: ManagerPlanHealth["gaps"] = [];
   const goals = activeGoals.map((goal) => {
+    const target = deterministicManagerGoalTarget(goal, now);
     const measurement = facts.goalMeasurements.find((item) => item.goalId === goal.id);
     const initiatives = facts.initiatives.filter((initiative) => initiative.goalId === goal.id && !["completed", "abandoned"].includes(initiative.status));
     const initiativeIds = new Set(initiatives.map((initiative) => initiative.id));
@@ -449,31 +458,31 @@ export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Da
     const overdue = tasks.filter((task) => task.status !== "done" && task.dueAt && task.dueAt < now);
     const unassigned = tasks.filter((task) => task.status !== "done" && !task.ownerLabel?.trim());
     const deadlinePast = Boolean(goal.deadline && goal.deadline < now);
-    const deadlineSoon = Boolean(goal.deadline && goal.deadline >= now && goal.deadline.getTime() - now.getTime() <= 30 * DAY_MS);
-    const progressRatio = goal.targetValue !== null && goal.currentValue !== null && goal.targetValue > 0
-      ? Math.max(0, goal.currentValue / goal.targetValue)
-      : null;
-    const expectedProgress = goal.createdAt && goal.deadline && goal.deadline > goal.createdAt && now > goal.createdAt
-      ? Math.min(1, (now.getTime() - goal.createdAt.getTime()) / (goal.deadline.getTime() - goal.createdAt.getTime()))
-      : null;
-    const behindPace = progressRatio !== null && expectedProgress !== null && progressRatio + 0.15 < expectedProgress;
+    const deadlineSoon = Boolean(goal.deadline && goal.deadline >= now && goal.deadline.getTime() - now.getTime() <= 7 * DAY_MS);
     const reasons: string[] = [];
     let status: ManagerPlanHealth["goals"][number]["status"] = "on_track";
-    if (deadlinePast && (progressRatio === null || progressRatio < 1)) {
+    const measurementDrift = Boolean(measurement && !["manual", "in_sync"].includes(measurement.status));
+    if (measurementDrift) {
+      status = "needs_measurement";
+      reasons.push(measurement!.summary);
+    } else if (["not_configured", "current_unknown", "invalid"].includes(target.state)) {
+      status = "needs_measurement";
+      reasons.push(target.summary);
+    } else if (target.state === "met" && target.finality === "final") {
+      status = "target_reached";
+      reasons.push(target.summary);
+    } else if (deadlinePast && target.state !== "met") {
       status = "off_track";
       reasons.push("The goal deadline has passed without recorded completion.");
-    } else if (blocked.length || blockedTasks.length || overdueInitiatives.length || overdue.length || unassigned.length || behindPace || (deadlineSoon && (progressRatio === null || progressRatio < 0.75))) {
+    } else if (blocked.length || blockedTasks.length || overdueInitiatives.length || overdue.length || unassigned.length || deadlineSoon || (!goal.deadline && target.direction !== "at_least")) {
       status = "at_risk";
       if (blocked.length) reasons.push(`${blocked.length} linked initiative${blocked.length === 1 ? " is" : "s are"} blocked.`);
       if (blockedTasks.length) reasons.push(`${blockedTasks.length} linked task${blockedTasks.length === 1 ? " is" : "s are"} blocked${blockedTasks[0]?.blockedReason ? `: ${blockedTasks[0].blockedReason}` : "."}`);
       if (overdueInitiatives.length) reasons.push(`${overdueInitiatives.length} linked initiative${overdueInitiatives.length === 1 ? " is" : "s are"} overdue.`);
       if (overdue.length) reasons.push(`${overdue.length} linked task${overdue.length === 1 ? " is" : "s are"} overdue.`);
       if (unassigned.length) reasons.push(`${unassigned.length} linked task${unassigned.length === 1 ? " needs" : "s need"} a real owner.`);
-      if (behindPace) reasons.push(`Recorded progress is behind the elapsed share of the goal timeline.`);
-      if (deadlineSoon && (progressRatio === null || progressRatio < 0.75)) reasons.push("The deadline is within 30 days and recorded progress is below 75% or unknown.");
-    } else if (progressRatio === null) {
-      status = "needs_measurement";
-      reasons.push("A target and current value are not both recorded.");
+      if (deadlineSoon) reasons.push("The deadline is within seven days and the recorded target is not final yet.");
+      if (!goal.deadline && target.direction !== "at_least") reasons.push("An at-most or exact target needs a deadline before its final result can be judged.");
     }
     if (!initiatives.length) {
       reasons.push("No active initiative is linked to this goal.");
@@ -485,25 +494,24 @@ export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Da
       if (status === "on_track") status = "at_risk";
     }
     if (unassigned.length) gaps.push({ code: "task_without_owner", detail: `“${goal.title}” has ${unassigned.length} open task${unassigned.length === 1 ? "" : "s"} without an owner.`, evidenceIds: [goal.id, ...unassigned.map((task) => task.id)] });
-    if (progressRatio === null) gaps.push({ code: "goal_without_measurement", detail: `“${goal.title}” needs a target and current value.`, evidenceIds: [goal.id] });
+    if (["not_configured", "current_unknown", "invalid"].includes(target.state)) gaps.push({ code: "goal_without_measurement", detail: `“${goal.title}” needs a finite target and current value.`, evidenceIds: [goal.id] });
     if (!goal.deadline) gaps.push({ code: "goal_without_deadline", detail: `“${goal.title}” has no deadline.`, evidenceIds: [goal.id] });
-    if (measurement && !["manual", "in_sync"].includes(measurement.status)) {
-      reasons.unshift(measurement.summary);
-      gaps.push({ code: "goal_measurement_drift", detail: `“${goal.title}” needs its recorded progress reconciled with ${measurement.label.toLowerCase()}.`, evidenceIds: measurement.evidenceIds.slice(0, 8) });
-      if (status === "on_track") status = "needs_measurement";
+    if (!goal.deadline && target.direction !== "at_least") gaps.push({ code: "bounded_target_without_deadline", detail: `“${goal.title}” cannot finalize an at-most or exact target without a deadline.`, evidenceIds: [goal.id] });
+    if (measurementDrift) {
+      gaps.push({ code: "goal_measurement_drift", detail: `“${goal.title}” needs its recorded progress reconciled with ${measurement!.label.toLowerCase()}.`, evidenceIds: measurement!.evidenceIds.slice(0, 8) });
     }
-    if (!reasons.length) reasons.push(progressRatio !== null ? `Recorded progress is ${Math.round(progressRatio * 100)}% with no linked overdue or blocked work.` : "No blocking condition is recorded.");
-    return { goalId: goal.id, title: goal.title, status, progressRatio, completedTasks, openTasks, reasons, evidenceIds: unique([goal.id, ...initiatives.map((initiative) => initiative.id), ...overdue.map((task) => task.id), ...(measurement?.evidenceIds ?? [])]) };
+    if (!reasons.length) reasons.push(`${target.summary} No linked contradiction, blocker, or overdue work is recorded; this is not a completion forecast.`);
+    return { goalId: goal.id, title: goal.title, status, target, progressRatio: target.progressRatio, completedTasks, openTasks, reasons, evidenceIds: unique([goal.id, ...initiatives.map((initiative) => initiative.id), ...overdue.map((task) => task.id), ...(measurement?.evidenceIds ?? [])]) };
   });
-  const weights = { on_track: 100, needs_measurement: 55, at_risk: 65, off_track: 15 } as const;
+  const weights = { on_track: 100, target_reached: 100, needs_measurement: 55, at_risk: 65, off_track: 15 } as const;
   const score = Math.round(goals.reduce((sum, goal) => sum + weights[goal.status], 0) / goals.length);
   const status: ManagerPlanHealth["status"] = goals.some((goal) => goal.status === "off_track") ? "off_track" : goals.some((goal) => goal.status === "at_risk" || goal.status === "needs_measurement") ? "at_risk" : "on_track";
   const summary = status === "on_track"
-    ? `The active plan is on track based on ${goals.length} recorded goal${goals.length === 1 ? "" : "s"}.`
+    ? `The active plan has no recorded contradiction or blocker${goals.some((goal) => goal.status === "target_reached") ? `; ${goals.filter((goal) => goal.status === "target_reached").length} target${goals.filter((goal) => goal.status === "target_reached").length === 1 ? " is" : "s are"} ready for review` : ""}. This is not a forecast of target completion.`
     : status === "off_track"
       ? "At least one active goal is past its deadline without recorded completion."
       : `${goals.filter((goal) => goal.status !== "on_track").length} active goal${goals.filter((goal) => goal.status !== "on_track").length === 1 ? " needs" : "s need"} attention or better measurement.`;
-  return { score, status, summary, goals, gaps };
+  return { policyVersion: "manager_plan_health_v2", observedAt: now.toISOString(), forecast: false, score, status, summary, goals, gaps };
 }
 
 export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = new Date()): ManagerBrief {
@@ -783,11 +791,11 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
       : null;
     addWeek({
       stableKey: `goal-path-${goalPath.goalId}-${goalPath.status}`,
-      title: goalPath.nextTask ? `Advance ${goalPath.nextTask.title}` : goalPath.status === "target_reached" ? `Review ${goalPath.goalTitle}` : `Repair the path to ${goalPath.goalTitle}`,
+      title: goalPath.nextTask ? `Advance ${goalPath.nextTask.title}` : goalPath.status === "target_reached" ? `Review ${goalPath.goalTitle}` : goalPath.status === "target_monitoring" ? `Keep measuring ${goalPath.goalTitle}` : `Repair the path to ${goalPath.goalTitle}`,
       reason: goalPath.reason,
       nextAction: goalPath.nextAction,
       workstream: goalPath.workstream,
-      priority: ["blocked", "conflicted"].includes(goalPath.status) ? "high" : "med",
+      priority: ["blocked", "conflicted"].includes(goalPath.status) ? "high" : goalPath.status === "target_monitoring" ? "low" : "med",
       evidenceIds: goalPath.evidenceIds.slice(0, 8),
       proposedAction
     });
@@ -816,7 +824,7 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
       workstream: goal?.workstream ?? "band_operations",
       priority: "low",
       evidenceIds: goal ? [goal.id] : [],
-      proposedAction: goal ? { type: "create_task", title: `Advance ${goal.title}`, dueAt: dueAt(1, now), initiativeId: null } : null
+      proposedAction: null
     });
   }
 
@@ -877,6 +885,10 @@ function questionHas(question: string, words: RegExp) {
   return words.test(question.toLowerCase());
 }
 
+export function managerQuestionAsksAboutPlanHealth(question: string) {
+  return /\b(goal|plan|progress|on track|off track|realistic|strategy|90-day|90 day|target|under budget|over budget)\b/i.test(question);
+}
+
 function deterministicManagerChatBase(facts: ManagerFacts, question: string, now = new Date()): ManagerChatResult {
   const brief = suppressRepeatedManagerAdvice(deterministicManagerBrief(facts, now), facts.recommendationHistory, now);
   const proposedDecisionDraft = decisionDraftFromQuestion(question);
@@ -885,7 +897,7 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
   const liveQuestion = questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/);
   const bookingQuestion = questionHas(question, /\b(booking|buyer|venue|festival|prospect|campaign|reply|outreach|pitch)\b/);
   const teamQuestion = questionHas(question, /\b(member|lineup|bandmate|who|available)\b/);
-  const planQuestion = questionHas(question, /\b(goal|plan|progress|track|realistic|strategy|90-day|90 day)\b/);
+  const planQuestion = managerQuestionAsksAboutPlanHealth(question);
   const releaseQuestion = questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
   const commitmentQuestion = managerQuestionAsksAboutCommitments(question);
   const workSequenceQuestion = managerQuestionAsksAboutWorkSequence(question);
@@ -1071,7 +1083,7 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
     };
   }
 
-  if (releaseQuestion) {
+  if (releaseQuestion && !planQuestion) {
     const activeProjects = facts.projects.filter((project) => !["completed", "cancelled"].includes(project.status));
     const lines = activeProjects.slice(0, 5).map((project) => project.readiness
       ? `• ${project.name} — ${project.readiness.status.replaceAll("_", " ")} at ${project.readiness.score}/100; ${project.readiness.nextMilestone ? `next: ${project.readiness.nextMilestone.title}` : project.readiness.nextAction}`
@@ -1088,13 +1100,15 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
     const health = deterministicManagerPlanHealth(facts, now);
     const ambition = facts.profile?.twelveMonthAmbition?.toLowerCase() ?? "";
     const unrealistic = /\b(globally famous|overnight|next month|guaranteed|no budget)\b/.test(ambition);
-    const attention = health.goals.find((goal) => goal.status === "off_track") ?? health.goals.find((goal) => goal.status === "at_risk" || goal.status === "needs_measurement");
+    const normalizedQuestion = question.toLocaleLowerCase();
+    const namedGoal = health.goals.find((goal) => normalizedQuestion.includes(goal.title.toLocaleLowerCase()));
+    const attention = namedGoal ?? health.goals.find((goal) => goal.status === "off_track") ?? health.goals.find((goal) => goal.status === "at_risk" || goal.status === "needs_measurement") ?? health.goals.find((goal) => goal.status === "target_reached");
     const nextPlannedTask = facts.tasks
       .filter((task) => task.status !== "done" && task.initiativeId)
       .sort((a, b) => (a.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER))[0];
-    const drift = facts.goalMeasurements.find((measurement) => !["manual", "in_sync"].includes(measurement.status));
+    const drift = facts.goalMeasurements.find((measurement) => (!namedGoal || measurement.goalId === namedGoal.goalId) && !["manual", "in_sync"].includes(measurement.status));
     return {
-      answer: `${unrealistic ? "The ambition is useful as a direction, but the recorded timeframe or constraints do not support treating it as a forecast. " : ""}${health.summary} The plan-health score is ${health.score}/100; that is an operating signal from deadlines, measurements, linked work, and blockers—not a prediction.${drift ? `\n\nBefore trusting the percentage for “${drift.goalTitle},” reconcile it: ${drift.summary} ${drift.nextAction}` : attention ? `\n\nStart with “${attention.title}”: ${attention.reasons[0]}` : nextPlannedTask ? `\n\nThe next recorded step is “${nextPlannedTask.title}”. Assign a real owner if it still says the band generally.` : "\n\nSet one measurable goal with a deadline, then link an initiative and a next task."}`,
+      answer: `${unrealistic ? "The ambition is useful as a direction, but the recorded timeframe or constraints do not support treating it as a forecast. " : ""}${health.summary} The plan-health score is ${health.score}/100; it checks target direction, deadlines, measurement integrity, linked work, and blockers—not elapsed-time pace or probability.${drift ? `\n\nBefore trusting the recorded value for “${drift.goalTitle},” reconcile it: ${drift.summary} ${drift.nextAction}` : attention ? `\n\nFor “${attention.title}”: ${attention.target.summary} ${attention.reasons[0]} ${attention.target.nextAction}` : nextPlannedTask ? `\n\nThe next recorded step is “${nextPlannedTask.title}”. Assign a real owner if it still says the band generally.` : "\n\nSet one measurable goal with a deadline, then link an initiative and a next task."}`,
       citations: unique([...health.goals.flatMap((goal) => goal.evidenceIds), ...(nextPlannedTask ? [nextPlannedTask.id] : [])]).slice(0, 10),
       recommendation: actionableRecommendation(matchingRecommendation(brief))
     };

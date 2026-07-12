@@ -361,7 +361,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v19`)
+  (owner-only; currently accepts only the code-registered `manager_os_v20`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -436,7 +436,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v19` retains the current operator question and at most 12
+version `manager_os_v20` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -527,6 +527,10 @@ recommendation and never activates a prompt/policy version.
 Goal progress accepts exactly one of `value` or `delta`; a delta requires an
 existing current value. Each update transactionally changes the goal and adds
 an immutable `ManagerGoalProgressEvent` with the prior value, actor, and note.
+Numeric goals use `targetDirection=at_least|at_most|exact`; omitted create
+values default to `at_least`, while PATCH requests apply only fields explicitly
+sent. The shared `manager_goal_target_v1` projection is the source of target
+state and language in goal paths, plan health, chat, and acceptance checks.
 Goals default to `measurementKind=manual`. A member may instead select
 `qualified_prospects`, `confirmed_gigs`, `completed_gigs`, or
 `completed_projects`. Qualified prospects count the current qualified/converted
@@ -537,8 +541,9 @@ manual. Repeated synchronization at the same observed value is a no-op.
 `GET /manager/plan-health` is deterministic: it scores active goals from
 deadlines, recorded measurements, linked initiatives, blocked work, and linked
 task state, and returns the reasons/evidence for every classification.
-Plan health also flags unassigned open tasks and timeline progress that trails
-the elapsed share of a measurable goal. Intake creates two band-mode-specific
+Plan health also flags unassigned open tasks, but does not infer linear pace or
+the probability of hitting a target. An “on track” result means only that the
+recorded work contains no contradiction or blocker. Intake creates two band-mode-specific
 goals, one initiative per goal, and three dated starter tasks per initiative.
 Tasks start unassigned intentionally; use the Tasks workspace to choose a
 linked active band member. Legacy text labels remain visible for existing
@@ -559,6 +564,8 @@ the result.
 `pnpm test:e2e` resets only the explicitly named test database after validating
 that its name contains `test`, then seeds it. Browser coverage therefore
 exercises first-time intake on every run instead of inheriting old test data.
+The runner forces its production build environment internally, so an unrelated
+shell-level `NODE_ENV` cannot invalidate Next.js prerendering.
 The three browser cases form one serial booking-to-operations journey over that
 database. Per-test retries are intentionally disabled because retrying only a
 downstream case would reuse partial state instead of replaying the journey;

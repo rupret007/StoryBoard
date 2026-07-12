@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, evidenceHealth, workSequence, goalPath, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -22,6 +22,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-evidence-health.js"),
   loadApi("manager/manager-work-sequence.js"),
   loadApi("manager/manager-goal-path.js"),
+  loadApi("manager/manager-goal-target.js"),
   loadApi("manager/manager-memory-capture.js"),
   loadApi("manager/manager-goal-measurement.js"),
   loadApi("manager/manager-coaching.js"),
@@ -77,6 +78,13 @@ test("manager intake is strict, supports every band mode, and preserves unknowns
   assert.equal(managerSchemas.managerDecisionReviewSchema.safeParse({ outcome: "mixed", note: "Worth repeating with a smaller room", evidence: [] }).success, true);
   assert.equal(managerSchemas.managerDecisionReviewSchema.safeParse({ outcome: "successful", note: "Invented status", evidence: [] }).success, false);
   assert.equal(managerSchemas.managerGoalCreateSchema.safeParse({ workstream: "live", title: "Book shows", measurementKind: "confirmed_gigs" }).success, true);
+  assert.equal(managerSchemas.managerGoalCreateSchema.parse({ workstream: "live", title: "Book shows" }).targetDirection, "at_least");
+  assert.equal(managerSchemas.managerGoalCreateSchema.safeParse({ workstream: "business", title: "Stay under budget", targetDirection: "at_most" }).success, true);
+  assert.equal(managerSchemas.managerGoalPatchSchema.safeParse({ targetDirection: "exact" }).success, true);
+  assert.deepEqual(managerSchemas.managerGoalPatchSchema.parse({ targetDirection: "at_most" }), { targetDirection: "at_most" });
+  assert.equal(managerSchemas.managerGoalPatchSchema.safeParse({}).success, false);
+  assert.equal(managerSchemas.managerGoalPatchSchema.safeParse({ targetDirection: "roughly" }).success, false);
+  assert.equal(managerSchemas.managerGoalPatchSchema.safeParse({ targetValue: Number.POSITIVE_INFINITY }).success, false);
   assert.equal(managerSchemas.managerGoalCreateSchema.safeParse({ workstream: "live", title: "Book shows", measurementKind: "social_vibes" }).success, false);
   assert.equal(managerSchemas.managerGoalProgressSyncSchema.safeParse({ observedValue: 2 }).success, true);
   assert.equal(managerSchemas.managerGoalProgressSyncSchema.safeParse({ observedValue: 1.5 }).success, false);
@@ -494,7 +502,7 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v19", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v20", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "available", effectiveUntil: "2026-07-20T12:00:00.000Z" }).success, true);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "busy" }).success, false);
@@ -563,7 +571,29 @@ test("manager response feedback is exact-message, tenant-safe, idempotent, and a
   assert.equal(upserts, 2);
 });
 
-test("plan health is transparent about measurement, deadlines, blockers, and linked work", () => {
+test("goal targets distinguish growth, caps, exact values, provisional state, and missing evidence", () => {
+  const deadline = new Date("2026-08-01T00:00:00.000Z");
+  const atLeast = goalTarget.deterministicManagerGoalTarget({ id: "goal-growth", title: "Book shows", targetValue: 6, currentValue: 2, targetUnit: "shows", targetDirection: "at_least", deadline }, now);
+  assert.equal(atLeast.state, "not_met");
+  assert.equal(atLeast.gapValue, 4);
+  assert.equal(atLeast.progressRatio, 1 / 3);
+  const cap = goalTarget.deterministicManagerGoalTarget({ id: "goal-cap", title: "Stay under budget", targetValue: 2000, currentValue: 1500, targetUnit: "USD", targetDirection: "at_most", deadline }, now);
+  assert.equal(cap.state, "met");
+  assert.equal(cap.finality, "provisional");
+  assert.equal(cap.progressRatio, null);
+  assert.match(cap.summary, /final result is not known before the deadline/i);
+  const capMiss = goalTarget.deterministicManagerGoalTarget({ id: "goal-cap", title: "Stay under budget", targetValue: 2000, currentValue: 2500, targetUnit: "USD", targetDirection: "at_most", deadline }, now);
+  assert.equal(capMiss.state, "not_met");
+  assert.equal(capMiss.gapValue, 500);
+  const exact = goalTarget.deterministicManagerGoalTarget({ id: "goal-exact", title: "Play one showcase", targetValue: 1, currentValue: 1, targetUnit: "showcase", targetDirection: "exact", deadline: new Date("2026-07-01T00:00:00.000Z") }, now);
+  assert.equal(exact.state, "met");
+  assert.equal(exact.finality, "final");
+  const unknown = goalTarget.deterministicManagerGoalTarget({ id: "goal-unknown", title: "Unknown", targetValue: 1, currentValue: null, targetDirection: "at_least", deadline }, now);
+  assert.equal(unknown.state, "current_unknown");
+  assert.equal(unknown.forecast, false);
+});
+
+test("plan health is transparent about target direction, measurement, deadlines, blockers, and linked work", () => {
   const healthy = intelligence.deterministicManagerPlanHealth(managerFacts({
     initiatives: [{ id: "initiative-a", goalId: "goal-a", title: "Regional sprint", status: "active", dueAt: new Date("2026-09-01T00:00:00.000Z") }],
     tasks: [{ id: "task-a", title: "Pitch rooms", status: "in_progress", ownerLabel: "Alex", dueAt: new Date("2026-07-20T00:00:00.000Z"), initiativeId: "initiative-a" }]
@@ -583,12 +613,22 @@ test("plan health is transparent about measurement, deadlines, blockers, and lin
   }), now);
   assert.equal(unassigned.status, "at_risk");
   assert.ok(unassigned.gaps.some((gap) => gap.code === "task_without_owner"));
-  const behindPace = intelligence.deterministicManagerPlanHealth(managerFacts({
-    goals: [{ id: "goal-a", title: "Book ten shows", workstream: "live", status: "active", createdAt: new Date("2026-01-01T00:00:00.000Z"), deadline: new Date("2026-10-01T00:00:00.000Z"), currentValue: 1, targetValue: 10 }],
-    initiatives: [{ id: "initiative-a", goalId: "goal-a", title: "Regional sprint", status: "active", dueAt: new Date("2026-09-01T00:00:00.000Z") }],
-    tasks: [{ id: "task-a", title: "Pitch rooms", status: "todo", ownerLabel: "Alex", dueAt: new Date("2026-07-20T00:00:00.000Z"), initiativeId: "initiative-a" }]
+  const lumpyRelease = intelligence.deterministicManagerPlanHealth(managerFacts({
+    goals: [{ id: "goal-a", title: "Ship one release", workstream: "releases", status: "active", createdAt: new Date("2026-01-01T00:00:00.000Z"), deadline: new Date("2026-10-01T00:00:00.000Z"), currentValue: 0, targetValue: 1, targetDirection: "at_least" }],
+    initiatives: [{ id: "initiative-a", goalId: "goal-a", title: "Release project", status: "active", dueAt: new Date("2026-09-01T00:00:00.000Z") }],
+    tasks: [{ id: "task-a", title: "Finish masters", status: "todo", ownerLabel: "Alex", dueAt: new Date("2026-07-20T00:00:00.000Z"), initiativeId: "initiative-a" }]
   }), now);
-  assert.match(behindPace.goals[0].reasons.join(" "), /behind the elapsed share/i);
+  assert.equal(lumpyRelease.status, "on_track");
+  assert.doesNotMatch(lumpyRelease.goals[0].reasons.join(" "), /behind|elapsed share|pace/i);
+  assert.match(lumpyRelease.summary, /not a forecast/i);
+  const cap = intelligence.deterministicManagerPlanHealth(managerFacts({
+    goals: [{ id: "goal-cap", title: "Keep release spend under budget", workstream: "business", status: "active", deadline: new Date("2026-10-01T00:00:00.000Z"), currentValue: 1500, targetValue: 2000, targetUnit: "USD", targetDirection: "at_most" }],
+    initiatives: [{ id: "initiative-cap", goalId: "goal-cap", title: "Track release spend", status: "active", dueAt: new Date("2026-09-30T00:00:00.000Z") }],
+    tasks: [{ id: "task-cap", title: "Reconcile expenses", status: "todo", ownerLabel: "Alex", dueAt: new Date("2026-07-20T00:00:00.000Z"), initiativeId: "initiative-cap" }]
+  }), now);
+  assert.equal(cap.goals[0].status, "on_track");
+  assert.equal(cap.goals[0].target.finality, "provisional");
+  assert.match(cap.goals[0].reasons.join(" "), /final result is not known/i);
   const noPlan = intelligence.deterministicManagerPlanHealth(managerFacts({ goals: [] }), now);
   assert.equal(noPlan.status, "needs_plan");
 });
@@ -769,22 +809,22 @@ test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v19", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v20", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v19", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v19", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v20", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v20", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v19", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v19", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v20", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v20", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v19", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v19", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v19", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v20", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v20", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v20", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 
@@ -1061,6 +1101,15 @@ test("manager goal paths reuse real prerequisites and never create orphan goal w
   const conflict = goalPath.deterministicManagerGoalPath({ goals, measurements: [], initiatives, tasks: conflictTasks, workSequence: workSequence.deterministicManagerWorkSequence(conflictTasks, now) }, now);
   assert.equal(conflict.goals[0].status, "conflicted");
   assert.equal(conflict.goals[0].contradictions[0].code, "task_after_goal");
+
+  const capGoals = [{ id: "goal-cap", title: "Keep release spend under budget", workstream: "business", status: "active", deadline: new Date("2026-09-30T00:00:00.000Z"), currentValue: 1500, targetValue: 2000, targetUnit: "USD", targetDirection: "at_most" }];
+  const capInitiatives = [{ id: "initiative-cap", goalId: "goal-cap", title: "Track expenses", status: "active", dueAt: new Date("2026-09-30T00:00:00.000Z") }];
+  const monitoring = goalPath.deterministicManagerGoalPath({ goals: capGoals, measurements: [], initiatives: capInitiatives, tasks: [], workSequence: workSequence.deterministicManagerWorkSequence([], now) }, now);
+  assert.equal(monitoring.goals[0].status, "target_monitoring");
+  assert.equal(monitoring.goals[0].target.direction, "at_most");
+  assert.equal(monitoring.counts.targetMonitoring, 1);
+  const monitoringBrief = intelligence.deterministicManagerBrief(managerFacts({ goals: capGoals, initiatives: capInitiatives, tasks: [], workSequence: workSequence.deterministicManagerWorkSequence([], now), goalPath: monitoring }), now);
+  assert.equal(monitoringBrief.thisWeek.find((item) => item.stableKey === "goal-path-goal-cap-target_monitoring")?.proposedAction, null);
 });
 
 test("manager knowledge health detects conflict and staleness while enforcing profile precedence", () => {

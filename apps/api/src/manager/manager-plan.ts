@@ -1,4 +1,4 @@
-import type { BandMode, ManagerGoalMeasurementKind, ManagerWorkstream } from "../generated/prisma/enums";
+import type { BandMode, ManagerGoalMeasurementKind, ManagerGoalTargetDirection, ManagerWorkstream } from "../generated/prisma/enums";
 
 export const MANAGER_PLAN_TEMPLATE_VERSION = "manager_plan_v1";
 
@@ -26,6 +26,7 @@ export type ManagerPlanGoalTemplate = {
   targetValue: number;
   targetUnit: string;
   currentValue: number;
+  targetDirection: ManagerGoalTargetDirection;
   measurementKind: ManagerGoalMeasurementKind;
   deadline: Date;
   initiative: ManagerPlanInitiativeTemplate;
@@ -55,6 +56,7 @@ function goal(
     targetValue,
     targetUnit,
     currentValue: 0,
+    targetDirection: "at_least",
     measurementKind,
     deadline: afterDays(now, 90),
     initiative: {

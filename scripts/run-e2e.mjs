@@ -8,6 +8,10 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const databaseUrl = requireTestDatabaseUrl();
 const env = {
   ...process.env,
+  // The harness builds the production artifacts before Playwright starts its
+  // separately configured API (development) and web (production) servers.
+  // Do not inherit a developer shell's nonstandard NODE_ENV into Next build.
+  NODE_ENV: "production",
   DATABASE_URL: databaseUrl,
   AUTH_DEV_BYPASS: "true",
   WEB_URL: "http://127.0.0.1:3000",

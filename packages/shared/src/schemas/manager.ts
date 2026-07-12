@@ -3,6 +3,7 @@ import { z } from "zod";
 export const bandModes = ["original", "cover_event", "hybrid"] as const;
 export const managerWorkstreams = ["live", "releases", "audience", "content", "business", "relationships", "band_operations"] as const;
 export const managerGoalMeasurementKinds = ["manual", "qualified_prospects", "confirmed_gigs", "completed_gigs", "completed_projects"] as const;
+export const managerGoalTargetDirections = ["at_least", "at_most", "exact"] as const;
 export const managerProfileSchema = z.object({
   bandMode: z.enum(bandModes), careerStage: z.string().trim().max(120).nullable().optional(),
   homeCity: z.string().trim().max(120).nullable().optional(), homeRegion: z.string().trim().max(120).nullable().optional(), homeCountry: z.string().trim().max(120).nullable().optional(),
@@ -18,8 +19,9 @@ export const bandMemberCheckInCreateSchema = z.object({
   note: z.string().trim().min(1).max(500).nullable().optional(),
   effectiveUntil: z.string().datetime({ offset: true }).nullable().optional()
 }).strict();
-export const managerGoalCreateSchema = z.object({ workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), description: z.string().trim().max(2000).nullable().optional(), targetValue: z.number().nullable().optional(), targetUnit: z.string().trim().max(80).nullable().optional(), currentValue: z.number().nullable().optional(), measurementKind: z.enum(managerGoalMeasurementKinds).default("manual"), deadline: z.string().datetime({ offset: true }).nullable().optional(), status: z.enum(["draft","active","achieved","paused","abandoned"]).default("draft") }).strict();
-export const managerGoalPatchSchema = managerGoalCreateSchema.partial().strict();
+const managerGoalFields = { workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), description: z.string().trim().max(2000).nullable(), targetValue: z.number().finite().nullable(), targetUnit: z.string().trim().max(80).nullable(), currentValue: z.number().finite().nullable(), targetDirection: z.enum(managerGoalTargetDirections), measurementKind: z.enum(managerGoalMeasurementKinds), deadline: z.string().datetime({ offset: true }).nullable(), status: z.enum(["draft","active","achieved","paused","abandoned"]) } as const;
+export const managerGoalCreateSchema = z.object({ ...managerGoalFields, description: managerGoalFields.description.optional(), targetValue: managerGoalFields.targetValue.optional(), targetUnit: managerGoalFields.targetUnit.optional(), currentValue: managerGoalFields.currentValue.optional(), targetDirection: managerGoalFields.targetDirection.default("at_least"), measurementKind: managerGoalFields.measurementKind.default("manual"), deadline: managerGoalFields.deadline.optional(), status: managerGoalFields.status.default("draft") }).strict();
+export const managerGoalPatchSchema = z.object(managerGoalFields).partial().strict().refine((value) => Object.keys(value).length > 0, { message: "At least one goal change is required" });
 export const managerGoalProgressSchema = z.object({
   value: z.number().finite().optional(),
   delta: z.number().finite().refine((value) => value !== 0, { message: "Delta must not be zero" }).optional(),
@@ -89,7 +91,7 @@ export const managerResponseEvalResolutionSchema = z.object({
   candidateVersion: z.string().regex(/^manager_os_v[1-9][0-9]*$/),
   note: z.string().trim().min(10).max(2000)
 }).strict();
-export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v19").default("manager_os_v19") }).strict();
+export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v20").default("manager_os_v20") }).strict();
 export const managerMemoryPatchSchema = z.object({
   value: z.json().optional(),
   confirmed: z.boolean().optional(),

@@ -110,7 +110,7 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v19`
+already performed an outside action. Prompt/policy version `manager_os_v20`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -128,13 +128,18 @@ unfinished prerequisites. Manager separates ready-now work from downstream
 work and recorded blockers, and advances a ready prerequisite instead of
 presenting a waiting task as actionable. It never infers effort, duration, or
 private member capacity from the graph.
-code-owned `manager_goal_path_v1` projection then joins every active goal to
+A code-owned `manager_goal_path_v1` projection then joins every active goal to
 its initiative, measurement, linked tasks, and prerequisite chain. Goal advice
 reuses the first real task or ready prerequisite, identifies missing or
 contradictory links, and prepares a new task only when a real initiative has no
 open work. Acceptance rechecks that premise in a serializable transaction, so
 an intervening task cannot create duplicate or orphan goal work. The path does
-not predict effort, duration, conversion, or private capacity. Before applying
+not predict effort, duration, conversion, or private capacity. The shared
+`manager_goal_target_v1` policy gives every numeric target an explicit meaning:
+reach at least, stay at or below, or match exactly. Caps and exact targets remain
+provisional until their deadline, while lumpy outcomes such as releases are no
+longer judged against an invented linear pace. “On track” means only that the
+recorded work has no contradiction or blocker; it is not a forecast. Before applying
 the five-item Today limit, the
 code-owned `manager_priority_v1` policy compares every candidate across event
 timing/readiness, member conflicts, commitment state, reply freshness,

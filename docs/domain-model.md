@@ -84,8 +84,14 @@ source for both manual numeric updates and member-approved reconciliation; it
 retains prior/current values, actor, policy source, and source kind. The sync
 route recomputes evidence in a serializable transaction and creates no event
 when already aligned. Plan health is derived—not stored—from goal measurement,
-deadlines, linked initiatives, blockers, task ownership/state, and elapsed
-timeline.
+deadlines, linked initiatives, blockers, and task ownership/state.
+`ManagerGoal.targetDirection` declares whether the numeric target is a minimum
+(`at_least`), a cap (`at_most`), or an exact final result (`exact`); existing
+goals retain `at_least` through the migration default. The non-persistent
+`manager_goal_target_v1` projection reports recorded target state, finality,
+gap, display language, and a bounded next step. Caps and exact values are
+provisional until their deadline. It deliberately makes no linear-pace,
+probability, effort, or duration forecast.
 `ManagerGoalPath` is the non-persistent `manager_goal_path_v1` view that joins
 that goal state to active initiatives, linked tasks, and
 `manager_work_sequence_v1`. It names one ready linked task or transitive

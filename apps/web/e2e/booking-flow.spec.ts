@@ -90,7 +90,7 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(cadenceCard.getByText(/Mondays after 9:00 AM in America\/Chicago/)).toBeVisible();
   const planCard = page.getByRole("heading", { name: "90-day plan" }).locator("xpath=ancestor::div[contains(@class,'shadow-')][1]");
   await expect(planCard).toBeVisible();
-  await expect(page.getByText(/65\/100 · At risk/i)).toBeVisible();
+  await expect(page.getByText(/\d+\/100 · At risk/i)).toBeVisible();
   await expect(planCard.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
   await expect(planCard.getByText("Complete the next release cycle", { exact: true })).toHaveCount(1);
   const liveGoalCard = planCard.getByText("Grow dependable show revenue", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-lg') and contains(@class,'border')][1]");
@@ -207,6 +207,15 @@ test("novice manager intake produces grounded work and band operations records",
   const planReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "plan-health score is" });
   await expect(planReply).toBeVisible();
   await expect(planReply).toContainText(/real owner/i);
+  const releaseGoalCard = planCard.getByText("Complete the next release cycle", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-lg') and contains(@class,'border')][1]");
+  const targetDirection = releaseGoalCard.getByLabel("Target means");
+  await targetDirection.selectOption("at_most");
+  await expect(page.getByText("Goal target meaning updated. Manager advice now uses this direction everywhere.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/final result is not known before the deadline/i).first()).toBeVisible();
+  await managerMessage.fill("Are we on track with Complete the next release cycle?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const targetReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "not elapsed-time pace or probability" }).last();
+  await expect(targetReply).toContainText(/final result is not known before the deadline/i);
   await managerMessage.fill("Remember that Morgan handles production advances");
   await page.getByRole("button", { name: "Send message" }).click();
   const memoryProposal = page.getByText("Suggested band memory", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
@@ -214,7 +223,7 @@ test("novice manager intake produces grounded work and band operations records",
   await memoryProposal.getByRole("button", { name: "Remember this" }).click();
   await expect(memoryProposal.getByText("completed", { exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByText(/plan-health score is/i)).toBeVisible();
+  await expect(page.getByText(/plan-health score is/i).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "What your manager remembers" })).toBeVisible();
   await expect(page.getByText("Morgan handles production advances", { exact: true }).last()).toBeVisible();
   await expect(page.getByTestId("manager-knowledge-health")).toContainText(/healthy/i);
@@ -238,7 +247,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v19", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v20", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 

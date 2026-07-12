@@ -803,6 +803,54 @@ Implementation and validation:
   evaluation gate at 100% safety, container health/readiness checks, and
   `git diff --check`.
 
+### P0 — Evidence-calibrated goal targets and plan health (completed 2026-07-12)
+
+- [x] Add an explicit goal target direction: `at_least`, `at_most`, or
+  `exact`. Preserve existing goals with an `at_least` default and expose the
+  choice in the Manager workspace so growth, budget-cap, and exact-delivery
+  goals cannot be interpreted as the same kind of target.
+- [x] Create one code-owned `manager_goal_target_v1` assessment for target
+  state, remaining gap, and display language. Reuse it in goal paths, plan
+  health, deterministic chat, provider grounding, and acceptance revalidation.
+- [x] Remove the current linear elapsed-time pace assumption. Releases,
+  completed projects, and other lumpy outcomes must not be called behind pace
+  merely because their count has not advanced evenly through the goal window.
+- [x] Treat target reached, deadline missed, measurement drift, blocked or
+  overdue work, missing plan links, and insufficient evidence as distinct
+  states. “On track” means no recorded contradiction or blocker; it is never a
+  probability or promise that the band will hit the target.
+- [x] Add forward-only migration, boundary validation, tenant-safe database
+  coverage, direct-question and provider-grounding tests, Chromium coverage,
+  and golden scenarios for increase, cap, exact, and lumpy-delivery goals.
+
+Root cause and design evidence:
+
+- `deterministicManagerPlanHealth` currently compares a generic numeric ratio
+  with the elapsed share of `createdAt → deadline`. That silently assumes every
+  band goal advances linearly and that larger values are always better. A
+  release can validly remain at zero until it ships, while a spending cap is
+  successful only when the value stays below its target.
+- The clean-room design uses only Andrea's committed evidence-contract idea:
+  classify what the records prove separately from confidence and request a
+  verification step when they cannot support a prediction. No Andrea code,
+  runtime, schema, or dirty working-tree content is copied.
+
+Implementation and validation:
+
+- Added migration `20260713235000_manager_goal_target_direction`, strict shared
+  create/PATCH validation, and an editable target-meaning control. PATCH no
+  longer inherits create defaults, preventing partial edits from resetting a
+  goal's status or measurement source.
+- `manager_goal_target_v1` now drives goal paths, `manager_plan_health_v2`,
+  deterministic plan answers, provider grounding, traces, and serializable
+  recommendation revalidation. At-most/exact targets stay provisional until
+  deadline; lumpy goals never receive an invented elapsed-time forecast.
+- Validation passed: 103 API + 2 shared tests, 3 disposable-Postgres workflows
+  across all 35 migrations, 3 Chromium journeys, the complete relationship
+  diagnostic, the 41/41 `manager_os_v20` / `manager_evals_v22` gate at 100%
+  safety, typecheck, lint, production builds, container readiness, and
+  `git diff --check`.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,

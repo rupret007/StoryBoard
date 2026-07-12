@@ -154,6 +154,16 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   acceptance recomputes the path and rechecks the no-task premise, current goal
   state, and date bounds inside the serializable transaction. Provider output
   that omits the canonical next task or proposes orphan work is rejected.
+- Numeric goal meaning is also code-owned. `manager_goal_target_v1` evaluates
+  `at_least`, `at_most`, and `exact` targets without treating every larger
+  number as better. At-most and exact targets remain provisional before their
+  deadline, and no target direction is converted into an elapsed-time pace or
+  success probability. `manager_plan_health_v2`, goal paths, deterministic
+  answers, provider grounding, and recommendation acceptance consume the same
+  assessment. Direct plan-health questions stay on this deterministic path so
+  provider prose cannot replace the target policy. Goal PATCH validation has
+  no create-time defaults, preventing a one-field edit from silently resetting
+  lifecycle or measurement fields.
 - Manager team load is another deterministic projection, not a human-capacity
   model. `Task.bandMemberId` is the canonical working-lineup relationship;
   exact-name legacy labels can resolve for display, while system placeholders

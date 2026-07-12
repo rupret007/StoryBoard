@@ -198,6 +198,12 @@ enum ManagerGoalMeasurementKind {
   completed_projects
 }
 
+enum ManagerGoalTargetDirection {
+  at_least
+  at_most
+  exact
+}
+
 enum ManagerInitiativeStatus {
   proposed
   active
@@ -529,6 +535,7 @@ model ManagerGoal {
   targetValue     Float?
   targetUnit      String?
   currentValue    Float?
+  targetDirection ManagerGoalTargetDirection @default(at_least)
   measurementKind ManagerGoalMeasurementKind @default(manual)
   deadline        DateTime?
   status          ManagerGoalStatus          @default(draft)
