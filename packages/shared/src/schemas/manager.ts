@@ -12,6 +12,12 @@ export const managerProfileSchema = z.object({
 }).strict();
 export const bandMemberCreateSchema = z.object({ name: z.string().trim().min(1).max(160), linkedOperatorId: z.string().trim().min(1).nullable().optional(), email: z.string().email().nullable().optional(), phone: z.string().trim().max(40).nullable().optional(), instruments: z.array(z.string().trim().min(1).max(80)).max(20).default([]), roles: z.array(z.string().trim().min(1).max(80)).max(20).default([]), defaultSplitBasisPoints: z.number().int().min(0).max(10000).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional(), active: z.boolean().default(true) }).strict();
 export const bandMemberPatchSchema = bandMemberCreateSchema.partial().strict();
+export const bandMemberCheckInStatuses = ["available", "limited", "unavailable"] as const;
+export const bandMemberCheckInCreateSchema = z.object({
+  status: z.enum(bandMemberCheckInStatuses),
+  note: z.string().trim().min(1).max(500).nullable().optional(),
+  effectiveUntil: z.string().datetime({ offset: true }).nullable().optional()
+}).strict();
 export const managerGoalCreateSchema = z.object({ workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), description: z.string().trim().max(2000).nullable().optional(), targetValue: z.number().nullable().optional(), targetUnit: z.string().trim().max(80).nullable().optional(), currentValue: z.number().nullable().optional(), measurementKind: z.enum(managerGoalMeasurementKinds).default("manual"), deadline: z.string().datetime({ offset: true }).nullable().optional(), status: z.enum(["draft","active","achieved","paused","abandoned"]).default("draft") }).strict();
 export const managerGoalPatchSchema = managerGoalCreateSchema.partial().strict();
 export const managerGoalProgressSchema = z.object({
@@ -83,7 +89,7 @@ export const managerResponseEvalResolutionSchema = z.object({
   candidateVersion: z.string().regex(/^manager_os_v[1-9][0-9]*$/),
   note: z.string().trim().min(10).max(2000)
 }).strict();
-export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v14").default("manager_os_v14") }).strict();
+export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v16").default("manager_os_v16") }).strict();
 export const managerMemoryPatchSchema = z.object({
   value: z.json().optional(),
   confirmed: z.boolean().optional(),
@@ -93,6 +99,7 @@ export const managerMemoryPatchSchema = z.object({
 
 export type ManagerProfileInput = z.infer<typeof managerProfileSchema>;
 export type BandMemberCreateInput = z.infer<typeof bandMemberCreateSchema>;
+export type BandMemberCheckInCreateInput = z.infer<typeof bandMemberCheckInCreateSchema>;
 export type ManagerGoalCreateInput = z.infer<typeof managerGoalCreateSchema>;
 export type ManagerGoalProgressInput = z.infer<typeof managerGoalProgressSchema>;
 export type ManagerGoalProgressSyncInput = z.infer<typeof managerGoalProgressSyncSchema>;

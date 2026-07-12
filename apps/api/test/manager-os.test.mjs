@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
+const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, memoryCapture, goalMeasurement, coaching, commitmentHealth, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -23,6 +23,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-goal-measurement.js"),
   loadApi("manager/manager-coaching.js"),
   loadApi("manager/manager-commitment-health.js"),
+  loadApi("manager/manager-team-load.js"),
   loadApi("manager/manager-schedule.js"),
   loadApi("manager/manager-provider-context.js"),
   loadApi("tasks/tasks.service.js"),
@@ -154,9 +155,13 @@ test("manager provider context enforces memory sensitivity independently of mode
   assert.equal(full.restrictedMemoryNeverShared, true);
 
   const service = new managerMod.ManagerService({ client: {} }, { log: async () => undefined }, { get: () => false });
-  const facts = managerFacts({ memoryFacts, knowledgeHealth: knowledgeHealth.deterministicManagerKnowledgeHealth({ profile: null, memoryFacts: [memoryFacts[0]] }, now), outcomeReview: { recordedLessons: [], evidenceIds: [] } });
+  const capacityMembers = [{ id: "member-a", name: "Alex", roles: ["booking"], instruments: [], checkIn: { id: "checkin-a", status: "limited", note: "UI-only capacity detail", effectiveUntil: new Date("2026-07-20T12:00:00.000Z"), createdAt: now } }];
+  const capacityLoad = teamLoad.deterministicManagerTeamLoad({ members: capacityMembers, tasks: [], now });
+  const facts = managerFacts({ members: capacityMembers, teamLoad: capacityLoad, memoryFacts, knowledgeHealth: knowledgeHealth.deterministicManagerKnowledgeHealth({ profile: null, memoryFacts: [memoryFacts[0]] }, now), outcomeReview: { recordedLessons: [], evidenceIds: [] } });
   assert.deepEqual(service.providerFacts(facts, false).memoryFacts.map((fact) => fact.id), ["normal-a"]);
   assert.deepEqual(service.providerFacts(facts, true).memoryFacts.map((fact) => fact.id), ["normal-a", "sensitive-a"]);
+  assert.equal(JSON.stringify(service.providerFacts(facts, false)).includes("UI-only capacity detail"), false);
+  assert.equal(JSON.stringify(service.providerFacts(facts, true)).includes("UI-only capacity detail"), false);
   assert.deepEqual(service.providerFacts(facts, false).knowledgeHealth.evidenceIds, ["normal-a"]);
   assert.equal(service.providerFacts(facts, true).knowledgeHealth.evidenceIds.includes("restricted-a"), false);
   const redactedIds = service.providerKnownIds(facts, false);
@@ -235,6 +240,7 @@ test("manager action authorization is code-owned and defaults to forbidden", () 
   assert.equal(policy.classifyManagerAction("generate_event_advance"), "internal");
   assert.equal(policy.classifyManagerAction("generate_project_plan"), "internal");
   assert.equal(policy.classifyManagerAction("remember_fact"), "internal");
+  assert.equal(policy.classifyManagerAction("assign_task"), "internal");
   assert.equal(policy.classifyManagerAction("create_draft_record"), "forbidden");
   assert.equal(policy.classifyManagerAction("send_email"), "approval_required");
   assert.equal(policy.classifyManagerAction("financial_action"), "owner_approval_required");
@@ -381,6 +387,75 @@ test("manager action targets are tenant-bound and revalidated before any write",
   assert.equal(writes, 0);
 });
 
+test("accepted role-grounded assignment is tenant-safe, optimistic, idempotent, linked, and audited", async () => {
+  let outcome = "suggested";
+  let task = { id: "task-a", artistId: "artist-a", title: "Send the venue follow-up", status: "todo", dueAt: null, ownerLabel: "Manager recommendation", bandMemberId: null };
+  const checkIn = { id: "checkin-a", status: "available", note: null, effectiveUntil: new Date(Date.now() + 86400000), createdAt: new Date() };
+  const audits = [];
+  const client = {
+    managerRecommendation: {
+      findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-assignment", outcome, taskId: null, decisionId: null, memoryFactId: null, task: null, decision: null, memoryFact: null, proposedAction: { type: "assign_task", taskId: task.id, bandMemberId: "member-a", checkInId: checkIn.id, availability: "available" }, evidence: [task.id, "member-a", checkIn.id] } : null,
+      updateMany: async ({ data }) => { if (outcome !== "suggested") return { count: 0 }; outcome = data.outcome; return { count: 1 }; },
+      update: async ({ data }) => ({ id: "rec-assignment", outcome, taskId: data.taskId ?? null, decisionId: null, memoryFactId: null, ...data })
+    },
+    task: {
+      findFirst: async ({ where }) => where.id === task.id && where.artistId === task.artistId ? { ...task } : null,
+      updateMany: async ({ where, data }) => {
+        if (where.id !== task.id || where.artistId !== task.artistId || task.bandMemberId !== null || where.ownerLabel !== task.ownerLabel) return { count: 0 };
+        task = { ...task, ...data };
+        return { count: 1 };
+      }
+    },
+    bandMember: {
+      findFirst: async ({ where }) => where.id === "member-a" && where.artistId === "artist-a" && where.active ? { id: "member-a", name: "Alex" } : null,
+      findMany: async ({ where }) => where.artistId === "artist-a" ? [{ id: "member-a", name: "Alex" }] : []
+    },
+    bandMemberCheckIn: { findFirst: async () => checkIn }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+  const accepted = await service.recommendation("artist-a", "rec-assignment", "accepted", {}, "member@test", "operator-a");
+  assert.equal(accepted.outcome, "completed");
+  assert.equal(accepted.taskId, "task-a");
+  assert.equal(task.bandMemberId, "member-a");
+  assert.equal(task.ownerLabel, "Alex");
+  assert.equal(audits.some((entry) => entry.action === "task.assigned" && entry.aggregateId === task.id), true);
+  await assert.rejects(() => service.recommendation("artist-a", "rec-assignment", "accepted", {}, "member@test", "operator-a"), /already been decided/);
+  await assert.rejects(() => service.recommendation("artist-b", "rec-assignment", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+});
+
+test("task assignment acceptance fails closed when ownership changes after review", async () => {
+  let outcome = "suggested";
+  let audits = 0;
+  const task = { id: "task-a", artistId: "artist-a", title: "Send the venue follow-up", status: "todo", dueAt: null, ownerLabel: "Manager recommendation", bandMemberId: null };
+  const checkIn = { id: "checkin-a", status: "available", note: null, effectiveUntil: new Date(Date.now() + 86400000), createdAt: new Date() };
+  const client = {
+    managerRecommendation: {
+      findFirst: async () => ({ id: "rec-assignment", outcome, taskId: null, decisionId: null, memoryFactId: null, task: null, decision: null, memoryFact: null, proposedAction: { type: "assign_task", taskId: task.id, bandMemberId: "member-a", checkInId: checkIn.id, availability: "available" }, evidence: [task.id, "member-a", checkIn.id] }),
+      updateMany: async ({ data }) => { outcome = data.outcome; return { count: 1 }; },
+      update: async () => { throw new Error("must not link a lost assignment"); }
+    },
+    task: {
+      findFirst: async () => ({ ...task }),
+      updateMany: async () => ({ count: 0 })
+    },
+    bandMember: {
+      findFirst: async () => ({ id: "member-a", name: "Alex" }),
+      findMany: async () => [{ id: "member-a", name: "Alex" }]
+    },
+    bandMemberCheckIn: { findFirst: async () => checkIn }
+  };
+  client.$transaction = async (fn) => {
+    const before = outcome;
+    try { return await fn(client); }
+    catch (error) { outcome = before; throw error; }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
+  await assert.rejects(() => service.recommendation("artist-a", "rec-assignment", "accepted", {}, "member@test", "operator-a"), /changed before the assignment was saved/i);
+  assert.equal(outcome, "suggested");
+  assert.equal(audits, 0);
+});
+
 test("concurrent recommendation acceptance cannot create duplicate tasks", async () => {
   let taskCreates = 0;
   const client = {
@@ -416,8 +491,30 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v14", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v16", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
+  assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "available", effectiveUntil: "2026-07-20T12:00:00.000Z" }).success, true);
+  assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "busy" }).success, false);
+  assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "limited", privateDetail: "not allowed" }).success, false);
+});
+
+test("member capacity check-ins are append-only, tenant-bound, and audited without note content", async () => {
+  const rows = [];
+  const audits = [];
+  const client = {
+    bandMember: { findFirst: async ({ where }) => where.id === "member-a" && where.artistId === "artist-a" && where.active ? { id: "member-a", name: "Alex" } : null },
+    bandMemberCheckIn: { create: async ({ data }) => { const row = { id: `checkin-${rows.length + 1}`, ...data, createdAt: new Date(), bandMember: { id: "member-a", name: "Alex", active: true } }; rows.push(row); return row; } }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+  const row = await service.recordMemberCheckIn("artist-a", "member-a", { status: "limited", note: "Only one more operational task", effectiveUntil: "2999-07-20T12:00:00.000Z" }, "member@test", "operator-a");
+  assert.equal(row.status, "limited");
+  assert.equal(rows.length, 1);
+  assert.equal(audits[0].action, "manager.member_check_in_recorded");
+  assert.equal(Object.hasOwn(audits[0].metadata, "note"), false);
+  await assert.rejects(() => service.recordMemberCheckIn("artist-b", "member-a", { status: "available" }, "member@test", "operator-a"), (error) => error?.getStatus?.() === 404);
+  assert.equal(rows.length, 1);
+  await assert.rejects(() => service.recordMemberCheckIn("artist-a", "member-a", { status: "available", effectiveUntil: "2020-01-01T00:00:00.000Z" }, "member@test", "operator-a"), /future/i);
+  assert.equal(rows.length, 1);
 });
 
 test("manager response quality rejects assistant tells, canned prose, and invented external actions", () => {
@@ -571,7 +668,7 @@ test("brief and plan conversation advance an existing linked step instead of inv
 test("a pre-intake cached brief is invalidated when setup completes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v14", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v16", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-12T11:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
@@ -583,7 +680,7 @@ test("a pre-intake cached brief is invalidated when setup completes", async () =
 test("a cached brief is invalidated when commitment facts change", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => ({ updatedAt: new Date("2026-07-12T11:00:00.000Z") }) } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v14", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v16", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
@@ -608,7 +705,7 @@ test("a cached brief is invalidated when an audited operating fact changes", asy
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   const createdAt = new Date(Date.now() - 60_000);
-  service.latestBrief = async () => ({ id: "stale-brief", promptVersion: "manager_os_v14", createdAt });
+  service.latestBrief = async () => ({ id: "stale-brief", promptVersion: "manager_os_v16", createdAt });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => ({ createdAt: new Date(createdAt.getTime() + 1_000) });
   service.generateBrief = async () => { generations += 1; return { id: "fresh-brief" }; };
@@ -669,22 +766,22 @@ test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v14", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v16", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v14", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v14", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v16", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v16", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v14", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v14", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v16", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v16", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v14", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v13", resolutionVersion: "manager_os_v14", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v14", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v16", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v14", resolutionVersion: "manager_os_v16", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v16", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 
@@ -949,6 +1046,78 @@ test("manager briefs and conversation expose context gaps without judging the ba
   assert.equal(answer.recommendation, null);
 });
 
+test("team workload resolves linked and legacy owners while treating system labels as unassigned", () => {
+  const members = [
+    { id: "member-a", name: "Alex", roles: ["booking"], instruments: ["vocals"], checkIn: { id: "checkin-a", status: "available", note: null, effectiveUntil: new Date("2026-07-24T12:00:00.000Z"), createdAt: now } },
+    { id: "member-b", name: "Morgan", roles: ["music director", "production"], instruments: ["guitar"], checkIn: { id: "checkin-b", status: "limited", note: "One additional task", effectiveUntil: new Date("2026-07-20T12:00:00.000Z"), createdAt: now } }
+  ];
+  const tasks = [
+    { id: "task-linked", title: "Confirm rehearsal schedule", status: "in_progress", bandMemberId: "member-b", ownerLabel: "Old display name", dueAt: new Date("2026-07-18T12:00:00.000Z") },
+    { id: "task-legacy", title: "Review the setlist", status: "todo", bandMemberId: null, ownerLabel: "Alex", dueAt: null },
+    { id: "task-followup", title: "Send the venue follow-up", status: "todo", bandMemberId: null, ownerLabel: "Manager recommendation", dueAt: new Date("2026-07-20T12:00:00.000Z") },
+    { id: "task-advance", title: "Confirm the stage input list", status: "todo", bandMemberId: null, ownerLabel: "Show advance", dueAt: new Date("2026-07-21T12:00:00.000Z") }
+  ];
+  const load = teamLoad.deterministicManagerTeamLoad({ members, tasks, now });
+  assert.equal(load.policyVersion, "manager_team_load_v2");
+  assert.equal(load.members.find((member) => member.memberId === "member-a").openTasks, 1);
+  assert.equal(load.members.find((member) => member.memberId === "member-b").openTasks, 1);
+  assert.equal(load.unassigned.find((task) => task.taskId === "task-followup").state, "system_placeholder");
+  assert.equal(load.suggestions.find((suggestion) => suggestion.taskId === "task-followup").memberId, "member-a");
+  assert.equal(load.suggestions.find((suggestion) => suggestion.taskId === "task-followup").checkInId, "checkin-a");
+  assert.equal(load.suggestions.find((suggestion) => suggestion.taskId === "task-advance").memberId, "member-b");
+  assert.ok(load.confidence <= 0.85);
+  assert.match(load.nextAction, /review whether/i);
+
+  const facts = managerFacts({ members, tasks, teamLoad: load, commitmentHealth: commitmentHealth.deterministicManagerCommitmentHealth(tasks, now) });
+  const answer = intelligence.deterministicManagerChat(facts, "Who should own the unassigned work?", now);
+  assert.match(answer.answer, /current voluntary check-ins/i);
+  assert.equal(answer.recommendation?.proposedAction?.type, "assign_task");
+  assert.equal(answer.recommendation?.proposedAction?.taskId, "task-followup");
+  assert.ok(answer.citations.includes("task-followup"));
+  assert.ok(answer.citations.includes("member-a"));
+});
+
+test("team workload refuses to choose between equally supported owners and excludes urgent members", () => {
+  const ambiguous = teamLoad.deterministicManagerTeamLoad({
+    members: [{ id: "member-a", name: "Alex", roles: ["booking"] }, { id: "member-b", name: "Morgan", roles: ["booking"] }],
+    tasks: [{ id: "task-a", title: "Pitch the venue", status: "todo", ownerLabel: null, bandMemberId: null, dueAt: null }],
+    now
+  });
+  assert.equal(ambiguous.suggestions.length, 0);
+  assert.match(ambiguous.nextAction, /choose a real owner/i);
+
+  const urgent = teamLoad.deterministicManagerTeamLoad({
+    members: [{ id: "member-a", name: "Alex", roles: ["booking"] }, { id: "member-b", name: "Morgan", roles: ["production"] }],
+    tasks: [
+      { id: "task-blocked", title: "Existing buyer follow-up", status: "blocked", bandMemberId: "member-a", ownerLabel: "Alex", blockedReason: "Waiting on buyer", dueAt: new Date("2026-07-10T12:00:00.000Z") },
+      { id: "task-new", title: "Pitch the venue", status: "todo", bandMemberId: null, ownerLabel: null, dueAt: null }
+    ],
+    now
+  });
+  assert.equal(urgent.members.find((member) => member.memberId === "member-a").pressure, "urgent");
+  assert.equal(urgent.suggestions.some((suggestion) => suggestion.memberId === "member-a"), false);
+});
+
+test("team workload excludes unavailable members and treats expired check-ins as unknown", () => {
+  const task = { id: "task-a", title: "Pitch the venue", status: "todo", ownerLabel: null, bandMemberId: null, dueAt: null };
+  const unavailable = teamLoad.deterministicManagerTeamLoad({
+    members: [{ id: "member-a", name: "Alex", roles: ["booking"], checkIn: { id: "checkin-unavailable", status: "unavailable", note: "Private note must not affect matching", effectiveUntil: new Date("2026-07-20T12:00:00.000Z"), createdAt: now } }],
+    tasks: [task], now
+  });
+  assert.equal(unavailable.members[0].availability, "unavailable");
+  assert.equal(unavailable.suggestions.length, 0);
+
+  const expired = teamLoad.deterministicManagerTeamLoad({
+    members: [{ id: "member-a", name: "Alex", roles: ["booking"], checkIn: { id: "checkin-expired", status: "available", note: "Must not remain current", effectiveUntil: new Date("2026-07-11T12:00:00.000Z"), createdAt: new Date("2026-07-10T12:00:00.000Z") } }],
+    tasks: [task], now
+  });
+  assert.equal(expired.members[0].availability, "unknown");
+  assert.equal(expired.members[0].availabilityFreshness, "expired");
+  assert.equal(expired.members[0].availabilityNote, null);
+  assert.equal(expired.suggestions[0].availability, "unknown");
+  assert.match(expired.suggestions[0].reason, /confirm before assigning/i);
+});
+
 test("commitment health ranks recorded blockers, waits, deferrals, ownership, and dates without inventing causes", () => {
   const tasks = [
     { id: "task-blocked", title: "Confirm stage dimensions", status: "blocked", ownerLabel: "Alex", dueAt: new Date("2026-07-11T12:00:00.000Z"), blockedReason: "Promoter has not supplied the stage plot", waitingOn: "Promoter", deferralCount: 0, lastDeferredAt: null },
@@ -1147,6 +1316,14 @@ test("manager grounding rejects a whole response with invented evidence", () => 
   assert.equal(service.chatOutputIsGrounded({ answer: "Exact blocker", citations: ["task-blocked"], recommendation: null }, commitmentFacts, "What is blocked or slipping?"), true);
   assert.equal(service.chatOutputIsGrounded({ answer: "Duplicate work", citations: ["task-blocked"], recommendation: { stableKey: "duplicate-task", title: "Duplicate", reason: "Wrong", nextAction: "Create it", workstream: "band_operations", priority: "med", evidenceIds: ["task-blocked"], proposedAction: { type: "create_task", title: "Confirm stage dimensions", dueAt: null, initiativeId: null } } }, commitmentFacts, "What is blocked or slipping?"), false);
   assert.equal(service.briefIsGrounded({ ...emptyBrief, today: [{ stableKey: "other-work", title: "Other", reason: "Lower priority", nextAction: "Do it", workstream: "band_operations", priority: "med", evidenceIds: ["goal-a"], proposedAction: null }] }, commitmentFacts), false);
+
+  const assignmentTasks = [{ id: "task-owner", title: "Send venue follow-up", status: "todo", ownerLabel: "Manager recommendation", bandMemberId: null, dueAt: null }];
+  const assignmentMembers = [{ id: "member-a", name: "Alex", roles: ["booking"], instruments: [], checkIn: { id: "checkin-a", status: "available", note: null, effectiveUntil: new Date("2026-07-20T12:00:00.000Z"), createdAt: now } }, { id: "member-b", name: "Morgan", roles: ["production"], instruments: [] }];
+  const assignmentLoad = teamLoad.deterministicManagerTeamLoad({ members: assignmentMembers, tasks: assignmentTasks, now });
+  const assignmentFacts = managerFacts({ members: assignmentMembers, tasks: assignmentTasks, teamLoad: assignmentLoad, commitmentHealth: commitmentHealth.deterministicManagerCommitmentHealth(assignmentTasks, now) });
+  const assignmentItem = { stableKey: "assign-task-owner-member-a", title: "Assign follow-up", reason: "Role match", nextAction: "Review assignment", workstream: "band_operations", priority: "med", evidenceIds: ["task-owner", "member-a", "checkin-a"], proposedAction: { type: "assign_task", taskId: "task-owner", bandMemberId: "member-a", checkInId: "checkin-a", availability: "available" } };
+  assert.equal(service.chatOutputIsGrounded({ answer: "Review the grounded match", citations: ["task-owner", "member-a"], recommendation: assignmentItem }, assignmentFacts, "Who should own this?"), true);
+  assert.equal(service.chatOutputIsGrounded({ answer: "Invent a different owner", citations: ["task-owner", "member-b"], recommendation: { ...assignmentItem, evidenceIds: ["task-owner", "member-b"], proposedAction: { type: "assign_task", taskId: "task-owner", bandMemberId: "member-b", checkInId: null, availability: "unknown" } } }, assignmentFacts, "Who should own this?"), false);
 });
 
 test("operations validation rejects unknown fields, invalid money, and bad settlement splits", () => {

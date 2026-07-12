@@ -206,8 +206,13 @@ database/Redis/worker state; it never returns URLs, credentials, or queue data.
 - `GET /tasks/overdue` — tasks with `dueAt` before now (not `done`), same rule as the dashboard overdue count.
 - `GET /tasks/stale-followups?days=7` — incomplete tasks whose `updatedAt` is older than `days` (stale follow-ups).
 - `POST /tasks` and `PATCH /tasks/:id` accept nullable artist-owned
-  `opportunityId` and `projectId` links. Each relation is checked before write;
-  a foreign ID returns generic not-found with no audit event.
+  `opportunityId`, `projectId`, and active `bandMemberId` links. Each relation
+  is checked before write; a foreign ID returns generic not-found with no audit
+  event. `bandMemberId: null` unlinks the owner. Do not send `bandMemberId` and
+  legacy `ownerLabel` together.
+- Linked `bandMemberId` is canonical and `ownerLabel` is its display snapshot.
+  Setting a legacy label clears the link for import compatibility; no migration
+  automatically guesses or rewrites historical labels.
 - A task with `status: "blocked"` requires `blockedReason`; `waitingOn` may name
   the person or organization holding the next step. Moving an incomplete task
   to a later date (or clearing an existing date) increments `deferralCount` and
@@ -318,6 +323,17 @@ Manager routes:
   `GET /manager/learning`
 - `GET /manager/outcome-review?days=90` — read-only, tenant-scoped derived
   outcomes; `days` accepts 7–365 and defaults to 90
+- `GET /manager/team-load` — read-only `manager_team_load_v2` projection over
+  active members, open tasks, and current voluntary capacity check-ins. It
+  distinguishes linked owners, exact-name legacy matches, system placeholders,
+  and unknown labels; it reports recorded pressure and check-in freshness,
+  never an estimate of hours or personal circumstances.
+- `GET /manager/member-check-ins` and
+  `POST /manager/members/:id/check-ins` — read append-only check-in history or
+  record `available`, `limited`, or `unavailable` with optional `note` and
+  offset-datetime `effectiveUntil`. Viewers read; members/owners write. Expiry
+  must be future, cross-artist/inactive member IDs return not found, and note
+  content is never copied to provider context or audit metadata.
 - `GET /manager/eval-examples` and
   `POST /manager/recommendations/:id/promote-eval` (owner-only)
 - `GET /manager/response-eval-examples`,
@@ -326,7 +342,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v14`)
+  (owner-only; currently accepts only the code-registered `manager_os_v16`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -382,7 +398,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v14` retains the current operator question and at most 12
+version `manager_os_v16` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -429,12 +445,16 @@ A deterministic post-output gate rejects canned openings, assistant/meta
 language, excessive length/formatting, and claims of completed outside actions;
 the deterministic manager answer is used when model output fails the gate.
 Chat may return one reviewable recommendation through the same recommendation
-API. Acceptance permits `create_task`, an open `create_decision` draft, or one
-of two readiness-bound operations: `generate_event_advance` and
-`generate_project_plan`. Those generators only create source-keyed internal
-Tasks, require the cited current target to belong to the artist, recheck the
-event/project date, and commit with the recommendation claim. They cannot call
-a provider or prepare/execute an Approval.
+API. Acceptance permits `create_task`, an open `create_decision` draft, a
+role-grounded `assign_task`, or one of two readiness-bound operations:
+`generate_event_advance` and `generate_project_plan`. Assignment requires the
+exact current-artist open task to still be unowned or system-labeled plus the
+exact active member selected by the deterministic team-load view; equal role
+matches remain unchosen and urgent recorded workloads are excluded. The
+generators only create source-keyed internal Tasks, require the cited current
+target to belong to the artist, recheck the event/project date, and commit with
+the recommendation claim. These actions cannot call a provider or
+prepare/execute an Approval.
 For commitment questions, code requires the top recorded pressure item as
 evidence and rejects duplicate task proposals. Generated briefs must keep a
 high-severity commitment first or fall back to deterministic output. The model does not
@@ -482,9 +502,11 @@ task state, and returns the reasons/evidence for every classification.
 Plan health also flags unassigned open tasks and timeline progress that trails
 the elapsed share of a measurable goal. Intake creates two band-mode-specific
 goals, one initiative per goal, and three dated starter tasks per initiative.
-Tasks start unassigned intentionally; use the Tasks workspace to choose a real
-band member or other owner. Blocked tasks need a reason; the workspace can also
-record a waiting party and reschedule a date. `ManagerCommitmentHealth` is
+Tasks start unassigned intentionally; use the Tasks workspace to choose a
+linked active band member. Legacy text labels remain visible for existing
+imports, but new UI assignments use member IDs. Blocked tasks need a reason;
+the workspace can also record a waiting party and reschedule a date.
+`ManagerCommitmentHealth` is
 derived from current task facts and deferral history, never edited as a score.
 Re-running plan ensure is idempotent.
 
@@ -700,7 +722,7 @@ pnpm test
 pnpm build
 ```
 
-**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (`nest build` then `node --test` on `apps/api/test/*.test.mjs`). The API suite covers tenant links, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. If repeated local builds exhaust Node's default heap, rerun the gate with `NODE_OPTIONS=--max-old-space-size=4096`; the container already uses lower-memory SWC emission after the separate typecheck.
+**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The API suite covers tenant links, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
 
 **Database integration tests:** Set `STORYBOARD_TEST_DATABASE_URL` to a disposable PostgreSQL database whose name contains `test`, then run:
 

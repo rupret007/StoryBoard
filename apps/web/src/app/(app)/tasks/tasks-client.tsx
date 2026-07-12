@@ -46,7 +46,7 @@ export function TasksClient({
   const [title, setTitle] = useState("");
   const [opportunityId, setOpportunityId] = useState("");
   const [dueAt, setDueAt] = useState("");
-  const [ownerLabel, setOwnerLabel] = useState("");
+  const [bandMemberId, setBandMemberId] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function createTask(e: React.FormEvent) {
@@ -59,13 +59,13 @@ export function TasksClient({
           title: title.trim(),
           opportunityId: opportunityId || undefined,
           dueAt: dueAt || undefined,
-          ownerLabel: ownerLabel || undefined
+          bandMemberId: bandMemberId || null
         }
       });
       setTitle("");
       setOpportunityId("");
       setDueAt("");
-      setOwnerLabel("");
+      setBandMemberId("");
       router.refresh();
     } finally {
       setBusy(false);
@@ -97,9 +97,9 @@ export function TasksClient({
           </label>
           <label>
             <span className="sb-label">Owner</span>
-            <select className="sb-select mt-1.5" value={ownerLabel} onChange={(e) => setOwnerLabel(e.target.value)}>
+            <select className="sb-select mt-1.5" value={bandMemberId} onChange={(e) => setBandMemberId(e.target.value)}>
               <option value="">Unassigned</option>
-              {members.filter((member) => member.active).map((member) => <option key={member.id} value={member.name}>{member.name}</option>)}
+              {members.filter((member) => member.active).map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
             </select>
           </label>
           <label>
@@ -148,7 +148,7 @@ export function TasksClient({
             tasks={grouped.blocked}
             tone="danger"
             onSaved={() => router.refresh()}
-            ownerOptions={members.filter((member) => member.active).map((member) => member.name)}
+            members={members}
           />
           <TaskSection
             title="Overdue"
@@ -156,7 +156,7 @@ export function TasksClient({
             tasks={grouped.overdue}
             tone="warning"
             onSaved={() => router.refresh()}
-            ownerOptions={members.filter((member) => member.active).map((member) => member.name)}
+            members={members}
           />
           <TaskSection
             title="Open"
@@ -164,7 +164,7 @@ export function TasksClient({
             tasks={grouped.open}
             tone="neutral"
             onSaved={() => router.refresh()}
-            ownerOptions={members.filter((member) => member.active).map((member) => member.name)}
+            members={members}
           />
           <TaskSection
             title="Done"
@@ -172,7 +172,7 @@ export function TasksClient({
             tasks={grouped.done}
             tone="success"
             onSaved={() => router.refresh()}
-            ownerOptions={members.filter((member) => member.active).map((member) => member.name)}
+            members={members}
           />
         </div>
       )}
@@ -186,14 +186,14 @@ function TaskSection({
   tasks,
   tone,
   onSaved,
-  ownerOptions
+  members
 }: {
   title: string;
   subtitle: string;
   tasks: Task[];
   tone: "danger" | "warning" | "neutral" | "success";
   onSaved: () => void;
-  ownerOptions: string[];
+  members: BandMember[];
 }) {
   if (tasks.length === 0) {
     return null;
@@ -245,7 +245,7 @@ function TaskSection({
           </thead>
           <tbody>
             {tasks.map((t) => (
-              <TaskRow key={t.id} task={t} onSaved={onSaved} ownerOptions={ownerOptions} />
+              <TaskRow key={t.id} task={t} onSaved={onSaved} members={members} />
             ))}
           </tbody>
         </table>
@@ -257,14 +257,15 @@ function TaskSection({
 function TaskRow({
   task: t,
   onSaved,
-  ownerOptions
+  members
 }: {
   task: Task;
   onSaved: () => void;
-  ownerOptions: string[];
+  members: BandMember[];
 }) {
+  const savedOwnerValue = t.bandMemberId ?? (t.ownerLabel ? `legacy:${t.ownerLabel}` : "");
   const [status, setStatus] = useState(t.status);
-  const [ownerLabel, setOwnerLabel] = useState(t.ownerLabel ?? "");
+  const [ownerValue, setOwnerValue] = useState(savedOwnerValue);
   const [dueAt, setDueAt] = useState(t.dueAt?.slice(0, 10) ?? "");
   const [waitingOn, setWaitingOn] = useState(t.waitingOn ?? "");
   const [blockedReason, setBlockedReason] = useState(t.blockedReason ?? "");
@@ -273,13 +274,13 @@ function TaskRow({
 
   useEffect(() => {
     setStatus(t.status);
-    setOwnerLabel(t.ownerLabel ?? "");
+    setOwnerValue(savedOwnerValue);
     setDueAt(t.dueAt?.slice(0, 10) ?? "");
     setWaitingOn(t.waitingOn ?? "");
     setBlockedReason(t.blockedReason ?? "");
-  }, [t.status, t.ownerLabel, t.dueAt, t.waitingOn, t.blockedReason]);
+  }, [t.status, t.bandMemberId, t.ownerLabel, t.dueAt, t.waitingOn, t.blockedReason, savedOwnerValue]);
 
-  const changed = status !== t.status || ownerLabel !== (t.ownerLabel ?? "") || dueAt !== (t.dueAt?.slice(0, 10) ?? "") || waitingOn !== (t.waitingOn ?? "") || (status === "blocked" ? blockedReason !== (t.blockedReason ?? "") : Boolean(t.blockedReason));
+  const changed = status !== t.status || ownerValue !== savedOwnerValue || dueAt !== (t.dueAt?.slice(0, 10) ?? "") || waitingOn !== (t.waitingOn ?? "") || (status === "blocked" ? blockedReason !== (t.blockedReason ?? "") : Boolean(t.blockedReason));
 
   async function save() {
     if (!changed || (status === "blocked" && !blockedReason.trim())) {
@@ -290,7 +291,7 @@ function TaskRow({
     try {
       await apiFetch(`/tasks/${t.id}`, {
         method: "PATCH",
-        json: { status, ownerLabel: ownerLabel.trim() || null, dueAt: dueAt || null, waitingOn: status === "done" ? null : waitingOn.trim() || null, blockedReason: status === "blocked" ? blockedReason.trim() : null }
+        json: { status, ...(ownerValue !== savedOwnerValue ? { bandMemberId: ownerValue && !ownerValue.startsWith("legacy:") ? ownerValue : null } : {}), dueAt: dueAt || null, waitingOn: status === "done" ? null : waitingOn.trim() || null, blockedReason: status === "blocked" ? blockedReason.trim() : null }
       });
       onSaved();
     } catch (err) {
@@ -318,9 +319,10 @@ function TaskRow({
         </select>
       </td>
       <td className="py-3 pr-4">
-        <select className="sb-select py-1.5 text-xs" aria-label={`Owner for ${t.title}`} value={ownerLabel} onChange={(e) => setOwnerLabel(e.target.value)}>
+        <select className="sb-select py-1.5 text-xs" aria-label={`Owner for ${t.title}`} value={ownerValue} onChange={(e) => setOwnerValue(e.target.value)}>
           <option value="">Unassigned</option>
-          {[...new Set([...(t.ownerLabel ? [t.ownerLabel] : []), ...ownerOptions])].map((owner) => <option key={owner} value={owner}>{owner}</option>)}
+          {t.ownerLabel && !t.bandMemberId ? <option value={`legacy:${t.ownerLabel}`}>{t.ownerLabel} (legacy label)</option> : null}
+          {members.map((member) => <option key={member.id} value={member.id} disabled={!member.active}>{member.name}{member.active ? "" : " (inactive)"}</option>)}
         </select>
       </td>
       <td className="py-3 pr-4 tabular-nums text-[var(--text-secondary)]">

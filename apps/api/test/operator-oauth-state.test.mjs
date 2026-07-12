@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const load = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
+const load = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 
 const [stateMod, authServiceMod, controllerMod] = await Promise.all([
   load("auth/operator-oauth-state.js"),

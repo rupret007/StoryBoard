@@ -4,7 +4,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const advisorMod = await import(pathToFileURL(join(dir, "..", "dist", "advisor", "booking-advisor.service.js")).href);
+const advisorImport = await import(pathToFileURL(join(dir, "..", "dist", "advisor", "booking-advisor.service.js")).href);
+const advisorMod = advisorImport.default ?? advisorImport;
 
 test("booking advisor is deterministic and reviewable when OpenAI is disabled", async () => {
   let persisted;

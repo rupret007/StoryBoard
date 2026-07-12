@@ -10,7 +10,7 @@ const testDatabaseUrl = requireTestDatabaseUrl();
 process.env.DATABASE_URL = testDatabaseUrl;
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const load = (path) => import(pathToFileURL(join(dir, "..", "..", "dist", path)).href);
+const load = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "..", "dist", path)).href); return module.default ?? module; };
 
 const [
   prismaMod,
@@ -400,6 +400,14 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(await client.managerMemoryFact.count({ where: { artistId: artist.id, sourceType: "operating_profile" } }), 4);
   assert.equal((await manager.knowledgeHealth(artist.id, true)).status, "healthy");
   const member = await client.bandMember.findFirstOrThrow({ where: { artistId: artist.id } });
+  await manager.patchMember(artist.id, member.id, { roles: ["bandleader", "booking"] }, operator.email, operator.id);
+  const productionMember = await manager.createMember(artist.id, { name: "Morgan", instruments: ["bass"], roles: ["production"], active: true }, operator.email, operator.id);
+  const foreignMember = await client.bandMember.create({ data: { artistId: foreignArtist.id, name: "Foreign member", roles: ["booking"], instruments: [], active: true } });
+  const bookingCheckIn = await manager.recordMemberCheckIn(artist.id, member.id, { status: "available", effectiveUntil: new Date(Date.now() + 14 * 86400000).toISOString() }, operator.email, operator.id);
+  await manager.recordMemberCheckIn(artist.id, productionMember.id, { status: "limited", note: "One additional operational task", effectiveUntil: new Date(Date.now() + 7 * 86400000).toISOString() }, operator.email, operator.id);
+  await assert.rejects(() => manager.recordMemberCheckIn(artist.id, foreignMember.id, { status: "available" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  assert.equal((await manager.memberCheckIns(artist.id))[0]?.bandMember.active, true);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: "manager.member_check_in_recorded" } }), 2);
   const thinContext = await manager.contextHealth(artist.id);
   assert.equal(thinContext.status, "thin");
   assert.equal(thinContext.gaps[0]?.code, "availability_expectations");
@@ -528,6 +536,38 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const completedRecommendation = await client.managerRecommendation.findUniqueOrThrow({ where: { id: actionable.id } });
   assert.equal(completedRecommendation.outcome, "completed");
   assert.equal(completedRecommendation.outcomeReason, "task_completed");
+  await assert.rejects(() => taskService.create(artist.id, { title: "Cross-tenant owner", bandMemberId: foreignMember.id }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  assert.equal(await client.task.count({ where: { artistId: artist.id, title: "Cross-tenant owner" } }), 0);
+  const linkedTask = await taskService.create(artist.id, { title: "Confirm rehearsal schedule", bandMemberId: productionMember.id }, operator.email, operator.id);
+  assert.equal(linkedTask.bandMemberId, productionMember.id);
+  assert.equal(linkedTask.ownerLabel, productionMember.name);
+  const unlinkedTask = await taskService.patch(artist.id, linkedTask.id, { bandMemberId: null }, operator.email, operator.id);
+  assert.equal(unlinkedTask.bandMemberId, null);
+  assert.equal(unlinkedTask.ownerLabel, null);
+  const assignmentTask = await taskService.create(artist.id, { title: "Send the venue follow-up", ownerLabel: "Manager recommendation", dueAt: new Date(Date.now() + 86400000).toISOString() }, operator.email, operator.id);
+  const teamSnapshot = await manager.teamLoad(artist.id);
+  const teamSuggestion = teamSnapshot.suggestions.find((suggestion) => suggestion.taskId === assignmentTask.id);
+  assert.equal(teamSuggestion?.memberId, member.id);
+  const assignmentChat = await manager.chat(artist.id, { message: "Who should own the unassigned work?" }, operator.email, operator.id);
+  assert.equal(assignmentChat.recommendation?.proposedAction?.type, "assign_task");
+  assert.equal(assignmentChat.recommendation?.proposedAction?.taskId, assignmentTask.id);
+  assert.equal(assignmentChat.recommendation?.proposedAction?.bandMemberId, member.id);
+  assert.equal(assignmentChat.recommendation?.proposedAction?.checkInId, bookingCheckIn.id);
+  assert.equal(assignmentChat.recommendation?.proposedAction?.availability, "available");
+  assert.match(assignmentChat.message.content, /current voluntary check-ins/i);
+  await assert.rejects(() => manager.recommendation(foreignArtist.id, assignmentChat.recommendation.id, "accepted", {}, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  await manager.recordMemberCheckIn(artist.id, member.id, { status: "unavailable", effectiveUntil: new Date(Date.now() + 86400000).toISOString() }, operator.email, operator.id);
+  await assert.rejects(() => manager.recommendation(artist.id, assignmentChat.recommendation.id, "accepted", {}, operator.email, operator.id), /availability changed|unavailable/i);
+  const refreshedCheckIn = await manager.recordMemberCheckIn(artist.id, member.id, { status: "available", effectiveUntil: new Date(Date.now() + 14 * 86400000).toISOString() }, operator.email, operator.id);
+  const refreshedAssignmentChat = await manager.chat(artist.id, { message: "Who should own the unassigned work?" }, operator.email, operator.id);
+  assert.equal(refreshedAssignmentChat.recommendation?.proposedAction?.checkInId, refreshedCheckIn.id);
+  const acceptedAssignment = await manager.recommendation(artist.id, refreshedAssignmentChat.recommendation.id, "accepted", {}, operator.email, operator.id);
+  assert.equal(acceptedAssignment.outcome, "completed");
+  const assignedTask = await client.task.findUniqueOrThrow({ where: { id: assignmentTask.id } });
+  assert.equal(assignedTask.bandMemberId, member.id);
+  assert.equal(assignedTask.ownerLabel, member.name);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: assignmentTask.id, action: "task.assigned" } }), 1);
+  await assert.rejects(() => manager.recommendation(artist.id, refreshedAssignmentChat.recommendation.id, "accepted", {}, operator.email, operator.id), /already been decided/);
   const commitmentTask = await taskService.create(artist.id, { title: "Confirm integration stage dimensions", ownerLabel: member.name, dueAt: new Date(Date.now() + 2 * 86400000).toISOString() }, operator.email, operator.id);
   await assert.rejects(() => taskService.patch(artist.id, commitmentTask.id, { status: "blocked" }, operator.email, operator.id), /requires a reason/);
   await assert.rejects(() => taskService.patch(foreignArtist.id, commitmentTask.id, { ownerLabel: "Foreign owner" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -551,17 +591,17 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const refreshedBrief = await manager.generateBrief(artist.id, "daily", operator.email, operator.id);
   assert.equal(refreshedBrief.recommendations.some((recommendation) => recommendation.stableKey === actionable.stableKey), false);
   const learning = await manager.learningSummary(artist.id);
-  assert.equal(learning.completed, 2);
+  assert.equal(learning.completed, 3);
   if (dismissible) assert.equal(learning.dismissalReasons[0]?.reason, "wrong_priority");
   const evalExample = await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
   const revisedEvalExample = await manager.promoteEvalExample(artist.id, actionable.id, { label: "needs_revision", notes: "Keep the action, improve the explanation" }, operator.email, operator.id);
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v14", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v16", operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v14", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v16", operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -607,8 +647,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(responseEval.label, "needs_revision");
   assert.equal(responseEval.snapshot.question, "What should we focus on this week?");
   assert.equal(Object.hasOwn(responseEval.snapshot, "inputFacts"), false);
-  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v14", operator.email, operator.id)).passed, false);
-  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v14", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
+  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v16", operator.email, operator.id)).passed, false);
+  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v16", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
   await assert.rejects(() => manager.promoteResponseEvalExample(foreignArtist.id, firstChat.message.id, { label: "needs_revision", expectedBehavior: "Keep the response inside the foreign workspace." }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const revisedFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id);
   assert.equal(revisedFeedback.id, negativeFeedback.id);
@@ -616,7 +656,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(usefulResponseEval.id, responseEval.id);
   assert.equal(usefulResponseEval.label, "useful");
   assert.equal(usefulResponseEval.resolvedAt, null);
-  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v14", operator.email, operator.id);
+  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v16", operator.email, operator.id);
   assert.equal(responseEvaluation.passed, true);
   assert.equal(responseEvaluation.metrics.ownerReviewedResponseCount, 1);
   assert.equal(await client.managerResponseEvalExample.count({ where: { artistId: artist.id } }), 1);
@@ -628,7 +668,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const persistedConversation = await manager.conversation(artist.id, firstChat.conversationId, operator.id);
   assert.deepEqual(persistedConversation.messages.map((message) => message.role), ["user", "assistant", "user", "assistant"]);
   assert.equal(persistedConversation.messages.find((message) => message.id === firstChat.message.id)?.feedback?.helpful, true);
-  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 5);
+  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 7);
   await assert.rejects(() => manager.conversation(foreignArtist.id, firstChat.conversationId, operator.id), (error) => error?.getStatus?.() === 404);
 
   const venue = await client.venue.create({ data: { artistId: artist.id, name: "Owned Room", city: "Chicago" } });
@@ -671,8 +711,9 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   await assert.rejects(() => operations.patchEvent(artist.id, event.id, { venueId: foreignVenue.id }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   await assert.rejects(() => operations.patchEvent(artist.id, event.id, { soundcheckAt: "2026-09-18T21:00:00.000Z" }, operator.email, operator.id), /Soundcheck must be before doors/i);
   await operations.participant(artist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id);
+  await operations.participant(artist.id, event.id, { bandMemberId: productionMember.id, response: "available" }, operator.email, operator.id);
   await assert.rejects(() => operations.participant(foreignArtist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
-  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v14", inputFacts: {}, output: {}, trace: {} } });
+  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v16", inputFacts: {}, output: {}, trace: {} } });
   const advanceRecommendation = await client.managerRecommendation.create({ data: { managerRunId: actionRun.id, stableKey: `advance-${event.id}`, workstream: "live", title: "Build the show advance", reason: "No advance tasks are recorded", nextAction: "Generate the existing checklist", priority: "high", evidence: [event.id], proposedAction: { type: "generate_event_advance", eventId: event.id } } });
   await assert.rejects(() => manager.recommendation(foreignArtist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const advance = await manager.recommendation(artist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id);

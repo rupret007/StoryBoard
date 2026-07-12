@@ -116,7 +116,8 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   explainable status from authoritative goals/initiatives/tasks, while numeric
   changes use append-only progress events. Starter-plan records use nullable
   tenant-unique source keys, so regeneration fills gaps instead of overwriting
-  work. Tasks are deliberately unassigned until a person chooses an owner.
+  work. Tasks are deliberately unassigned until a person chooses an active
+  `BandMember`; historical text labels remain compatibility data.
   Owner-triggered offline evaluation
   runs are version-allowlisted and recorded; there is no self-activation path.
 - Manager education is a bounded read path, not free-form authority. Explicit
@@ -132,6 +133,18 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   ranking drives Manager Today, Waiting on, risks, chat, and UI. Model briefs
   cannot displace a high-severity commitment, and blocker questions cannot
   propose duplicate work.
+- Manager team load is another deterministic projection, not a human-capacity
+  model. `Task.bandMemberId` is the canonical working-lineup relationship;
+  exact-name legacy labels can resolve for display, while system placeholders
+  and unknown labels remain unassigned. `manager_team_load_v2` reports only
+  open, due-soon, overdue, blocked, and unscheduled records plus current
+  append-only member capacity check-ins. Responsibility fit remains primary;
+  availability is a tie-break, current `unavailable` members are excluded, and
+  missing or expired signals remain unknown. A unique responsibility match can
+  prepare one `assign_task` proposal, but ambiguous matches remain a question
+  and members with urgent recorded pressure are excluded. Acceptance rechecks
+  tenant, active member, exact check-in, open task, owner premise, and
+  optimistic write before an audited update. Check-in notes remain UI-only.
 - Manager scheduling completes the existing brief boundary rather than adding
   another planner. It is owner-opted, uses the profile cadence plus a validated
   IANA timezone/hour/weekday, and runs through BullMQ. Local-period claims use
@@ -141,8 +154,9 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   default and requires separate owner consent before it may spend model tokens.
   A scheduled run can suggest reviewable internal work but cannot accept it or
   perform any provider, legal, financial, or irreversible action.
-- Manager recommendations bridge only two existing readiness gaps into direct
-  internal work: `generate_event_advance` and `generate_project_plan`. Code
+- Manager recommendations bridge two readiness gaps and one ownership gap into
+  direct internal work: `generate_event_advance`, `generate_project_plan`, and
+  bounded `assign_task`. Code
   requires the cited same-artist event/project and missing-plan premise,
   revalidates the target at acceptance, and atomically claims the recommendation
   with source-keyed Task creation. The action is immediately complete and

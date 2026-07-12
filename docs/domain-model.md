@@ -206,11 +206,25 @@ recipient; it never sends an email or advances the booking stage automatically.
 
 Represents a piece of operational follow-through. Tasks may exist independently
 or attach to a booking opportunity, event, project, or manager initiative. They
-carry ownership labels, due dates, and checklist metadata. Blocked tasks require
+may link to one active working `BandMember` through nullable `bandMemberId`;
+`ownerLabel` remains a display snapshot and legacy-import field. Relationship
+writes are artist-scoped, unlinking clears both fields, and historical labels
+are not automatically backfilled. Tasks also carry due dates and checklist
+metadata. Blocked tasks require
 `blockedReason`; `waitingOn` records the external or internal party holding the
 next step. `deferralCount` and `lastDeferredAt` preserve repeated later-date
 changes. `ManagerCommitmentHealth` is a non-persistent ranked view over these
 facts; it does not create a second task state machine.
+`BandMemberCheckIn` is append-only artist-scoped history for a voluntary
+`available`, `limited`, or `unavailable` planning signal with optional expiry
+and bounded note. The latest unexpired row is current; missing and expired rows
+project as unknown. Notes are visible in the tenant UI but excluded from model
+context.
+
+`ManagerTeamLoad` is a separate non-persistent `manager_team_load_v2` view over
+tasks, active members, and their current check-ins. It measures recorded task
+coverage/pressure and may identify one unique responsibility match; it does not
+claim to know hours, effort, wellbeing, or outside commitments.
 
 ### ApprovalRequest
 

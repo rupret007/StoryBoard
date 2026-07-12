@@ -266,6 +266,12 @@ enum AvailabilityResponse {
   unavailable
 }
 
+enum BandMemberCheckInStatus {
+  available
+  limited
+  unavailable
+}
+
 enum ArtistProjectType {
   release
   content_campaign
@@ -346,6 +352,7 @@ model Operator {
   managerResponseEvalsResolved      ManagerResponseEvalExample[] @relation("ManagerResponseEvalResolver")
   managerGoalProgressRecorded       ManagerGoalProgressEvent[]  @relation("ManagerGoalProgressRecorder")
   managerEvaluationRunsCreated      ManagerEvaluationRun[]      @relation("ManagerEvaluationRunner")
+  bandMemberCheckInsRecorded        BandMemberCheckIn[]         @relation("BandMemberCheckInRecorder")
 }
 
 model ArtistMembership {
@@ -398,6 +405,7 @@ model Artist {
   operatingProfile            ArtistOperatingProfile?
   managerSettings             ManagerSettings?
   bandMembers                 BandMember[]
+  bandMemberCheckIns          BandMemberCheckIn[]
   managerGoals                ManagerGoal[]
   managerInitiatives          ManagerInitiative[]
   managerDecisions            ManagerDecision[]
@@ -487,9 +495,28 @@ model BandMember {
   linkedOperator          Operator?          @relation(fields: [linkedOperatorId], references: [id], onDelete: SetNull)
   eventResponses          EventParticipant[]
   memberSplits            MemberSplit[]
+  assignedTasks           Task[]
+  checkIns                BandMemberCheckIn[]
 
   @@unique([artistId, linkedOperatorId])
   @@index([artistId, active])
+}
+
+model BandMemberCheckIn {
+  id                   String                  @id @default(cuid())
+  artistId             String
+  bandMemberId         String
+  recordedByOperatorId String?
+  status               BandMemberCheckInStatus
+  note                 String?
+  effectiveUntil       DateTime?
+  createdAt            DateTime                @default(now())
+  artist               Artist                  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  bandMember           BandMember              @relation(fields: [bandMemberId], references: [id], onDelete: Cascade)
+  recordedBy           Operator?               @relation("BandMemberCheckInRecorder", fields: [recordedByOperatorId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, createdAt])
+  @@index([bandMemberId, createdAt])
 }
 
 model ManagerGoal {
@@ -956,6 +983,7 @@ model BookingOpportunity {
 model Task {
   id                         String                    @id @default(cuid())
   artistId                   String
+  bandMemberId               String?
   opportunityId              String?
   eventId                    String?
   projectId                  String?
@@ -973,6 +1001,7 @@ model Task {
   createdAt                  DateTime                  @default(now())
   updatedAt                  DateTime                  @updatedAt
   artist                     Artist                    @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  bandMember                 BandMember?               @relation(fields: [bandMemberId], references: [id], onDelete: SetNull)
   opportunity                BookingOpportunity?       @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
   event                      BandEvent?                @relation(fields: [eventId], references: [id], onDelete: SetNull)
   project                    ArtistProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -982,6 +1011,7 @@ model Task {
 
   @@unique([artistId, sourceKey])
   @@index([artistId, status, dueAt])
+  @@index([artistId, bandMemberId])
 }
 
 model ArtistBookingProfile {

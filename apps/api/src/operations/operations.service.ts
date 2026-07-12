@@ -40,13 +40,13 @@ const eventDetailInclude = {
   setlist: { include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" as const } } } },
   participants: { include: { bandMember: true } },
   schedule: { orderBy: { sortOrder: "asc" as const } },
-  tasks: true,
+  tasks: { include: { bandMember: true } },
   deals: { include: { agreements: { orderBy: { version: "desc" as const } }, invoices: { include: { payments: true } } } },
   invoices: { include: { payments: true } },
   expenses: true,
   settlement: { include: { splits: { include: { bandMember: true } } } }
 } as const;
-const projectDetailInclude = { goal: true, events: true, tasks: { orderBy: [{ dueAt: "asc" as const }, { createdAt: "asc" as const }] }, expenses: { orderBy: { incurredAt: "desc" as const } } } satisfies Prisma.ArtistProjectInclude;
+const projectDetailInclude = { goal: true, events: true, tasks: { include: { bandMember: true }, orderBy: [{ dueAt: "asc" as const }, { createdAt: "asc" as const }] }, expenses: { orderBy: { incurredAt: "desc" as const } } } satisfies Prisma.ArtistProjectInclude;
 function cleanDates(input: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined).map(([key, value]) => [key, dateFields.has(key) && typeof value === "string" ? new Date(value) : value]));
 }

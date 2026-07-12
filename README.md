@@ -110,7 +110,7 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v14`
+already performed an outside action. Prompt/policy version `manager_os_v16`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, and respectful
 missing-context guidance. Before applying the five-item Today limit, the
@@ -123,10 +123,19 @@ merged with these deterministic must-not-miss signals and reranked, so model
 wording cannot hide a same-day show or other authoritative pressure. When the
 same readiness evidence shows that an event has no advance or a dated project
 has no milestone plan, Manager may offer one additional explicit internal
-action: build the existing source-keyed show advance or project plan.
-Acceptance revalidates the artist and current date, uses the existing Task
-authority, and completes atomically; it does not grant arbitrary tool or
-provider access.
+action: build the existing source-keyed show advance or project plan. It may
+also propose one internal task assignment when an open unowned task has a
+unique match to an active member's recorded responsibilities. Append-only
+`available`, `limited`, or `unavailable` check-ins add a voluntary current
+capacity signal without requesting private explanations. Responsibility fit
+remains primary, current availability is only a tie-break, unavailable members
+are excluded, and missing or expired check-ins stay explicitly unknown. Equal
+matches remain a human decision; members with blocked or overdue recorded work
+are not suggested. Acceptance revalidates the artist, open task, active member,
+current ownership, exact check-in premise, and stale-write premise, then
+completes atomically with audit history. Capacity notes remain in the tenant UI
+and never enter model context. The policy does not estimate hours, wellbeing,
+or personal circumstances and does not grant arbitrary tool or provider access.
 The same conversation teaches common band-business concepts without requiring
 a model. Explicit questions about holds, guarantees, door deals, advancing,
 production documents, deposits, agreements, invoices, settlements, member
@@ -164,6 +173,13 @@ blocked, overdue, repeatedly deferred, waiting, ownerless, and due-soon work
 for Manager Today, Waiting on, risks, and conversation. When OpenAI is enabled,
 code still requires the highest-severity commitment to remain first and rejects
 a duplicate task proposal for a blocker question.
+The **Team workload** view resolves current Tasks to active working members via
+`bandMemberId`; old exact-name labels remain readable, while `Show advance` and
+`Manager recommendation` are correctly treated as placeholders. It shows only
+recorded open/due/overdue/blocked pressure. A unique responsibility match may
+produce a reviewable assignment, but StoryBoard explicitly does not infer
+hours, effort, health, employment, family commitments, or anyone's actual
+capacity. Historical labels are not automatically rewritten.
 The **Manager cadence** completes the proactive loop without creating another
 planner. It is off by default and owner-controlled. A BullMQ scan uses the
 band's daily or weekly preference plus an IANA timezone, local hour, and weekly

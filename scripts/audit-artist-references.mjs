@@ -45,6 +45,28 @@ const checks = [
     `
   },
   {
+    relation: "Task → BandMember",
+    query: `
+      SELECT t."id" AS "recordId", t."artistId" AS "recordArtistId",
+             t."bandMemberId" AS "relatedId", m."artistId" AS "relatedArtistId"
+      FROM "Task" t
+      INNER JOIN "BandMember" m ON m."id" = t."bandMemberId"
+      WHERE t."artistId" <> m."artistId"
+      ORDER BY t."id";
+    `
+  },
+  {
+    relation: "BandMemberCheckIn → BandMember",
+    query: `
+      SELECT c."id" AS "recordId", c."artistId" AS "recordArtistId",
+             c."bandMemberId" AS "relatedId", m."artistId" AS "relatedArtistId"
+      FROM "BandMemberCheckIn" c
+      INNER JOIN "BandMember" m ON m."id" = c."bandMemberId"
+      WHERE c."artistId" <> m."artistId"
+      ORDER BY c."id";
+    `
+  },
+  {
     relation: "BookingProspect → Venue",
     query: `
       SELECT p."id" AS "recordId", p."artistId" AS "recordArtistId",

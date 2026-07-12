@@ -9,6 +9,7 @@ import type { ManagerGoalMeasurement } from "./manager-goal-measurement";
 import { managerQuestionAsksAboutCommitments, type ManagerCommitmentHealth } from "./manager-commitment-health";
 import { assessManagerMemoryCapture } from "./manager-memory-capture";
 import { deterministicManagerCoaching } from "./manager-coaching";
+import { managerQuestionAsksAboutTeamLoad, type ManagerTeamLoad } from "./manager-team-load";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -34,6 +35,12 @@ export type ManagerProposedAction = {
   key: string;
   label: string;
   value: string;
+} | {
+  type: "assign_task";
+  taskId: string;
+  bandMemberId: string;
+  checkInId: string | null;
+  availability: "available" | "limited" | "unknown";
 };
 
 export type ManagerRecommendationDraft = {
@@ -64,11 +71,11 @@ export type ManagerFacts = {
     twelveMonthAmbition: string | null;
     educationTopics?: string[];
   } | null;
-  members: { id: string; name: string }[];
+  members: { id: string; name: string; roles?: string[]; instruments?: string[] }[];
   goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; createdAt?: Date }[];
   goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
-  tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null }[];
+  tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null }[];
   opportunities: { id: string; title: string; stage: string; updatedAt: Date; targetDate: Date | null }[];
   events: {
     id: string;
@@ -93,6 +100,7 @@ export type ManagerFacts = {
   contextHealth?: ManagerContextHealth;
   knowledgeHealth?: ManagerKnowledgeHealth;
   commitmentHealth?: ManagerCommitmentHealth;
+  teamLoad?: ManagerTeamLoad;
   recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null }[];
 };
 
@@ -533,6 +541,7 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
   const overdueTasks = facts.tasks.filter((task) => task.status !== "done" && task.dueAt && task.dueAt < now);
   const commitment = facts.commitmentHealth?.items[0];
   if (commitment && commitment.state !== "active") {
+    const assignment = commitment.state === "unassigned" ? facts.teamLoad?.suggestions.find((suggestion) => suggestion.taskId === commitment.taskId) : null;
     const item = {
       stableKey: `commitment-${commitment.state}-${commitment.taskId}`,
       title: commitment.state === "blocked" ? `Unblock ${commitment.title}` : commitment.state === "overdue" ? `Recommit ${commitment.title}` : commitment.state === "repeatedly_deferred" ? `Re-scope ${commitment.title}` : commitment.state === "waiting" ? `Close the wait on ${commitment.title}` : commitment.state === "unassigned" ? `Assign ${commitment.title}` : `Make ${commitment.title} credible`,
@@ -540,8 +549,8 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
       nextAction: facts.commitmentHealth!.nextAction,
       workstream: "band_operations" as const,
       priority: commitment.severity === "high" ? "high" as const : "med" as const,
-      evidenceIds: [commitment.taskId],
-      proposedAction: null
+      evidenceIds: assignment ? [commitment.taskId, assignment.memberId] : [commitment.taskId],
+      proposedAction: assignment ? { type: "assign_task" as const, taskId: assignment.taskId, bandMemberId: assignment.memberId, checkInId: assignment.checkInId, availability: assignment.availability } : null
     };
     if (commitment.severity === "high") addToday(item); else addWeek(item);
   } else if (!facts.commitmentHealth && overdueTasks[0]) {
@@ -847,6 +856,7 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
   const planQuestion = questionHas(question, /\b(goal|plan|progress|track|realistic|strategy|90-day|90 day)\b/);
   const releaseQuestion = questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
   const commitmentQuestion = managerQuestionAsksAboutCommitments(question);
+  const teamLoadQuestion = managerQuestionAsksAboutTeamLoad(question);
   const outcomeQuestion = questionHas(question, /\b(last show|recent shows?|what worked|what did(?:n't| not) work|how did we do|outcomes?|learn(?:ed|ing)|post-show|review the show|recent results?|show results?|campaign results?)\b/);
   const decisionQuestion = Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
   const contextQuestion = questionHas(question, /\b(what do you (?:still )?(?:need|know)|what are you missing|missing context|band context|about (?:us|the band)|know about (?:us|the band)|setup|profile completeness)\b/);
@@ -967,6 +977,28 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
       answer: `For “${target.title}”, the band chose “${target.choice}”.${target.rationale ? ` The recorded reason was: ${target.rationale}` : ""}${target.expectedOutcome ? ` The expected result was: ${target.expectedOutcome}` : ""}\n\n${reviewDue ? "The review date has arrived. Record what actually happened—even if the result is mixed or inconclusive—before changing the story after the fact." : target.reviewAt ? `The review is scheduled for ${eventDate(target.reviewAt)}. Keep the choice intact until there is enough outcome evidence to judge it.` : "No review date is recorded, so this choice does not yet have a reliable learning checkpoint."}`,
       citations,
       recommendation: null
+    };
+  }
+
+  if (teamLoadQuestion && facts.teamLoad) {
+    const load = facts.teamLoad;
+    const rows = load.members.slice().sort((left, right) => right.overdue - left.overdue || right.blocked - left.blocked || right.dueWithinHorizon - left.dueWithinHorizon || right.openTasks - left.openTasks || left.name.localeCompare(right.name));
+    const lines = rows.slice(0, 5).map((member) => `• ${member.name} — ${member.openTasks} open; ${member.dueWithinHorizon} due within ${load.horizonDays} days${member.overdue ? `; ${member.overdue} overdue` : ""}${member.blocked ? `; ${member.blocked} blocked` : ""}; capacity check-in ${member.availability}.`);
+    const suggestion = load.suggestions[0];
+    const recommendation: ManagerRecommendationDraft | null = suggestion ? {
+      stableKey: `assign_${suggestion.taskId}_${suggestion.memberId}`.slice(0, 80),
+      title: `Assign ${suggestion.taskTitle} to ${suggestion.memberName}`,
+      reason: suggestion.reason,
+      nextAction: `Review the role match, then assign “${suggestion.taskTitle}” to ${suggestion.memberName}.`,
+      workstream: "band_operations",
+      priority: "med",
+      evidenceIds: suggestion.evidenceIds.slice(0, 8),
+      proposedAction: { type: "assign_task", taskId: suggestion.taskId, bandMemberId: suggestion.memberId, checkInId: suggestion.checkInId, availability: suggestion.availability }
+    } : null;
+    return {
+      answer: `${load.summary}${lines.length ? `\n\n${lines.join("\n")}` : ""}\n\n${suggestion ? `The clearest recorded match is “${suggestion.taskTitle}” for ${suggestion.memberName}: ${suggestion.reason}` : load.nextAction}\n\nThis combines recorded task pressure with current voluntary check-ins. It still does not know hours, effort, health, work, or family commitments, and no private explanation is required.`,
+      citations: load.evidenceIds.slice(0, 10),
+      recommendation
     };
   }
 

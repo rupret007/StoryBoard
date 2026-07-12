@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const load = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
+const load = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 
 const [contactsMod, bookingMod, tasksMod, bookingSchemaMod, taskSchemaMod] =
   await Promise.all([
@@ -146,10 +146,10 @@ test("booking venue links stay within the current artist and may be cleared", as
   assert.equal(events.length, 2);
 });
 
-test("task opportunity and project links stay within the current artist and may be cleared", async () => {
-  const calls = { opportunityLookups: 0, projectLookups: 0, creates: 0, updates: 0 };
+test("task opportunity, project, and owner links stay within the current artist and may be cleared", async () => {
+  const calls = { opportunityLookups: 0, projectLookups: 0, memberLookups: 0, creates: 0, updates: 0 };
   const { audit, events } = auditSpy();
-  let taskRow = { id: "task-a", artistId: "artist-a", status: "todo", ownerLabel: null, dueAt: null, blockedReason: null, waitingOn: null, deferralCount: 0, updatedAt: new Date("2026-07-01T00:00:00.000Z") };
+  let taskRow = { id: "task-a", artistId: "artist-a", status: "todo", ownerLabel: null, bandMemberId: null, dueAt: null, blockedReason: null, waitingOn: null, deferralCount: 0, updatedAt: new Date("2026-07-01T00:00:00.000Z") };
   const client = {
     managerRecommendation: { updateMany: async () => ({ count: 0 }) },
     bookingOpportunity: {
@@ -162,6 +162,14 @@ test("task opportunity and project links stay within the current artist and may 
       findFirst: async ({ where }) => {
         calls.projectLookups += 1;
         return where.id === "project-a" && where.artistId === "artist-a" ? { id: "project-a" } : null;
+      }
+    },
+    bandMember: {
+      findFirst: async ({ where }) => {
+        calls.memberLookups += 1;
+        return where.id === "member-a" && where.artistId === "artist-a" && where.active === true
+          ? { id: "member-a", name: "Alex" }
+          : null;
       }
     },
     task: {
@@ -196,6 +204,18 @@ test("task opportunity and project links stay within the current artist and may 
   assert.equal(events.length, 0);
 
   await assert.rejects(
+    () => service.create("artist-a", { title: "Off-tenant owner", bandMemberId: "member-b" }),
+    (error) => assertNotFound(error, "Band member not found")
+  );
+  await assert.rejects(
+    () => service.patch("artist-a", "task-a", { bandMemberId: "member-b" }),
+    (error) => assertNotFound(error, "Band member not found")
+  );
+  assert.equal(calls.creates, 0);
+  assert.equal(calls.updates, 0);
+  assert.equal(events.length, 0);
+
+  await assert.rejects(
     () => service.patch("artist-a", "task-a", { opportunityId: "opportunity-b" }),
     (error) => assertNotFound(error, "Booking opportunity not found")
   );
@@ -221,9 +241,18 @@ test("task opportunity and project links stay within the current artist and may 
   await service.patch("artist-a", "task-a", { opportunityId: null });
   await service.create("artist-a", { title: "Owned project task", projectId: "project-a" });
   await service.patch("artist-a", "task-a", { projectId: null });
-  assert.equal(calls.creates, 2);
-  assert.equal(calls.updates, 2);
-  assert.equal(events.length, 4);
+  const linked = await service.create("artist-a", { title: "Owned member task", bandMemberId: "member-a" });
+  assert.equal(linked.bandMemberId, "member-a");
+  assert.equal(linked.ownerLabel, "Alex");
+  const updated = await service.patch("artist-a", "task-a", { bandMemberId: "member-a" });
+  assert.equal(updated.bandMemberId, "member-a");
+  assert.equal(updated.ownerLabel, "Alex");
+  const unlinked = await service.patch("artist-a", "task-a", { bandMemberId: null });
+  assert.equal(unlinked.bandMemberId, null);
+  assert.equal(unlinked.ownerLabel, null);
+  assert.equal(calls.creates, 3);
+  assert.equal(calls.updates, 4);
+  assert.equal(events.length, 7);
 });
 
 test("booking and task request schemas reject malformed values and unknown fields", () => {
@@ -257,6 +286,8 @@ test("booking and task request schemas reject malformed values and unknown field
     }).success,
     true
   );
+  assert.equal(taskSchemaMod.taskCreateSchema.safeParse({ title: "Assign twice", bandMemberId: "member-a", ownerLabel: "Alex" }).success, false);
+  assert.equal(taskSchemaMod.taskPatchSchema.safeParse({ bandMemberId: "member-a", ownerLabel: "Alex" }).success, false);
   assert.equal(
     taskSchemaMod.taskPatchSchema.safeParse({ dueAt: "tomorrow" }).success,
     false

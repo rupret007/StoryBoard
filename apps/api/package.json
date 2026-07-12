@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "nest start --watch",
-    "build": "nest build",
+    "build": "pnpm run typecheck && nest build -b swc",
     "start": "node dist/main.js",
     "lint": "eslint -c ../../eslint.config.mjs \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",

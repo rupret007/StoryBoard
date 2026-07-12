@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
+const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) =>
   import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
 

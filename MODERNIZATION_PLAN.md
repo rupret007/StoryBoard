@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `028e578`
+Baseline for this round: `main` at `2db5851`
 
 ## Product and current architecture
 
@@ -509,6 +509,95 @@ mock-safe provider adapters.
 - [x] Promote the reviewed contract to `manager_os_v14` /
   `manager_evals_v15` with unit, database, golden-eval, and Chromium coverage.
 
+### P0 — Accountable team workload and assignment (completed 2026-07-12)
+
+- [x] Replace ambiguous person ownership with an additive optional
+  `Task.bandMemberId` relation while preserving `ownerLabel` as a display and
+  legacy-import field. Validate the member on create and patch; another
+  artist's member ID must return generic not-found before write or audit.
+- [x] Derive a bounded `manager_team_load_v1` view from active members, their
+  recorded roles, and current tasks. Distinguish real member assignments from
+  system placeholders such as `Show advance`; show overdue, blocked, due-soon,
+  unscheduled, and concentrated work without claiming to know hours, effort, or
+  personal capacity that StoryBoard has not recorded.
+- [x] Answer natural ownership and workload questions from that same view. A
+  role-matched, uniquely supported assignment may become one reviewable
+  `assign_task` proposal; ambiguous matches must remain questions, and
+  acceptance must revalidate the open task, active member, tenant, and stale
+  assignment state before an audited internal update.
+- [x] Update Tasks, project milestones, Manager UI, relationship diagnostics,
+  and documentation to use linked owners while remaining compatible with
+  historical labels. Do not backfill or rewrite existing tasks automatically.
+- [x] Add unit, disposable-database, golden-eval, and Chromium coverage for
+  linked assignment, cross-artist rejection, system-placeholder handling,
+  role-based suggestions, ambiguity, stale acceptance, and explainable team
+  pressure. The promoted contract is `manager_os_v15` / `manager_evals_v16`.
+
+Implementation and validation notes:
+
+- Migration `20260713232000_task_band_member_ownership` is additive and does
+  not rewrite historical `ownerLabel` values. Linked member identity is now
+  canonical; the label remains a compatibility/display snapshot.
+- Assignment suggestions use only recorded responsibilities and current task
+  pressure. Equal matches remain unresolved, urgent members are excluded, and
+  every response states that StoryBoard does not know real personal capacity.
+- Acceptance revalidates the same-artist open task, active member, placeholder
+  ownership premise, and optimistic write. It records both the completed
+  recommendation and `task.assigned` audit history.
+- Validation passed 94 compiled API tests, two shared-package tests, three
+  disposable Postgres workflows across all 32 migrations, three production
+  Chromium workflows, 29/29 offline Manager checks at 100% safety, typecheck,
+  lint, production builds, relationship diagnostics, and container smoke.
+- Clean-room review of other agent-management patterns reinforced three
+  boundaries already used here: canonical records stay separate from derived
+  judgment, a proposal should be the smallest reversible action, and execution
+  does not equal outcome closure. No external code, runtime, or data was copied.
+
+### P0 — Current member capacity check-ins (completed 2026-07-12)
+
+- [x] Add append-only, artist-scoped `BandMemberCheckIn` records for
+  `available`, `limited`, and `unavailable` status, an optional bounded note,
+  and an optional expiry. No check-in means unknown; an expired check-in must
+  not be presented as current.
+- [x] Let viewers read current check-ins and members/owners record one for any
+  active working member. Validate tenant ownership before write, audit every
+  check-in, retain history, and never require or encourage medical/private
+  explanations.
+- [x] Extend `manager_team_load_v2` to combine current check-ins with recorded
+  task pressure. Exclude explicitly unavailable members from assignment,
+  prefer an available member only as a tie-break after responsibility fit,
+  label limited/unknown status honestly, and continue to avoid hour/effort or
+  wellbeing claims.
+- [x] Answer availability, workload, and delegation questions from the same
+  current projection. Trace the exact check-in evidence and revalidate current
+  availability when accepting an assignment so an expired or superseded
+  premise fails closed.
+- [x] Add a low-friction Manager UI for team check-ins and freshness, plus
+  unit, database, golden-eval, relationship-diagnostic, and Chromium coverage.
+  Promote a new Manager contract only after the full gate passes.
+
+Implementation and validation notes:
+
+- Migration `20260713234000_band_member_check_ins` adds append-only history and
+  does not rewrite members or tasks. Current state is derived from the latest
+  row; missing and expired rows remain unknown.
+- The Manager UI records a bounded status, optional expiry, and optional
+  operational note. Notes stay tenant-local: provider projections and audit
+  metadata retain the status/evidence but omit note content.
+- `manager_team_load_v2` uses responsibility fit before availability, excludes
+  currently unavailable members, and binds every accepted assignment to the
+  exact check-in premise. A superseded or unavailable premise fails before the
+  recommendation claim or task write.
+- The promoted contract is `manager_os_v16` / `manager_evals_v17`. Validation
+  passed 96 compiled API tests, two shared tests, three disposable Postgres
+  workflows across all 33 migrations, three production Chromium workflows,
+  30/30 offline Manager checks at 100% safety, typecheck, lint, repeatable
+  production builds, relationship diagnostics, and a rebuilt healthy container.
+- The normal API build now runs strict typecheck followed by the same SWC emitter
+  used by the container. Test imports normalize CommonJS modules so unit and
+  integration coverage is emitter-independent; repeated parallel builds no
+  longer depend on Node's default heap peak.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -616,6 +705,32 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Added voluntary, append-only capacity check-ins for active working
+  members and upgraded team-load reasoning to `manager_team_load_v2`. The
+  Manager now distinguishes available, limited, unavailable, expired, and
+  unknown signals; never requests a private explanation; keeps note content out
+  of provider context and audit metadata; and revalidates the exact check-in
+  before accepting a task assignment. The Manager UI, tenant API, diagnostics,
+  database workflow, golden evals, and Chromium journey use the same policy.
+  The release contract is `manager_os_v16` / `manager_evals_v17`; validation
+  passed 96 API tests, two shared tests, three database workflows across all 33
+  migrations, three Chromium workflows, 30/30 Manager checks at 100% safety,
+  the complete static/build gate, relationship diagnostics, and a cold healthy
+  container bundle. The API build also moved to typecheck-plus-SWC emission to
+  eliminate intermittent parallel-build heap failures without weakening types.
+- 2026-07-12: Made band work accountable to the real working lineup. Tasks now
+  support an additive tenant-checked `bandMemberId`, while legacy labels remain
+  readable without an automatic backfill. The shared `manager_team_load_v1`
+  projection distinguishes linked, legacy, placeholder, and unknown ownership;
+  reports only recorded pressure; and may prepare one uniquely role-grounded
+  assignment for review. Acceptance rechecks the same-artist open task, active
+  member, current owner premise, and stale write before an audited update. Tasks,
+  project milestones, event views, Manager chat/UI, diagnostics, and docs use
+  the same relationship. The release contract is `manager_os_v15` /
+  `manager_evals_v16`; validation passed 94 API tests, two shared tests, three
+  database workflows across all 32 migrations, three Chromium workflows,
+  29/29 Manager checks at 100% safety, the complete static/build gate,
+  relationship diagnostics, and a cold healthy container bundle.
 - 2026-07-12: Added novice-safe Manager coaching so the no-provider path can
   explain the business instead of falling back to unrelated priorities. The
   code-owned catalog covers booking/deal structures, show production,

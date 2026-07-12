@@ -5,6 +5,7 @@ export type CommitmentTask = {
   title: string;
   status: string;
   ownerLabel?: string | null;
+  bandMemberId?: string | null;
   dueAt?: Date | null;
   blockedReason?: string | null;
   waitingOn?: string | null;
@@ -81,7 +82,8 @@ export function deterministicManagerCommitmentHealth(tasks: CommitmentTask[], no
     const blocked = task.status === "blocked";
     const overdue = Boolean(task.dueAt && task.dueAt.getTime() < now.getTime());
     const waiting = Boolean(task.waitingOn?.trim());
-    const unassigned = !task.ownerLabel?.trim();
+    const ownerLabel = task.ownerLabel?.trim() ?? "";
+    const unassigned = !task.bandMemberId && (!ownerLabel || ["show advance", "manager recommendation"].includes(ownerLabel.toLowerCase()));
     const deferralCount = Math.max(0, task.deferralCount ?? 0);
     const repeated = deferralCount >= 2;
     const dueSoon = Boolean(task.dueAt && task.dueAt.getTime() >= now.getTime() && task.dueAt.getTime() <= dueSoonLimit);

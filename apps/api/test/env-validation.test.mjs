@@ -4,7 +4,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const envMod = await import(pathToFileURL(join(dir, "..", "dist", "config", "env.validation.js")).href);
+const envImport = await import(pathToFileURL(join(dir, "..", "dist", "config", "env.validation.js")).href);
+const envMod = envImport.default ?? envImport;
 
 function base(overrides = {}) {
   return {

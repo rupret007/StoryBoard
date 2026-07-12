@@ -1,4 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function signInForBrowserTest(page: Page) {
+  await page.goto("http://127.0.0.1:4000/auth/dev/login");
+  await expect(page.getByText("Your operational home base")).toBeVisible();
+  await expect.poll(async () => (await page.context().cookies()).some((cookie) => cookie.name === "sb_session"), { message: "Dev login must establish the browser session cookie" }).toBe(true);
+}
 
 test("manual prospect can gain a buyer and enter an approval-ready campaign", async ({ page }) => {
   const suffix = Date.now().toString(36);
@@ -6,8 +12,7 @@ test("manual prospect can gain a buyer and enter an approval-ready campaign", as
 
   // The runner resets only the explicit test database, then seeds this owner
   // workspace so first-use flows remain deterministic across iterations.
-  await page.goto("http://127.0.0.1:4000/auth/dev/login");
-  await expect(page.getByText("Your operational home base")).toBeVisible();
+  await signInForBrowserTest(page);
 
   await page.goto("/prospects");
   await page.getByLabel("Home city").fill("Austin");
@@ -44,8 +49,7 @@ test("manual prospect can gain a buyer and enter an approval-ready campaign", as
 });
 
 test("booking advisor produces reviewable, non-automated guidance", async ({ page }) => {
-  await page.goto("http://127.0.0.1:4000/auth/dev/login");
-  await expect(page.getByText("Your operational home base")).toBeVisible();
+  await signInForBrowserTest(page);
 
   await page.goto("/advisor");
   const generate = page.getByRole("button", { name: "Generate booking brief" });
@@ -57,8 +61,7 @@ test("booking advisor produces reviewable, non-automated guidance", async ({ pag
 
 test("novice manager intake produces grounded work and band operations records", async ({ page }) => {
   const suffix = Date.now().toString(36);
-  await page.goto("http://127.0.0.1:4000/auth/dev/login");
-  await expect(page.getByText("Your operational home base")).toBeVisible();
+  await signInForBrowserTest(page);
   await page.goto("/manager");
   const intake = page.getByRole("heading", { name: "Tell StoryBoard enough to manage the tradeoffs" });
   if (await intake.isVisible().catch(() => false)) {
@@ -132,6 +135,29 @@ test("novice manager intake produces grounded work and band operations records",
   const newConversation = page.getByRole("button", { name: "New", exact: true });
   if (await newConversation.isVisible().catch(() => false)) await newConversation.click();
   const managerMessage = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
+  const checkIns = page.getByTestId("manager-capacity-check-ins");
+  await expect(checkIns.getByRole("heading", { name: "Who has room for work right now?" })).toBeVisible();
+  await checkIns.getByLabel("Capacity for Alex").selectOption("available");
+  const alexCheckInSaved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/members/") && response.url().endsWith("/check-ins") && response.ok());
+  await checkIns.getByRole("button", { name: "Save check-in" }).first().click();
+  await alexCheckInSaved;
+  await expect(page.getByText("Alex's capacity check-in was saved.", { exact: true })).toBeVisible();
+  await checkIns.getByLabel("Capacity for Morgan").selectOption("limited");
+  const morganCheckInSaved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/members/") && response.url().endsWith("/check-ins") && response.ok());
+  await checkIns.getByRole("button", { name: "Save check-in" }).nth(1).click();
+  await morganCheckInSaved;
+  await expect(page.getByText("Morgan's capacity check-in was saved.", { exact: true })).toBeVisible();
+  const teamLoad = page.getByTestId("manager-team-load");
+  await expect(teamLoad.getByRole("heading", { name: "Team workload" })).toBeVisible();
+  await expect(teamLoad).toContainText(/recorded tasks plus voluntary capacity check-ins/i);
+  await expect(teamLoad).toContainText(/available/i);
+  await managerMessage.fill("Who should own the unassigned work?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const assignmentProposal = page.getByText("Suggested task owner", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await expect(assignmentProposal).toContainText(/role match/i);
+  await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: /current voluntary check-ins/i }).last()).toBeVisible();
+  await assignmentProposal.getByRole("button", { name: "Assign task" }).click();
+  await expect(assignmentProposal.getByText("completed", { exact: true })).toBeVisible();
   const coachingPrompts = page.getByTestId("manager-coaching-prompts");
   await expect(coachingPrompts.getByRole("button", { name: "How does a show settlement work?" })).toBeVisible();
   await coachingPrompts.getByRole("button", { name: "How does a show settlement work?" }).click();
@@ -202,7 +228,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v14", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v16", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -242,14 +268,14 @@ test("novice manager intake produces grounded work and band operations records",
   await page.goto("/tasks");
   const firstPlanOwner = page.getByLabel("Owner for Finish the booking profile and define what a good-fit show means");
   const firstPlanTaskRow = firstPlanOwner.locator("xpath=ancestor::tr");
-  await firstPlanOwner.selectOption("Alex");
+  await firstPlanOwner.selectOption({ label: "Alex" });
   await firstPlanTaskRow.getByLabel("Status for Finish the booking profile and define what a good-fit show means").selectOption("blocked");
   await firstPlanTaskRow.getByLabel("Waiting on for Finish the booking profile and define what a good-fit show means").fill("Bandleader");
   await firstPlanTaskRow.getByLabel("Blocker for Finish the booking profile and define what a good-fit show means").fill("The band has not agreed on the target room size.");
   const deferredDate = new Date(Date.now() + 180 * 86400000).toISOString().slice(0, 10);
   await firstPlanTaskRow.getByLabel("Due date for Finish the booking profile and define what a good-fit show means").fill(deferredDate);
   await firstPlanTaskRow.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByLabel("Owner for Finish the booking profile and define what a good-fit show means")).toHaveValue("Alex");
+  await expect(page.getByLabel("Owner for Finish the booking profile and define what a good-fit show means").locator("option:checked")).toHaveText("Alex");
   await expect(page.getByRole("heading", { name: "Blocked", exact: true })).toBeVisible();
   await expect(page.getByLabel("Blocker for Finish the booking profile and define what a good-fit show means")).toHaveValue("The band has not agreed on the target room size.");
 
@@ -329,7 +355,7 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByRole("heading", { name: "Milestone plan", exact: true })).toBeVisible();
   await expect(page.getByText(/0\/6 milestones complete/)).toBeVisible();
   const firstReleaseMilestone = "Lock the release goal, audience, and story";
-  await page.getByLabel(`Owner for project milestone ${firstReleaseMilestone}`).selectOption("Alex");
+  await page.getByLabel(`Owner for project milestone ${firstReleaseMilestone}`).selectOption({ label: "Alex" });
   await page.getByLabel(`Status for project milestone ${firstReleaseMilestone}`).selectOption("done");
   await expect(page.getByText(/1\/6 milestones complete/)).toBeVisible();
   await page.getByLabel("Project budget").fill("750");

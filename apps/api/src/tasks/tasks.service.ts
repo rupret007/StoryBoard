@@ -15,7 +15,7 @@ export class TasksService {
   list(artistId: string) {
     return this.prisma.client.task.findMany({
       where: { artistId },
-      include: { opportunity: { include: { venue: true } }, project: true, event: true },
+      include: { opportunity: { include: { venue: true } }, project: true, event: true, bandMember: true },
       orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }]
     });
   }
@@ -60,7 +60,7 @@ export class TasksService {
   async get(artistId: string, id: string) {
     const row = await this.prisma.client.task.findFirst({
       where: { id, artistId },
-      include: { opportunity: true }
+      include: { opportunity: true, project: true, event: true, bandMember: true }
     });
     if (!row) {
       throw new NotFoundException("Task not found");
@@ -86,6 +86,12 @@ export class TasksService {
     if (!project) throw new NotFoundException("Project not found");
   }
 
+  private async bandMemberForArtist(artistId: string, bandMemberId: string) {
+    const member = await this.prisma.client.bandMember.findFirst({ where: { id: bandMemberId, artistId, active: true }, select: { id: true, name: true } });
+    if (!member) throw new NotFoundException("Band member not found");
+    return member;
+  }
+
   async create(
     artistId: string,
     data: TaskCreateInput,
@@ -99,6 +105,7 @@ export class TasksService {
       );
     }
     if (data.projectId != null) await this.assertProjectBelongsToArtist(artistId, data.projectId);
+    const bandMember = data.bandMemberId ? await this.bandMemberForArtist(artistId, data.bandMemberId) : null;
     if (data.status === TaskStatus.blocked && !data.blockedReason?.trim()) throw new BadRequestException("A blocked task requires a reason");
     if (data.status !== TaskStatus.blocked && data.blockedReason) throw new BadRequestException("A blocker may only be recorded on a blocked task");
     if (data.status === TaskStatus.done && data.waitingOn) throw new BadRequestException("Completed work cannot remain waiting on someone");
@@ -108,8 +115,9 @@ export class TasksService {
         title: data.title,
         opportunityId: data.opportunityId ?? null,
         projectId: data.projectId ?? null,
+        bandMemberId: bandMember?.id ?? null,
         status: data.status ?? TaskStatus.todo,
-        ownerLabel: data.ownerLabel ?? null,
+        ownerLabel: bandMember?.name ?? data.ownerLabel ?? null,
         dueAt: data.dueAt ? new Date(data.dueAt) : null,
         blockedReason: data.blockedReason ?? null,
         waitingOn: data.waitingOn ?? null
@@ -142,6 +150,7 @@ export class TasksService {
       );
     }
     if (data.projectId != null) await this.assertProjectBelongsToArtist(artistId, data.projectId);
+    const bandMember = data.bandMemberId ? await this.bandMemberForArtist(artistId, data.bandMemberId) : null;
     const targetStatus = data.status ?? current.status;
     const targetBlockedReason = data.blockedReason === undefined ? current.blockedReason : data.blockedReason;
     if (targetStatus === TaskStatus.blocked && !targetBlockedReason?.trim()) throw new BadRequestException("A blocked task requires a reason");
@@ -154,8 +163,12 @@ export class TasksService {
     if (data.status !== undefined) {
       patchData.status = data.status;
     }
-    if (data.ownerLabel !== undefined) {
+    if (data.bandMemberId !== undefined) {
+      patchData.bandMemberId = bandMember?.id ?? null;
+      patchData.ownerLabel = bandMember?.name ?? null;
+    } else if (data.ownerLabel !== undefined) {
       patchData.ownerLabel = data.ownerLabel;
+      patchData.bandMemberId = null;
     }
     if (data.opportunityId !== undefined) {
       patchData.opportunityId = data.opportunityId;
@@ -188,7 +201,7 @@ export class TasksService {
             data: { outcome: ManagerRecommendationOutcome.completed, outcomeReason: "task_completed", outcomeAt: new Date() }
           })
         : { count: 0 };
-      const row = await tx.task.findUniqueOrThrow({ where: { id }, include: { opportunity: { include: { venue: true } }, project: true, event: true } });
+      const row = await tx.task.findUniqueOrThrow({ where: { id }, include: { opportunity: { include: { venue: true } }, project: true, event: true, bandMember: true } });
       return { row, attributed: completed };
     });
     await this.audit.log({
@@ -200,8 +213,8 @@ export class TasksService {
       actorOperatorId: actorOperatorId ?? null,
       metadata: {
         fields: Object.keys(data),
-        previous: { status: current.status, ownerLabel: current.ownerLabel, dueAt: current.dueAt, blockedReason: current.blockedReason, waitingOn: current.waitingOn },
-        current: { status: row.status, ownerLabel: row.ownerLabel, dueAt: row.dueAt, blockedReason: row.blockedReason, waitingOn: row.waitingOn },
+        previous: { status: current.status, ownerLabel: current.ownerLabel, bandMemberId: current.bandMemberId, dueAt: current.dueAt, blockedReason: current.blockedReason, waitingOn: current.waitingOn },
+        current: { status: row.status, ownerLabel: row.ownerLabel, bandMemberId: row.bandMemberId, dueAt: row.dueAt, blockedReason: row.blockedReason, waitingOn: row.waitingOn },
         deferred,
         deferralCount: row.deferralCount,
         managerRecommendationsCompleted: attributed.count

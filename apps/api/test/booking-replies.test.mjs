@@ -4,8 +4,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const repliesMod = await import(pathToFileURL(join(dir, "..", "dist", "booking", "booking-replies.service.js")).href);
-const constants = await import(pathToFileURL(join(dir, "..", "dist", "integrations", "google-oauth.constants.js")).href);
+const repliesImport = await import(pathToFileURL(join(dir, "..", "dist", "booking", "booking-replies.service.js")).href);
+const constantsImport = await import(pathToFileURL(join(dir, "..", "dist", "integrations", "google-oauth.constants.js")).href);
+const repliesMod = repliesImport.default ?? repliesImport;
+const constants = constantsImport.default ?? constantsImport;
 
 function serviceFixture({ scopeReady = true, threadMessages = [] } = {}) {
   const state = { replies: [], recipientStatus: "sent", audits: [], settings: null };

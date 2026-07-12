@@ -27,7 +27,11 @@ export default defineConfig({
       env: {
         ...process.env,
         NODE_ENV: "development",
-        AUTH_DEV_BYPASS: "true"
+        AUTH_DEV_BYPASS: "true",
+        WEB_URL: "http://127.0.0.1:3000",
+        // Keep the dev session host-only. A developer .env commonly scopes it
+        // to localhost, which browsers correctly refuse on the 127.0.0.1 E2E origin.
+        COOKIE_DOMAIN: ""
       },
       reuseExistingServer: false
     },

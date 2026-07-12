@@ -1,14 +1,14 @@
 "use client";
 
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
-import { Activity, Archive, BrainCircuit, Check, ClipboardList, GitCompareArrows, ListChecks, MessageSquareText, Pencil, Plus, RefreshCw, Save, Send, ShieldCheck, Target, ThumbsDown, ThumbsUp, TrendingUp, X } from "lucide-react";
+import { Activity, Archive, BrainCircuit, Check, ClipboardList, GitCompareArrows, ListChecks, MessageSquareText, Pencil, Plus, RefreshCw, Save, Send, ShieldCheck, Target, ThumbsDown, ThumbsUp, TrendingUp, UsersRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import type { BandMember, ManagerCommitmentHealth, ManagerContextHealth, ManagerConversation, ManagerDecision, ManagerDecisionOption, ManagerEvalExample, ManagerEvaluationRun, ManagerGoal, ManagerGoalMeasurement, ManagerGoalMeasurementKind, ManagerGoalProgressEvent, ManagerKnowledgeHealth, ManagerLearningSummary, ManagerMemoryFact, ManagerMessage, ManagerMessageFeedback, ManagerOutcomeReview, ManagerPlanHealth, ManagerProfile, ManagerProviderContextPolicy, ManagerRecommendation, ManagerResponseEvalExample, ManagerRun, ManagerSettings } from "@/lib/types";
+import type { BandMember, BandMemberCheckIn, ManagerCommitmentHealth, ManagerContextHealth, ManagerConversation, ManagerDecision, ManagerDecisionOption, ManagerEvalExample, ManagerEvaluationRun, ManagerGoal, ManagerGoalMeasurement, ManagerGoalMeasurementKind, ManagerGoalProgressEvent, ManagerKnowledgeHealth, ManagerLearningSummary, ManagerMemoryFact, ManagerMessage, ManagerMessageFeedback, ManagerOutcomeReview, ManagerPlanHealth, ManagerProfile, ManagerProviderContextPolicy, ManagerRecommendation, ManagerResponseEvalExample, ManagerRun, ManagerSettings, ManagerTeamLoad } from "@/lib/types";
 import { ManagerCadenceCard } from "./manager-cadence-card";
 
-export function ManagerClient({ initialProfile, initialMembers, initialGoals, initialGoalMeasurements, initialDecisions, initialBrief, initialConversation, initialMemory, initialLearning, initialPlanHealth, initialContextHealth, initialKnowledgeHealth, initialCommitmentHealth, initialOutcomeReview, initialEvalExamples, initialResponseEvalExamples, initialEvaluation, initialSettings, initialProviderContextPolicy, isOwner }: { initialProfile: ManagerProfile | null; initialMembers: BandMember[]; initialGoals: ManagerGoal[]; initialGoalMeasurements: ManagerGoalMeasurement[]; initialDecisions: ManagerDecision[]; initialBrief: ManagerRun | null; initialConversation: ManagerConversation | null; initialMemory: ManagerMemoryFact[]; initialLearning: ManagerLearningSummary | null; initialPlanHealth: ManagerPlanHealth | null; initialContextHealth: ManagerContextHealth | null; initialKnowledgeHealth: ManagerKnowledgeHealth | null; initialCommitmentHealth: ManagerCommitmentHealth | null; initialOutcomeReview: ManagerOutcomeReview | null; initialEvalExamples: ManagerEvalExample[] | null; initialResponseEvalExamples: ManagerResponseEvalExample[] | null; initialEvaluation: ManagerEvaluationRun | null; initialSettings: ManagerSettings | null; initialProviderContextPolicy: ManagerProviderContextPolicy | null; isOwner: boolean }) {
+export function ManagerClient({ initialProfile, initialMembers, initialMemberCheckIns, initialGoals, initialGoalMeasurements, initialDecisions, initialBrief, initialConversation, initialMemory, initialLearning, initialPlanHealth, initialContextHealth, initialKnowledgeHealth, initialCommitmentHealth, initialTeamLoad, initialOutcomeReview, initialEvalExamples, initialResponseEvalExamples, initialEvaluation, initialSettings, initialProviderContextPolicy, isOwner }: { initialProfile: ManagerProfile | null; initialMembers: BandMember[]; initialMemberCheckIns: BandMemberCheckIn[]; initialGoals: ManagerGoal[]; initialGoalMeasurements: ManagerGoalMeasurement[]; initialDecisions: ManagerDecision[]; initialBrief: ManagerRun | null; initialConversation: ManagerConversation | null; initialMemory: ManagerMemoryFact[]; initialLearning: ManagerLearningSummary | null; initialPlanHealth: ManagerPlanHealth | null; initialContextHealth: ManagerContextHealth | null; initialKnowledgeHealth: ManagerKnowledgeHealth | null; initialCommitmentHealth: ManagerCommitmentHealth | null; initialTeamLoad: ManagerTeamLoad | null; initialOutcomeReview: ManagerOutcomeReview | null; initialEvalExamples: ManagerEvalExample[] | null; initialResponseEvalExamples: ManagerResponseEvalExample[] | null; initialEvaluation: ManagerEvaluationRun | null; initialSettings: ManagerSettings | null; initialProviderContextPolicy: ManagerProviderContextPolicy | null; isOwner: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -19,6 +19,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialGoals, in
   const [memory, setMemory] = useState(initialMemory);
   const [profile, setProfile] = useState(initialProfile);
   const [members, setMembers] = useState(initialMembers);
+  const [memberCheckIns, setMemberCheckIns] = useState(initialMemberCheckIns);
   const [goals, setGoals] = useState(initialGoals);
   const [goalMeasurements, setGoalMeasurements] = useState(initialGoalMeasurements);
   const [decisions, setDecisions] = useState(initialDecisions);
@@ -35,6 +36,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialGoals, in
   useEffect(() => setGoalMeasurements(initialGoalMeasurements), [initialGoalMeasurements]);
   useEffect(() => setProfile(initialProfile), [initialProfile]);
   useEffect(() => setMembers(initialMembers), [initialMembers]);
+  useEffect(() => setMemberCheckIns(initialMemberCheckIns), [initialMemberCheckIns]);
   useEffect(() => setDecisions(initialDecisions), [initialDecisions]);
   useEffect(() => setMemory(initialMemory), [initialMemory]);
   useEffect(() => setPlanHealth(initialPlanHealth), [initialPlanHealth]);
@@ -139,7 +141,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialGoals, in
   }
   async function runEvaluation() {
     setBusy(true); setError("");
-    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v14" } })); }
+    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v16" } })); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function submitMessageFeedback(messageId: string, payload: { helpful: boolean; reason?: string | null; note?: string | null }) {
@@ -189,6 +191,15 @@ export function ManagerClient({ initialProfile, initialMembers, initialGoals, in
     try { const row = await apiFetch<BandMember>(`/manager/members/${id}`, { method: "PATCH", json: payload }); setMembers((current) => current.map((member) => member.id === id ? row : member)); await refreshContext(); router.refresh(); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); throw err; } finally { setBusy(false); }
   }
+  async function recordMemberCheckIn(id: string, payload: unknown) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const row = await apiFetch<BandMemberCheckIn>(`/manager/members/${id}/check-ins`, { method: "POST", json: payload });
+      setMemberCheckIns((current) => [row, ...current]);
+      setNotice(`${row.bandMember.name}'s capacity check-in was saved.`);
+      router.refresh();
+    } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); throw err; } finally { setBusy(false); }
+  }
   function newConversation() { setConversationId(null); setMessages([]); setQuestion(""); setError(""); }
   if (!profile?.intakeCompletedAt) return <Intake busy={busy} error={error} onSubmit={async (payload) => act("/manager/intake/complete", payload)} />;
   const output = initialBrief?.output;
@@ -207,6 +218,8 @@ export function ManagerClient({ initialProfile, initialMembers, initialGoals, in
     {contextHealth ? <BandContextCard profile={profile} members={members} health={contextHealth} busy={busy} onSaveProfile={saveProfile} onAddMember={addBandMember} onUpdateMember={updateBandMember} /> : null}
     {initialSettings ? <ManagerCadenceCard initialSettings={initialSettings} initialProviderContextPolicy={initialProviderContextPolicy} cadence={profile.communicationCadence === "weekly" ? "weekly" : "daily"} isOwner={isOwner} /> : null}
     {initialCommitmentHealth ? <CommitmentHealthCard health={initialCommitmentHealth} /> : null}
+    {initialTeamLoad ? <TeamLoadCard load={initialTeamLoad} /> : null}
+    <MemberCheckInsCard members={members.filter((member) => member.active)} checkIns={memberCheckIns} load={initialTeamLoad} busy={busy} onRecord={recordMemberCheckIn} />
     {initialOutcomeReview ? <OutcomeReviewCard review={initialOutcomeReview} /> : null}
     <DecisionBoard decisions={decisions} busy={busy} onCreate={createDecision} onDecide={patchDecision} onReview={reviewDecision} />
     <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"><SurfaceCard><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Target className="h-4 w-4 text-[var(--accent)]" /><h2 className="font-semibold">90-day plan</h2></div><div className="flex items-center gap-2">{planHealth ? <Badge variant={planHealth.status === "on_track" ? "success" : planHealth.status === "off_track" ? "danger" : "neutral"}>{planHealth.score}/100 · {friendlyReason(planHealth.status)}</Badge> : null}<button className="sb-btn-ghost" disabled={busy} onClick={() => void ensurePlan()}><RefreshCw className="h-4 w-4" /> Fill missing steps</button></div></div>{planHealth ? <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3"><div className="flex gap-2"><Activity className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" /><p className="text-sm text-[var(--text-secondary)]">{planHealth.summary}</p></div>{planHealth.gaps[0] ? <p className="mt-2 text-xs text-[var(--text-muted)]">First gap: {planHealth.gaps[0].detail}</p> : null}</div> : null}<div className="mt-4 space-y-3">{goals.map((goal) => <GoalProgressCard key={goal.id} goal={goal} measurement={goalMeasurements.find((measurement) => measurement.goalId === goal.id) ?? null} health={planHealth?.goals.find((item) => item.goalId === goal.id) ?? null} busy={busy} onRecord={recordGoalProgress} onMeasurementKind={setGoalMeasurementKind} onSync={syncGoalProgress} />)}</div></SurfaceCard>
@@ -237,6 +250,32 @@ function CommitmentHealthCard({ health }: { health: ManagerCommitmentHealth }) {
     {pressure.length ? <div className="mt-4 grid gap-3 lg:grid-cols-2">{pressure.map((item) => <div className={`rounded-lg border p-3 ${item.severity === "high" ? "border-red-500/25 bg-red-500/5" : "border-[var(--border)]"}`} key={item.taskId}><div className="flex items-start justify-between gap-2"><p className="text-sm font-medium">{item.title}</p><Badge variant={item.severity === "high" ? "danger" : "neutral"}>{friendlyReason(item.state)}</Badge></div><p className="mt-2 text-xs text-[var(--text-secondary)]">{item.reasons.join(" ")}</p><p className="mt-2 text-xs text-[var(--text-muted)]">{item.ownerLabel ? `Owner: ${item.ownerLabel}` : "No owner"}{item.dueAt ? ` · Due ${new Date(item.dueAt).toLocaleDateString()}` : " · No date"}</p></div>)}</div> : <p className="mt-4 rounded-lg border border-dashed border-[var(--border)] p-4 text-sm text-[var(--text-muted)]">No follow-through intervention is needed from the recorded task board.</p>}
     <div className="mt-4 rounded-lg bg-[var(--surface-0)] p-3 text-sm"><span className="font-medium">Manager's next move:</span> <span className="text-[var(--text-secondary)]">{health.nextAction}</span></div>
   </SurfaceCard></div>;
+}
+
+function TeamLoadCard({ load }: { load: ManagerTeamLoad }) {
+  const suggestion = load.suggestions[0];
+  return <div data-testid="manager-team-load"><SurfaceCard><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><UsersRound className="h-4 w-4 text-[var(--accent)]" /><h2 className="font-semibold">Team workload</h2></div><p className="mt-2 max-w-4xl text-sm text-[var(--text-secondary)]">{load.summary}</p><p className="mt-1 text-xs text-[var(--text-muted)]">Recorded tasks plus voluntary capacity check-ins · {load.confidenceLabel} coverage · {load.horizonDays}-day horizon. This does not estimate hours or anyone's personal circumstances.</p></div><a className="sb-btn-secondary" href="/tasks">Assign work</a></div>
+    <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{load.members.map((member) => <div className="rounded-lg border border-[var(--border)] p-3" key={member.memberId}><div className="flex items-start justify-between gap-2"><div><p className="text-sm font-medium">{member.name}</p><p className="mt-0.5 text-xs text-[var(--text-muted)]">{member.roles.length ? member.roles.join(", ") : "Responsibilities not recorded"}</p></div><div className="flex flex-col items-end gap-1"><Badge variant={member.pressure === "urgent" ? "danger" : member.pressure === "high" ? "warning" : "neutral"}>{member.pressure}</Badge><Badge variant={member.availability === "available" ? "success" : member.availability === "unavailable" ? "danger" : member.availability === "limited" ? "warning" : "neutral"}>{member.availabilityFreshness === "expired" ? "check-in expired" : member.availability}</Badge></div></div><dl className="mt-3 grid grid-cols-3 gap-2 text-xs"><div><dt className="text-[var(--text-muted)]">Open</dt><dd className="mt-1 font-semibold">{member.openTasks}</dd></div><div><dt className="text-[var(--text-muted)]">Due soon</dt><dd className="mt-1 font-semibold">{member.dueWithinHorizon}</dd></div><div><dt className="text-[var(--text-muted)]">Overdue</dt><dd className="mt-1 font-semibold">{member.overdue}</dd></div></dl>{member.availabilityUntil && member.availabilityFreshness === "current" ? <p className="mt-2 text-xs text-[var(--text-muted)]">Capacity through {new Date(member.availabilityUntil).toLocaleDateString()}</p> : null}</div>)}</div>
+    {suggestion ? <div className="mt-4 rounded-lg border border-[var(--accent)]/25 bg-[var(--accent-muted)] p-3 text-sm"><p className="font-medium">Review one ownership match</p><p className="mt-1 text-[var(--text-secondary)]">“{suggestion.taskTitle}” → {suggestion.memberName}. {suggestion.reason}</p><p className="mt-2 text-xs text-[var(--text-muted)]">Ask “Who should own the unassigned work?” to review and accept the assignment in conversation.</p></div> : load.unassigned[0] ? <div className="mt-4 rounded-lg border border-[var(--border)] p-3 text-sm"><p className="font-medium">Ownership still needs a band decision</p><p className="mt-1 text-[var(--text-secondary)]">{load.nextAction}</p></div> : null}
+  </SurfaceCard></div>;
+}
+
+function MemberCheckInsCard({ members, checkIns, load, busy, onRecord }: { members: BandMember[]; checkIns: BandMemberCheckIn[]; load: ManagerTeamLoad | null; busy: boolean; onRecord: (id: string, payload: unknown) => Promise<void> }) {
+  return <div data-testid="manager-capacity-check-ins"><SurfaceCard><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="sb-kicker">Capacity check-ins</p><h2 className="mt-2 font-semibold">Who has room for work right now?</h2><p className="mt-2 max-w-3xl text-sm text-[var(--text-secondary)]">Save a simple planning signal for each person. It helps the Manager avoid assigning work to someone who is unavailable; no private explanation is needed.</p></div><Badge variant="neutral">Append-only history</Badge></div>
+    <div className="mt-4 grid gap-3 lg:grid-cols-2">{members.map((member) => <MemberCheckInRow key={member.id} member={member} latest={checkIns.find((checkIn) => checkIn.bandMemberId === member.id) ?? null} assessment={load?.members.find((item) => item.memberId === member.id) ?? null} busy={busy} onRecord={onRecord} />)}</div>
+    {!members.length ? <p className="mt-4 rounded-lg border border-dashed border-[var(--border)] p-4 text-sm text-[var(--text-muted)]">Add the working lineup before recording capacity.</p> : null}
+  </SurfaceCard></div>;
+}
+
+function MemberCheckInRow({ member, latest, assessment, busy, onRecord }: { member: BandMember; latest: BandMemberCheckIn | null; assessment: ManagerTeamLoad["members"][number] | null; busy: boolean; onRecord: (id: string, payload: unknown) => Promise<void> }) {
+  const [status, setStatus] = useState<BandMemberCheckIn["status"]>(assessment?.availability === "unknown" || !assessment ? "available" : assessment.availability);
+  const [effectiveUntil, setEffectiveUntil] = useState(assessment?.availabilityUntil?.slice(0, 10) ?? "");
+  const [note, setNote] = useState(assessment?.availabilityNote ?? "");
+  async function save() {
+    await onRecord(member.id, { status, note: note.trim() || null, effectiveUntil: effectiveUntil ? new Date(`${effectiveUntil}T23:59:59.000Z`).toISOString() : null });
+  }
+  const currentLabel = assessment?.availabilityFreshness === "current" ? assessment.availability : assessment?.availabilityFreshness === "expired" ? "expired" : "not checked in";
+  return <div className="rounded-lg border border-[var(--border)] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium">{member.name}</p><p className="mt-1 text-xs text-[var(--text-muted)]">Current signal: {currentLabel}{latest ? ` · last saved ${new Date(latest.createdAt).toLocaleDateString()}` : ""}</p></div><Badge variant={assessment?.availability === "available" && assessment.availabilityFreshness === "current" ? "success" : assessment?.availability === "unavailable" && assessment.availabilityFreshness === "current" ? "danger" : assessment?.availability === "limited" && assessment.availabilityFreshness === "current" ? "warning" : "neutral"}>{currentLabel}</Badge></div><div className="mt-3 grid gap-2 sm:grid-cols-2"><label><span className="sb-label">Capacity for {member.name}</span><select className="sb-select mt-1 w-full" value={status} disabled={busy} onChange={(event) => setStatus(event.target.value as BandMemberCheckIn["status"])}><option value="available">Available</option><option value="limited">Limited</option><option value="unavailable">Unavailable</option></select></label><label><span className="sb-label">Through (optional)</span><input className="sb-input mt-1" type="date" value={effectiveUntil} disabled={busy} onChange={(event) => setEffectiveUntil(event.target.value)} /></label><label className="sm:col-span-2"><span className="sb-label">Planning note (optional)</span><input className="sb-input mt-1" value={note} maxLength={500} disabled={busy} onChange={(event) => setNote(event.target.value)} placeholder="Keep it operational; no personal details needed" /></label></div><button type="button" className="sb-btn-secondary mt-3" disabled={busy} onClick={() => void save()}><Save className="h-4 w-4" /> Save check-in</button></div>;
 }
 
 function BandContextCard({ profile, members, health, busy, onSaveProfile, onAddMember, onUpdateMember }: { profile: ManagerProfile; members: BandMember[]; health: ManagerContextHealth; busy: boolean; onSaveProfile: (payload: unknown) => Promise<void>; onAddMember: (payload: unknown) => Promise<void>; onUpdateMember: (id: string, payload: unknown) => Promise<void> }) {
@@ -409,6 +448,7 @@ function managerActionLabel(actionType?: string | null) {
   if (actionType === "create_decision") return "Suggested open decision";
   if (actionType === "generate_event_advance") return "Suggested show setup";
   if (actionType === "generate_project_plan") return "Suggested project setup";
+  if (actionType === "assign_task") return "Suggested task owner";
   return "Suggested internal task";
 }
 
@@ -417,6 +457,7 @@ function managerActionButton(actionType?: string | null) {
   if (actionType === "create_decision") return "Add decision draft";
   if (actionType === "generate_event_advance") return "Build advance";
   if (actionType === "generate_project_plan") return "Build milestone plan";
+  if (actionType === "assign_task") return "Assign task";
   if (actionType === "create_task") return "Add task";
   return "Accept";
 }
