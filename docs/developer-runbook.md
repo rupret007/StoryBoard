@@ -539,6 +539,9 @@ Operations routes:
   evidence IDs, and prioritized gaps; `days` accepts 1–365
 - `GET /events/:id/day-of` — the tenant-scoped event, active lineup, shared
   readiness result, and deterministic current/next show-day view
+- `POST /events/:id/schedule`, `PATCH /events/:id/schedule/:itemId`, and
+  `DELETE /events/:id/schedule/:itemId` — strict, tenant-scoped custom
+  run-of-show checkpoints; owner/member writes only
 - `GET` / `POST` / `PATCH /songs`, `/setlists`, and `/projects`
 - `GET /projects/readiness`, `GET /projects/:id/readiness`, and
   `POST /projects/:id/generate-plan` — explainable active-project health plus
@@ -592,7 +595,12 @@ by the outcome review rather than silently changing the finalized document.
 
 Open **Day-of view** from a gig card for the phone-oriented live workspace. It
 derives the next checkpoint from load-in, soundcheck, doors, set, curfew, and
-custom schedule items; shows overdue/open advance work, availability,
+custom schedule items. Members and owners can add, correct, and remove custom
+travel calls, meals, support slots, changeovers, meet-and-greets, and similar
+checkpoints inline; the canonical load-in through curfew fields remain in the
+main event editor. Custom checkpoint end time must follow its start, rows
+inherit tenant ownership through their event, and cross-artist event/item pairs
+fail before write or audit. The view also shows overdue/open advance work, availability,
 contact/map actions, setlist, production links, expected fee/deposit, recorded
 payments, and invoice balance; and permits explicit availability and task-state
 updates through the existing audited APIs. Refresh recomputes all relative time
@@ -733,7 +741,8 @@ STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/
 
 The command refuses to fall back to `DATABASE_URL`, runs `prisma generate` and
 `prisma migrate deploy` against that explicit test database, and then verifies
-tenant links, role enforcement, Telegram registration binding, and audit rows.
+tenant links (including custom event schedule ownership), role enforcement,
+Telegram registration binding, and audit rows.
 Before a release, run the read-only relationship diagnostic against the target
 database; it exits non-zero if it finds a mismatch and never changes data:
 

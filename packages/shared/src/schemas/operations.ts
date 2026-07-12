@@ -7,6 +7,22 @@ export const eventTypes = ["gig","rehearsal","studio","release","promotion","tra
 export const eventCreateSchema = z.object({ type: z.enum(eventTypes), status: z.enum(["draft","hold","confirmed","completed","cancelled"]).default("draft"), title: z.string().trim().min(1).max(240), opportunityId: nullableId, venueId: nullableId, contactId: nullableId, projectId: nullableId, setlistId: nullableId, startsAt: nullableDate, endsAt: nullableDate, timezone: z.string().trim().max(80).nullable().optional(), locationName: z.string().trim().max(240).nullable().optional(), address: z.string().trim().max(500).nullable().optional(), loadInAt: nullableDate, soundcheckAt: nullableDate, doorsAt: nullableDate, setAt: nullableDate, curfewAt: nullableDate, travelNotes: z.string().trim().max(3000).nullable().optional(), hospitalityNotes: z.string().trim().max(3000).nullable().optional(), productionNotes: z.string().trim().max(3000).nullable().optional(), cancellationTerms: z.string().trim().max(3000).nullable().optional(), guaranteeMinor: money, depositMinor: money, depositDueAt: nullableDate, balanceDueAt: nullableDate, currency: z.string().trim().length(3).default("USD"), stagePlotUrl: z.string().url().nullable().optional(), inputListUrl: z.string().url().nullable().optional(), techRiderUrl: z.string().url().nullable().optional(), hospitalityRiderUrl: z.string().url().nullable().optional(), parkingNotes: z.string().trim().max(2000).nullable().optional(), guestListNotes: z.string().trim().max(2000).nullable().optional(), attendance: z.number().int().nonnegative().nullable().optional(), grossRevenueMinor: money, postShowNotes: z.string().trim().max(5000).nullable().optional(), relationshipOutcome: z.string().trim().max(1000).nullable().optional() }).strict();
 export const eventPatchSchema = eventCreateSchema.partial().strict();
 export const eventParticipantSchema = z.object({ bandMemberId: z.string().trim().min(1), response: z.enum(["unknown","available","tentative","unavailable"]).default("unknown"), assignment: z.string().trim().max(300).nullable().optional(), notes: z.string().trim().max(1000).nullable().optional() }).strict();
+const eventScheduleFields = {
+  title: z.string().trim().min(1).max(160),
+  startsAt: z.string().datetime({ offset: true }),
+  endsAt: z.string().datetime({ offset: true }).nullable().optional(),
+  location: z.string().trim().max(240).nullable().optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+  sortOrder: z.number().int().min(0).max(999)
+} as const;
+function validateScheduleRange(value: { startsAt?: string | undefined; endsAt?: string | null | undefined }, context: z.RefinementCtx) {
+  if (value.startsAt && value.endsAt && new Date(value.endsAt) <= new Date(value.startsAt)) context.addIssue({ code: "custom", path: ["endsAt"], message: "Schedule item end must be after its start" });
+}
+export const eventScheduleItemCreateSchema = z.object({ ...eventScheduleFields, sortOrder: eventScheduleFields.sortOrder.default(0) }).strict().superRefine(validateScheduleRange);
+export const eventScheduleItemPatchSchema = z.object(eventScheduleFields).partial().strict().superRefine((value, context) => {
+  if (!Object.keys(value).length) context.addIssue({ code: "custom", message: "At least one schedule change is required" });
+  validateScheduleRange(value, context);
+});
 export const songCreateSchema = z.object({ title: z.string().trim().min(1).max(240), durationSeconds: z.number().int().positive().max(7200).nullable().optional(), musicalKey: z.string().trim().max(30).nullable().optional(), bpm: z.number().int().min(20).max(400).nullable().optional(), leadVocalist: z.string().trim().max(160).nullable().optional(), genre: z.string().trim().max(100).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional(), lyricsUrl: z.string().url().nullable().optional(), chartUrl: z.string().url().nullable().optional(), active: z.boolean().default(true) }).strict();
 export const songPatchSchema = songCreateSchema.partial().strict();
 export const setlistCreateSchema = z.object({ name: z.string().trim().min(1).max(240), status: z.enum(["draft","active","archived"]).default("draft"), notes: z.string().trim().max(2000).nullable().optional(), items: z.array(z.object({ songId: z.string().trim().min(1).nullable().optional(), itemType: z.enum(["song","break","note"]).default("song"), label: z.string().trim().max(240).nullable().optional(), transitionNotes: z.string().trim().max(1000).nullable().optional() }).strict()).max(100).default([]) }).strict();

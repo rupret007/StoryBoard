@@ -230,6 +230,17 @@ const checks = [
     `
   },
   {
+    relation: "EventScheduleItem → BandEvent",
+    query: `
+      SELECT s."id" AS "recordId", e."artistId" AS "recordArtistId",
+             s."eventId" AS "relatedId", e."artistId" AS "relatedArtistId"
+      FROM "EventScheduleItem" s
+      LEFT JOIN "BandEvent" e ON e."id" = s."eventId"
+      WHERE e."id" IS NULL
+      ORDER BY s."id";
+    `
+  },
+  {
     relation: "Task → event, project, and initiative",
     query: `
       SELECT t."id" AS "recordId", t."artistId" AS "recordArtistId",

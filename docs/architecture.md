@@ -194,6 +194,10 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
 - Event edits reuse strict shared schemas and service-layer artist ownership.
   Timeline validation operates on the merged stored record, preventing a
   partial PATCH from introducing an impossible show-day sequence.
+- Custom `EventScheduleItem` writes resolve ownership through the parent event,
+  require an exact event/item pair, validate the merged start/end range, and
+  audit only bounded operational metadata. The rows feed the existing timeline
+  directly; there is no second itinerary or Manager-authored schedule.
 - The day-of view is recomputed from authoritative event data and the shared
   readiness policy. It carries evidence IDs and has no separate editable score.
   Manager consumes it only inside the 24-hour show window, keeping longer-range

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
-import { eventCreateSchema, eventPatchSchema, eventParticipantSchema, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema } from "@storyboard/shared";
+import { eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema } from "@storyboard/shared";
 import type { Prisma } from "../generated/prisma/client";
 import { ApprovalStatus, InvoiceStatus, SettlementStatus } from "../generated/prisma/enums";
 import { ApprovalsService } from "../approvals/approvals.service";
@@ -15,6 +15,8 @@ import { SHOW_ADVANCE_VERSION, showAdvanceSourceKey, showAdvanceTaskSpecs } from
 type EventCreate = z.infer<typeof eventCreateSchema>;
 type EventPatch = z.infer<typeof eventPatchSchema>;
 type ParticipantInput = z.infer<typeof eventParticipantSchema>;
+type EventScheduleItemCreate = z.infer<typeof eventScheduleItemCreateSchema>;
+type EventScheduleItemPatch = z.infer<typeof eventScheduleItemPatchSchema>;
 type SongCreate = z.infer<typeof songCreateSchema>;
 type SongPatch = z.infer<typeof songPatchSchema>;
 type SetlistCreate = z.infer<typeof setlistCreateSchema>;
@@ -136,6 +138,33 @@ export class OperationsService {
   }
   async createEvent(artistId: string, input: EventCreate, actorLabel: string, actorOperatorId: string) { await this.validateEventRelations(artistId, input); validateEventTimeline(input); const row = await this.prisma.client.bandEvent.create({ data: { artistId, ...cleanDates(input) } as Prisma.BandEventUncheckedCreateInput }); await this.auditWrite(artistId, "BandEvent", row.id, "event.created", actorLabel, actorOperatorId, { type: row.type, status: row.status }); return this.event(artistId, row.id); }
   async patchEvent(artistId: string, id: string, input: EventPatch, actorLabel: string, actorOperatorId: string) { const existing = await this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, select: { startsAt: true, endsAt: true, loadInAt: true, soundcheckAt: true, doorsAt: true, setAt: true, curfewAt: true } }); if (!existing) throw new NotFoundException("Record not found"); await this.validateEventRelations(artistId, input); validateEventTimeline(input, existing); const row = await this.prisma.client.bandEvent.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "BandEvent", id, "event.updated", actorLabel, actorOperatorId, { fields: Object.keys(input), status: row.status }); return this.event(artistId, id); }
+  async createEventScheduleItem(artistId: string, eventId: string, input: EventScheduleItemCreate, actorLabel: string, actorOperatorId: string) {
+    await this.assertArtistRecord("event", artistId, eventId);
+    const startsAt = new Date(input.startsAt);
+    const endsAt = input.endsAt ? new Date(input.endsAt) : null;
+    if (endsAt && endsAt <= startsAt) throw new BadRequestException("Schedule item end must be after its start");
+    const row = await this.prisma.client.eventScheduleItem.create({ data: { eventId, title: input.title, startsAt, endsAt, location: input.location ?? null, notes: input.notes ?? null, sortOrder: input.sortOrder } });
+    await this.auditWrite(artistId, "EventScheduleItem", row.id, "event.schedule_item_created", actorLabel, actorOperatorId, { eventId, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, sortOrder: row.sortOrder });
+    return row;
+  }
+  async patchEventScheduleItem(artistId: string, eventId: string, id: string, input: EventScheduleItemPatch, actorLabel: string, actorOperatorId: string) {
+    const existing = await this.prisma.client.eventScheduleItem.findFirst({ where: { id, eventId, event: { artistId } } });
+    if (!existing) throw new NotFoundException("Record not found");
+    const startsAt = input.startsAt ? new Date(input.startsAt) : existing.startsAt;
+    const endsAt = input.endsAt === undefined ? existing.endsAt : input.endsAt ? new Date(input.endsAt) : null;
+    if (endsAt && endsAt <= startsAt) throw new BadRequestException("Schedule item end must be after its start");
+    const data: Prisma.EventScheduleItemUpdateInput = { startsAt, endsAt, ...(input.title !== undefined ? { title: input.title } : {}), ...(input.location !== undefined ? { location: input.location } : {}), ...(input.notes !== undefined ? { notes: input.notes } : {}), ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}) };
+    const row = await this.prisma.client.eventScheduleItem.update({ where: { id }, data });
+    await this.auditWrite(artistId, "EventScheduleItem", id, "event.schedule_item_updated", actorLabel, actorOperatorId, { eventId, fields: Object.keys(input), startsAt: row.startsAt, endsAt: row.endsAt, sortOrder: row.sortOrder });
+    return row;
+  }
+  async removeEventScheduleItem(artistId: string, eventId: string, id: string, actorLabel: string, actorOperatorId: string) {
+    const existing = await this.prisma.client.eventScheduleItem.findFirst({ where: { id, eventId, event: { artistId } }, select: { id: true, title: true, startsAt: true, endsAt: true, sortOrder: true } });
+    if (!existing) throw new NotFoundException("Record not found");
+    await this.prisma.client.eventScheduleItem.delete({ where: { id } });
+    await this.auditWrite(artistId, "EventScheduleItem", id, "event.schedule_item_removed", actorLabel, actorOperatorId, { eventId, title: existing.title, startsAt: existing.startsAt, endsAt: existing.endsAt, sortOrder: existing.sortOrder });
+    return { id, deleted: true };
+  }
   async eventFromOpportunity(artistId: string, opportunityId: string, actorLabel: string, actorOperatorId: string) { const opportunity = await this.prisma.client.bookingOpportunity.findFirst({ where: { id: opportunityId, artistId }, include: { venue: true } }); if (!opportunity) throw new NotFoundException("Booking opportunity not found"); const existing = await this.prisma.client.bandEvent.findUnique({ where: { opportunityId } }); const row = await this.prisma.client.bandEvent.upsert({ where: { opportunityId }, create: { artistId, opportunityId, venueId: opportunity.venueId, type: "gig", status: "confirmed", title: opportunity.title, startsAt: opportunity.targetDate, locationName: opportunity.venue?.name ?? null }, update: {} }); if (!existing) await this.auditWrite(artistId, "BandEvent", row.id, "event.created_from_opportunity", actorLabel, actorOperatorId, { opportunityId }); return this.event(artistId, row.id); }
   async participant(artistId: string, eventId: string, input: ParticipantInput, actorLabel: string, actorOperatorId: string) { await Promise.all([this.assertArtistRecord("event", artistId, eventId), this.assertArtistRecord("member", artistId, input.bandMemberId)]); const row = await this.prisma.client.eventParticipant.upsert({ where: { eventId_bandMemberId: { eventId, bandMemberId: input.bandMemberId } }, create: { eventId, bandMemberId: input.bandMemberId, response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt: input.response === "unknown" ? null : new Date() }, update: { response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt: input.response === "unknown" ? null : new Date() } }); await this.auditWrite(artistId, "EventParticipant", row.id, "event.availability_recorded", actorLabel, actorOperatorId, { eventId, response: row.response }); return row; }
   async generateAdvance(artistId: string, eventId: string, actorLabel: string, actorOperatorId: string) {

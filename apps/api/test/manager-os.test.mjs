@@ -1332,6 +1332,10 @@ test("operations validation rejects unknown fields, invalid money, and bad settl
   assert.equal(operationSchemas.settlementCreateSchema.safeParse({ eventId: "event-a", splits: [{ bandMemberId: "a", basisPoints: 4000 }, { bandMemberId: "b", basisPoints: 4000 }] }).success, false);
   assert.equal(operationSchemas.paymentRecordSchema.safeParse({ idempotencyKey: "payment-a", amountMinor: 100, method: "check", receivedAt: "2026-07-11T12:00:00.000Z" }).success, true);
   assert.equal(operationSchemas.expenseCreateSchema.safeParse({ category: "travel", description: "Fuel", amountMinor: 100, incurredAt: "2026-07-11T12:00:00.000Z" }).success, false);
+  assert.equal(operationSchemas.eventScheduleItemCreateSchema.safeParse({ title: "Support set", startsAt: "2026-07-18T23:00:00.000Z", endsAt: "2026-07-19T00:00:00.000Z", sortOrder: 10 }).success, true);
+  assert.equal(operationSchemas.eventScheduleItemCreateSchema.safeParse({ title: "Backwards", startsAt: "2026-07-19T00:00:00.000Z", endsAt: "2026-07-18T23:00:00.000Z" }).success, false);
+  assert.equal(operationSchemas.eventScheduleItemCreateSchema.safeParse({ title: "Unknown field", startsAt: "2026-07-18T23:00:00.000Z", surprise: true }).success, false);
+  assert.equal(operationSchemas.eventScheduleItemPatchSchema.safeParse({}).success, false);
 });
 
 test("settlement math includes only expenses in the settlement currency", async () => {
@@ -1536,6 +1540,37 @@ test("event patches validate the merged schedule before write or audit", async (
   );
   assert.equal(updates, 0);
   assert.equal(audits, 0);
+});
+
+test("custom run-of-show items are tenant-bound, range-checked, editable, removable, and audited", async () => {
+  let creates = 0; let updates = 0; let deletes = 0;
+  const audits = [];
+  let item = { id: "schedule-a", eventId: "event-a", title: "Support set", startsAt: new Date("2026-09-18T20:00:00.000Z"), endsAt: new Date("2026-09-18T21:00:00.000Z"), location: "Main stage", notes: null, sortOrder: 10 };
+  const client = {
+    bandEvent: { findFirst: async ({ where }) => where.id === "event-a" && where.artistId === "artist-a" ? { id: "event-a" } : null },
+    eventScheduleItem: {
+      create: async ({ data }) => { creates += 1; item = { id: "schedule-a", ...data }; return item; },
+      findFirst: async ({ where }) => where.id === item.id && where.eventId === item.eventId && where.event.artistId === "artist-a" ? { ...item } : null,
+      update: async ({ data }) => { updates += 1; item = { ...item, ...data }; return item; },
+      delete: async () => { deletes += 1; return item; }
+    }
+  };
+  const service = new operationsMod.OperationsService({ client }, { log: async (entry) => audits.push(entry) }, {});
+  const created = await service.createEventScheduleItem("artist-a", "event-a", { title: "Support set", startsAt: "2026-09-18T20:00:00.000Z", endsAt: "2026-09-18T21:00:00.000Z", location: "Main stage", sortOrder: 10 }, "owner@test", "operator-a");
+  assert.equal(created.id, "schedule-a");
+  assert.equal(creates, 1);
+  await assert.rejects(() => service.createEventScheduleItem("artist-b", "event-a", { title: "Foreign", startsAt: "2026-09-18T20:00:00.000Z", sortOrder: 0 }, "owner@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+  await assert.rejects(() => service.patchEventScheduleItem("artist-a", "event-a", item.id, { startsAt: "2026-09-18T22:00:00.000Z" }, "owner@test", "operator-a"), /end must be after/i);
+  assert.equal(updates, 0);
+  const updated = await service.patchEventScheduleItem("artist-a", "event-a", item.id, { title: "Opening artist", endsAt: "2026-09-18T22:30:00.000Z" }, "owner@test", "operator-a");
+  assert.equal(updated.title, "Opening artist");
+  await assert.rejects(() => service.patchEventScheduleItem("artist-b", "event-a", item.id, { title: "Foreign edit" }, "owner@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+  assert.equal(updates, 1);
+  const removed = await service.removeEventScheduleItem("artist-a", "event-a", item.id, "owner@test", "operator-a");
+  assert.deepEqual(removed, { id: item.id, deleted: true });
+  assert.equal(deletes, 1);
+  assert.deepEqual(audits.map((entry) => entry.action), ["event.schedule_item_created", "event.schedule_item_updated", "event.schedule_item_removed"]);
+  assert.equal(audits.some((entry) => Object.hasOwn(entry.metadata, "notes")), false);
 });
 
 test("payment recording is idempotent and never double-applies the balance", async () => {

@@ -133,6 +133,11 @@ keys whether generated from Operations or an accepted Manager recommendation.
 Event timeline writes preserve `startsAt <= endsAt` and the recorded show-day
 order load-in → soundcheck → doors → set → curfew. Patch validation merges the
 new values with existing values before checking this invariant.
+`EventScheduleItem` stores additional real-world checkpoints such as travel
+calls, meals, support slots, and changeovers. It inherits artist ownership from
+its required `BandEvent`; service writes require the exact artist/event/item
+chain, validate `endsAt > startsAt` on the merged row, and are audited. These
+rows join the canonical event timestamps in one ordered day-of projection.
 `EventDayOfView` is another non-persistent projection. It combines the shared
 readiness result with the ordered timeline, active-member responses, event
 tasks, accepted terms, and unique invoices to identify the current/next

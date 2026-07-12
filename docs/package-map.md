@@ -46,6 +46,10 @@ The NestJS orchestration backend. Current responsibilities:
   novice-safe code-owned business coaching, evidence-reconciled goal measurement, global
   explainable pressure ranking, exact-message feedback, and owner-reviewed
   response release gates in `src/manager/`
+- **Band operations:** tenant-safe events, editable custom run-of-show
+  checkpoints, availability, readiness/day-of projections, songs/setlists,
+  projects, deal documents, invoices, expenses, and settlements in
+  `src/operations/`
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
 - Global **`CsrfOriginGuard`** (OAuth + Telegram webhook paths excluded for POST)
 
@@ -78,7 +82,7 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
 ## Scripts
 
 - `scripts/preflight.mjs` — infra smoke
-- `scripts/bootstrap/` — reserved / docs
+- `scripts/audit-artist-references.mjs` — read-only tenant relationship diagnostic
 
 ## Tests
 

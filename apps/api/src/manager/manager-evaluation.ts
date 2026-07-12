@@ -6,13 +6,14 @@ import { deterministicManagerContextHealth } from "./manager-context-health";
 import { deterministicManagerCommitmentHealth } from "./manager-commitment-health";
 import { deterministicManagerTeamLoad } from "./manager-team-load";
 import { deterministicShowReadiness } from "../operations/event-readiness";
+import { deterministicEventDayOf } from "../operations/event-day-of";
 import { deterministicProjectReadiness } from "../operations/project-plan";
 import { projectManagerMemoryForProvider } from "./manager-provider-context";
 import { deterministicManagerKnowledgeHealth, projectManagerMemoryForReasoning } from "./manager-knowledge-health";
 import { deterministicManagerGoalMeasurement } from "./manager-goal-measurement";
 
 export const MANAGER_PROMPT_VERSION = "manager_os_v16";
-export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v17";
+export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v18";
 
 type ReviewedExample = { id: string; label: string; promptVersion: string; snapshot: unknown };
 type ReviewedResponseExample = { id: string; label: string; promptVersion: string; expectedBehavior: string | null; resolutionVersion: string | null; resolvedAt: Date | null; snapshot: unknown; inputFacts: unknown };
@@ -82,6 +83,24 @@ function goldenResults(candidateVersion: string): EvalResult[] {
     decisions: [{ id: "decision-due", workstream: "live", title: "Which market next?", context: null, options: [], choice: "Milwaukee", rationale: "Lower travel cost", expectedOutcome: "One return invitation", evidence: [], status: "decided", reviewAt: new Date("2026-07-01T00:00:00.000Z"), decidedAt: new Date("2026-06-01T00:00:00.000Z") }],
     campaignRecipients: [{ id: "recipient-a", status: "sent", followUpDueAt: new Date("2026-07-01T00:00:00.000Z"), followUpTaskId: null }]
   }), NOW);
+  const scheduleEvent = {
+    ...show,
+    startsAt: new Date("2026-07-12T18:00:00.000Z"),
+    endsAt: new Date("2026-07-12T23:00:00.000Z"),
+    loadInAt: new Date("2026-07-12T15:00:00.000Z"),
+    soundcheckAt: new Date("2026-07-12T16:30:00.000Z"),
+    doorsAt: new Date("2026-07-12T17:30:00.000Z"),
+    setAt: new Date("2026-07-12T18:00:00.000Z"),
+    curfewAt: new Date("2026-07-12T22:00:00.000Z"),
+    currency: "USD",
+    tasks: [],
+    schedule: [{ id: "schedule-meal", title: "Band meal", startsAt: new Date("2026-07-12T14:00:00.000Z"), endsAt: new Date("2026-07-12T14:30:00.000Z"), location: "Green room", notes: "Confirm dietary order" }],
+    deals: [],
+    invoices: []
+  };
+  const scheduleReadiness = deterministicShowReadiness(scheduleEvent, [{ id: "member-a" }, { id: "member-b" }], NOW);
+  const scheduleDayOf = deterministicEventDayOf(scheduleEvent, scheduleReadiness, [{ id: "member-a" }, { id: "member-b" }], NOW);
+  const scheduleBrief = deterministicManagerBrief(facts({ events: [{ ...scheduleEvent, readiness: scheduleReadiness, dayOf: scheduleDayOf }] }), NOW);
   const cases = [
     { name: "original-incomplete", run: () => deterministicManagerChat(intakeFacts, "What should we do next?", NOW), check: (result: ReturnType<typeof deterministicManagerChat>) => /finish the manager setup|complete the guided manager setup/i.test(result.answer), detail: "Incomplete intake is identified before strategic advice." },
     { name: "original-release-and-shows", run: () => deterministicManagerChat(facts(), "What should we focus on this week?", NOW), check: (result: ReturnType<typeof deterministicManagerChat>) => result.citations.length > 0 && /first move|simple|next/i.test(result.answer), detail: "Prioritized work is tied to recorded evidence." },
@@ -114,6 +133,7 @@ function goldenResults(candidateVersion: string): EvalResult[] {
   const fullMemory = projectManagerMemoryForProvider(memoryFacts, true);
   return [
     ...chatResults,
+    { name: "custom-run-of-show-grounding", source: "golden", passed: scheduleBrief.today.some((item) => item.stableKey === "event-event-a" && /Band meal/.test(item.reason) && item.evidenceIds.includes("schedule-meal")), detail: "A saved custom checkpoint enters the same evidence-backed day-of brief instead of a separate or invented itinerary." },
     { name: "competing-pressure-global-ranking", source: "golden", passed: competingPressureBrief.today.length === 5 && competingPressureBrief.today[0]?.stableKey === "event-event-a" && competingPressureBrief.today.some((item) => item.stableKey === "booking-reply-reply-a"), detail: "The Manager ranks every recorded pressure before applying the five-item limit, keeping a same-day blocked show ahead of later code-order candidates." },
     { name: "knowledge-source-precedence", source: "golden", passed: knowledgeHealth.status === "conflicted" && (canonicalMemory[0]?.value as { city?: string }).city === "Chicago" && /conflicts with the operating profile/i.test(knowledgeAnswer.answer), detail: "The operating profile wins over contradictory duplicate memory, and the Manager asks for review instead of asserting the stale value." },
     { name: "goal-record-reconciliation", source: "golden", passed: goalMeasurement.status === "records_ahead" && goalMeasurement.observedValue === 1 && /reconcile it/i.test(measurementAnswer.answer) && measurementAnswer.citations.includes("event-measured"), detail: "Manager goal advice detects when authoritative operating records have moved ahead of the saved progress number without silently rewriting it." },

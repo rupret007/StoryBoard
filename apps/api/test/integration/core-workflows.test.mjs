@@ -710,6 +710,12 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   }, operator.email, operator.id);
   await assert.rejects(() => operations.patchEvent(artist.id, event.id, { venueId: foreignVenue.id }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   await assert.rejects(() => operations.patchEvent(artist.id, event.id, { soundcheckAt: "2026-09-18T21:00:00.000Z" }, operator.email, operator.id), /Soundcheck must be before doors/i);
+  const mealCheckpoint = await operations.createEventScheduleItem(artist.id, event.id, { title: "Band meal", startsAt: "2026-09-18T16:30:00.000Z", endsAt: "2026-09-18T16:50:00.000Z", location: "Green room", sortOrder: 10 }, operator.email, operator.id);
+  const updatedCheckpoint = await operations.patchEventScheduleItem(artist.id, event.id, mealCheckpoint.id, { notes: "Dietary order confirmed" }, operator.email, operator.id);
+  assert.equal(updatedCheckpoint.notes, "Dietary order confirmed");
+  await assert.rejects(() => operations.createEventScheduleItem(foreignArtist.id, event.id, { title: "Foreign checkpoint", startsAt: "2026-09-18T16:00:00.000Z", sortOrder: 0 }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  const foreignSchedule = await client.eventScheduleItem.create({ data: { eventId: (await client.bandEvent.create({ data: { artistId: foreignArtist.id, type: "gig", status: "draft", title: "Foreign event", currency: "USD" } })).id, title: "Foreign item", startsAt: new Date("2026-09-18T16:00:00.000Z") } });
+  await assert.rejects(() => operations.patchEventScheduleItem(artist.id, event.id, foreignSchedule.id, { title: "Unsafe edit" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   await operations.participant(artist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id);
   await operations.participant(artist.id, event.id, { bandMemberId: productionMember.id, response: "available" }, operator.email, operator.id);
   await assert.rejects(() => operations.participant(foreignArtist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -728,11 +734,14 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.ok(readiness.evidenceIds.includes(event.id));
   const dayOf = await operations.eventDayOf(artist.id, event.id, new Date("2026-09-18T16:00:00.000Z"));
   assert.equal(dayOf.dayOf.mode, "pre_show");
-  assert.equal(dayOf.dayOf.nextCheckpoint.label, "Load-in");
-  assert.equal(dayOf.dayOf.nextCheckpoint.minutesUntil, 60);
+  assert.equal(dayOf.dayOf.nextCheckpoint.label, "Band meal");
+  assert.equal(dayOf.dayOf.nextCheckpoint.minutesUntil, 30);
+  assert.equal(dayOf.dayOf.nextCheckpoint.notes, "Dietary order confirmed");
   assert.equal(dayOf.dayOf.unresolvedAvailabilityCount, 0);
   assert.equal(dayOf.event.contactId, dayOfContact.id);
   await assert.rejects(() => operations.eventDayOf(foreignArtist.id, event.id), (error) => error?.getStatus?.() === 404);
+  assert.deepEqual(await operations.removeEventScheduleItem(artist.id, event.id, mealCheckpoint.id, operator.email, operator.id), { id: mealCheckpoint.id, deleted: true });
+  assert.equal((await operations.eventDayOf(artist.id, event.id, new Date("2026-09-18T16:00:00.000Z"))).dayOf.nextCheckpoint.label, "Load-in");
 
   const deal = await operations.createDeal(artist.id, { eventId: event.id, opportunityId: opportunity.id, status: "accepted", title: "Friday guarantee", offerAmountMinor: 100000, currency: "USD", depositMinor: 25000 }, operator.email, operator.id);
   const invoice = await operations.createInvoice(artist.id, { dealOfferId: deal.id, eventId: event.id, number: "TEST-001", recipientName: "Owned Room", currency: "USD", subtotalMinor: 100000, taxMinor: 0 }, operator.email, operator.id);
@@ -774,5 +783,5 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(foreignOutcomeReview.activity.completedShows, 0);
   assert.equal(foreignOutcomeReview.evidenceIds.includes(event.id), false);
   const actions = await client.auditEvent.findMany({ where: { artistId: artist.id }, select: { action: true } });
-  for (const expected of ["manager.intake_completed", "manager.profile_updated", "manager.plan_ensured", "manager.settings_updated", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
+  for (const expected of ["manager.intake_completed", "manager.profile_updated", "manager.plan_ensured", "manager.settings_updated", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.schedule_item_created", "event.schedule_item_updated", "event.schedule_item_removed", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
 });

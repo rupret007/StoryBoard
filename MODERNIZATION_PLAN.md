@@ -628,6 +628,43 @@ Implementation and validation notes:
   unavailable-performer blocking, confidence, evidence, and a fully recorded
   ready show. No migration or provider access is required.
 
+### P1 — Editable run-of-show operations (completed 2026-07-12)
+
+- [x] Close the current data-entry gap around the existing
+  `EventScheduleItem` model. Add strict, tenant-safe create, patch, and remove
+  routes for custom show-day checkpoints without changing the canonical
+  load-in, soundcheck, doors, set, or curfew fields.
+- [x] Validate title, offset datetimes, optional end time, location, notes, and
+  bounded sort order at the HTTP boundary. End time must follow start time;
+  another artist's event or schedule-item ID must return generic not-found
+  before any write or audit.
+- [x] Make the phone-oriented event workspace an actual run-of-show editor:
+  members can add travel calls, meals, support slots, changeovers, meet-and-
+  greets, and other real checkpoints, correct them inline, and remove obsolete
+  rows. Viewers remain read-only through the existing role policy.
+- [x] Keep one source of truth: the existing day-of timeline, Manager day-of
+  priority, and evidence trace must consume the saved schedule rows immediately
+  rather than creating a separate itinerary model or generated prose copy.
+- [x] Add unit, disposable-database, golden-eval, relationship-diagnostic, and
+  Chromium coverage. Update the runbook, domain/architecture docs, README, and
+  handoff after the complete gate passes.
+
+Implementation and validation notes:
+
+- Added strict shared create/patch contracts plus member/owner REST writes for
+  custom schedule rows. Service checks resolve ownership through the exact
+  artist/event/item chain, validate the merged time range, and return generic
+  not-found before writes or audits on a foreign chain. No schema migration was
+  needed because the forward-only `EventScheduleItem` model already existed.
+- Added the inline day-of editor and kept canonical load-in through curfew in
+  the main event editor. The same persisted rows immediately drive the ordered
+  day-of timeline, evidence IDs, and within-24-hours Manager priority.
+- Validation passed: `pnpm typecheck`, `pnpm lint`, 97 API + 2 shared tests,
+  `pnpm build`, 3 disposable-Postgres workflows, the complete relationship
+  diagnostic including schedule→event ownership, 3 Chromium journeys with
+  create/edit/reload persistence, `git diff --check`, and the
+  `manager_os_v16` / `manager_evals_v18` gate at 31/31 safety/usefulness checks.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,

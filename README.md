@@ -254,7 +254,8 @@ setlist, ordered show-day timing, guarantee/deposit, production notes, and
 technical-document links. Partial edits are checked against the complete saved
 schedule, so an impossible load-in/soundcheck/doors/set/curfew order is rejected
 before write or audit. Each gig also has a phone-friendly **day-of view** with
-the next checkpoint, run of show, contact/map actions, lineup assignments,
+the next checkpoint, an editable custom run of show for travel calls, meals,
+support slots, changeovers, and other checkpoints, contact/map actions, lineup assignments,
 advance-task completion, setlist, production links, and recorded payment state.
 When the show is over, the same event editor records attendance, gross revenue,
 what worked or failed, and the buyer/venue relationship outcome. Settlement
