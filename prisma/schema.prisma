@@ -324,6 +324,7 @@ model Operator {
   advisorFeedback                   BookingAdvisorFeedback[]
   bandMemberProfiles                BandMember[]
   managerMessages                   ManagerMessage[]
+  managerMessageFeedback            ManagerMessageFeedback[]
   managerEvalExamplesPromoted       ManagerEvalExample[]        @relation("ManagerEvalPromoter")
   managerGoalProgressRecorded       ManagerGoalProgressEvent[]  @relation("ManagerGoalProgressRecorder")
   managerEvaluationRunsCreated      ManagerEvaluationRun[]      @relation("ManagerEvaluationRunner")
@@ -385,6 +386,7 @@ model Artist {
   managerMemoryFacts          ManagerMemoryFact[]
   managerRuns                 ManagerRun[]
   managerConversations        ManagerConversation[]
+  managerMessageFeedback      ManagerMessageFeedback[]
   managerEvalExamples         ManagerEvalExample[]
   managerGoalProgressEvents   ManagerGoalProgressEvent[]
   managerEvaluationRuns       ManagerEvaluationRun[]
@@ -585,6 +587,7 @@ model ManagerRun {
   createdAt       DateTime                @default(now())
   artist          Artist                  @relation(fields: [artistId], references: [id], onDelete: Cascade)
   recommendations ManagerRecommendation[]
+  message         ManagerMessage?
 
   @@index([artistId, cadence, createdAt])
 }
@@ -665,18 +668,39 @@ model ManagerConversation {
 }
 
 model ManagerMessage {
-  id              String              @id @default(cuid())
+  id              String                   @id @default(cuid())
   conversationId  String
+  managerRunId    String?                  @unique
   operatorId      String?
   role            String
   content         String
-  citations       Json                @default("[]")
-  proposedActions Json                @default("[]")
-  createdAt       DateTime            @default(now())
-  conversation    ManagerConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  operator        Operator?           @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  citations       Json                     @default("[]")
+  proposedActions Json                     @default("[]")
+  createdAt       DateTime                 @default(now())
+  conversation    ManagerConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  managerRun      ManagerRun?              @relation(fields: [managerRunId], references: [id], onDelete: SetNull)
+  operator        Operator?                @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  feedback        ManagerMessageFeedback[]
 
   @@index([conversationId, createdAt])
+}
+
+model ManagerMessageFeedback {
+  id               String         @id @default(cuid())
+  artistId         String
+  managerMessageId String
+  operatorId       String
+  helpful          Boolean
+  reason           String?
+  note             String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  artist           Artist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  managerMessage   ManagerMessage @relation(fields: [managerMessageId], references: [id], onDelete: Cascade)
+  operator         Operator       @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+
+  @@unique([managerMessageId, operatorId])
+  @@index([artistId, createdAt])
 }
 
 model BookingAdvisorRun {

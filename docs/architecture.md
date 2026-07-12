@@ -91,7 +91,12 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
 - Manager adaptation is outcome-controlled: accepted recommendations are
   transactionally single-use, task completion is attributed, and recent
   accepted/completed/dismissed stable keys are suppressed for fixed cooldowns.
-  User corrections update sourced memory. Feedback may shape reviewed evals,
+  User corrections update sourced memory. Delivered answers link to the exact
+  run, and explicit response feedback changes only a small code-owned mapping
+  of presentation rules; correction notes are never treated as instructions.
+  A deterministic response-quality gate rejects canned/meta prose, excessive
+  presentation, and unverified claims of completed outside actions before a
+  model answer can replace the safe fallback. Feedback may shape reviewed evals,
   but runtime models cannot rewrite prompts, policy, schemas, or code.
   Owner-promoted `ManagerEvalExample` rows are bounded local fixtures, not an
   online training or self-deployment mechanism. Code-owned plan health derives

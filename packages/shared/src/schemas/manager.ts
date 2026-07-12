@@ -23,10 +23,19 @@ export const managerInitiativePatchSchema = managerInitiativeCreateSchema.partia
 export const managerDecisionCreateSchema = z.object({ workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), context: z.string().trim().max(3000).nullable().optional(), options: z.array(z.object({ label: z.string().trim().min(1).max(200), tradeoff: z.string().trim().max(1000) }).strict()).min(2).max(6), choice: z.string().trim().max(200).nullable().optional(), rationale: z.string().trim().max(2000).nullable().optional(), evidence: z.array(z.string().trim().min(1).max(200)).max(20).default([]), reviewAt: z.string().datetime({ offset: true }).nullable().optional() }).strict();
 export const managerSettingsSchema = z.object({ aiEnabled: z.boolean().optional(), fullContextEnabled: z.boolean().optional(), scheduleEnabled: z.boolean().optional(), timezone: z.string().trim().max(80).nullable().optional(), dailyHour: z.number().int().min(6).max(20).optional() }).strict();
 export const managerChatSchema = z.object({ conversationId: z.string().trim().min(1).nullable().optional(), message: z.string().trim().min(1).max(10000) }).strict();
+export const managerMessageFeedbackReasons = ["incorrect", "missed_question", "too_vague", "too_long", "wrong_tone", "missing_context", "other"] as const;
+export const managerMessageFeedbackSchema = z.object({
+  helpful: z.boolean(),
+  reason: z.enum(managerMessageFeedbackReasons).nullable().optional(),
+  note: z.string().trim().min(1).max(1000).nullable().optional()
+}).strict().superRefine((input, context) => {
+  if (input.helpful && input.reason) context.addIssue({ code: "custom", path: ["reason"], message: "Helpful feedback cannot include a correction reason" });
+  if (!input.helpful && !input.reason) context.addIssue({ code: "custom", path: ["reason"], message: "Choose what needs improvement" });
+});
 export const managerRecommendationReasons = ["accepted", "task_completed", "already_handled", "not_relevant", "wrong_priority", "bad_timing", "missing_context", "other"] as const;
 export const managerRecommendationFeedbackSchema = z.object({ reason: z.enum(managerRecommendationReasons).optional(), note: z.string().trim().max(1000).nullable().optional() }).strict();
 export const managerEvalPromotionSchema = z.object({ label: z.enum(["useful", "not_useful", "needs_revision"]), notes: z.string().trim().max(2000).nullable().optional() }).strict();
-export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v3").default("manager_os_v3") }).strict();
+export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v4").default("manager_os_v4") }).strict();
 export const managerMemoryPatchSchema = z.object({
   value: z.json().optional(),
   confirmed: z.boolean().optional(),
@@ -40,5 +49,6 @@ export type ManagerGoalCreateInput = z.infer<typeof managerGoalCreateSchema>;
 export type ManagerGoalProgressInput = z.infer<typeof managerGoalProgressSchema>;
 export type ManagerInitiativeCreateInput = z.infer<typeof managerInitiativeCreateSchema>;
 export type ManagerRecommendationFeedbackInput = z.infer<typeof managerRecommendationFeedbackSchema>;
+export type ManagerMessageFeedbackInput = z.infer<typeof managerMessageFeedbackSchema>;
 export type ManagerEvalPromotionInput = z.infer<typeof managerEvalPromotionSchema>;
 export type ManagerMemoryPatchInput = z.infer<typeof managerMemoryPatchSchema>;

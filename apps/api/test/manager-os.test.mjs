@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -15,6 +15,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("operations/operations.service.js"),
   loadApi("manager/manager.service.js"),
   loadApi("manager/manager-intelligence.js"),
+  loadApi("manager/manager-response-quality.js"),
   loadApi("tasks/tasks.service.js"),
   loadApi("manager/manager-evaluation.js"),
   loadApi("manager/manager-plan.js"),
@@ -117,6 +118,53 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerGoalProgressSchema.safeParse({ delta: 1 }).success, true);
   assert.equal(managerSchemas.managerGoalProgressSchema.safeParse({ value: 3, delta: 1 }).success, false);
   assert.equal(managerSchemas.managerGoalProgressSchema.safeParse({}).success, false);
+  assert.equal(managerSchemas.managerMessageFeedbackSchema.safeParse({ helpful: true }).success, true);
+  assert.equal(managerSchemas.managerMessageFeedbackSchema.safeParse({ helpful: false, reason: "too_vague", note: "Name the next step" }).success, true);
+  assert.equal(managerSchemas.managerMessageFeedbackSchema.safeParse({ helpful: false }).success, false);
+  assert.equal(managerSchemas.managerMessageFeedbackSchema.safeParse({ helpful: true, reason: "too_long" }).success, false);
+});
+
+test("manager response quality rejects assistant tells, canned prose, and invented external actions", () => {
+  const natural = responseQuality.evaluateManagerResponseQuality("Start with the overdue venue follow-up. It is the clearest booking risk today, and Alex already owns it.", "guided");
+  assert.equal(natural.passed, true);
+  const unsafe = responseQuality.evaluateManagerResponseQuality("Certainly! As an AI assistant, I have emailed the buyer based on the provided snapshot.", "guided");
+  assert.equal(unsafe.passed, false);
+  assert.ok(unsafe.violations.includes("canned_preamble"));
+  assert.ok(unsafe.violations.includes("assistant_meta_language"));
+  assert.ok(unsafe.violations.includes("unverified_external_action_claim"));
+  const tooLong = responseQuality.evaluateManagerResponseQuality(Array.from({ length: 141 }, () => "word").join(" "), "concise");
+  assert.ok(tooLong.violations.includes("too_long"));
+});
+
+test("explicit response feedback becomes bounded presentation guidance without changing authority", () => {
+  const rows = [
+    { helpful: false, reason: "too_vague" },
+    { helpful: false, reason: "missed_question" },
+    { helpful: true, reason: null }
+  ];
+  const summary = responseQuality.summarizeManagerResponseFeedback(rows);
+  assert.equal(summary.helpfulRate, 1 / 3);
+  assert.equal(summary.reasons[0].reason, "missed_question");
+  const guidance = responseQuality.managerResponseGuidance(rows);
+  assert.match(guidance, /exact question|specific next action/i);
+  assert.doesNotMatch(guidance, /send|execute|approve/i);
+});
+
+test("manager response feedback is exact-message, tenant-safe, idempotent, and audited", async () => {
+  let upserts = 0; let audits = 0;
+  const client = {
+    managerMessage: { findFirst: async ({ where }) => where.conversation.artistId === "artist-a" && where.role === "assistant" ? { id: "message-a", managerRunId: "run-a" } : null },
+    managerMessageFeedback: { upsert: async ({ create, update }) => { upserts += 1; return { id: "feedback-a", ...create, ...update }; } }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
+  const first = await service.messageFeedback("artist-a", "message-a", { helpful: false, reason: "too_vague" }, "member@test", "operator-a");
+  const corrected = await service.messageFeedback("artist-a", "message-a", { helpful: true }, "member@test", "operator-a");
+  assert.equal(first.helpful, false);
+  assert.equal(corrected.helpful, true);
+  assert.equal(upserts, 2);
+  assert.equal(audits, 2);
+  await assert.rejects(() => service.messageFeedback("artist-b", "message-a", { helpful: true }, "member@test", "operator-a"), (error) => error?.getStatus?.() === 404);
+  assert.equal(upserts, 2);
 });
 
 test("plan health is transparent about measurement, deadlines, blockers, and linked work", () => {
@@ -212,11 +260,11 @@ test("goal progress is append-only, artist-scoped, and audited", async () => {
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v3", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v4", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v3", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v3", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v4", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v4", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);

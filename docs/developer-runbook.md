@@ -286,6 +286,8 @@ Manager routes:
 - `GET /manager/brief?cadence=daily|weekly` and
   `POST /manager/brief/generate`
 - `POST /manager/chat`
+- `POST /manager/messages/:id/feedback` with `{ "helpful": true }` or
+  `{ "helpful": false, "reason": "too_vague", "note": "..." }`
 - `GET /manager/conversations?limit=1..20` and
   `GET /manager/conversations/:id` (bounded to 50 messages)
 - `GET /manager/memory`, `PATCH /manager/memory/:id`, and
@@ -293,7 +295,7 @@ Manager routes:
 - `GET /manager/eval-examples` and
   `POST /manager/recommendations/:id/promote-eval` (owner-only)
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v3`)
+  (owner-only; currently accepts only the code-registered `manager_os_v4`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -303,10 +305,19 @@ Manager routes:
 tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices, and
 settlements. CRM/provider text is treated as untrusted data. Prompt/policy
-version `manager_os_v3` retains the current operator question and at most 12
+version `manager_os_v4` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
+Each assistant message links to the exact `ManagerRun` that produced it.
+Members can record one idempotent feedback row per response/operator; feedback
+is tenant-scoped and audited. Only aggregate helpful/correction signals enter
+future response guidance—free-text notes are not injected into prompts.
+Code maps common corrections (`incorrect`, `missed_question`, `too_vague`,
+`too_long`, `wrong_tone`, and `missing_context`) to bounded presentation rules.
+A deterministic post-output gate rejects canned openings, assistant/meta
+language, excessive length/formatting, and claims of completed outside actions;
+the deterministic manager answer is used when model output fails the gate.
 Chat may return one reviewable recommendation through the same recommendation
 API. Acceptance currently permits only `create_task`. The model does not
 receive provider-write, SQL, or arbitrary tool execution. Sending, signing,
@@ -315,8 +326,8 @@ Recommendation acceptance uses a transaction so concurrent clicks cannot
 create duplicate tasks. Finishing a linked task attributes completion back to
 the recommendation. Accepted work stays suppressed while its task is open;
 completed work has a 14-day cooldown and dismissed work a 7-day cooldown.
-Dismissal reasons and 90-day acceptance/completion metrics are visible in the
-Manager workspace. Normal confirmed memory can be corrected by members;
+Dismissal reasons, response helpfulness, correction reasons, and 90-day
+acceptance/completion metrics are visible in the Manager workspace. Normal confirmed memory can be corrected by members;
 sensitive/restricted memory and sensitivity changes remain owner-controlled.
 Archiving a memory removes it from reasoning without deleting audit history.
 An owner may promote a decided recommendation to the local eval set with

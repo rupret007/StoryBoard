@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `49b4734`
+Baseline for this round: `main` at `582699f`
 
 ## Product and current architecture
 
@@ -153,8 +153,8 @@ mock-safe provider adapters.
 - [x] Add append-only, tenant-safe, audited goal progress events. Numeric
   progress stays explicit; completed recommendation tasks contribute through
   their linked initiative without inventing a numeric goal increment.
-- [x] Add an owner-triggered offline evaluation runner over eight golden
-  scenarios plus owner-reviewed examples. Candidate versions are code-allowlisted,
+- [x] Add an owner-triggered offline evaluation runner over versioned golden
+  scenarios (currently eleven) plus owner-reviewed examples. Candidate versions are code-allowlisted,
   unresolved same-version revision labels fail the run, results are persisted,
   and there is no automatic activation endpoint.
 - [x] Make guided intake deliver the promised executable 90-day plan: two
@@ -167,6 +167,28 @@ mock-safe provider adapters.
 - [x] Invalidate briefs created before completed intake and synchronize Manager
   client state after server refresh. Reset only the explicit E2E database so
   first-use intake remains a real regression path.
+
+### P0 — Reviewed response quality and bounded learning (completed 2026-07-12)
+
+- [x] Link each delivered Manager answer to the exact `ManagerRun` that
+  produced it and persist one tenant-scoped, per-operator helpful/correction
+  verdict without duplicating conversation content.
+- [x] Accept a strict correction taxonomy plus an optional human note. Feed only
+  aggregate reasons—not raw notes—into a small code-owned presentation mapping;
+  feedback cannot add tools, change risk, or expand authority.
+- [x] Add a deterministic natural-response gate for configured length,
+  excessive formatting, canned assistant openings, implementation/meta
+  language, and unverified claims of completed external actions. Failed model
+  output falls back to the grounded deterministic answer.
+- [x] Promote the reviewed policy to `manager_os_v4` / `manager_evals_v3` with
+  explicit natural-voice, meta/action-claim rejection, and feedback-guidance
+  checks. No version activates itself.
+- [x] Expose response feedback in the Manager conversation and 90-day learning
+  summary; preserve viewer read-only rules, member mutation permissions, audit
+  history, and tenant isolation.
+- [x] Clean-room the design from Andrea_NanoBot's exact-response feedback and
+  outcome-led learning concepts; no source code, runtime, database, or broad
+  assistant authority is imported.
 
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
@@ -275,6 +297,20 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Added forward migration
+  `20260713010000_manager_response_feedback` and Manager policy
+  `manager_os_v4`. Every delivered chat answer now links to its run and accepts
+  audited, idempotent, tenant-safe helpful/correction feedback. Only aggregate
+  correction reasons influence bounded presentation guidance; free-text notes
+  never become prompt instructions. A deterministic response-quality gate
+  rejects canned/meta language, excessive presentation, and fabricated claims
+  of outside action. Validation passed 59 API tests, all three 22-migration
+  database workflows, three production Chromium workflows including helpful
+  and correction feedback, and the 11/11 offline Manager gate. The design uses
+  Andrea_NanoBot's outcome-led feedback concepts as a clean-room reference; no
+  code or broader autonomy was imported. The full typecheck/lint/test/build
+  gate, Compose validation, and expanded relationship audit also pass with zero
+  cross-artist mismatches.
 - 2026-07-12: Added executable project management without a new milestone
   table. `project_plan_v1` generates type-specific, source-keyed Task sequences;
   project readiness explains progress, ownership, blockers, metrics, assets,

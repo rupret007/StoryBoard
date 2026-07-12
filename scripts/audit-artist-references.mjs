@@ -306,6 +306,21 @@ const checks = [
     `
   },
   {
+    relation: "Manager response feedback → conversation and run",
+    query: `
+      SELECT f."id" AS "recordId", f."artistId" AS "recordArtistId",
+             f."managerMessageId" AS "relatedId",
+             COALESCE(c."artistId", r."artistId") AS "relatedArtistId"
+      FROM "ManagerMessageFeedback" f
+      INNER JOIN "ManagerMessage" m ON m."id" = f."managerMessageId"
+      INNER JOIN "ManagerConversation" c ON c."id" = m."conversationId"
+      LEFT JOIN "ManagerRun" r ON r."id" = m."managerRunId"
+      WHERE f."artistId" <> c."artistId"
+         OR (r."id" IS NOT NULL AND f."artistId" <> r."artistId")
+      ORDER BY f."id";
+    `
+  },
+  {
     relation: "Agreement → deal and template",
     query: `
       SELECT a."id" AS "recordId", a."artistId" AS "recordArtistId",

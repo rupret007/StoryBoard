@@ -432,10 +432,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v3", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v4", operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v3", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v4", operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -443,10 +443,21 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const firstChat = await manager.chat(artist.id, { message: "What should we focus on this week?" }, operator.email, operator.id);
   const secondChat = await manager.chat(artist.id, { conversationId: firstChat.conversationId, message: "And what about our next show?" }, operator.email, operator.id);
   assert.equal(secondChat.conversationId, firstChat.conversationId);
-  const persistedConversation = await manager.conversation(artist.id, firstChat.conversationId);
+  assert.ok(firstChat.message.managerRunId);
+  const negativeFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: false, reason: "too_vague", note: "Name the exact first step" }, operator.email, operator.id);
+  assert.equal(negativeFeedback.helpful, false);
+  const revisedFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id);
+  assert.equal(revisedFeedback.id, negativeFeedback.id);
+  assert.equal(await client.managerMessageFeedback.count({ where: { artistId: artist.id } }), 1);
+  await assert.rejects(() => manager.messageFeedback(foreignArtist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  const feedbackLearning = await manager.learningSummary(artist.id);
+  assert.equal(feedbackLearning.responseFeedback.total, 1);
+  assert.equal(feedbackLearning.responseFeedback.helpfulRate, 1);
+  const persistedConversation = await manager.conversation(artist.id, firstChat.conversationId, operator.id);
   assert.deepEqual(persistedConversation.messages.map((message) => message.role), ["user", "assistant", "user", "assistant"]);
+  assert.equal(persistedConversation.messages.find((message) => message.id === firstChat.message.id)?.feedback?.helpful, true);
   assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 2);
-  await assert.rejects(() => manager.conversation(foreignArtist.id, firstChat.conversationId), (error) => error?.getStatus?.() === 404);
+  await assert.rejects(() => manager.conversation(foreignArtist.id, firstChat.conversationId, operator.id), (error) => error?.getStatus?.() === 404);
 
   const venue = await client.venue.create({ data: { artistId: artist.id, name: "Owned Room", city: "Chicago" } });
   const foreignVenue = await client.venue.create({ data: { artistId: foreignArtist.id, name: "Foreign Room", city: "Elsewhere" } });
@@ -513,5 +524,5 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(finalized.status, "finalized");
   assert.equal(finalized.snapshots.length, 1);
   const actions = await client.auditEvent.findMany({ where: { artistId: artist.id }, select: { action: true } });
-  for (const expected of ["manager.intake_completed", "manager.plan_ensured", "manager.memory_corrected", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
+  for (const expected of ["manager.intake_completed", "manager.plan_ensured", "manager.memory_corrected", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
 });

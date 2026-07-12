@@ -19,7 +19,12 @@ facts with source, confidence, sensitivity, and confirmation time.
 facts read, structured output, safe proposed actions, outcome, and runtime
 metadata. `ManagerConversation` and `ManagerMessage` retain a shared,
 artist-scoped conversation; reasoning uses only the latest 12 messages and API
-reads return at most 50. Assistant messages can reference a reviewable
+reads return at most 50. Every delivered assistant message may link its exact
+`ManagerRun`. `ManagerMessageFeedback` stores one audited, tenant-scoped
+helpful/correction verdict per response and operator. Free-text corrections are
+retained for human review but are not sent back through model instructions;
+only bounded reason aggregates affect code-owned response presentation.
+Assistant messages can reference a reviewable
 `ManagerRecommendation`, but cannot directly perform provider, legal, or
 financial actions. Recommendation outcome reason/note/time support reviewed
 learning; accepted recommendations link to a task and task completion is

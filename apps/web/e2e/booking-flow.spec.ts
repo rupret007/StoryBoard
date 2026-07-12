@@ -86,6 +86,8 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("Explain our next priority in plain language.", { exact: true })).toBeVisible();
   await expect(page.getByText(/I would keep this simple|first move is/i)).toBeVisible();
+  await page.getByRole("button", { name: "Helpful", exact: true }).last().click();
+  await expect(page.getByText("Saved", { exact: true }).last()).toBeVisible();
   const notUseful = page.getByRole("button", { name: "Not useful" });
   if (await notUseful.isVisible().catch(() => false)) {
     await notUseful.click();
@@ -98,6 +100,11 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("Where does our money stand?", { exact: true })).toBeVisible();
   await expect(page.getByText(/books currently show/i)).toBeVisible();
+  await page.getByRole("button", { name: "Needs work", exact: true }).last().click();
+  await page.getByLabel("What should improve?").selectOption("too_vague");
+  await page.getByLabel("Correction (optional)").fill("Lead with the current balance and one next step.");
+  await page.getByRole("button", { name: "Save feedback" }).click();
+  await expect(page.getByText("Saved", { exact: true }).last()).toBeVisible();
   await managerMessage.fill("Are we on track with the 90-day plan?");
   await page.getByRole("button", { name: "Send message" }).click();
   const planReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "plan-health score is" });
@@ -125,7 +132,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v3", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v4", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 

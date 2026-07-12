@@ -102,6 +102,14 @@ legal, and financial work remains human-reviewed and approval-gated.
 Accepted recommendations are single-use and linked to their task; completing
 that task records the outcome automatically. Dismissal reasons and bounded
 cooldowns keep the Manager from repeating recently rejected or finished work.
+Every delivered conversational answer is linked to its exact Manager run and
+can be rated helpful or corrected with a bounded reason. Recent explicit
+feedback changes only code-owned presentation guidance (for example, lead with
+the answer, be more specific, or be shorter); it cannot add tools or expand
+authority. A deterministic response gate rejects canned assistant phrasing,
+implementation/meta language, excessive length, and claims that StoryBoard
+already performed an outside action. Prompt/policy version `manager_os_v4`
+and its offline eval suite cover these response-quality rules.
 The **What your manager remembers** panel lets the band correct or archive
 confirmed memory, while sensitive memory remains owner-controlled. This
 reviewed feedback influences future ranking and evaluation only—it never lets
