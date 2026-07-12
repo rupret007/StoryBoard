@@ -46,6 +46,17 @@ Two immediate internal recommendation types reuse existing authorities:
 Their target ownership and date are revalidated, task source keys make replay
 idempotent, and a successful acceptance records `action_executed` and completes
 the recommendation in the same transaction.
+`ManagerMemoryFact.sensitivity` also controls provider eligibility: `normal`
+may enter redacted context, `sensitive` requires full-context owner consent,
+and `restricted` remains local. `ManagerRun.inputFacts` always stores the
+redacted projection; its trace stores policy counts and provider-attempt/output
+status rather than withheld values.
+`ManagerResponseEvalExample` is an owner-promoted, artist-scoped reference to
+one assistant message and its exact rated response snapshot. It does not copy
+run input facts. Useful examples replay quality and evidence rules; negative
+examples retain expected behavior and resolution metadata for a later
+code-registered Manager version. The unique message link makes promotion
+idempotent, and audit history records promotion and resolution.
 Conversation-created decisions have `needsFraming=true`, cannot be chosen until
 a member saves real options/tradeoffs, and complete the linked recommendation
 only after an outcome review. Task completion is attributed automatically.

@@ -334,6 +334,8 @@ model Operator {
   managerMessages                   ManagerMessage[]
   managerMessageFeedback            ManagerMessageFeedback[]
   managerEvalExamplesPromoted       ManagerEvalExample[]        @relation("ManagerEvalPromoter")
+  managerResponseEvalsPromoted      ManagerResponseEvalExample[] @relation("ManagerResponseEvalPromoter")
+  managerResponseEvalsResolved      ManagerResponseEvalExample[] @relation("ManagerResponseEvalResolver")
   managerGoalProgressRecorded       ManagerGoalProgressEvent[]  @relation("ManagerGoalProgressRecorder")
   managerEvaluationRunsCreated      ManagerEvaluationRun[]      @relation("ManagerEvaluationRunner")
 }
@@ -396,6 +398,7 @@ model Artist {
   managerConversations        ManagerConversation[]
   managerMessageFeedback      ManagerMessageFeedback[]
   managerEvalExamples         ManagerEvalExample[]
+  managerResponseEvalExamples ManagerResponseEvalExample[]
   managerGoalProgressEvents   ManagerGoalProgressEvent[]
   managerEvaluationRuns       ManagerEvaluationRun[]
   events                      BandEvent[]
@@ -705,8 +708,34 @@ model ManagerMessage {
   managerRun      ManagerRun?              @relation(fields: [managerRunId], references: [id], onDelete: SetNull)
   operator        Operator?                @relation(fields: [operatorId], references: [id], onDelete: SetNull)
   feedback        ManagerMessageFeedback[]
+  responseEval    ManagerResponseEvalExample?
 
   @@index([conversationId, createdAt])
+}
+
+model ManagerResponseEvalExample {
+  id                   String         @id @default(cuid())
+  artistId             String
+  managerMessageId     String         @unique
+  promotedByOperatorId String?
+  label                String
+  expectedBehavior     String?
+  notes                String?
+  promptVersion        String
+  snapshot             Json
+  resolvedAt           DateTime?
+  resolvedByOperatorId String?
+  resolutionVersion    String?
+  resolutionNote       String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  artist               Artist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  managerMessage       ManagerMessage @relation(fields: [managerMessageId], references: [id], onDelete: Cascade)
+  promotedBy           Operator?      @relation("ManagerResponseEvalPromoter", fields: [promotedByOperatorId], references: [id], onDelete: SetNull)
+  resolvedBy           Operator?      @relation("ManagerResponseEvalResolver", fields: [resolvedByOperatorId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, createdAt])
+  @@index([artistId, label, resolvedAt])
 }
 
 model ManagerMessageFeedback {

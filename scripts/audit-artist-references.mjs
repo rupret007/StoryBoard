@@ -323,6 +323,27 @@ const checks = [
     `
   },
   {
+    relation: "Manager response eval → conversation, run, and reviewers",
+    query: `
+      SELECT x."id" AS "recordId", x."artistId" AS "recordArtistId",
+             x."managerMessageId" AS "relatedId",
+             COALESCE(c."artistId", r."artistId") AS "relatedArtistId"
+      FROM "ManagerResponseEvalExample" x
+      INNER JOIN "ManagerMessage" m ON m."id" = x."managerMessageId"
+      INNER JOIN "ManagerConversation" c ON c."id" = m."conversationId"
+      LEFT JOIN "ManagerRun" r ON r."id" = m."managerRunId"
+      LEFT JOIN "ArtistMembership" p
+        ON p."operatorId" = x."promotedByOperatorId" AND p."artistId" = x."artistId"
+      LEFT JOIN "ArtistMembership" v
+        ON v."operatorId" = x."resolvedByOperatorId" AND v."artistId" = x."artistId"
+      WHERE x."artistId" <> c."artistId"
+         OR (r."id" IS NOT NULL AND x."artistId" <> r."artistId")
+         OR (x."promotedByOperatorId" IS NOT NULL AND p."id" IS NULL)
+         OR (x."resolvedByOperatorId" IS NOT NULL AND v."id" IS NULL)
+      ORDER BY x."id";
+    `
+  },
+  {
     relation: "Manager brief notification → run and active team recipient",
     query: `
       SELECT n."id" AS "recordId", n."artistId" AS "recordArtistId",

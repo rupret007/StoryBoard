@@ -4,7 +4,7 @@ import { Badge, SurfaceCard } from "@storyboard/ui";
 import { Clock3, Save, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import type { ManagerSettings } from "@/lib/types";
+import type { ManagerProviderContextPolicy, ManagerSettings } from "@/lib/types";
 
 const WEEKDAYS = [
   { value: 1, label: "Monday" },
@@ -24,10 +24,12 @@ function hourLabel(hour: number) {
 
 export function ManagerCadenceCard({
   initialSettings,
+  initialProviderContextPolicy,
   cadence,
   isOwner
 }: {
   initialSettings: ManagerSettings;
+  initialProviderContextPolicy: ManagerProviderContextPolicy | null;
   cadence: "daily" | "weekly";
   isOwner: boolean;
 }) {
@@ -78,6 +80,19 @@ export function ManagerCadenceCard({
   const scheduleText = settings.scheduleEnabled && timezone
     ? `${cadence === "weekly" ? `${WEEKDAYS.find((day) => day.value === settings.weeklyDay)?.label ?? "Monday"}s` : "Every day"} after ${hourLabel(settings.dailyHour)} in ${timezone}`
     : "On request only";
+  const providerPolicy = initialProviderContextPolicy ? {
+    ...initialProviderContextPolicy,
+    mode: !settings.aiEnabled ? "disabled" as const : settings.fullContextEnabled ? "full" as const : "redacted" as const,
+    fullContextEnabled: settings.aiEnabled && settings.fullContextEnabled,
+    includesOperatingNotes: settings.aiEnabled && settings.fullContextEnabled,
+    memory: {
+      ...initialProviderContextPolicy.memory,
+      included: settings.aiEnabled ? initialProviderContextPolicy.memory.normal + (settings.fullContextEnabled ? initialProviderContextPolicy.memory.sensitive : 0) : 0,
+      excluded: settings.aiEnabled
+        ? initialProviderContextPolicy.memory.restricted + (settings.fullContextEnabled ? 0 : initialProviderContextPolicy.memory.sensitive)
+        : initialProviderContextPolicy.memory.normal + initialProviderContextPolicy.memory.sensitive + initialProviderContextPolicy.memory.restricted
+    }
+  } : null;
 
   return (
     <div data-testid="manager-cadence">
@@ -126,9 +141,10 @@ export function ManagerCadenceCard({
               <p className="mt-1 text-xs text-[var(--text-muted)]">Deterministic, evidence-ranked briefs work without a provider. These controls never expand the Manager&apos;s authority.</p>
               <div className="mt-3 space-y-3">
                 <label className="flex items-start gap-3"><input aria-label="Enable Manager AI reasoning" className="mt-1 h-4 w-4" type="checkbox" checked={settings.aiEnabled} onChange={(event) => setSettings((current) => ({ ...current, aiEnabled: event.target.checked, ...(!event.target.checked ? { fullContextEnabled: false, scheduledAiEnabled: false } : {}) }))} /><span><span className="block text-sm">Enable configured OpenAI reasoning</span><span className="block text-xs text-[var(--text-muted)]">Manual refreshes and chat may use the configured Manager model.</span></span></label>
-                <label className="flex items-start gap-3"><input aria-label="Allow full Manager context" className="mt-1 h-4 w-4" type="checkbox" disabled={!settings.aiEnabled} checked={settings.fullContextEnabled} onChange={(event) => setSettings((current) => ({ ...current, fullContextEnabled: event.target.checked }))} /><span><span className="block text-sm">Allow full tenant-scoped StoryBoard context</span><span className="block text-xs text-[var(--text-muted)]">Includes CRM and operating notes. General inbox content and provider credentials remain excluded.</span></span></label>
+                <label className="flex items-start gap-3"><input aria-label="Allow full Manager context" className="mt-1 h-4 w-4" type="checkbox" disabled={!settings.aiEnabled} checked={settings.fullContextEnabled} onChange={(event) => setSettings((current) => ({ ...current, fullContextEnabled: event.target.checked }))} /><span><span className="block text-sm">Allow full tenant-scoped StoryBoard context</span><span className="block text-xs text-[var(--text-muted)]">Adds CRM and operating notes plus memory marked sensitive. Restricted memory, general inbox content, and provider credentials never enter the model snapshot.</span></span></label>
                 <label className="flex items-start gap-3"><input aria-label="Use AI for scheduled Manager briefs" className="mt-1 h-4 w-4" type="checkbox" disabled={!settings.aiEnabled || !settings.scheduleEnabled} checked={settings.scheduledAiEnabled} onChange={(event) => setSettings((current) => ({ ...current, scheduledAiEnabled: event.target.checked }))} /><span><span className="block text-sm">Use model reasoning for scheduled briefs</span><span className="block text-xs text-[var(--text-muted)]">Separate opt-in because scheduled calls may use provider tokens. Off keeps scheduled briefs deterministic and free of model calls.</span></span></label>
               </div>
+              {providerPolicy ? <div data-testid="manager-provider-context-policy" className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3 text-xs text-[var(--text-secondary)]"><div className="flex items-center justify-between gap-3"><span className="font-medium text-[var(--text-primary)]">Provider context: {providerPolicy.mode}</span><Badge variant={providerPolicy.mode === "disabled" ? "neutral" : "success"}>{providerPolicy.memory.included} memory fact{providerPolicy.memory.included === 1 ? "" : "s"} included</Badge></div><p className="mt-2">{providerPolicy.mode === "disabled" ? "No Manager snapshot is sent to the model." : providerPolicy.mode === "full" ? "Normal and sensitive memory may be included under this owner consent." : "Only normal memory and bounded structured operating facts are included."} {providerPolicy.memory.excluded} memory fact{providerPolicy.memory.excluded === 1 ? " is" : "s are"} held back. Restricted memory never leaves StoryBoard.</p></div> : null}
             </div>
 
             <button className="sb-btn-primary" disabled={saving || (settings.scheduleEnabled && !timezone.trim())}><Save className="h-4 w-4" /> {saving ? "Saving…" : "Save cadence"}</button>

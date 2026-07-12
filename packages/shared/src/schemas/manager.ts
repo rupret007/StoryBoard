@@ -70,6 +70,17 @@ export const managerMessageFeedbackSchema = z.object({
 export const managerRecommendationReasons = ["accepted", "action_executed", "task_completed", "decision_reviewed", "already_handled", "not_relevant", "wrong_priority", "bad_timing", "missing_context", "other"] as const;
 export const managerRecommendationFeedbackSchema = z.object({ reason: z.enum(managerRecommendationReasons).optional(), note: z.string().trim().max(1000).nullable().optional() }).strict();
 export const managerEvalPromotionSchema = z.object({ label: z.enum(["useful", "not_useful", "needs_revision"]), notes: z.string().trim().max(2000).nullable().optional() }).strict();
+export const managerResponseEvalPromotionSchema = z.object({
+  label: z.enum(["useful", "not_useful", "needs_revision"]),
+  expectedBehavior: z.string().trim().min(10).max(3000).nullable().optional(),
+  notes: z.string().trim().max(2000).nullable().optional()
+}).strict().superRefine((input, context) => {
+  if (input.label !== "useful" && !input.expectedBehavior) context.addIssue({ code: "custom", path: ["expectedBehavior"], message: "Describe what the Manager should do instead" });
+});
+export const managerResponseEvalResolutionSchema = z.object({
+  candidateVersion: z.string().regex(/^manager_os_v[1-9][0-9]*$/),
+  note: z.string().trim().min(10).max(2000)
+}).strict();
 export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v9").default("manager_os_v9") }).strict();
 export const managerMemoryPatchSchema = z.object({
   value: z.json().optional(),
@@ -89,5 +100,7 @@ export type ManagerDecisionReviewInput = z.infer<typeof managerDecisionReviewSch
 export type ManagerRecommendationFeedbackInput = z.infer<typeof managerRecommendationFeedbackSchema>;
 export type ManagerMessageFeedbackInput = z.infer<typeof managerMessageFeedbackSchema>;
 export type ManagerEvalPromotionInput = z.infer<typeof managerEvalPromotionSchema>;
+export type ManagerResponseEvalPromotionInput = z.infer<typeof managerResponseEvalPromotionSchema>;
+export type ManagerResponseEvalResolutionInput = z.infer<typeof managerResponseEvalResolutionSchema>;
 export type ManagerMemoryPatchInput = z.infer<typeof managerMemoryPatchSchema>;
 export type ManagerSettingsInput = z.infer<typeof managerSettingsSchema>;

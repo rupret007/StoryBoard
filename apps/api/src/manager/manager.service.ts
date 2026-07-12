@@ -3,7 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCall, ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
-import type { BandMemberCreateInput, ManagerDecisionCreateInput, ManagerDecisionPatchInput, ManagerDecisionReviewInput, ManagerEvalPromotionInput, ManagerGoalCreateInput, ManagerGoalProgressInput, ManagerInitiativeCreateInput, ManagerMemoryPatchInput, ManagerMessageFeedbackInput, ManagerProfileInput, ManagerRecommendationFeedbackInput, ManagerSettingsInput } from "@storyboard/shared";
+import type { BandMemberCreateInput, ManagerDecisionCreateInput, ManagerDecisionPatchInput, ManagerDecisionReviewInput, ManagerEvalPromotionInput, ManagerGoalCreateInput, ManagerGoalProgressInput, ManagerInitiativeCreateInput, ManagerMemoryPatchInput, ManagerMessageFeedbackInput, ManagerProfileInput, ManagerRecommendationFeedbackInput, ManagerResponseEvalPromotionInput, ManagerResponseEvalResolutionInput, ManagerSettingsInput } from "@storyboard/shared";
 import { ArtistMembershipRole, ManagerGoalStatus, ManagerInitiativeStatus, ManagerRecommendationOutcome, ManagerRunCadence, ManagerWorkstream, WorkflowNotificationKind } from "../generated/prisma/enums";
 import type { Prisma } from "../generated/prisma/client";
 import { AuditService } from "../audit/audit.service";
@@ -28,6 +28,7 @@ import { deterministicManagerOutcomeReview } from "./manager-outcome-review";
 import { deterministicManagerContextHealth } from "./manager-context-health";
 import { deterministicManagerCommitmentHealth, managerQuestionAsksAboutCommitments } from "./manager-commitment-health";
 import { managerScheduleKey, managerScheduleSlot } from "./manager-schedule";
+import { managerProviderContextPolicy, projectManagerMemoryForProvider } from "./manager-provider-context";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const taskActionSchema = z.object({ type: z.literal("create_task"), title: z.string().min(1).max(240), dueAt: z.string().datetime({ offset: true }).nullable(), initiativeId: z.string().nullable() }).strict();
@@ -57,6 +58,7 @@ type GenerateBriefOptions = {
 };
 type OptionalFields<T> = { [K in keyof T]?: T[K] | undefined };
 function clean<T extends Record<string, unknown>>(value: T): Record<string, unknown> { return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)); }
+function objectRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 
 @Injectable()
 export class ManagerService {
@@ -166,6 +168,13 @@ export class ManagerService {
   }
 
   async settings(artistId: string) { return this.prisma.client.managerSettings.upsert({ where: { artistId }, create: { artistId }, update: {} }); }
+  async providerContextPolicy(artistId: string) {
+    const [settings, memoryFacts] = await Promise.all([
+      this.settings(artistId),
+      this.prisma.client.managerMemoryFact.findMany({ where: { artistId, archivedAt: null }, select: { sensitivity: true } })
+    ]);
+    return managerProviderContextPolicy(memoryFacts, settings);
+  }
   async updateSettings(artistId: string, input: ManagerSettingsInput, actorLabel: string, actorOperatorId: string) {
     const current = await this.settings(artistId);
     const normalized = input.aiEnabled === false
@@ -406,9 +415,15 @@ export class ManagerService {
   latestEvaluation(artistId: string) { return this.prisma.client.managerEvaluationRun.findFirst({ where: { artistId }, orderBy: { createdAt: "desc" } }); }
 
   async runEvaluation(artistId: string, candidateVersion: string, actorLabel: string, actorOperatorId: string) {
-    const examples = await this.prisma.client.managerEvalExample.findMany({ where: { artistId }, select: { id: true, label: true, promptVersion: true, snapshot: true } });
+    const [examples, responseExamples] = await Promise.all([
+      this.prisma.client.managerEvalExample.findMany({ where: { artistId }, select: { id: true, label: true, promptVersion: true, snapshot: true } }),
+      this.prisma.client.managerResponseEvalExample.findMany({
+        where: { artistId },
+        select: { id: true, label: true, promptVersion: true, expectedBehavior: true, resolutionVersion: true, resolvedAt: true, snapshot: true, managerMessage: { select: { managerRun: { select: { inputFacts: true } } } } }
+      })
+    ]);
     let evaluation;
-    try { evaluation = runManagerEvaluation(candidateVersion, examples); }
+    try { evaluation = runManagerEvaluation(candidateVersion, examples, responseExamples.map((example) => ({ ...example, inputFacts: example.managerMessage.managerRun?.inputFacts ?? {} }))); }
     catch (error) { throw new BadRequestException(error instanceof Error ? error.message : "Unknown manager candidate version"); }
     const row = await this.prisma.client.managerEvaluationRun.create({ data: { artistId, createdByOperatorId: actorOperatorId, candidateVersion: evaluation.candidateVersion, datasetVersion: evaluation.datasetVersion, passed: evaluation.passed, metrics: evaluation.metrics, results: evaluation.results } });
     await this.audit.log({ artistId, aggregateType: "ManagerEvaluationRun", aggregateId: row.id, action: "manager.evaluation_run", actorLabel, actorOperatorId, metadata: { candidateVersion, passed: row.passed, total: evaluation.metrics.total } });
@@ -441,6 +456,71 @@ export class ManagerService {
       update: { promotedByOperatorId: actorOperatorId, label: input.label, notes: input.notes ?? null, promptVersion: recommendation.managerRun.promptVersion, snapshot }
     });
     await this.audit.log({ artistId, aggregateType: "ManagerEvalExample", aggregateId: row.id, action: "manager.eval_example_promoted", actorLabel, actorOperatorId, metadata: { recommendationId, label: input.label, promptVersion: row.promptVersion } });
+    return row;
+  }
+
+  responseEvalExamples(artistId: string) {
+    return this.prisma.client.managerResponseEvalExample.findMany({
+      where: { artistId },
+      include: { managerMessage: { select: { id: true, content: true, createdAt: true } } },
+      orderBy: { updatedAt: "desc" },
+      take: 100
+    });
+  }
+
+  async promoteResponseEvalExample(artistId: string, messageId: string, input: ManagerResponseEvalPromotionInput, actorLabel: string, actorOperatorId: string) {
+    const message = await this.prisma.client.managerMessage.findFirst({
+      where: { id: messageId, role: "assistant", conversation: { artistId } },
+      include: {
+        managerRun: { select: { promptVersion: true, mode: true, inputFacts: true } },
+        feedback: { where: { operatorId: actorOperatorId }, take: 1 }
+      }
+    });
+    if (!message?.managerRun) throw new NotFoundException("Manager response not found");
+    const feedback = message.feedback[0];
+    if (!feedback) throw new BadRequestException("Rate this Manager response before adding it to evaluations");
+    if (feedback.helpful && input.label !== "useful") throw new BadRequestException("Helpful feedback can only create a useful evaluation example");
+    if (!feedback.helpful && input.label === "useful") throw new BadRequestException("Correct the response feedback before marking this example useful");
+    const question = await this.prisma.client.managerMessage.findFirst({
+      where: { conversationId: message.conversationId, role: "user", createdAt: { lte: message.createdAt } },
+      orderBy: { createdAt: "desc" },
+      select: { content: true }
+    });
+    if (!question) throw new BadRequestException("The user question for this response is unavailable");
+    const facts = objectRecord(message.managerRun.inputFacts);
+    const profile = objectRecord(facts.profile);
+    const citations = Array.isArray(message.citations) ? message.citations.filter((value): value is string => typeof value === "string") : [];
+    const proposedActions = Array.isArray(message.proposedActions) ? message.proposedActions : [];
+    const actionTypes = proposedActions.flatMap((value) => {
+      const action = objectRecord(value);
+      return typeof action.actionType === "string" ? [action.actionType] : [];
+    }).slice(0, 5);
+    const snapshot = {
+      question: question.content,
+      answer: message.content,
+      responseStyle: typeof profile.decisionStyle === "string" ? profile.decisionStyle : "guided",
+      citations,
+      actionTypes,
+      mode: message.managerRun.mode,
+      feedback: { helpful: feedback.helpful, reason: feedback.reason, note: feedback.note }
+    };
+    const row = await this.prisma.client.managerResponseEvalExample.upsert({
+      where: { managerMessageId: messageId },
+      create: { artistId, managerMessageId: messageId, promotedByOperatorId: actorOperatorId, label: input.label, expectedBehavior: input.expectedBehavior ?? null, notes: input.notes ?? null, promptVersion: message.managerRun.promptVersion, snapshot },
+      update: { promotedByOperatorId: actorOperatorId, label: input.label, expectedBehavior: input.expectedBehavior ?? null, notes: input.notes ?? null, promptVersion: message.managerRun.promptVersion, snapshot, resolvedAt: null, resolvedByOperatorId: null, resolutionVersion: null, resolutionNote: null }
+    });
+    await this.audit.log({ artistId, aggregateType: "ManagerResponseEvalExample", aggregateId: row.id, action: "manager.response_eval_promoted", actorLabel, actorOperatorId, metadata: { messageId, label: row.label, promptVersion: row.promptVersion, feedbackReason: feedback.reason } });
+    return row;
+  }
+
+  async resolveResponseEvalExample(artistId: string, id: string, input: ManagerResponseEvalResolutionInput, actorLabel: string, actorOperatorId: string) {
+    const example = await this.prisma.client.managerResponseEvalExample.findFirst({ where: { id, artistId } });
+    if (!example) throw new NotFoundException("Manager response evaluation example not found");
+    if (example.label === "useful") throw new BadRequestException("Useful response examples do not require resolution");
+    if (input.candidateVersion !== MANAGER_PROMPT_VERSION) throw new BadRequestException("Only the code-registered Manager version can resolve an evaluation example");
+    if (input.candidateVersion === example.promptVersion) throw new BadRequestException("A response failure cannot be resolved by the same Manager version that produced it");
+    const row = await this.prisma.client.managerResponseEvalExample.update({ where: { id }, data: { resolvedAt: new Date(), resolvedByOperatorId: actorOperatorId, resolutionVersion: input.candidateVersion, resolutionNote: input.note } });
+    await this.audit.log({ artistId, aggregateType: "ManagerResponseEvalExample", aggregateId: id, action: "manager.response_eval_resolved", actorLabel, actorOperatorId, metadata: { sourceVersion: example.promptVersion, candidateVersion: input.candidateVersion } });
     return row;
   }
 
@@ -550,7 +630,7 @@ export class ManagerService {
       deals: facts.deals.map((row) => ({ id: row.id, eventId: row.eventId, opportunityId: row.opportunityId, status: row.status, title: row.title, offerAmountMinor: row.offerAmountMinor, currency: row.currency, depositMinor: row.depositMinor, depositDueAt: row.depositDueAt, balanceDueAt: row.balanceDueAt, performanceDate: row.performanceDate, expiresAt: row.expiresAt })),
       invoices: facts.invoices.map((row) => ({ id: row.id, dealOfferId: row.dealOfferId, eventId: row.eventId, number: row.number, status: row.status, currency: row.currency, totalMinor: row.totalMinor, paidMinor: row.paidMinor, dueAt: row.dueAt })),
       decisions: facts.decisions,
-      memoryFacts: facts.memoryFacts,
+      memoryFacts: projectManagerMemoryForProvider(facts.memoryFacts, false),
       approvals: facts.approvals,
       bookingReplies: facts.bookingReplies,
       campaignRecipients: facts.campaignRecipients,
@@ -561,6 +641,14 @@ export class ManagerService {
       commitmentHealth: facts.commitmentHealth,
       recommendationHistory: facts.recommendationHistory.map((row) => ({ id: row.id, stableKey: row.stableKey, outcome: row.outcome, outcomeReason: row.outcomeReason, outcomeAt: row.outcomeAt, taskStatus: row.task?.status ?? null })),
       generatedAt: facts.generatedAt
+    };
+  }
+
+  private providerFacts(facts: Awaited<ReturnType<ManagerService["facts"]>>, fullContextEnabled: boolean) {
+    if (!fullContextEnabled) return this.safeFacts(facts);
+    return {
+      ...facts,
+      memoryFacts: projectManagerMemoryForProvider(facts.memoryFacts, true)
     };
   }
 
@@ -586,11 +674,14 @@ export class ManagerService {
     let inputTokens: number | null = null;
     let outputTokens: number | null = null;
     const settings = await this.settings(artistId);
+    const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, settings);
+    let providerAttempted = false;
     if ((options.allowModel ?? true) && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
       try {
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
-        const context = await this.readSnapshotTool(client, model, `Prepare the ${cadence} manager brief.`, settings.fullContextEnabled ? facts : safeFacts);
+        providerAttempted = true;
+        const context = await this.readSnapshotTool(client, model, `Prepare the ${cadence} manager brief.`, this.providerFacts(facts, settings.fullContextEnabled));
         const response = await client.responses.create({
           model,
           store: false,
@@ -602,7 +693,7 @@ export class ManagerService {
         inputTokens = context.inputTokens + (response.usage?.input_tokens ?? 0);
         outputTokens = context.outputTokens + (response.usage?.output_tokens ?? 0);
         const parsed = briefSchema.safeParse(JSON.parse(response.output_text));
-        if (parsed.success && this.briefIsGrounded(parsed.data, facts)) {
+        if (parsed.success && this.briefIsGrounded(parsed.data, facts, this.providerKnownIds(facts, settings.fullContextEnabled))) {
           brief = parsed.data;
           mode = "openai";
         } else {
@@ -626,8 +717,9 @@ export class ManagerService {
       output: brief,
       trace: {
         factsRead: [...this.knownIds(facts)],
-        toolsSelected: mode === "openai" ? ["read_manager_snapshot"] : [],
-        guardrails: ["known-evidence", "repeat-suppression", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", ...(options.scheduled ? ["explicit-schedule-opt-in", "local-period-idempotency"] : [])],
+        toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
+        guardrails: ["known-evidence", "repeat-suppression", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", ...(options.scheduled ? ["explicit-schedule-opt-in", "local-period-idempotency"] : [])],
+        providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
         suppressedCount
       },
       ...(options.scheduled ? { scheduleKey: options.scheduled.scheduleKey } : {}),
@@ -888,6 +980,8 @@ export class ManagerService {
     let responseQuality = evaluateManagerResponseQuality(content, facts.profile?.decisionStyle ?? "guided");
     const started = Date.now();
     const settings = await this.settings(artistId);
+    const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, settings);
+    let providerAttempted = false;
     if (settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       try {
         model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
@@ -897,7 +991,8 @@ export class ManagerService {
           recentConversation: history.map((message) => ({ role: message.role, content: message.content })),
           responseStyle: facts.profile?.decisionStyle ?? "guided"
         });
-        const context = await this.readSnapshotTool(client, model, request, settings.fullContextEnabled ? facts : safeFacts);
+        providerAttempted = true;
+        const context = await this.readSnapshotTool(client, model, request, this.providerFacts(facts, settings.fullContextEnabled));
         const response = await client.responses.create({
           model,
           store: false,
@@ -912,7 +1007,7 @@ export class ManagerService {
         const candidateQuality = parsed.success
           ? evaluateManagerResponseQuality(parsed.data.answer, facts.profile?.decisionStyle ?? "guided")
           : null;
-        if (parsed.success && candidateQuality?.passed && this.chatOutputIsGrounded(parsed.data, facts, input.message)) {
+        if (parsed.success && candidateQuality?.passed && this.chatOutputIsGrounded(parsed.data, facts, input.message, this.providerKnownIds(facts, settings.fullContextEnabled))) {
           content = parsed.data.answer;
           citations = parsed.data.citations;
           recommendation = parsed.data.recommendation && !managerRecommendationIsSuppressed(parsed.data.recommendation, facts.recommendationHistory) ? parsed.data.recommendation : null;
@@ -935,8 +1030,9 @@ export class ManagerService {
         trace: {
           factsRead: [...this.knownIds(facts)],
           conversationMessageIds: history.map((message) => message.id),
-          toolsSelected: mode === "openai" ? ["read_manager_snapshot"] : [],
-          guardrails: ["known-evidence", "bounded-history", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text"],
+          toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
+          guardrails: ["known-evidence", "bounded-history", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy"],
+          providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
           responseQuality,
           responseFeedbackSignals: summarizeManagerResponseFeedback(responseFeedback)
         },
@@ -973,7 +1069,7 @@ export class ManagerService {
       }
     });
     await this.prisma.client.managerConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
-    await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, tool: mode === "openai" ? "read_manager_snapshot" : null } });
+    await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, tool: providerAttempted ? "read_manager_snapshot" : null, providerOutputUsed: mode === "openai" } });
     return { conversationId: conversation.id, message: { ...message, feedback: null }, recommendation: recommendationRecord };
   }
 
@@ -1025,8 +1121,7 @@ export class ManagerService {
     return Boolean(project?.dueAt && project.readiness?.status === "needs_plan");
   }
 
-  private chatOutputIsGrounded(output: z.infer<typeof chatOutputSchema>, facts: Awaited<ReturnType<ManagerService["facts"]>>, question = "") {
-    const known = this.knownIds(facts);
+  private chatOutputIsGrounded(output: z.infer<typeof chatOutputSchema>, facts: Awaited<ReturnType<ManagerService["facts"]>>, question = "", known = this.knownIds(facts)) {
     if (!output.citations.every((id) => known.has(id))) return false;
     const commitment = facts.commitmentHealth?.items.find((item) => item.state !== "active");
     if (managerQuestionAsksAboutCommitments(question) && commitment && (!output.citations.includes(commitment.taskId) || output.recommendation)) return false;
@@ -1037,8 +1132,7 @@ export class ManagerService {
     return this.proposedActionIsGrounded(action, facts, true);
   }
 
-  private briefIsGrounded(brief: Brief, facts: Awaited<ReturnType<ManagerService["facts"]>>) {
-    const known = this.knownIds(facts);
+  private briefIsGrounded(brief: Brief, facts: Awaited<ReturnType<ManagerService["facts"]>>, known = this.knownIds(facts)) {
     const evidenceGroups = [
       ...brief.today.map((item) => item.evidenceIds),
       ...brief.thisWeek.map((item) => item.evidenceIds),
@@ -1086,6 +1180,23 @@ export class ManagerService {
       ...(facts.outcomeReview?.evidenceIds ?? []),
       ...facts.recommendationHistory.map((x) => x.id)
     ]);
+  }
+  private providerKnownIds(facts: Awaited<ReturnType<ManagerService["facts"]>>, fullContextEnabled: boolean) {
+    const locallyKnown = this.knownIds(facts);
+    const visible = new Set<string>();
+    const visit = (value: unknown) => {
+      if (typeof value === "string") {
+        if (locallyKnown.has(value)) visible.add(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) visit(item);
+        return;
+      }
+      if (value && typeof value === "object") for (const item of Object.values(value)) visit(item);
+    };
+    visit(this.providerFacts(facts, fullContextEnabled));
+    return visible;
   }
   private async owned(model: "bandMember" | "managerGoal" | "managerInitiative", artistId: string, id: string) { const where = { id, artistId }; const row = model === "bandMember" ? await this.prisma.client.bandMember.findFirst({ where, select: { id: true } }) : model === "managerGoal" ? await this.prisma.client.managerGoal.findFirst({ where, select: { id: true } }) : await this.prisma.client.managerInitiative.findFirst({ where, select: { id: true } }); if (!row) throw new NotFoundException("Record not found"); return row; }
   private briefJsonSchema() { return { type: "object", additionalProperties: false, required: ["summary","today","thisWeek","decisionsNeeded","waitingOn","risksAndOpportunities"], properties: { summary: { type: "string" }, today: { type: "array", maxItems: 5, items: this.itemJsonSchema() }, thisWeek: { type: "array", maxItems: 10, items: this.itemJsonSchema() }, decisionsNeeded: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, required: ["title","explanation","evidenceIds"], properties: { title: { type: "string" }, explanation: { type: "string" }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 } } } }, waitingOn: { type: "array", maxItems: 10, items: { type: "object", additionalProperties: false, required: ["title","dueAt","evidenceIds"], properties: { title: { type: "string" }, dueAt: { type: ["string","null"] }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 } } } }, risksAndOpportunities: { type: "array", maxItems: 10, items: { type: "object", additionalProperties: false, required: ["title","detail","confidence","evidenceIds"], properties: { title: { type: "string" }, detail: { type: "string" }, confidence: { type: "number" }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 } } } } } }; }

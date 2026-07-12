@@ -165,11 +165,19 @@ or potential. Members can edit the full operating profile and working-lineup
 responsibilities after intake; updates immediately change the shared brief,
 conversation, and model snapshot without turning unknowns into guesses.
 The **What your manager remembers** panel lets the band correct or archive
-confirmed memory, while sensitive memory remains owner-controlled. This
-reviewed feedback influences future ranking and evaluation only—it never lets
+confirmed memory, while sensitive memory remains owner-controlled. Provider
+context follows the same boundary: normal memory may enter the standard
+redacted snapshot, sensitive memory requires the owner's separate full-context
+consent, and restricted memory never enters a model snapshot. Owners can see
+the current mode and included/withheld counts without exposing the withheld
+values. Reviewed feedback influences future ranking and evaluation only—it never lets
 the model rewrite prompts, policy, schemas, or application code. Owners can
 explicitly promote decided recommendations into a bounded local eval set for
-offline candidate-version testing. Goal progress updates create append-only,
+offline candidate-version testing. They can also promote an exact rated answer:
+helpful examples must stay natural and grounded, while answers needing work
+must include the expected behavior and block the current candidate until a
+later code-registered version is explicitly reviewed as fixed. The examples
+stay local and do not activate or rewrite any version. Goal progress updates create append-only,
 audited events instead of silently replacing history. A code-owned plan-health
 score explains which goals are on track, at risk, overdue, or missing
 measurement, linked work, or real task owners. Starter-plan source keys make

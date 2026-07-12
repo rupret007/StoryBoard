@@ -308,11 +308,18 @@ Manager routes:
   outcomes; `days` accepts 7–365 and defaults to 90
 - `GET /manager/eval-examples` and
   `POST /manager/recommendations/:id/promote-eval` (owner-only)
+- `GET /manager/response-eval-examples`,
+  `POST /manager/messages/:id/promote-eval`, and
+  `POST /manager/response-eval-examples/:id/resolve` (owner-only). Promote only
+  after the same owner rates the answer; negative examples require
+  `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
   (owner-only; currently accepts only the code-registered `manager_os_v9`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
+- `GET /manager/provider-context-policy` (owner-only; counts and active policy,
+  never memory values)
 
 Manager cadence is off by default. The owner-facing Manager card controls
 `scheduleEnabled`, IANA `timezone`, local `dailyHour`, ISO-style `weeklyDay`
@@ -333,6 +340,23 @@ is still a separate owner data-policy choice. Disabling the schedule clears
 Scheduled briefs create no email,
 Telegram, calendar, Drive, legal, financial, or other provider action and never
 accept their own recommendations.
+
+The provider projection enforces memory sensitivity before the read tool is
+called. Standard redacted context may include `normal` memory only. Full-context
+owner consent may add `sensitive` memory and CRM/operating notes. `restricted`
+memory is never supplied to the model. Model citations are validated against
+the same projected ID set, and `ManagerRun.inputFacts` remains redacted in all
+modes. Run traces record only policy counts plus whether provider context was
+attempted and accepted; `GET /manager/provider-context-policy` exposes the same
+value-free summary to owners.
+
+Owner-reviewed response evals store a bounded question/answer/feedback snapshot
+and refer back to the assistant message's linked, already-redacted
+`ManagerRun.inputFacts` during offline replay. Useful examples must pass the
+natural-response and grounding rules. Unresolved negative examples block the
+candidate that produced them; only a later code-registered version can be
+marked as resolving the expected behavior. Promotion, resolution, and eval runs
+are artist-scoped and audited, and none of them changes the active version.
 
 `OPENAI_ENABLED=false` is fully supported. With OpenAI enabled, set
 `OPENAI_MANAGER_MODEL` (default `gpt-5.6-terra`). Manager inputs are

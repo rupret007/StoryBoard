@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, commitmentHealth, managerSchedule, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, commitmentHealth, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -20,6 +20,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-context-health.js"),
   loadApi("manager/manager-commitment-health.js"),
   loadApi("manager/manager-schedule.js"),
+  loadApi("manager/manager-provider-context.js"),
   loadApi("tasks/tasks.service.js"),
   loadApi("manager/manager-evaluation.js"),
   loadApi("manager/manager-plan.js"),
@@ -118,6 +119,41 @@ test("manager settings require explicit, compatible schedule and model consent",
   const disabled = await service.updateSettings("artist-a", { scheduleEnabled: false }, "owner@test", "operator-a");
   assert.equal(disabled.scheduledAiEnabled, false);
   assert.equal(audits, 2);
+});
+
+test("manager provider context enforces memory sensitivity independently of model output", () => {
+  const memoryFacts = [
+    { id: "normal-a", sensitivity: "normal", value: "Chicago" },
+    { id: "sensitive-a", sensitivity: "sensitive", value: "Private budget" },
+    { id: "restricted-a", sensitivity: "restricted", value: "Never share" }
+  ];
+  assert.deepEqual(providerContext.projectManagerMemoryForProvider(memoryFacts, false).map((fact) => fact.id), ["normal-a"]);
+  assert.deepEqual(providerContext.projectManagerMemoryForProvider(memoryFacts, true).map((fact) => fact.id), ["normal-a", "sensitive-a"]);
+
+  const disabled = providerContext.managerProviderContextPolicy(memoryFacts, { aiEnabled: false, fullContextEnabled: true });
+  assert.equal(disabled.mode, "disabled");
+  assert.equal(disabled.memory.included, 0);
+  assert.equal(disabled.memory.excluded, 3);
+
+  const redacted = providerContext.managerProviderContextPolicy(memoryFacts, { aiEnabled: true, fullContextEnabled: false });
+  assert.equal(redacted.mode, "redacted");
+  assert.deepEqual(redacted.memory, { normal: 1, sensitive: 1, restricted: 1, included: 1, excluded: 2 });
+
+  const full = providerContext.managerProviderContextPolicy(memoryFacts, { aiEnabled: true, fullContextEnabled: true });
+  assert.equal(full.mode, "full");
+  assert.deepEqual(full.memory, { normal: 1, sensitive: 1, restricted: 1, included: 2, excluded: 1 });
+  assert.equal(full.restrictedMemoryNeverShared, true);
+
+  const service = new managerMod.ManagerService({ client: {} }, { log: async () => undefined }, { get: () => false });
+  const facts = managerFacts({ memoryFacts, outcomeReview: { recordedLessons: [], evidenceIds: [] } });
+  assert.deepEqual(service.providerFacts(facts, false).memoryFacts.map((fact) => fact.id), ["normal-a"]);
+  assert.deepEqual(service.providerFacts(facts, true).memoryFacts.map((fact) => fact.id), ["normal-a", "sensitive-a"]);
+  const redactedIds = service.providerKnownIds(facts, false);
+  assert.equal(redactedIds.has("normal-a"), true);
+  assert.equal(redactedIds.has("sensitive-a"), false);
+  assert.equal(redactedIds.has("restricted-a"), false);
+  assert.equal(service.chatOutputIsGrounded({ answer: "Use the recorded home market.", citations: ["normal-a"], recommendation: null }, facts, "", redactedIds), true);
+  assert.equal(service.chatOutputIsGrounded({ answer: "Use the private note.", citations: ["restricted-a"], recommendation: null }, facts, "", redactedIds), false);
 });
 
 test("the queue dispatches the Manager schedule scan through the registered service", async () => {
@@ -341,6 +377,11 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerMessageFeedbackSchema.safeParse({ helpful: false, reason: "too_vague", note: "Name the next step" }).success, true);
   assert.equal(managerSchemas.managerMessageFeedbackSchema.safeParse({ helpful: false }).success, false);
   assert.equal(managerSchemas.managerMessageFeedbackSchema.safeParse({ helpful: true, reason: "too_long" }).success, false);
+  assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v10", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
 });
 
 test("manager response quality rejects assistant tells, canned prose, and invented external actions", () => {
@@ -497,6 +538,15 @@ test("offline manager evaluation gates the current policy and honors owner revis
   const blocked = evaluation.runManagerEvaluation("manager_os_v9", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v9", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
+  const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v9", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v9", [], [usefulResponse]);
+  assert.equal(withUsefulResponse.passed, true);
+  assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
+  const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v9", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v8", resolutionVersion: "manager_os_v9", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v9", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 

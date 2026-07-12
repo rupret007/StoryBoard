@@ -74,6 +74,9 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByText("Today", { exact: true })).toBeVisible();
   const cadenceCard = page.getByTestId("manager-cadence");
   await expect(cadenceCard.getByText("On request only", { exact: true })).toBeVisible();
+  const providerPolicy = cadenceCard.getByTestId("manager-provider-context-policy");
+  await expect(providerPolicy.getByText("Provider context: disabled", { exact: true })).toBeVisible();
+  await expect(providerPolicy.getByText(/No Manager snapshot is sent to the model.*Restricted memory never leaves StoryBoard/)).toBeVisible();
   await cadenceCard.getByLabel("Prepare Manager briefs on schedule").check();
   await cadenceCard.getByLabel("Manager schedule timezone").fill("America/Chicago");
   await cadenceCard.getByLabel("Manager schedule hour").selectOption("9");
@@ -93,10 +96,13 @@ test("novice manager intake produces grounded work and band operations records",
   await context.getByLabel("Responsibilities for Alex").fill("bandleader, booking");
   await context.getByLabel("Instruments for Alex").fill("vocals, guitar");
   await alexContext.getByRole("button", { name: "Save" }).click();
+  await expect(alexContext.getByRole("button", { name: "Save" })).toBeEnabled();
   const morganContext = context.getByLabel("Responsibilities for Morgan").locator("xpath=ancestor::div[contains(@class,'grid')][1]");
   await context.getByLabel("Responsibilities for Morgan").fill("production, finances");
   await context.getByLabel("Instruments for Morgan").fill("drums");
+  await expect(morganContext.getByRole("button", { name: "Save" })).toBeEnabled();
   await morganContext.getByRole("button", { name: "Save" }).click();
+  await expect(morganContext.getByRole("button", { name: "Save" })).toBeEnabled();
   await context.getByLabel("Availability expectations").fill("Respond to holds within 48 hours and protect two weekends each month.");
   await context.getByLabel("Current revenue sources (one per line)").fill("Private events\nTicketed shows");
   await context.getByLabel("Usable assets (one per line)").fill("Finished EP masters\nLive performance video");
@@ -118,6 +124,8 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByText(/I would keep this simple|first move is/i)).toBeVisible();
   await page.getByRole("button", { name: "Helpful", exact: true }).last().click();
   await expect(page.getByText("Saved", { exact: true }).last()).toBeVisible();
+  await page.getByRole("button", { name: "Add answer to evals", exact: true }).last().click();
+  await expect(page.getByText("answer in eval set", { exact: true }).last()).toBeVisible();
   const notUseful = page.getByRole("button", { name: "Not useful" });
   if (await notUseful.isVisible().catch(() => false)) {
     await notUseful.click();
@@ -283,7 +291,9 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByText("Milestone plan created.", { exact: true })).toBeVisible();
   await page.goto("/operations");
   await page.getByRole("tab", { name: "Projects" }).click();
-  await page.getByRole("link", { name: "Open project" }).click();
+  const openProject = page.getByRole("link", { name: "Open project" });
+  await openProject.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  await openProject.click();
   await expect(page.getByRole("heading", { name: "Milestone plan", exact: true })).toBeVisible();
   await expect(page.getByText(/0\/6 milestones complete/)).toBeVisible();
   const firstReleaseMilestone = "Lock the release goal, audience, and story";

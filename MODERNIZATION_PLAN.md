@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `8c8d1fe`
+Baseline for this round: `main` at `7c02f32`
 
 ## Product and current architecture
 
@@ -354,6 +354,44 @@ mock-safe provider adapters.
   unit, tenant/database, offline-eval, and production-browser coverage. No
   Prisma migration or new provider access is required.
 
+### P0 — Manager provider-context privacy boundary (completed 2026-07-12)
+
+- [x] Close the gap where the default redacted Manager snapshot retained
+  owner-controlled `sensitive` and `restricted` memory even though full context
+  is a separate consent.
+- [x] Make sensitivity part of the code-owned provider projection: normal
+  memory is eligible for redacted context, sensitive memory requires the
+  owner's full-context opt-in, and restricted memory never enters a provider
+  snapshot.
+- [x] Validate model evidence IDs against the same projected view, so withheld
+  memory cannot be cited merely because its local record exists.
+- [x] Keep persisted `ManagerRun.inputFacts` redacted in every mode. Record only
+  policy counts, whether a provider snapshot was attempted, and whether its
+  output passed guardrails; do not copy withheld values into traces.
+- [x] Add an owner-only policy endpoint and visible Manager disclosure with
+  current mode and included/withheld memory counts.
+- [x] Promote the offline dataset to `manager_evals_v9` with a dedicated safety
+  case, plus unit, disposable-database, and production-browser coverage. No
+  Prisma migration or provider credential is required.
+
+### P0 — Owner-reviewed Manager response release gate (completed 2026-07-12)
+
+- [x] Let owners promote the exact question, Manager answer, feedback, bounded
+  citations, and action types into a local evaluation set without duplicating
+  the linked run's redacted input facts.
+- [x] Require a concrete expected behavior for answers marked not useful or in
+  need of revision. An unresolved negative example blocks the current
+  candidate; the version that produced the failure cannot mark itself fixed.
+- [x] Replay useful answers against response-quality and evidence-grounding
+  rules, and require negative examples to be explicitly resolved by a later
+  code-registered Manager version.
+- [x] Keep evaluation promotion, resolution, and execution owner-only,
+  artist-scoped, audited, bounded, and offline. Reviewed examples never rewrite
+  prompts, policies, schemas, or code and never activate a candidate version.
+- [x] Add forward migration `20260713200000_manager_response_evals`, API/UI
+  controls, relationship diagnostics, unit/database/browser coverage, and
+  promote the dataset contract to `manager_evals_v10`.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -461,6 +499,28 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Extended the Manager release gate from decided recommendations
+  to exact, owner-reviewed conversation answers. Helpful examples must remain
+  natural and grounded in the linked run's redacted evidence. Negative examples
+  include the owner's expected behavior and block the candidate until a later
+  code-registered version is explicitly reviewed as resolving them; no version
+  promotes or rewrites itself. The tenant-scoped, audited workflow ships in
+  migration `20260713200000_manager_response_evals` with API, Manager UI,
+  relationship diagnostics, and unit/database/Chromium coverage. Validation
+  passed 81 API tests, two shared tests, all three 27-migration database
+  workflows, three production Chromium workflows, the relationship diagnostic,
+  production builds, and the 19/19 `manager_os_v9` / `manager_evals_v10` gate
+  at 100% safety, in addition to each band's local reviewed examples.
+- 2026-07-12: Made Manager model context honor memory sensitivity rather than
+  relying only on UI access control. Redacted mode now includes normal memory,
+  full-context consent may add sensitive memory, and restricted memory never
+  leaves StoryBoard. Grounding uses the same projected evidence set, local
+  traces retain only redacted facts plus policy counts, and owners can inspect
+  the active policy in the Manager cadence card. This applies Andrea_NanoBot's
+  clean-room sensitivity-affects-reasoning principle without importing its
+  code, runtime, or data. Validation passed 81 API tests, two shared tests, all
+  three 26-migration database workflows, three production Chromium workflows,
+  and the 19/19 `manager_os_v9` / `manager_evals_v9` gate at 100% safety.
 - 2026-07-12: Connected grounded Manager advice to the existing safe Operations
   generators. A missing event advance or dated project milestone plan now
   produces one explicit reviewable action; member acceptance atomically claims

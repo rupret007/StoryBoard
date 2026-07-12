@@ -127,6 +127,16 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   revalidates the target at acceptance, and atomically claims the recommendation
   with source-keyed Task creation. The action is immediately complete and
   replay-safe; this does not expose arbitrary operations or provider tools.
+- Manager provider context is a code-owned projection, not a prompt request.
+  Redacted mode includes only normal memory; full-context owner consent may add
+  sensitive memory; restricted memory is always excluded. Model citations are
+  checked against the same projected evidence IDs, while persisted run inputs
+  remain redacted even when full context was used transiently.
+- The Manager release gate accepts owner-promoted recommendation outcomes and
+  exact response examples. Response snapshots remain bounded and reuse the
+  linked run's redacted input facts for offline grounding checks. A negative
+  answer blocks its producing candidate and can be resolved only for a later
+  code-registered version; evaluation never rewrites or activates a version.
 - Show readiness is deterministic derived data, not a model assertion or an
   editable status. It uses the tenant-scoped event graph, active lineup, dated
   urgency, explicit evidence IDs, and premise-coverage confidence. Operations

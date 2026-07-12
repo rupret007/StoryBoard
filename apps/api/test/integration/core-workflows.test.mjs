@@ -436,6 +436,22 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const correctedMemory = await manager.patchMemory(artist.id, rememberedAmbition.id, { value: "Release an EP before the regional run" }, true, operator.email, operator.id);
   assert.equal(correctedMemory.sourceType, "operator_correction");
   await assert.rejects(() => manager.patchMemory(foreignArtist.id, rememberedAmbition.id, { confirmed: true }, true, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  await client.managerMemoryFact.createMany({ data: [
+    { artistId: artist.id, key: "private_budget_note", value: "Do not discuss outside the band", sourceType: "owner", sensitivity: "sensitive", confirmedAt: new Date() },
+    { artistId: artist.id, key: "restricted_health_note", value: "Never send to a model", sourceType: "owner", sensitivity: "restricted", confirmedAt: new Date() }
+  ] });
+  const privacyRun = await manager.generateBrief(artist.id, "daily", operator.email, operator.id);
+  assert.ok(Array.isArray(privacyRun.inputFacts.memoryFacts));
+  assert.equal(privacyRun.inputFacts.memoryFacts.every((fact) => fact.sensitivity === "normal"), true);
+  assert.equal(privacyRun.inputFacts.memoryFacts.some((fact) => fact.key === "private_budget_note" || fact.key === "restricted_health_note"), false);
+  assert.equal(privacyRun.trace.providerContext.mode, "disabled");
+  assert.equal(privacyRun.trace.providerContext.attempted, false);
+  assert.equal(privacyRun.trace.providerContext.memory.restricted, 1);
+  const providerPolicy = await manager.providerContextPolicy(artist.id);
+  assert.equal(providerPolicy.mode, "disabled");
+  assert.equal(providerPolicy.memory.sensitive, 1);
+  assert.equal(providerPolicy.memory.restricted, 1);
+  assert.equal(providerPolicy.memory.included, 0);
 
   const trackedGoal = await client.managerGoal.findFirstOrThrow({ where: { artistId: artist.id, status: "active" } });
   await manager.patchGoal(artist.id, trackedGoal.id, { targetValue: 6, currentValue: 0 }, operator.email, operator.id);
@@ -531,8 +547,23 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.ok(firstChat.message.managerRunId);
   const negativeFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: false, reason: "too_vague", note: "Name the exact first step" }, operator.email, operator.id);
   assert.equal(negativeFeedback.helpful, false);
+  const responseEval = await manager.promoteResponseEvalExample(artist.id, firstChat.message.id, { label: "needs_revision", expectedBehavior: "Answer the exact question first and name the recorded next step." }, operator.email, operator.id);
+  assert.equal(responseEval.label, "needs_revision");
+  assert.equal(responseEval.snapshot.question, "What should we focus on this week?");
+  assert.equal(Object.hasOwn(responseEval.snapshot, "inputFacts"), false);
+  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v9", operator.email, operator.id)).passed, false);
+  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v9", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
+  await assert.rejects(() => manager.promoteResponseEvalExample(foreignArtist.id, firstChat.message.id, { label: "needs_revision", expectedBehavior: "Keep the response inside the foreign workspace." }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const revisedFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id);
   assert.equal(revisedFeedback.id, negativeFeedback.id);
+  const usefulResponseEval = await manager.promoteResponseEvalExample(artist.id, firstChat.message.id, { label: "useful" }, operator.email, operator.id);
+  assert.equal(usefulResponseEval.id, responseEval.id);
+  assert.equal(usefulResponseEval.label, "useful");
+  assert.equal(usefulResponseEval.resolvedAt, null);
+  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v9", operator.email, operator.id);
+  assert.equal(responseEvaluation.passed, true);
+  assert.equal(responseEvaluation.metrics.ownerReviewedResponseCount, 1);
+  assert.equal(await client.managerResponseEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(await client.managerMessageFeedback.count({ where: { artistId: artist.id } }), 1);
   await assert.rejects(() => manager.messageFeedback(foreignArtist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const feedbackLearning = await manager.learningSummary(artist.id);
