@@ -451,6 +451,30 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(acceptedContext.outcome, "completed");
   assert.equal((await client.artistOperatingProfile.findUniqueOrThrow({ where: { artistId: artist.id } })).availabilityExpectations, "Members should respond to holds within 48 hours.");
   assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: contextAnswerChat.recommendation.proposedAction.profileId, action: "manager.profile_context_updated" } }), 1);
+  const taskCaptureChat = await manager.chat(artist.id, { conversationId: contextQuestionChat.conversationId, message: "Add a task to confirm the July rehearsal room by 2026-07-18" }, operator.email, operator.id);
+  assert.equal(taskCaptureChat.recommendation?.proposedAction?.type, "create_conversation_task");
+  assert.equal(taskCaptureChat.recommendation?.proposedAction?.title, "confirm the July rehearsal room");
+  assert.equal(taskCaptureChat.recommendation?.proposedAction?.dueDate, "2026-07-18");
+  assert.match(taskCaptureChat.message.proposedActions[0]?.preview ?? "", /Task: confirm the July rehearsal room/);
+  assert.equal(await client.task.count({ where: { artistId: artist.id, sourceKey: { startsWith: "manager_task_capture_v1:" } } }), 0);
+  const taskCaptureRun = await client.managerRun.findUniqueOrThrow({ where: { id: taskCaptureChat.message.managerRunId } });
+  assert.equal(taskCaptureRun.mode, "deterministic_task_capture");
+  assert.equal(taskCaptureRun.trace.taskCapture.policyVersion, "manager_task_capture_v1");
+  assert.equal(taskCaptureRun.trace.taskCapture.providerBypassed, true);
+  await assert.rejects(() => manager.recommendation(foreignArtist.id, taskCaptureChat.recommendation.id, "accepted", {}, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  const acceptedTaskCapture = await manager.recommendation(artist.id, taskCaptureChat.recommendation.id, "accepted", {}, operator.email, operator.id);
+  assert.equal(acceptedTaskCapture.outcome, "accepted");
+  const capturedTask = await client.task.findUniqueOrThrow({ where: { id: acceptedTaskCapture.taskId } });
+  assert.equal(capturedTask.title, "confirm the July rehearsal room");
+  assert.equal(capturedTask.ownerLabel, null);
+  assert.equal(capturedTask.dueAt?.toISOString(), "2026-07-18T12:00:00.000Z");
+  assert.match(capturedTask.sourceKey ?? "", /^manager_task_capture_v1:/);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: capturedTask.id, action: "task.created_from_manager_chat" } }), 1);
+  const duplicateTaskChat = await manager.chat(artist.id, { conversationId: contextQuestionChat.conversationId, message: "Create a task: Confirm the July rehearsal room!" }, operator.email, operator.id);
+  assert.equal(duplicateTaskChat.recommendation, null);
+  assert.match(duplicateTaskChat.message.content, /already open/i);
+  assert.deepEqual(duplicateTaskChat.message.citations, [capturedTask.id]);
+  assert.equal(await client.task.count({ where: { artistId: artist.id, title: { equals: "confirm the July rehearsal room", mode: "insensitive" } } }), 1);
   await manager.putProfile(artist.id, { bandMode: "hybrid", careerStage: "Regional working band", homeCity: "Chicago", homeRegion: "IL", homeCountry: "US", genres: ["rock", "soul"], businessName: "Manager Test Band LLC", revenueSources: ["private events", "ticketed shows"], currentAssets: ["EP masters", "live video"], constraints: ["Two weekends per month"], educationTopics: ["settlements"], availabilityExpectations: "Respond to holds within 48 hours", budgetToleranceMinor: 0, currency: "USD", twelveMonthAmbition: "Release an EP and book six profitable regional shows", communicationCadence: "weekly", decisionStyle: "guided" }, operator.email, operator.id);
   const constraintsMemory = await client.managerMemoryFact.findUniqueOrThrow({ where: { artistId_key: { artistId: artist.id, key: "constraints" } } });
   assert.deepEqual(constraintsMemory.value, ["Two weekends per month"]);
@@ -620,7 +644,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const directionGoal = await manager.createGoal(artist.id, { workstream: "business", title: "Cap showcase spend", targetValue: 1000, targetUnit: "USD", currentValue: 1200, targetDirection: "at_most", measurementKind: "manual", deadline: new Date(Date.now() + 75 * 86400000).toISOString(), status: "active" }, operator.email, operator.id);
   const directionInitiative = await manager.createInitiative(artist.id, { goalId: directionGoal.id, workstream: "business", title: "Control showcase costs", status: "active", dueAt: new Date(Date.now() + 60 * 86400000).toISOString() }, operator.email, operator.id);
   assert.equal((await manager.goalPaths(artist.id)).goals.find((goal) => goal.goalId === directionGoal.id)?.status, "missing_task");
-  const directionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v24", inputFacts: {}, output: {}, trace: {}, recommendations: { create: { stableKey: `goal-path-${directionGoal.id}-missing_task`, workstream: "business", title: "Add the next cost-control step", reason: "The initiative has no task", nextAction: "Create one linked task", priority: "med", evidence: [directionGoal.id, directionInitiative.id], proposedAction: { type: "create_task", title: "Review showcase expenses", dueAt: new Date(Date.now() + 7 * 86400000).toISOString(), initiativeId: directionInitiative.id } } } }, include: { recommendations: true } });
+  const directionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v25", inputFacts: {}, output: {}, trace: {}, recommendations: { create: { stableKey: `goal-path-${directionGoal.id}-missing_task`, workstream: "business", title: "Add the next cost-control step", reason: "The initiative has no task", nextAction: "Create one linked task", priority: "med", evidence: [directionGoal.id, directionInitiative.id], proposedAction: { type: "create_task", title: "Review showcase expenses", dueAt: new Date(Date.now() + 7 * 86400000).toISOString(), initiativeId: directionInitiative.id } } } }, include: { recommendations: true } });
   await manager.patchGoal(artist.id, directionGoal.id, { currentValue: 900 }, operator.email, operator.id);
   const adjustedDirectionGoal = await client.managerGoal.findUniqueOrThrow({ where: { id: directionGoal.id } });
   assert.equal(adjustedDirectionGoal.status, "active");
@@ -700,10 +724,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v24", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v25", operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v24", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v25", operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -780,8 +804,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(responseEval.label, "needs_revision");
   assert.equal(responseEval.snapshot.question, "What should we focus on this week?");
   assert.equal(Object.hasOwn(responseEval.snapshot, "inputFacts"), false);
-  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v24", operator.email, operator.id)).passed, false);
-  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v24", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
+  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v25", operator.email, operator.id)).passed, false);
+  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v25", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
   await assert.rejects(() => manager.promoteResponseEvalExample(foreignArtist.id, firstChat.message.id, { label: "needs_revision", expectedBehavior: "Keep the response inside the foreign workspace." }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const revisedFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id);
   assert.equal(revisedFeedback.id, negativeFeedback.id);
@@ -789,7 +813,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(usefulResponseEval.id, responseEval.id);
   assert.equal(usefulResponseEval.label, "useful");
   assert.equal(usefulResponseEval.resolvedAt, null);
-  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v24", operator.email, operator.id);
+  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v25", operator.email, operator.id);
   assert.equal(responseEvaluation.passed, true);
   assert.equal(responseEvaluation.metrics.ownerReviewedResponseCount, 2);
   assert.equal(await client.managerResponseEvalExample.count({ where: { artistId: artist.id } }), 2);
@@ -808,7 +832,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(conversationSummaries[0].messages[0].id, naturalFeedbackChat.message.id);
   assert.equal((await manager.conversations(artist.id, 1)).length, 1);
   assert.equal((await manager.conversations(foreignArtist.id, 10)).some((item) => item.id === firstChat.conversationId), false);
-  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 12);
+  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 14);
   await assert.rejects(() => manager.conversation(foreignArtist.id, firstChat.conversationId, operator.id), (error) => error?.getStatus?.() === 404);
 
   const venue = await client.venue.create({ data: { artistId: artist.id, name: "Owned Room", city: "Chicago" } });
@@ -859,7 +883,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   await operations.participant(artist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id);
   await operations.participant(artist.id, event.id, { bandMemberId: productionMember.id, response: "available" }, operator.email, operator.id);
   await assert.rejects(() => operations.participant(foreignArtist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
-  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v24", inputFacts: {}, output: {}, trace: {} } });
+  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v25", inputFacts: {}, output: {}, trace: {} } });
   const advanceRecommendation = await client.managerRecommendation.create({ data: { managerRunId: actionRun.id, stableKey: `advance-${event.id}`, workstream: "live", title: "Build the show advance", reason: "No advance tasks are recorded", nextAction: "Generate the existing checklist", priority: "high", evidence: [event.id], proposedAction: { type: "generate_event_advance", eventId: event.id } } });
   await assert.rejects(() => manager.recommendation(foreignArtist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const advance = await manager.recommendation(artist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id);
@@ -984,5 +1008,5 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(goalPathRun.trace.goalPath.policyVersion, "manager_goal_path_v1");
   assert.equal(goalPathRun.trace.goalPath.providerBypassed, true);
   const actions = await client.auditEvent.findMany({ where: { artistId: artist.id }, select: { action: true } });
-  for (const expected of ["manager.intake_completed", "manager.profile_updated", "manager.profile_context_updated", "manager.plan_ensured", "manager.settings_updated", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.schedule_item_created", "event.schedule_item_updated", "event.schedule_item_removed", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
+  for (const expected of ["manager.intake_completed", "manager.profile_updated", "manager.profile_context_updated", "manager.plan_ensured", "manager.settings_updated", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "task.created_from_manager_chat", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.schedule_item_created", "event.schedule_item_updated", "event.schedule_item_removed", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
 });

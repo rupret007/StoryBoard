@@ -17,6 +17,7 @@ import { deterministicManagerGoalTarget, type ManagerGoalTargetAssessment } from
 import { managerConversationRecommendationMatchesCurrent, type ManagerConversationContinuity } from "./manager-conversation-continuity";
 import type { ManagerSubjectReference } from "./manager-subject-reference";
 import type { ManagerProfileContextAction } from "./manager-context-capture";
+import type { ManagerConversationTaskAction } from "./manager-task-capture";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -48,7 +49,7 @@ export type ManagerProposedAction = {
   bandMemberId: string;
   checkInId: string | null;
   availability: "available" | "limited" | "unknown";
-} | ManagerProfileContextAction;
+} | ManagerProfileContextAction | ManagerConversationTaskAction;
 
 export type ManagerRecommendationDraft = {
   stableKey: string;

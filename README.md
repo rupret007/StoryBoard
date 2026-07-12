@@ -140,7 +140,7 @@ Feedback, promotion, resolution, and version activation remain separate; no
 rating or queue read activates a new version. A
 deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v24`
+already performed an outside action. Prompt/policy version `manager_os_v25`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -159,6 +159,15 @@ artist, profile version, current gap, and typed field/value before updating the
 authoritative profile and its compatibility memory atomically. Lineup, goals,
 active commitments, sensitive details, and ambiguous replies stay in their
 structured workflows rather than being guessed from chat.
+Explicit shared-work requests follow the same reviewed pattern. “Add a task to
+…” and “remind us to …” are handled by the code-owned
+`manager_task_capture_v1` route even when OpenAI is disabled. StoryBoard shows
+the exact title, due date, and unassigned owner before acceptance; relative
+dates require the saved Manager timezone, while ambiguous dates, personal
+reminders, multi-task requests, credential values, and implicit plans are not
+captured. Acceptance re-parses the originating tenant message, rechecks open
+tasks, and creates one source-keyed Task without sending or executing anything
+outside StoryBoard.
 `manager_work_sequence_v1` projection makes task order explicit. Members can
 record one Task as another Task's prerequisite; the API rejects cross-artist
 links, self-links, cycles, impossible date order, and completion that skips

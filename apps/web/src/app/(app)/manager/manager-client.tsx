@@ -3,12 +3,12 @@
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { Activity, Archive, BrainCircuit, Check, ClipboardList, GitCompareArrows, ListChecks, MessageSquareText, Pencil, Plus, RefreshCw, Route, Save, Send, ShieldCheck, Target, ThumbsDown, ThumbsUp, TrendingUp, UsersRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { BandMember, BandMemberCheckIn, ManagerCommitmentHealth, ManagerContextHealth, ManagerConversation, ManagerConversationSummary, ManagerDecision, ManagerDecisionOption, ManagerEvalExample, ManagerEvaluationRun, ManagerEvidenceHealth, ManagerGoal, ManagerGoalMeasurement, ManagerGoalMeasurementKind, ManagerGoalPath, ManagerGoalProgressEvent, ManagerGoalTargetDirection, ManagerKnowledgeHealth, ManagerLearningSummary, ManagerMemoryFact, ManagerMessage, ManagerMessageFeedback, ManagerOutcomeReview, ManagerPlanHealth, ManagerProfile, ManagerProviderContextPolicy, ManagerRecommendation, ManagerRecommendationEvalReviewQueue, ManagerResponseEvalExample, ManagerResponseEvalReviewQueue, ManagerResponseReviewQueue, ManagerRun, ManagerSettings, ManagerTeamLoad, ManagerWorkSequence } from "@/lib/types";
 import { ManagerCadenceCard } from "./manager-cadence-card";
 
-export function ManagerClient({ initialProfile, initialMembers, initialMemberCheckIns, initialGoals, initialGoalMeasurements, initialDecisions, initialBrief, initialConversations, initialConversation, initialMemory, initialLearning, initialRecommendationEvalReview, initialResponseReview, initialResponseEvalReview, initialPlanHealth, initialContextHealth, initialKnowledgeHealth, initialEvidenceHealth, initialGoalPath, initialWorkSequence, initialCommitmentHealth, initialTeamLoad, initialOutcomeReview, initialEvalExamples, initialResponseEvalExamples, initialEvaluation, initialSettings, initialProviderContextPolicy, isOwner }: { initialProfile: ManagerProfile | null; initialMembers: BandMember[]; initialMemberCheckIns: BandMemberCheckIn[]; initialGoals: ManagerGoal[]; initialGoalMeasurements: ManagerGoalMeasurement[]; initialDecisions: ManagerDecision[]; initialBrief: ManagerRun | null; initialConversations: ManagerConversationSummary[]; initialConversation: ManagerConversation | null; initialMemory: ManagerMemoryFact[]; initialLearning: ManagerLearningSummary | null; initialRecommendationEvalReview: ManagerRecommendationEvalReviewQueue | null; initialResponseReview: ManagerResponseReviewQueue | null; initialResponseEvalReview: ManagerResponseEvalReviewQueue | null; initialPlanHealth: ManagerPlanHealth | null; initialContextHealth: ManagerContextHealth | null; initialKnowledgeHealth: ManagerKnowledgeHealth | null; initialEvidenceHealth: ManagerEvidenceHealth | null; initialGoalPath: ManagerGoalPath | null; initialWorkSequence: ManagerWorkSequence | null; initialCommitmentHealth: ManagerCommitmentHealth | null; initialTeamLoad: ManagerTeamLoad | null; initialOutcomeReview: ManagerOutcomeReview | null; initialEvalExamples: ManagerEvalExample[] | null; initialResponseEvalExamples: ManagerResponseEvalExample[] | null; initialEvaluation: ManagerEvaluationRun | null; initialSettings: ManagerSettings | null; initialProviderContextPolicy: ManagerProviderContextPolicy | null; isOwner: boolean }) {
+export function ManagerClient({ activeArtistId, initialProfile, initialMembers, initialMemberCheckIns, initialGoals, initialGoalMeasurements, initialDecisions, initialBrief, initialConversations, initialConversation, initialMemory, initialLearning, initialRecommendationEvalReview, initialResponseReview, initialResponseEvalReview, initialPlanHealth, initialContextHealth, initialKnowledgeHealth, initialEvidenceHealth, initialGoalPath, initialWorkSequence, initialCommitmentHealth, initialTeamLoad, initialOutcomeReview, initialEvalExamples, initialResponseEvalExamples, initialEvaluation, initialSettings, initialProviderContextPolicy, isOwner }: { activeArtistId: string | null; initialProfile: ManagerProfile | null; initialMembers: BandMember[]; initialMemberCheckIns: BandMemberCheckIn[]; initialGoals: ManagerGoal[]; initialGoalMeasurements: ManagerGoalMeasurement[]; initialDecisions: ManagerDecision[]; initialBrief: ManagerRun | null; initialConversations: ManagerConversationSummary[]; initialConversation: ManagerConversation | null; initialMemory: ManagerMemoryFact[]; initialLearning: ManagerLearningSummary | null; initialRecommendationEvalReview: ManagerRecommendationEvalReviewQueue | null; initialResponseReview: ManagerResponseReviewQueue | null; initialResponseEvalReview: ManagerResponseEvalReviewQueue | null; initialPlanHealth: ManagerPlanHealth | null; initialContextHealth: ManagerContextHealth | null; initialKnowledgeHealth: ManagerKnowledgeHealth | null; initialEvidenceHealth: ManagerEvidenceHealth | null; initialGoalPath: ManagerGoalPath | null; initialWorkSequence: ManagerWorkSequence | null; initialCommitmentHealth: ManagerCommitmentHealth | null; initialTeamLoad: ManagerTeamLoad | null; initialOutcomeReview: ManagerOutcomeReview | null; initialEvalExamples: ManagerEvalExample[] | null; initialResponseEvalExamples: ManagerResponseEvalExample[] | null; initialEvaluation: ManagerEvaluationRun | null; initialSettings: ManagerSettings | null; initialProviderContextPolicy: ManagerProviderContextPolicy | null; isOwner: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -16,6 +16,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialMemberChe
   const [question, setQuestion] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(initialConversation?.id ?? null);
   const [conversations, setConversations] = useState(initialConversations);
+  const conversationArtistId = useRef(activeArtistId);
   const [messages, setMessages] = useState<ManagerMessage[]>(initialConversation?.messages ?? []);
   const [memory, setMemory] = useState(initialMemory);
   const [profile, setProfile] = useState(initialProfile);
@@ -53,7 +54,23 @@ export function ManagerClient({ initialProfile, initialMembers, initialMemberChe
   useEffect(() => setRecommendationEvalReview(initialRecommendationEvalReview), [initialRecommendationEvalReview]);
   useEffect(() => setResponseReview(initialResponseReview), [initialResponseReview]);
   useEffect(() => setResponseEvalReview(initialResponseEvalReview), [initialResponseEvalReview]);
-  useEffect(() => setConversations(initialConversations), [initialConversations]);
+  useEffect(() => {
+    if (conversationArtistId.current !== activeArtistId) {
+      conversationArtistId.current = activeArtistId;
+      setConversations(initialConversations);
+      setConversationId(initialConversation?.id ?? null);
+      setMessages(initialConversation?.messages ?? []);
+      return;
+    }
+    setConversations((current) => {
+      const merged = new Map(initialConversations.map((item) => [item.id, item]));
+      for (const item of current) {
+        const server = merged.get(item.id);
+        if (!server || new Date(item.updatedAt).getTime() >= new Date(server.updatedAt).getTime()) merged.set(item.id, item);
+      }
+      return [...merged.values()].sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()).slice(0, 10);
+    });
+  }, [activeArtistId, initialConversation, initialConversations]);
   async function act(path: string, json?: unknown) { setBusy(true); setError(""); try { await apiFetch(path, { method: "POST", ...(json === undefined ? {} : { json }) }); router.refresh(); } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); } }
   async function chat(event: React.FormEvent) {
     event.preventDefault();
@@ -93,7 +110,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialMemberChe
     setBusy(true); setError(""); setNotice("");
     try {
       await apiFetch<ManagerRecommendation>(`/manager/recommendations/${recommendation.id}/accept`, { method: "POST" });
-      setNotice(recommendation.proposedAction?.type === "generate_event_advance" ? "Show advance created." : recommendation.proposedAction?.type === "generate_project_plan" ? "Milestone plan created." : recommendation.proposedAction?.type === "remember_fact" ? "Band memory saved." : recommendation.proposedAction?.type === "update_profile_context" ? "Band context saved." : recommendation.proposedAction?.type === "create_task" ? "Task added." : recommendation.proposedAction?.type === "create_decision" ? "Decision draft added." : "Recommendation accepted.");
+      setNotice(recommendation.proposedAction?.type === "generate_event_advance" ? "Show advance created." : recommendation.proposedAction?.type === "generate_project_plan" ? "Milestone plan created." : recommendation.proposedAction?.type === "remember_fact" ? "Band memory saved." : recommendation.proposedAction?.type === "update_profile_context" ? "Band context saved." : recommendation.proposedAction?.type === "create_task" || recommendation.proposedAction?.type === "create_conversation_task" ? "Task added." : recommendation.proposedAction?.type === "create_decision" ? "Decision draft added." : "Recommendation accepted.");
       router.refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
@@ -183,7 +200,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialMemberChe
   }
   async function runEvaluation() {
     setBusy(true); setError("");
-    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v24" } })); }
+    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v25" } })); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function submitMessageFeedback(messageId: string, payload: { helpful: boolean; reason?: string | null; note?: string | null }) {
@@ -586,6 +603,7 @@ function friendlyReason(reason: string) {
 }
 
 function managerActionLabel(actionType?: string | null) {
+  if (actionType === "create_conversation_task") return "Suggested shared task";
   if (actionType === "remember_fact") return "Suggested band memory";
   if (actionType === "update_profile_context") return "Suggested band context";
   if (actionType === "create_decision") return "Suggested open decision";
@@ -602,7 +620,7 @@ function managerActionButton(actionType?: string | null) {
   if (actionType === "generate_event_advance") return "Build advance";
   if (actionType === "generate_project_plan") return "Build milestone plan";
   if (actionType === "assign_task") return "Assign task";
-  if (actionType === "create_task") return "Add task";
+  if (actionType === "create_task" || actionType === "create_conversation_task") return "Add task";
   return "Accept";
 }
 

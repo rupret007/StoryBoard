@@ -311,7 +311,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v24", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v25", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -568,4 +568,22 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByRole("button", { name: "Send message" }).click();
   const outcomeReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "Recorded attendance totals 135" });
   await expect(outcomeReply).toContainText(/finalized net USD 475\.00/);
+
+  const capturedTaskTitle = `Confirm the E2E rehearsal debrief ${suffix}`;
+  await outcomeQuestion.fill(`Add a task to ${capturedTaskTitle} by 2099-12-31`);
+  await page.getByRole("button", { name: "Send message" }).click();
+  const capturedTaskProposal = page.getByText("Suggested shared task", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await expect(capturedTaskProposal).toContainText(`Task: ${capturedTaskTitle}`);
+  await expect(capturedTaskProposal).toContainText("Due: Dec 31, 2099");
+  await expect(capturedTaskProposal).toContainText("Owner: Unassigned");
+  await capturedTaskProposal.getByRole("button", { name: "Add task" }).click();
+  await expect(capturedTaskProposal.getByText("accepted", { exact: true })).toBeVisible();
+  await outcomeQuestion.fill(`Create a task: ${capturedTaskTitle}!`);
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "already open" }).last()).toContainText("will not add a duplicate task");
+  await page.goto("/tasks");
+  const capturedTaskRow = page.getByRole("row", { name: new RegExp(capturedTaskTitle) });
+  await expect(capturedTaskRow).toBeVisible();
+  await expect(capturedTaskRow.getByLabel(`Due date for ${capturedTaskTitle}`)).toHaveValue("2099-12-31");
+  await expect(capturedTaskRow.getByLabel(`Owner for ${capturedTaskTitle}`).locator("option:checked")).toHaveText("Unassigned");
 });

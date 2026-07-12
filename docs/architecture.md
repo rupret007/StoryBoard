@@ -105,6 +105,16 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   The acceptance path re-parses the originating answer, rechecks the current
   gap/profile version, synchronizes profile-owned memory transactionally, and
   audits no raw value. Provider output cannot emit this action.
+  `manager_task_capture_v1` handles only explicit shared-work carrier phrases.
+  It stages a source-message-bound `create_conversation_task` action with a
+  date-only preview and never writes on the chat turn. Relative dates require
+  the saved Manager timezone; ambiguous, personal, multi-task, sensitive, and
+  implicit requests fail closed. Acceptance re-parses the exact tenant message,
+  checks equivalent open work around a serializable transaction, creates one
+  unassigned source-keyed Task, and audits provenance without raw chat text.
+  The provider schema cannot emit this action. Conversation summary refreshes
+  merge by ID and timestamp so a late server render cannot erase a just-created
+  local thread, and reset completely when the active artist changes.
   A deterministic response-quality gate rejects canned/meta prose, excessive
   presentation, and unverified claims of completed outside actions before a
   model answer can replace the safe fallback. Feedback may shape reviewed evals,

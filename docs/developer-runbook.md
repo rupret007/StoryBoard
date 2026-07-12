@@ -345,11 +345,22 @@ Manager routes:
   Accepting revalidates the original user answer and optimistic profile version
   before an audited atomic update. Sensitive, ambiguous, lineup, goal, and
   commitment answers are never coerced into profile fields.
+  Explicit “add a task to …” and shared “remind us to …” requests route through
+  `manager_task_capture_v1` without a provider call. The reply previews one
+  title, optional date-only deadline, and an unassigned owner; it does not
+  write. Relative dates require the saved Manager timezone. Ambiguous dates,
+  personal reminders, multiple tasks, credential values, questions, and
+  implicit plans fail closed. Acceptance re-parses the exact tenant source
+  message, rejects equivalent open work, and creates one source-keyed Task in
+  the recommendation transaction. The provider output schema cannot emit this
+  action.
 - `POST /manager/messages/:id/feedback` with `{ "helpful": true }` or
   `{ "helpful": false, "reason": "too_vague", "note": "..." }`
 - `GET /manager/conversations?limit=1..20` — newest-first summaries with the
   latest message and total message count — and `GET /manager/conversations/:id`
-  (bounded to 50 messages and the requesting operator's feedback)
+  (bounded to 50 messages and the requesting operator's feedback). The web
+  client merges late server summaries by ID/timestamp so a refresh cannot erase
+  a new thread, and clears conversation state when the active artist changes.
 - `GET /manager/memory`, `PATCH /manager/memory/:id`, and
   `GET /manager/learning`
 - `GET /manager/recommendation-eval-review?limit=3` — owner-only, read-only
@@ -391,7 +402,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v24`)
+  (owner-only; currently accepts only the code-registered `manager_os_v25`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -466,7 +477,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v24` retains the current operator question and at most 12
+version `manager_os_v25` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.

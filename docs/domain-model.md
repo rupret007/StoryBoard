@@ -48,12 +48,23 @@ recommendation carries the profile ID/version and a human-readable preview;
 acceptance re-parses the originating answer and compare-and-sets
 `ArtistOperatingProfile`. Profile-owned compatibility memory is synchronized
 in the same transaction. No separate conversation-memory row is created.
+`manager_task_capture_v1` stages `create_conversation_task` only from an
+explicit shared request. The action carries the source `ManagerMessage` ID and
+timestamp, exact title, optional date-only deadline, and the timezone used for
+relative parsing. No `Task` exists until acceptance re-parses the source,
+rejects equivalent open work, and creates one unassigned Task with source key
+`manager_task_capture_v1:<messageId>`. The recommendation becomes accepted in
+the same serializable transaction; only later Task completion may mark its work
+completed. Audit metadata stores the source ID, due date, and policy version—not
+raw chat text or a credential value.
 Conversation list reads are a non-persistent summary projection: newest first,
 at most 20, with the latest message and `_count.messages` mapped to
 `messageCount`. Conversation detail remains the message source of truth, reads
 at most 50 records, and projects only the requesting operator's feedback. A UI
 switch replaces rather than merges message arrays, preserving each thread's
-continuity and named-subject boundary.
+continuity and named-subject boundary. Refreshed summary lists merge by
+conversation ID and newest timestamp so a late server render cannot remove a
+locally created thread.
 The non-persistent `manager_response_review_v1` projection selects up to five
 recent unrated assistant messages for the current operator from the active
 artist. Every item retains its exact preceding question and persisted

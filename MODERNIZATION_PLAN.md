@@ -1268,6 +1268,64 @@ Implementation and validation:
   relationship diagnostic with zero mismatches, typecheck, lint, production
   builds, and `git diff --check`. No schema migration was required.
 
+### P0 — Reviewed conversational task capture (completed 2026-07-12)
+
+- [x] Recognize only explicit shared-work requests such as “add a task to …”
+  or “remind us to …”; ordinary plans, personal reminders, questions,
+  completion claims, feedback, and external-action requests must not silently
+  become tasks.
+- [x] Parse one bounded title plus an optional exact/relative due date without
+  invoking a model. Relative dates require the Manager timezone; ambiguous
+  dates and multi-task requests ask for clarification rather than guessing.
+- [x] Stage a typed, code-owned `create_conversation_task` recommendation tied
+  to the exact tenant conversation message. Show the title and due date before
+  review, and do not write a Task on the initial chat turn.
+- [x] On explicit acceptance, re-read and reparse the source message, reject a
+  changed/stale proposal or an equivalent open task, and create one unassigned
+  source-keyed Task in the same serializable transaction as the accepted
+  recommendation. Completing the Task remains a separate observed outcome.
+  Audit provenance without copying the raw chat into metadata.
+- [x] Keep the action unavailable to provider output and cover carrier phrases,
+  due-date handling, ambiguity, sensitive-value refusal, duplicate/stale
+  rejection, tenant isolation, UI review, and the versioned Manager gate.
+
+Root cause and design evidence:
+
+- The Manager can recommend work inferred from existing records, but an
+  operator who explicitly says “add a task” still depends on optional model
+  behavior or must leave the conversation and retype it in Tasks. The current
+  generic `create_task` action is not provenance-bound to that exact request.
+- Andrea_NanoBot's committed autonomy ladder and everyday capture work support
+  the clean-room principle that a local pending action is distinct from an
+  external action and should retain source provenance until reviewed.
+  StoryBoard will copy no parser, schema, task model, or runtime code; it will
+  use its own tenant roles, Manager recommendations, Task source keys, audits,
+  and release evaluations.
+
+Implementation and validation:
+
+- Added a pure `manager_task_capture_v1` resolver with conservative carrier
+  phrases, date-only semantics, duplicate comparison, and redacted trace data.
+- Reused the existing recommendation review control with a task-specific
+  preview. Acceptance is source-message-bound, re-parses relative dates against
+  the original timezone premise, checks every open tenant task before and
+  inside the serializable transaction, leaves the new task unassigned, and
+  keeps recommendation completion tied to later Task completion. No Prisma
+  migration was required.
+- Fixed a browser-discovered conversation-history race by merging refreshed
+  summaries by ID/timestamp while resetting all conversation state when the
+  active artist changes. A stale server render can no longer erase a new local
+  thread or carry one artist's thread into another workspace.
+- Promoted the reviewed routing/action contract to `manager_os_v25` /
+  `manager_evals_v27`; 54/54 golden checks pass at 100% safety. Validation also
+  passed 125 API + 2 shared tests, all 35 migrations and all 3 disposable-
+  Postgres workflows, all 3 production-mode Chromium journeys, the complete
+  relationship diagnostic with zero mismatches, typecheck, lint, production
+  builds, `git diff --check`, and a rebuilt healthy container stack. The first
+  browser attempt correctly refused an occupied API port; after stopping only
+  web/API containers, the suite exposed the summary-refresh race and a broad
+  task-row locator, both of which were corrected before the clean rerun.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,
