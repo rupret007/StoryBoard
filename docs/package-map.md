@@ -35,7 +35,8 @@ The NestJS orchestration backend. Current responsibilities:
 - **Integrations:** adapter registry, Google OAuth, **Telegram** real/mock adapters
 - **Workflow automation:** BullMQ jobs (`workflow-automation/`, `queue/`), in-app notifications, email drafts, digests, opt-in **Manager cadence**, **Telegram urgent scan**
 - **Manager OS:** tenant snapshots, deterministic briefs/chat, post-show outcome
-  review, structured context health, scheduled decision/outcome learning,
+  review, structured context health, six-area `manager_evidence_v1` operating
+  confidence calibration, scheduled decision/outcome learning,
   evidence-ranked commitment follow-through, linked task ownership, append-only
   member capacity check-ins, and bounded `manager_team_load_v2` assignment
   proposals, conversation-to-decision drafts,

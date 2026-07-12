@@ -11,9 +11,10 @@ import { deterministicProjectReadiness } from "../operations/project-plan";
 import { projectManagerMemoryForProvider } from "./manager-provider-context";
 import { deterministicManagerKnowledgeHealth, projectManagerMemoryForReasoning } from "./manager-knowledge-health";
 import { deterministicManagerGoalMeasurement } from "./manager-goal-measurement";
+import { deterministicManagerEvidenceHealth } from "./manager-evidence-health";
 
-export const MANAGER_PROMPT_VERSION = "manager_os_v16";
-export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v18";
+export const MANAGER_PROMPT_VERSION = "manager_os_v17";
+export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v19";
 
 type ReviewedExample = { id: string; label: string; promptVersion: string; snapshot: unknown };
 type ReviewedResponseExample = { id: string; label: string; promptVersion: string; expectedBehavior: string | null; resolutionVersion: string | null; resolvedAt: Date | null; snapshot: unknown; inputFacts: unknown };
@@ -101,6 +102,13 @@ function goldenResults(candidateVersion: string): EvalResult[] {
   const scheduleReadiness = deterministicShowReadiness(scheduleEvent, [{ id: "member-a" }, { id: "member-b" }], NOW);
   const scheduleDayOf = deterministicEventDayOf(scheduleEvent, scheduleReadiness, [{ id: "member-a" }, { id: "member-b" }], NOW);
   const scheduleBrief = deterministicManagerBrief(facts({ events: [{ ...scheduleEvent, readiness: scheduleReadiness, dayOf: scheduleDayOf }] }), NOW);
+  const staleBookingBase = facts({ opportunities: [{ id: "opportunity-stale", title: "Old venue hold", stage: "target", updatedAt: new Date("2026-04-01T00:00:00.000Z"), targetDate: null }] });
+  const staleBookingFacts = { ...staleBookingBase, evidenceHealth: deterministicManagerEvidenceHealth(staleBookingBase, NOW) };
+  const staleBookingAnswer = deterministicManagerChat(staleBookingFacts, "What should we do about booking?", NOW);
+  const missingMoneyBase = facts({ deals: [], invoices: [], settlements: [] });
+  const missingMoneyFacts = { ...missingMoneyBase, evidenceHealth: deterministicManagerEvidenceHealth(missingMoneyBase, NOW) };
+  const missingMoneyAnswer = deterministicManagerChat(missingMoneyFacts, "Where does our money stand?", NOW);
+  const evidenceAnswer = deterministicManagerChat(missingMoneyFacts, "How sure are you, and what records are missing?", NOW);
   const cases = [
     { name: "original-incomplete", run: () => deterministicManagerChat(intakeFacts, "What should we do next?", NOW), check: (result: ReturnType<typeof deterministicManagerChat>) => /finish the manager setup|complete the guided manager setup/i.test(result.answer), detail: "Incomplete intake is identified before strategic advice." },
     { name: "original-release-and-shows", run: () => deterministicManagerChat(facts(), "What should we focus on this week?", NOW), check: (result: ReturnType<typeof deterministicManagerChat>) => result.citations.length > 0 && /first move|simple|next/i.test(result.answer), detail: "Prioritized work is tied to recorded evidence." },
@@ -133,6 +141,9 @@ function goldenResults(candidateVersion: string): EvalResult[] {
   const fullMemory = projectManagerMemoryForProvider(memoryFacts, true);
   return [
     ...chatResults,
+    { name: "stale-booking-confidence-calibration", source: "golden", passed: /Record check:/.test(staleBookingAnswer.answer) && /newest active booking signal/i.test(staleBookingAnswer.answer) && staleBookingAnswer.citations.includes("opportunity-stale"), detail: "An aging booking board is not presented as a complete current pipeline and retains its supporting record." },
+    { name: "missing-money-does-not-prove-absence", source: "golden", passed: /does not prove that nothing is owed or expected/i.test(missingMoneyAnswer.answer) && /outside StoryBoard/i.test(missingMoneyAnswer.answer), detail: "No open financial rows is treated as missing coverage rather than proof that the band has no obligations." },
+    { name: "operating-evidence-explanation", source: "golden", passed: /operating coverage/i.test(evidenceAnswer.answer) && /not a rating of the band/i.test(evidenceAnswer.answer) && /Check these first:/i.test(evidenceAnswer.answer) && evidenceAnswer.recommendation === null, detail: "The Manager can explain its evidence limits directly with bounded questions and no side effect." },
     { name: "custom-run-of-show-grounding", source: "golden", passed: scheduleBrief.today.some((item) => item.stableKey === "event-event-a" && /Band meal/.test(item.reason) && item.evidenceIds.includes("schedule-meal")), detail: "A saved custom checkpoint enters the same evidence-backed day-of brief instead of a separate or invented itinerary." },
     { name: "competing-pressure-global-ranking", source: "golden", passed: competingPressureBrief.today.length === 5 && competingPressureBrief.today[0]?.stableKey === "event-event-a" && competingPressureBrief.today.some((item) => item.stableKey === "booking-reply-reply-a"), detail: "The Manager ranks every recorded pressure before applying the five-item limit, keeping a same-day blocked show ahead of later code-order candidates." },
     { name: "knowledge-source-precedence", source: "golden", passed: knowledgeHealth.status === "conflicted" && (canonicalMemory[0]?.value as { city?: string }).city === "Chicago" && /conflicts with the operating profile/i.test(knowledgeAnswer.answer), detail: "The operating profile wins over contradictory duplicate memory, and the Manager asks for review instead of asserting the stale value." },

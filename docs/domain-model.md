@@ -111,6 +111,14 @@ recorded identity/strategy, people/responsibilities, business facts, and active
 execution on four transparent 25-point dimensions. It orders unanswered
 questions by operational importance and carries evidence IDs; it never scores
 talent, artistic quality, likelihood of success, or facts that were not saved.
+`ManagerEvidenceHealth` (`manager_evidence_v1`) is the operational confidence
+companion to context health. It composes current events/readiness, booking
+updates, projects/readiness, open deal/invoice/settlement rows, goal measurement,
+and the active lineup into six bounded areas. Its states—current,
+needs-confirmation, stale, missing, and conflicted—describe only StoryBoard's
+evidence. Missing records never prove that no real-world obligation or activity
+exists. The projection is tenant-scoped, non-persistent, provider-safe, and
+cannot authorize or execute work.
 `manager_coaching_v1` is also derived and non-persistent. It maps an explicit
 learning question to a reviewed music-business concept, optionally projects
 same-artist evidence such as a draft settlement or open invoice, and returns no

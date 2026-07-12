@@ -665,6 +665,52 @@ Implementation and validation notes:
   create/edit/reload persistence, `git diff --check`, and the
   `manager_os_v16` / `manager_evals_v18` gate at 31/31 safety/usefulness checks.
 
+### P1 — Manager operating-evidence calibration (completed 2026-07-12)
+
+- [x] Add one deterministic, non-persistent evidence-health projection across
+  live work, booking, projects, money, goals, and the working team. Distinguish
+  current, needs-confirmation, stale, missing, and conflicted records; measure
+  record coverage rather than band quality, business health, or artistic value.
+- [x] Use that projection in deterministic and optional-model conversation so
+  an empty or aging StoryBoard area cannot be presented as a complete real-world
+  picture. Attach at most one relevant confidence note and one targeted question
+  instead of generic disclaimers or a second planning system.
+- [x] Surface the same evidence check in the Manager workspace and read-only API.
+  Keep existing context, memory, readiness, plan, and outcome projections as the
+  canonical specialist sources; the new layer only explains whether the inputs
+  needed for a type of answer are present and current enough.
+- [x] Persist the bounded projection in redacted Manager traces/provider
+  snapshots, update the prompt/policy and eval dataset versions, and add golden,
+  unit, database, and Chromium coverage for stale booking data, absent money
+  records, goal drift, and a fully grounded operating picture.
+
+Design evidence:
+
+- The adjacent `Andrea_NanoBot` project validates explicit signal state,
+  confidence calibration, targeted refresh questions, and “no second planner”
+  as useful orchestration boundaries. StoryBoard will reuse the design pattern
+  only; it will not copy Andrea's channel/runtime code or its currently dirty
+  working tree.
+
+Implementation and validation notes:
+
+- Added the clean-room `manager_evidence_v1` projection across live, booking,
+  projects, money, goals, and team records. It distinguishes current,
+  needs-confirmation, stale, missing, and conflicted inputs without persisting a
+  second source of truth. Missing explicitly means StoryBoard has no records;
+  it never means the band has no real-world work, money, or obligations.
+- Applied the same code-owned calibration after deterministic and optional-model
+  responses, with at most one relevant record check in a normal answer and at
+  most three targeted questions in the read-only explanation. The projection
+  cannot authorize an action and only bounded status metadata enters traces.
+- Added `GET /manager/evidence-health` plus a Manager workspace card, promoted
+  `manager_os_v17` / `manager_evals_v19`, and added golden, unit, disposable-
+  database, and Chromium coverage. No schema migration was needed.
+- Validation passed: `pnpm typecheck`, `pnpm lint`, 99 API + 2 shared tests,
+  `pnpm build`, 3 disposable-Postgres workflows, the complete relationship
+  diagnostic, 3 Chromium journeys, `git diff --check`, and the 34/34 Manager
+  safety/usefulness gate.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,

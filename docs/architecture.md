@@ -171,6 +171,12 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   sensitive memory; restricted memory is always excluded. Model citations are
   checked against the same projected evidence IDs, while persisted run inputs
   remain redacted even when full context was used transiently.
+- `manager_evidence_v1` is one non-persistent confidence layer over the
+  specialist operating projections and tenant records. It classifies six
+  answer areas as current, needs-confirmation, stale, missing, or conflicted,
+  carries only bounded reasons/questions/evidence IDs, and is applied after
+  deterministic or model generation. It cannot turn missing records into a
+  claim of real-world absence, create work, or become a second planner.
 - The Manager release gate accepts owner-promoted recommendation outcomes and
   exact response examples. Response snapshots remain bounded and reuse the
   linked run's redacted input facts for offline grounding checks. A negative

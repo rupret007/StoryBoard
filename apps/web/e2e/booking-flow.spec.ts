@@ -135,6 +135,15 @@ test("novice manager intake produces grounded work and band operations records",
   const newConversation = page.getByRole("button", { name: "New", exact: true });
   if (await newConversation.isVisible().catch(() => false)) await newConversation.click();
   const managerMessage = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
+  const evidenceCard = page.getByTestId("manager-evidence-health");
+  await expect(evidenceCard.getByRole("heading", { name: "What the Manager can trust right now" })).toBeVisible();
+  await expect(evidenceCard).toContainText("Deals and money");
+  await expect(evidenceCard).toContainText("Missing");
+  await managerMessage.fill("How sure are you, and what records are missing?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const evidenceReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "operating coverage" }).last();
+  await expect(evidenceReply).toContainText(/not a rating of the band/i);
+  await expect(evidenceReply).toContainText(/Check these first:/i);
   const checkIns = page.getByTestId("manager-capacity-check-ins");
   await expect(checkIns.getByRole("heading", { name: "Who has room for work right now?" })).toBeVisible();
   await checkIns.getByLabel("Capacity for Alex").selectOption("available");
@@ -228,7 +237,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v16", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v17", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 

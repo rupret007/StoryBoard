@@ -10,6 +10,7 @@ import { managerQuestionAsksAboutCommitments, type ManagerCommitmentHealth } fro
 import { assessManagerMemoryCapture } from "./manager-memory-capture";
 import { deterministicManagerCoaching } from "./manager-coaching";
 import { managerQuestionAsksAboutTeamLoad, type ManagerTeamLoad } from "./manager-team-load";
+import { calibrateManagerChatResult, type ManagerEvidenceHealth } from "./manager-evidence-health";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -72,11 +73,11 @@ export type ManagerFacts = {
     educationTopics?: string[];
   } | null;
   members: { id: string; name: string; roles?: string[]; instruments?: string[] }[];
-  goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; createdAt?: Date }[];
+  goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; measurementKind?: string; createdAt?: Date; updatedAt?: Date }[];
   goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
   tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null }[];
-  opportunities: { id: string; title: string; stage: string; updatedAt: Date; targetDate: Date | null }[];
+  opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null }[];
   events: {
     id: string;
     title: string;
@@ -87,20 +88,21 @@ export type ManagerFacts = {
     readiness?: ShowReadiness | null;
     dayOf?: EventDayOfView | null;
   }[];
-  projects: { id: string; name: string; type?: string; status: string; dueAt: Date | null; readiness?: ProjectReadiness | null }[];
-  deals: { id: string; title: string; status: string; expiresAt: Date | null }[];
-  invoices: { id: string; number: string; status: string; currency: string; totalMinor: number; paidMinor: number; dueAt: Date | null }[];
+  projects: { id: string; name: string; type?: string; status: string; dueAt: Date | null; updatedAt?: Date; readiness?: ProjectReadiness | null }[];
+  deals: { id: string; title: string; status: string; expiresAt: Date | null; updatedAt?: Date }[];
+  invoices: { id: string; number: string; status: string; currency: string; totalMinor: number; paidMinor: number; dueAt: Date | null; updatedAt?: Date }[];
   decisions: { id: string; workstream: ManagerWorkstream; title: string; context: string | null; options: unknown; choice: string | null; rationale: string | null; expectedOutcome: string | null; needsFraming?: boolean; evidence: unknown; status: string; reviewAt: Date | null; decidedAt: Date | null; reviewOutcome?: string | null; reviewNote?: string | null; reviewedAt?: Date | null }[];
   approvals: { id: string; title: string; status: string; actionType: string; updatedAt: Date }[];
   bookingReplies: { id: string; subject: string | null; fromName: string | null; fromEmail: string; processingStatus: string; receivedAt: Date }[];
   campaignRecipients: { id: string; status: string; followUpDueAt: Date | null; followUpTaskId: string | null }[];
-  prospects: { id: string; name: string; status: string; kind: string; city: string }[];
-  settlements: { id: string; status: string; currency: string; grossMinor: number; expenseMinor: number; netMinor: number; event: { title: string } }[];
+  prospects: { id: string; name: string; status: string; kind: string; city: string; updatedAt?: Date }[];
+  settlements: { id: string; status: string; currency: string; grossMinor: number; expenseMinor: number; netMinor: number; updatedAt?: Date; event: { title: string } }[];
   outcomeReview?: ManagerOutcomeReview;
   contextHealth?: ManagerContextHealth;
   knowledgeHealth?: ManagerKnowledgeHealth;
   commitmentHealth?: ManagerCommitmentHealth;
   teamLoad?: ManagerTeamLoad;
+  evidenceHealth?: ManagerEvidenceHealth;
   recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null }[];
 };
 
@@ -815,6 +817,7 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
     ].slice(0, 10),
     risksAndOpportunities: [
       ...(facts.knowledgeHealth && facts.knowledgeHealth.status !== "healthy" ? [{ title: facts.knowledgeHealth.status === "conflicted" ? "Conflicting manager knowledge" : "Band knowledge needs review", detail: facts.knowledgeHealth.summary, confidence: 1, evidenceIds: facts.knowledgeHealth.evidenceIds.slice(0, 8) }] : []),
+      ...(facts.evidenceHealth && facts.evidenceHealth.status !== "strong" ? [{ title: "Operating evidence needs confirmation", detail: facts.evidenceHealth.summary, confidence: facts.evidenceHealth.confidence, evidenceIds: facts.evidenceHealth.evidenceIds.slice(0, 8) }] : []),
       ...(availabilityConflicts.length ? [{ title: "Member availability conflict", detail: `${availabilityConflicts.length} upcoming event${availabilityConflicts.length === 1 ? " has" : "s have"} an unavailable participant.`, confidence: 1, evidenceIds: availabilityConflicts.slice(0, 8).map((event) => event.id) }] : []),
       ...(readinessRisks.length ? [{ title: "Show readiness gaps", detail: `${readinessRisks.length} upcoming show${readinessRisks.length === 1 ? " has" : "s have"} unresolved operational gaps; the nearest is ${readinessRisks[0]?.readiness?.score ?? 0}/100.`, confidence: readinessRisks[0]?.readiness?.confidence ?? 0.5, evidenceIds: readinessRisks.slice(0, 8).map((event) => event.id) }] : []),
       ...(overdueInvoices.length ? [{ title: "Overdue receivables", detail: `${overdueInvoices.length} invoice${overdueInvoices.length === 1 ? " is" : "s are"} past the recorded due date.`, confidence: 1, evidenceIds: overdueInvoices.slice(0, 8).map((item) => item.id) }] : []),
@@ -845,7 +848,7 @@ function questionHas(question: string, words: RegExp) {
   return words.test(question.toLowerCase());
 }
 
-export function deterministicManagerChat(facts: ManagerFacts, question: string, now = new Date()): ManagerChatResult {
+function deterministicManagerChatBase(facts: ManagerFacts, question: string, now = new Date()): ManagerChatResult {
   const brief = suppressRepeatedManagerAdvice(deterministicManagerBrief(facts, now), facts.recommendationHistory, now);
   const proposedDecisionDraft = decisionDraftFromQuestion(question);
   const externalRequest = questionHas(question, /\b(send|email|message|post|publish|pay|sign|execute|accept the contract|call them)\b/);
@@ -1117,4 +1120,8 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
     citations: unique(top.flatMap((item) => item.evidenceIds)).slice(0, 10),
     recommendation: actionableRecommendation(recommendation)
   };
+}
+
+export function deterministicManagerChat(facts: ManagerFacts, question: string, now = new Date()): ManagerChatResult {
+  return calibrateManagerChatResult(deterministicManagerChatBase(facts, question, now), facts, question);
 }

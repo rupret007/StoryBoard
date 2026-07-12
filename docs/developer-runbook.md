@@ -307,6 +307,10 @@ Manager routes:
 - `GET /manager/knowledge-health` — consistency, confirmation, confidence, and
   review age for the caller-visible Manager memory. Owners include sensitive
   rows; restricted values remain excluded from provider context.
+- `GET /manager/evidence-health` — read-only `manager_evidence_v1` coverage for
+  live work, booking, projects, money, goals, and the working team. Each area is
+  current, needs confirmation, stale, missing, or conflicted and carries a
+  bounded next question plus tenant evidence IDs.
 - `GET /manager/plan`; `POST /manager/plan/ensure` fills only missing
   `manager_plan_v1` records and never replaces user edits
 - `GET` / `POST /manager/decisions`; `PATCH /manager/decisions/:id` records a
@@ -342,7 +346,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v16`)
+  (owner-only; currently accepts only the code-registered `manager_os_v17`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -384,6 +388,17 @@ whether provider context was attempted and accepted;
 `GET /manager/provider-context-policy` exposes the same value-free summary to
 owners.
 
+`manager_evidence_v1` is a separate, non-persistent operating-coverage check.
+It composes the existing show/project readiness, goal measurement, booking
+timestamps, open financial records, and working lineup without replacing any
+of them. Missing means StoryBoard lacks a source; it never means the real-world
+fact is false. Booking signals become needs-confirmation after 21 days and stale
+after 45 days; old draft deals and settlements are called out explicitly. The
+same result is shown in Manager, included in the redacted provider snapshot and
+trace, and applied after either deterministic or model response generation. At
+most one relevant record check is appended to a normal answer. A direct
+confidence question returns the highest-risk areas and proposes no action.
+
 Owner-reviewed response evals store a bounded question/answer/feedback snapshot
 and refer back to the assistant message's linked, already-redacted
 `ManagerRun.inputFacts` during offline replay. Useful examples must pass the
@@ -398,7 +413,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v16` retains the current operator question and at most 12
+version `manager_os_v17` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.

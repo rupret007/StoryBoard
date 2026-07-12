@@ -110,10 +110,17 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v16`
+already performed an outside action. Prompt/policy version `manager_os_v17`
 and its offline eval suite cover response quality, conversation-created
-decision framing/review, commitment follow-through, and respectful
-missing-context guidance. Before applying the five-item Today limit, the
+decision framing/review, commitment follow-through, respectful missing-context
+guidance, and operating-evidence calibration. The read-only
+`manager_evidence_v1` projection checks live work, booking, projects, money,
+goals, and the working team as current, needs confirmation, stale, missing, or
+conflicted. Both deterministic and optional-model answers receive the same
+post-generation calibration, so an empty area means “not recorded,” never proof
+that nothing exists outside StoryBoard. The Manager workspace shows the same
+bounded confidence and at most three targeted questions; it measures record
+coverage, not artistic quality or business success. Before applying the five-item Today limit, the
 code-owned `manager_priority_v1` policy compares every candidate across event
 timing/readiness, member conflicts, commitment state, reply freshness,
 approvals, overdue money, due reviews, follow-ups, and project health. The
