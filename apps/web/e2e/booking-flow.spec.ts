@@ -167,7 +167,7 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByLabel(`Guarantee for E2E rehearsal ${suffix}`).fill("500");
   await page.getByLabel(`Deposit for E2E rehearsal ${suffix}`).fill("100");
   await page.getByLabel(`Production notes for E2E rehearsal ${suffix}`).fill("House PA, four vocal microphones, and shared backline.");
-  await page.getByRole("button", { name: "Save readiness details" }).click();
+  await page.getByRole("button", { name: "Save event details" }).click();
   await expect(page.getByText(/E2E Working Room/)).toBeVisible();
   await expect(page.getByText("Availability: 2/2 active members available", { exact: true })).toBeVisible();
   await expect(page.getByText("20/20", { exact: true })).toBeVisible();
@@ -259,4 +259,33 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByRole("button", { name: "Calculate" }).click();
   await page.getByRole("button", { name: "Finalize PDF" }).last().click();
   await expect(page.getByText("finalized", { exact: true }).last()).toBeVisible();
+
+  await page.getByRole("tab", { name: "Events" }).click();
+  const completedShow = page.locator("article").filter({ hasText: `E2E rehearsal ${suffix}` });
+  await completedShow.getByText("Manage readiness details", { exact: true }).click();
+  const completedSetAt = new Date(Date.now() - 2 * 3600000);
+  await page.getByLabel(`Event start for E2E rehearsal ${suffix}`).fill(localTime(completedSetAt));
+  await page.getByLabel(`Load-in for E2E rehearsal ${suffix}`).fill(localTime(new Date(completedSetAt.getTime() - 3 * 3600000)));
+  await page.getByLabel(`Soundcheck for E2E rehearsal ${suffix}`).fill(localTime(new Date(completedSetAt.getTime() - 2 * 3600000)));
+  await page.getByLabel(`Doors for E2E rehearsal ${suffix}`).fill(localTime(new Date(completedSetAt.getTime() - 3600000)));
+  await page.getByLabel(`Set time for E2E rehearsal ${suffix}`).fill(localTime(completedSetAt));
+  await page.getByLabel(`Curfew for E2E rehearsal ${suffix}`).fill(localTime(new Date(completedSetAt.getTime() + 3600000)));
+  await page.getByLabel(`Status for E2E rehearsal ${suffix}`).selectOption("completed");
+  await page.getByLabel(`Attendance for E2E rehearsal ${suffix}`).fill("135");
+  await page.getByLabel(`Gross revenue for E2E rehearsal ${suffix}`).fill("500");
+  await page.getByLabel(`Post-show notes for E2E rehearsal ${suffix}`).fill("Strong audience response; tighten the changeover next time.");
+  await page.getByLabel(`Relationship outcome for E2E rehearsal ${suffix}`).fill("Buyer invited a return pitch.");
+  await completedShow.getByRole("button", { name: "Save event details" }).click();
+  await expect(completedShow.locator("span").filter({ hasText: /^completed$/ })).toBeVisible();
+
+  await page.goto("/manager");
+  const outcomes = page.getByTestId("manager-outcome-review");
+  await expect(outcomes.getByRole("heading", { name: "Recent outcomes" })).toBeVisible();
+  await expect(outcomes.getByText("135", { exact: true })).toBeVisible();
+  await expect(outcomes.getByText(/Finalized net \$475\.00/)).toBeVisible();
+  const outcomeQuestion = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
+  await outcomeQuestion.fill("What did we learn from our recent shows?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const outcomeReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "Recorded attendance totals 135" });
+  await expect(outcomeReply).toContainText(/finalized net USD 475\.00/);
 });

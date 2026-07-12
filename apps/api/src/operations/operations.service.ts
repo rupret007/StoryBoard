@@ -180,7 +180,62 @@ export class OperationsService {
 
   settlements(artistId: string) { return this.prisma.client.settlement.findMany({ where: { artistId }, include: { event: true, expenses: true, splits: { include: { bandMember: true } } }, orderBy: { updatedAt: "desc" } }); }
   private async validateSplits(artistId: string, splits: { bandMemberId: string; basisPoints: number }[]) { for (const split of splits) await this.assertArtistRecord("member", artistId, split.bandMemberId); if (new Set(splits.map((split) => split.bandMemberId)).size !== splits.length) throw new BadRequestException("A member may appear only once in a settlement"); }
-  async createSettlement(artistId: string, input: SettlementCreate, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("event", artistId, input.eventId); await this.validateSplits(artistId, input.splits); const expenses = await this.prisma.client.expense.aggregate({ where: { artistId, eventId: input.eventId }, _sum: { amountMinor: true } }); const expenseMinor = expenses._sum.amountMinor ?? 0; const netMinor = input.grossMinor - expenseMinor; if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue"); const row = await this.prisma.client.settlement.create({ data: { artistId, eventId: input.eventId, currency: input.currency, grossMinor: input.grossMinor, expenseMinor, netMinor, notes: input.notes ?? null, splits: { create: input.splits.map((split) => ({ ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) })) } }, include: { splits: true } }); await this.auditWrite(artistId, "Settlement", row.id, "settlement.created", actorLabel, actorOperatorId, { eventId: input.eventId, grossMinor: row.grossMinor, netMinor }); return row; }
-  async patchSettlement(artistId: string, id: string, input: SettlementPatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("settlement", artistId, id); const existing = await this.prisma.client.settlement.findUniqueOrThrow({ where: { id }, include: { splits: true } }); if (existing.status === SettlementStatus.finalized) throw new BadRequestException("Finalized settlements are immutable"); if (input.splits) await this.validateSplits(artistId, input.splits); const expenses = await this.prisma.client.expense.aggregate({ where: { artistId, eventId: existing.eventId }, _sum: { amountMinor: true } }); const expenseMinor = expenses._sum.amountMinor ?? 0; const grossMinor = input.grossMinor ?? existing.grossMinor; const netMinor = grossMinor - expenseMinor; if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue"); const specs = input.splits ?? existing.splits.map((split) => ({ bandMemberId: split.bandMemberId, basisPoints: split.basisPoints })); const row = await this.prisma.client.$transaction(async (tx) => { if (input.splits) await tx.memberSplit.deleteMany({ where: { settlementId: id } }); if (input.splits) await tx.memberSplit.createMany({ data: specs.map((split) => ({ settlementId: id, ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) })) }); else for (const split of specs) await tx.memberSplit.update({ where: { settlementId_bandMemberId: { settlementId: id, bandMemberId: split.bandMemberId } }, data: { amountMinor: Math.floor(netMinor * split.basisPoints / 10000) } }); return tx.settlement.update({ where: { id }, data: { grossMinor, expenseMinor, netMinor, ...(input.notes !== undefined ? { notes: input.notes } : {}) }, include: { splits: true } }); }); await this.auditWrite(artistId, "Settlement", id, "settlement.updated", actorLabel, actorOperatorId, { grossMinor, expenseMinor, netMinor }); return row; }
-  async finalizeSettlement(artistId: string, id: string, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("settlement", artistId, id); const settlement = await this.prisma.client.settlement.findUniqueOrThrow({ where: { id }, include: { event: true, splits: { include: { bandMember: true } } } }); if (settlement.status === SettlementStatus.finalized) return settlement; if (settlement.splits.length && settlement.splits.reduce((sum, split) => sum + split.basisPoints, 0) !== 10000) throw new BadRequestException("Member splits must total 100%"); const title = `${settlement.event.title} settlement`; const body = [`Gross: ${settlement.currency} ${(settlement.grossMinor/100).toFixed(2)}`, `Expenses: ${settlement.currency} ${(settlement.expenseMinor/100).toFixed(2)}`, `Net: ${settlement.currency} ${(settlement.netMinor/100).toFixed(2)}`, "", ...settlement.splits.map((split) => `${split.bandMember.name}: ${settlement.currency} ${(split.amountMinor/100).toFixed(2)}`)].join("\n"); const { bytes, sha256 } = renderTextPdf(title, body); const row = await this.prisma.client.settlement.update({ where: { id }, data: { status: SettlementStatus.finalized, finalizedAt: new Date(), snapshots: { create: { artistId, kind: "settlement", version: 1, sha256, contentBase64: bytes.toString("base64") } } }, include: { splits: true, snapshots: true } }); await this.auditWrite(artistId, "Settlement", id, "settlement.finalized", actorLabel, actorOperatorId, { sha256, netMinor: row.netMinor }); return row; }
+  async createSettlement(artistId: string, input: SettlementCreate, actorLabel: string, actorOperatorId: string) {
+    await this.assertArtistRecord("event", artistId, input.eventId);
+    await this.validateSplits(artistId, input.splits);
+    const currency = input.currency.toUpperCase();
+    const expenseWhere: Prisma.ExpenseWhereInput = { artistId, eventId: input.eventId, currency: { equals: currency, mode: "insensitive" } };
+    const expenses = await this.prisma.client.expense.aggregate({ where: expenseWhere, _sum: { amountMinor: true } });
+    const expenseMinor = expenses._sum.amountMinor ?? 0;
+    const netMinor = input.grossMinor - expenseMinor;
+    if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue");
+    const row = await this.prisma.client.settlement.create({ data: { artistId, eventId: input.eventId, currency, grossMinor: input.grossMinor, expenseMinor, netMinor, notes: input.notes ?? null, splits: { create: input.splits.map((split) => ({ ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) })) } }, include: { splits: true } });
+    await this.auditWrite(artistId, "Settlement", row.id, "settlement.created", actorLabel, actorOperatorId, { eventId: input.eventId, grossMinor: row.grossMinor, expenseMinor, netMinor });
+    return row;
+  }
+
+  async patchSettlement(artistId: string, id: string, input: SettlementPatch, actorLabel: string, actorOperatorId: string) {
+    await this.assertArtistRecord("settlement", artistId, id);
+    const existing = await this.prisma.client.settlement.findUniqueOrThrow({ where: { id }, include: { splits: true } });
+    if (existing.status === SettlementStatus.finalized) throw new BadRequestException("Finalized settlements are immutable");
+    if (input.splits) await this.validateSplits(artistId, input.splits);
+    const expenseWhere: Prisma.ExpenseWhereInput = { artistId, eventId: existing.eventId, currency: { equals: existing.currency, mode: "insensitive" } };
+    const expenses = await this.prisma.client.expense.aggregate({ where: expenseWhere, _sum: { amountMinor: true } });
+    const expenseMinor = expenses._sum.amountMinor ?? 0;
+    const grossMinor = input.grossMinor ?? existing.grossMinor;
+    const netMinor = grossMinor - expenseMinor;
+    if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue");
+    const specs = input.splits ?? existing.splits.map((split) => ({ bandMemberId: split.bandMemberId, basisPoints: split.basisPoints }));
+    const row = await this.prisma.client.$transaction(async (tx) => {
+      if (input.splits) await tx.memberSplit.deleteMany({ where: { settlementId: id } });
+      if (input.splits) await tx.memberSplit.createMany({ data: specs.map((split) => ({ settlementId: id, ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) })) });
+      else for (const split of specs) await tx.memberSplit.update({ where: { settlementId_bandMemberId: { settlementId: id, bandMemberId: split.bandMemberId } }, data: { amountMinor: Math.floor(netMinor * split.basisPoints / 10000) } });
+      return tx.settlement.update({ where: { id }, data: { grossMinor, expenseMinor, netMinor, ...(input.notes !== undefined ? { notes: input.notes } : {}) }, include: { splits: true } });
+    });
+    await this.auditWrite(artistId, "Settlement", id, "settlement.updated", actorLabel, actorOperatorId, { grossMinor, expenseMinor, netMinor });
+    return row;
+  }
+
+  async finalizeSettlement(artistId: string, id: string, actorLabel: string, actorOperatorId: string) {
+    await this.assertArtistRecord("settlement", artistId, id);
+    const settlement = await this.prisma.client.settlement.findUniqueOrThrow({ where: { id }, include: { event: true, splits: { include: { bandMember: true } } } });
+    if (settlement.status === SettlementStatus.finalized) return settlement;
+    if (settlement.splits.length && settlement.splits.reduce((sum, split) => sum + split.basisPoints, 0) !== 10000) throw new BadRequestException("Member splits must total 100%");
+    const expenseWhere: Prisma.ExpenseWhereInput = { artistId, eventId: settlement.eventId, currency: { equals: settlement.currency, mode: "insensitive" } };
+    const expenses = await this.prisma.client.expense.aggregate({ where: expenseWhere, _sum: { amountMinor: true } });
+    const expenseMinor = expenses._sum.amountMinor ?? 0;
+    const netMinor = settlement.grossMinor - expenseMinor;
+    if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue");
+    const splitAmounts = settlement.splits.map((split) => ({ ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) }));
+    const title = `${settlement.event.title} settlement`;
+    const body = [`Gross: ${settlement.currency} ${(settlement.grossMinor/100).toFixed(2)}`, `Expenses: ${settlement.currency} ${(expenseMinor/100).toFixed(2)}`, `Net: ${settlement.currency} ${(netMinor/100).toFixed(2)}`, "", ...splitAmounts.map((split) => `${split.bandMember.name}: ${settlement.currency} ${(split.amountMinor/100).toFixed(2)}`)].join("\n");
+    const { bytes, sha256 } = renderTextPdf(title, body);
+    const row = await this.prisma.client.$transaction(async (tx) => {
+      await tx.expense.updateMany({ where: { ...expenseWhere, settlementId: null }, data: { settlementId: id } });
+      for (const split of splitAmounts) await tx.memberSplit.update({ where: { settlementId_bandMemberId: { settlementId: id, bandMemberId: split.bandMemberId } }, data: { amountMinor: split.amountMinor } });
+      return tx.settlement.update({ where: { id }, data: { expenseMinor, netMinor, status: SettlementStatus.finalized, finalizedAt: new Date(), snapshots: { create: { artistId, kind: "settlement", version: 1, sha256, contentBase64: bytes.toString("base64") } } }, include: { splits: true, snapshots: true } });
+    });
+    await this.auditWrite(artistId, "Settlement", id, "settlement.finalized", actorLabel, actorOperatorId, { sha256, expenseMinor, netMinor: row.netMinor });
+    return row;
+  }
 }

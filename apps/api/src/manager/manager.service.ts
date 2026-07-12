@@ -23,6 +23,7 @@ import { deterministicEventDayOf } from "../operations/event-day-of";
 import { deterministicProjectReadiness } from "../operations/project-plan";
 import { managerActionMayExecuteDirectly } from "./manager-policy";
 import { evaluateManagerResponseQuality, managerResponseGuidance, summarizeManagerResponseFeedback } from "./manager-response-quality";
+import { deterministicManagerOutcomeReview } from "./manager-outcome-review";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const itemSchema = z.object({ stableKey: z.string().regex(/^[a-z0-9_-]{1,80}$/), title: z.string().min(1).max(200), reason: z.string().min(1).max(800), nextAction: z.string().min(1).max(500), workstream: z.nativeEnum(ManagerWorkstream), priority: z.enum(["low","med","high"]), evidenceIds: z.array(z.string()).max(8), proposedAction: z.object({ type: z.literal("create_task"), title: z.string().min(1).max(240), dueAt: z.string().datetime({ offset: true }).nullable(), initiativeId: z.string().nullable() }).strict().nullable() }).strict();
@@ -138,6 +139,56 @@ export class ManagerService {
       dismissalReasons: Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({ reason, count })),
       responseFeedback: summarizeManagerResponseFeedback(responseRows)
     };
+  }
+
+  async outcomeReview(artistId: string, days = 90, through = new Date()) {
+    const windowDays = Math.max(7, Math.min(365, Math.trunc(days)));
+    const from = new Date(through.getTime() - windowDays * 24 * 60 * 60 * 1000);
+    const inWindow = { gte: from, lte: through };
+    const [events, projects, completedTasks, campaignRecipients] = await Promise.all([
+      this.prisma.client.bandEvent.findMany({
+        where: {
+          artistId,
+          type: "gig",
+          status: { in: ["completed", "cancelled"] },
+          AND: [
+            { OR: [{ startsAt: null }, { startsAt: { lte: through } }] },
+            { OR: [{ startsAt: inWindow }, { updatedAt: inWindow }] }
+          ]
+        },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          startsAt: true,
+          updatedAt: true,
+          currency: true,
+          attendance: true,
+          grossRevenueMinor: true,
+          postShowNotes: true,
+          relationshipOutcome: true,
+          settlement: { select: { id: true, status: true, currency: true, grossMinor: true, expenseMinor: true, netMinor: true } },
+          expenses: { select: { id: true, currency: true, amountMinor: true } },
+          invoices: { select: { id: true, status: true, currency: true, totalMinor: true, paidMinor: true, dueAt: true } }
+        },
+        orderBy: [{ startsAt: "desc" }, { updatedAt: "desc" }],
+        take: 100
+      }),
+      this.prisma.client.artistProject.findMany({
+        where: { artistId, status: { in: ["completed", "cancelled"] }, updatedAt: inWindow },
+        select: { id: true, name: true, status: true, updatedAt: true, tasks: { select: { id: true, status: true } }, expenses: { select: { id: true, currency: true, amountMinor: true } } },
+        orderBy: { updatedAt: "desc" },
+        take: 100
+      }),
+      this.prisma.client.task.findMany({ where: { artistId, status: "done", updatedAt: inWindow }, select: { id: true, updatedAt: true }, orderBy: { updatedAt: "desc" }, take: 200 }),
+      this.prisma.client.bookingCampaignRecipient.findMany({
+        where: { campaign: { artistId }, status: { in: ["booked", "replied", "declined"] }, updatedAt: inWindow },
+        select: { id: true, status: true, updatedAt: true },
+        orderBy: { updatedAt: "desc" },
+        take: 200
+      })
+    ]);
+    return deterministicManagerOutcomeReview({ windowDays, through, events, projects, completedTasks, campaignRecipients });
   }
 
   async messageFeedback(artistId: string, messageId: string, input: ManagerMessageFeedbackInput, actorLabel: string, actorOperatorId: string) {
@@ -297,6 +348,7 @@ export class ManagerService {
       campaignRecipients,
       prospects,
       settlements,
+      outcomeReview,
       recommendationHistory
     ] = await Promise.all([
       this.prisma.client.artist.findUniqueOrThrow({ where: { id: artistId }, select: { id: true, name: true } }),
@@ -317,6 +369,7 @@ export class ManagerService {
       this.prisma.client.bookingCampaignRecipient.findMany({ where: { campaign: { artistId }, status: { in: ["drafted", "sent"] } }, select: { id: true, status: true, followUpDueAt: true, followUpTaskId: true }, orderBy: { followUpDueAt: "asc" }, take: 30 }),
       this.prisma.client.bookingProspect.findMany({ where: { artistId, status: "qualified" }, select: { id: true, name: true, status: true, kind: true, city: true }, orderBy: { updatedAt: "asc" }, take: 30 }),
       this.prisma.client.settlement.findMany({ where: { artistId, status: "draft" }, select: { id: true, status: true, currency: true, grossMinor: true, expenseMinor: true, netMinor: true, event: { select: { title: true } } }, orderBy: { updatedAt: "asc" }, take: 20 }),
+      this.outcomeReview(artistId, 90),
       this.prisma.client.managerRecommendation.findMany({ where: { managerRun: { artistId }, outcome: { not: "suggested" } }, select: { id: true, stableKey: true, outcome: true, outcomeReason: true, outcomeAt: true, updatedAt: true, task: { select: { status: true } } }, orderBy: { updatedAt: "desc" }, take: 100 })
     ]);
     const eventsWithSignals = events.map((event) => {
@@ -344,6 +397,7 @@ export class ManagerService {
       campaignRecipients,
       prospects,
       settlements,
+      outcomeReview,
       recommendationHistory,
       generatedAt: new Date().toISOString()
     };
@@ -373,6 +427,7 @@ export class ManagerService {
       campaignRecipients: facts.campaignRecipients,
       prospects: facts.prospects,
       settlements: facts.settlements,
+      outcomeReview: { ...facts.outcomeReview, recordedLessons: facts.outcomeReview.recordedLessons.map((lesson) => ({ eventId: lesson.eventId, title: lesson.title, postShowNotesRecorded: Boolean(lesson.postShowNotes), relationshipOutcomeRecorded: Boolean(lesson.relationshipOutcome), evidenceIds: lesson.evidenceIds })) },
       recommendationHistory: facts.recommendationHistory.map((row) => ({ id: row.id, stableKey: row.stableKey, outcome: row.outcome, outcomeReason: row.outcomeReason, outcomeAt: row.outcomeAt, taskStatus: row.task?.status ?? null })),
       generatedAt: facts.generatedAt
     };
@@ -685,6 +740,7 @@ export class ManagerService {
       ...facts.campaignRecipients.map((x) => x.id),
       ...facts.prospects.map((x) => x.id),
       ...facts.settlements.map((x) => x.id),
+      ...(facts.outcomeReview?.evidenceIds ?? []),
       ...facts.recommendationHistory.map((x) => x.id)
     ]);
   }

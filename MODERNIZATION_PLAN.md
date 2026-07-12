@@ -190,6 +190,28 @@ mock-safe provider adapters.
   outcome-led learning concepts; no source code, runtime, database, or broad
   assistant authority is imported.
 
+### P0 — Evidence-backed post-show learning loop (completed 2026-07-12)
+
+- [x] Expose the existing attendance, gross-revenue, post-show lesson, and
+  relationship-outcome fields in the gig editor so completed work no longer
+  disappears before the band can record what happened.
+- [x] Add a bounded, tenant-scoped `GET /manager/outcome-review?days=7..365`
+  projection over completed/cancelled shows and projects, completed tasks,
+  explicit campaign outcomes, invoices, expenses, and settlements.
+- [x] Derive confidence from recorded premises, cite source record IDs, keep
+  unsupported net income unknown, aggregate each currency separately, and ask
+  focused questions for missing attendance, lessons, or relationship results.
+- [x] Use the same review in the Manager workspace, retrospective conversation,
+  safe model snapshot, grounding allowlist, and weekly brief. No second AI-owned
+  outcome truth or provider authority was introduced.
+- [x] Correct settlement math to deduct only event expenses whose currency
+  matches the settlement. Link included expenses at finalization, recalculate
+  draft totals/splits at finalization, and surface later or historical expense
+  drift without mutating the finalized document.
+- [x] Cover empty/complete/incomplete/multi-currency outcomes, tenant isolation,
+  database settlement evidence, and the full browser path from show completion
+  through Manager retrospective advice.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -297,6 +319,17 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Closed the post-show learning blind spot without a migration.
+  Gig editing now captures attendance, gross, lessons, and relationship outcome;
+  a deterministic 7–365 day Manager review reports completed activity, explicit
+  booking outcomes, premise coverage, currency-separated financials, unknowns,
+  and a first evidence-backed action. Briefs, chat, the Manager workspace, and
+  model snapshots consume the same projection. Settlement calculations now
+  exclude mismatched-currency expenses, attach included costs, and recheck the
+  draft at finalization instead of combining unlike or stale minor units.
+  Validation passed 63 API tests, all three 22-migration database workflows,
+  three production Chromium workflows, and the 12/12 `manager_os_v4` offline
+  gate at 100% safety.
 - 2026-07-12: Added forward migration
   `20260713010000_manager_response_feedback` and Manager policy
   `manager_os_v4`. Every delivered chat answer now links to its run and accepts

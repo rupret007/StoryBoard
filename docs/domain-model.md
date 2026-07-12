@@ -42,6 +42,10 @@ tenant-scoped recommendation/outcome snapshot used for offline evaluation; its
 existence never changes the active runtime version. Owner-triggered
 `ManagerEvaluationRun` rows retain candidate, dataset, pass metrics, and
 scenario results; they cannot activate a version.
+`ManagerOutcomeReview` is a derived, non-persistent view over bounded recent
+events, projects, tasks, campaign outcomes, invoices, expenses, and settlements.
+It carries premise-coverage confidence and evidence IDs, groups money by
+currency, and never derives net income for a show without a settlement.
 
 ### Events, music, projects, and deals
 
@@ -76,8 +80,12 @@ milestone, and evidence rather than asserting an unsupported project outcome.
 `Agreement` based on an owner-activated `DocumentTemplate`. Generated
 `DocumentSnapshot` PDFs are content-addressed with SHA-256. `Invoice` balances
 derive from idempotent `PaymentRecord` rows. `Settlement` derives gross,
-expenses, net, and basis-point `MemberSplit` amounts, then becomes immutable on
-finalization. All money uses integer minor units and an explicit currency.
+same-currency expenses, net, and basis-point `MemberSplit` amounts, then becomes
+immutable on finalization. Other-currency costs remain separate rather than
+being combined as equal minor units. At finalization, included expenses receive
+the settlement link transactionally and the draft is recalculated before freezing
+its splits and PDF snapshot. All money uses integer minor units and an explicit
+currency.
 
 ### Venue
 

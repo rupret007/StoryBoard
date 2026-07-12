@@ -110,6 +110,13 @@ authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
 already performed an outside action. Prompt/policy version `manager_os_v4`
 and its offline eval suite cover these response-quality rules.
+The Manager also has one shared, deterministic 90-day outcome review. Completed
+shows, projects, tasks, campaign results, attendance, post-show notes,
+relationship outcomes, invoices, expenses, and finalized settlements are
+combined by tenant and currency. It reports premise coverage as confidence,
+keeps unknown net income unknown until settlement, and asks for the missing
+fact instead of turning free-text notes into a success claim. The same review
+drives the Manager card, retrospective chat answers, and weekly attention item.
 The **What your manager remembers** panel lets the band correct or archive
 confirmed memory, while sensitive memory remains owner-controlled. This
 reviewed feedback influences future ranking and evaluation only—it never lets
@@ -140,6 +147,12 @@ schedule, so an impossible load-in/soundcheck/doors/set/curfew order is rejected
 before write or audit. Each gig also has a phone-friendly **day-of view** with
 the next checkpoint, run of show, contact/map actions, lineup assignments,
 advance-task completion, setlist, production links, and recorded payment state.
+When the show is over, the same event editor records attendance, gross revenue,
+what worked or failed, and the buyer/venue relationship outcome. Settlement
+math includes only expenses in the settlement currency; other-currency costs
+remain separately visible rather than being silently mixed into net income.
+Draft finalization rechecks current matching expenses, attaches them to the
+settlement, and freezes the recalculated split and PDF together.
 Manager uses that same day-of signal inside 24 hours of a show instead of
 falling back to generic advice. It also includes a shared song library and
 release/content/tour/business projects. Project workspaces generate idempotent,

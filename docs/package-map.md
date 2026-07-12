@@ -34,8 +34,8 @@ The NestJS orchestration backend. Current responsibilities:
 - **`AuditService`** on important actions; approval execution paths
 - **Integrations:** adapter registry, Google OAuth, **Telegram** real/mock adapters
 - **Workflow automation:** BullMQ jobs (`workflow-automation/`, `queue/`), in-app notifications, email drafts, digests, **Telegram urgent scan**
-- **Manager OS:** tenant snapshots, deterministic briefs/chat, response-quality
-  policy and exact-message feedback in `src/manager/`
+- **Manager OS:** tenant snapshots, deterministic briefs/chat, post-show outcome
+  review, response-quality policy, and exact-message feedback in `src/manager/`
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
 - Global **`CsrfOriginGuard`** (OAuth + Telegram webhook paths excluded for POST)
 

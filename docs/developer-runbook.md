@@ -292,6 +292,8 @@ Manager routes:
   `GET /manager/conversations/:id` (bounded to 50 messages)
 - `GET /manager/memory`, `PATCH /manager/memory/:id`, and
   `GET /manager/learning`
+- `GET /manager/outcome-review?days=90` — read-only, tenant-scoped derived
+  outcomes; `days` accepts 7–365 and defaults to 90
 - `GET /manager/eval-examples` and
   `POST /manager/recommendations/:id/promote-eval` (owner-only)
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
@@ -303,8 +305,9 @@ Manager routes:
 `OPENAI_ENABLED=false` is fully supported. With OpenAI enabled, set
 `OPENAI_MANAGER_MODEL` (default `gpt-5.6-terra`). Manager inputs are
 tenant-scoped snapshots covering operating goals/tasks plus current events,
-booking replies and follow-ups, prospects, approvals, deals, invoices, and
-settlements. CRM/provider text is treated as untrusted data. Prompt/policy
+booking replies and follow-ups, prospects, approvals, deals, invoices,
+settlements, and the shared evidence-backed outcome review. CRM/provider text
+is treated as untrusted data. Prompt/policy
 version `manager_os_v4` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
@@ -403,10 +406,23 @@ urgency. Manager briefs and chat consume this same result.
 In Band operations, expand **Manage readiness details** on an event to record
 each active member's availability, attach an artist-owned venue/contact/setlist,
 and edit the location, show-day schedule, guarantee/deposit, production notes,
-and technical URLs. Relationship IDs are revalidated by the API. Schedule
+and technical URLs. For gigs, **After the show** also records attendance,
+gross revenue, lessons, and the buyer/venue relationship outcome. Blank values
+remain unknown. Relationship IDs are revalidated by the API. Schedule
 patches are validated against both the submitted fields and the event's saved
 timestamps; load-in, soundcheck, doors, set, and curfew cannot be reordered by
 a partial update. Every successful event or availability write is audited.
+
+The outcome review is non-persistent derived data. It looks back 7–365 days at
+completed/cancelled gigs and projects, completed tasks, explicit campaign
+results, event invoices/expenses, and settlements. Confidence is premise
+coverage, not a model score. Gross and expenses are grouped by currency;
+settled net is shown only for a recorded settlement. Settlement creation and
+recalculation deduct only expenses in the settlement currency, leaving other
+currencies separate for review. Draft expenses remain editable. Finalization
+re-reads matching expenses, attaches them transactionally, recalculates net/member splits, and
+freezes those values with the PDF. Later or historical expense drift is reported
+by the outcome review rather than silently changing the finalized document.
 
 Open **Day-of view** from a gig card for the phone-oriented live workspace. It
 derives the next checkpoint from load-in, soundcheck, doors, set, curfew, and

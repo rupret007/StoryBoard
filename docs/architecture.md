@@ -117,13 +117,19 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   readiness policy. It carries evidence IDs and has no separate editable score.
   Manager consumes it only inside the 24-hour show window, keeping longer-range
   planning distinct from live operational guidance.
+- Manager outcome review is another deterministic, non-persistent projection.
+  It reads only bounded tenant records, derives confidence from premise
+  coverage, separates currencies, and preserves unknown net until a settlement
+  exists. Operations UI, Manager briefs/chat, and model snapshots consume this
+  one projection so post-show learning cannot diverge across surfaces.
 - Project templates reuse tenant-scoped Tasks and nullable unique source keys;
   they do not create a competing milestone authority. Readiness is derived
   from project/task/expense/event records, and Manager consumes that same view.
   Foreign `projectId` task links fail before write or audit.
 - Agreement templates require owner activation. Payment replay keys and
   immutable deal/document/settlement history take precedence over destructive
-  replacement.
+  replacement. Settlement math filters expenses by exact settlement currency;
+  unlike currencies are never added as though their minor units were equal.
 
 ## Auditability Design
 

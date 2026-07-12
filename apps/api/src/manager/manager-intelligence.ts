@@ -2,6 +2,7 @@ import type { ManagerWorkstream } from "../generated/prisma/enums";
 import type { ShowReadiness } from "../operations/event-readiness";
 import type { EventDayOfView } from "../operations/event-day-of";
 import type { ProjectReadiness } from "../operations/project-plan";
+import type { ManagerOutcomeReview } from "./manager-outcome-review";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -63,6 +64,7 @@ export type ManagerFacts = {
   campaignRecipients: { id: string; status: string; followUpDueAt: Date | null; followUpTaskId: string | null }[];
   prospects: { id: string; name: string; status: string; kind: string; city: string }[];
   settlements: { id: string; status: string; currency: string; grossMinor: number; expenseMinor: number; netMinor: number; event: { title: string } }[];
+  outcomeReview?: ManagerOutcomeReview;
   recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null }[];
 };
 
@@ -337,6 +339,20 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
     });
   }
 
+  const outcomeAttention = facts.outcomeReview?.attention[0];
+  if (outcomeAttention && outcomeAttention.code !== "no_recorded_outcomes") {
+    addWeek({
+      stableKey: `outcome-${outcomeAttention.code}`,
+      title: outcomeAttention.title,
+      reason: facts.outcomeReview!.headline,
+      nextAction: outcomeAttention.detail,
+      workstream: outcomeAttention.code === "settlement_incomplete" || outcomeAttention.code === "event_invoice_open" ? "business" : "live",
+      priority: outcomeAttention.code === "event_invoice_open" ? "high" : "med",
+      evidenceIds: outcomeAttention.evidenceIds.slice(0, 8),
+      proposedAction: null
+    });
+  }
+
   const projectAttention = facts.projects.find((project) => ["blocked", "off_track"].includes(project.readiness?.status ?? ""))
     ?? facts.projects.find((project) => ["needs_plan", "at_risk"].includes(project.readiness?.status ?? ""))
     ?? facts.projects.find((project) => project.dueAt && project.dueAt < now);
@@ -464,6 +480,7 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
   const teamQuestion = questionHas(question, /\b(member|lineup|bandmate|who|available)\b/);
   const planQuestion = questionHas(question, /\b(goal|plan|progress|track|realistic|strategy|90-day|90 day)\b/);
   const releaseQuestion = questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
+  const outcomeQuestion = questionHas(question, /\b(last show|recent shows?|what worked|what did(?:n't| not) work|how did we do|outcomes?|learn(?:ed|ing)|post-show|review the show|recent results?|show results?|campaign results?)\b/);
 
   if (externalRequest) {
     const recommendation = matchingRecommendation(brief);
@@ -471,6 +488,30 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
       answer: `I can help prepare that, but I won't send, sign, pay, publish, or execute outside work from this conversation. Those actions need the exact payload reviewed in Approvals.\n\nThe useful next move is to prepare the internal work first${recommendation ? `: ${recommendation.nextAction}` : "."}`,
       citations: recommendation?.evidenceIds ?? [],
       recommendation: recommendation?.proposedAction ? recommendation : null
+    };
+  }
+
+  if (outcomeQuestion && facts.outcomeReview) {
+    const review = facts.outcomeReview;
+    const snippet = (value: string, limit: number) => value.replace(/\s+/g, " ").trim().slice(0, limit);
+    const moneyLines = review.financials.map((row) => {
+      const gross = row.showsWithGross ? `gross ${money(row.grossMinor, row.currency)}` : "gross not recorded";
+      const net = row.netKnownShows ? `${row.finalizedSettlements === row.netKnownShows ? "finalized net" : "recorded settlement net including draft work"} ${money(row.settledNetMinor, row.currency)}` : "net not established";
+      return `${row.currency}: ${gross}; expenses ${money(row.expenseMinor, row.currency)}; ${net}`;
+    });
+    const attendance = review.live.attendanceRecordedShows
+      ? `Recorded attendance totals ${review.live.attendanceTotal} across ${review.live.attendanceRecordedShows} show${review.live.attendanceRecordedShows === 1 ? "" : "s"}.`
+      : "No completed show has recorded attendance.";
+    const booking = review.activity.booking.booked ? ` ${review.activity.booking.booked} campaign prospect${review.activity.booking.booked === 1 ? " was" : "s were"} explicitly marked booked.` : "";
+    const lessonLines = review.recordedLessons.slice(0, 2).map((lesson) => {
+      const note = lesson.postShowNotes ? `the post-show note says “${snippet(lesson.postShowNotes, 160)}”` : null;
+      const relationship = lesson.relationshipOutcome ? `the relationship outcome says “${snippet(lesson.relationshipOutcome, 120)}”` : null;
+      return `For ${lesson.title}, ${[note, relationship].filter(Boolean).join("; ")}.`;
+    });
+    return {
+      answer: `${review.headline}\n\n${attendance}${booking}${lessonLines.length ? `\n${lessonLines.join("\n")}` : ""}${moneyLines.length ? `\n${moneyLines.join("\n")}` : "\nNo show financial result is established yet."}\n\n${review.attention[0] ? `The first gap to close is ${review.attention[0].title.toLowerCase()}: ${review.attention[0].detail}` : review.nextAction}`,
+      citations: review.evidenceIds.slice(0, 10),
+      recommendation: null
     };
   }
 

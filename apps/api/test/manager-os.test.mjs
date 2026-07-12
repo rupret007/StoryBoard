@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -16,6 +16,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager.service.js"),
   loadApi("manager/manager-intelligence.js"),
   loadApi("manager/manager-response-quality.js"),
+  loadApi("manager/manager-outcome-review.js"),
   loadApi("tasks/tasks.service.js"),
   loadApi("manager/manager-evaluation.js"),
   loadApi("manager/manager-plan.js"),
@@ -335,6 +336,57 @@ test("deterministic manager chat answers the question asked instead of repeating
   assert.match(bookingAnswer.answer, /1 qualified prospect/);
 });
 
+test("manager outcome review is explicit when no result evidence exists", () => {
+  const review = outcomeReview.deterministicManagerOutcomeReview({ windowDays: 90, through: now, events: [], projects: [], completedTasks: [], campaignRecipients: [] });
+  assert.equal(review.confidence, 0);
+  assert.equal(review.confidenceLabel, "low");
+  assert.match(review.headline, /not enough recorded outcome data/i);
+  assert.equal(review.attention[0].code, "no_recorded_outcomes");
+  assert.equal(review.financials.length, 0);
+});
+
+test("manager outcome review separates currencies and never invents unsettled net", () => {
+  const baseEvent = { id: "event-a", title: "Friday show", status: "completed", startsAt: new Date("2026-07-10T01:00:00.000Z"), updatedAt: now, currency: "USD", attendance: 120, grossRevenueMinor: 150000, postShowNotes: "Strong audience response", relationshipOutcome: "Buyer invited a return pitch", invoices: [] };
+  const settled = outcomeReview.deterministicManagerOutcomeReview({
+    windowDays: 90,
+    through: now,
+    events: [{ ...baseEvent, settlement: { id: "settlement-a", status: "finalized", currency: "USD", grossMinor: 150000, expenseMinor: 25000, netMinor: 125000 }, expenses: [{ id: "expense-a", currency: "USD", amountMinor: 25000 }, { id: "expense-eur", currency: "EUR", amountMinor: 5000 }] }],
+    projects: [{ id: "project-a", name: "Show campaign", status: "completed", updatedAt: now, tasks: [], expenses: [{ id: "expense-eur", currency: "EUR", amountMinor: 5000 }] }],
+    completedTasks: [{ id: "task-a", updatedAt: now }],
+    campaignRecipients: [{ id: "recipient-a", status: "booked", updatedAt: now }]
+  });
+  assert.equal(settled.confidenceLabel, "high");
+  assert.deepEqual(settled.financials.find((row) => row.currency === "USD"), { currency: "USD", grossMinor: 150000, expenseMinor: 25000, settledNetMinor: 125000, showsWithGross: 1, finalizedSettlements: 1, netKnownShows: 1 });
+  assert.deepEqual(settled.financials.find((row) => row.currency === "EUR"), { currency: "EUR", grossMinor: 0, expenseMinor: 5000, settledNetMinor: 0, showsWithGross: 0, finalizedSettlements: 0, netKnownShows: 0 });
+  assert.ok(settled.evidenceIds.includes("settlement-a"));
+  assert.ok(settled.wins.some((item) => item.code === "positive_settled_net"));
+  assert.equal(settled.recordedLessons[0].postShowNotes, "Strong audience response");
+
+  const drift = outcomeReview.deterministicManagerOutcomeReview({ windowDays: 90, through: now, events: [{ ...baseEvent, settlement: { id: "settlement-a", status: "finalized", currency: "USD", grossMinor: 150000, expenseMinor: 25000, netMinor: 125000 }, expenses: [{ id: "expense-a", currency: "USD", amountMinor: 30000 }] }], projects: [], completedTasks: [], campaignRecipients: [] });
+  assert.equal(drift.financials[0].expenseMinor, 30000);
+  assert.ok(drift.attention.some((item) => item.code === "settlement_expense_drift"));
+
+  const unsettled = outcomeReview.deterministicManagerOutcomeReview({ windowDays: 90, through: now, events: [{ ...baseEvent, attendance: null, postShowNotes: null, relationshipOutcome: null, settlement: null, expenses: [{ id: "expense-a", currency: "USD", amountMinor: 25000 }] }], projects: [], completedTasks: [], campaignRecipients: [] });
+  assert.equal(unsettled.financials[0].settledNetMinor, 0);
+  assert.equal(unsettled.financials[0].netKnownShows, 0);
+  assert.ok(unsettled.attention.some((item) => item.code === "post_show_incomplete"));
+  assert.ok(unsettled.attention.some((item) => item.code === "settlement_incomplete"));
+});
+
+test("manager answers retrospective questions from the shared outcome review", () => {
+  const review = outcomeReview.deterministicManagerOutcomeReview({
+    windowDays: 90,
+    through: now,
+    events: [{ id: "event-a", title: "Friday show", status: "completed", startsAt: new Date("2026-07-10T01:00:00.000Z"), updatedAt: now, currency: "USD", attendance: 120, grossRevenueMinor: 150000, postShowNotes: "Strong audience response", relationshipOutcome: "Buyer invited a return pitch", settlement: { id: "settlement-a", status: "finalized", currency: "USD", grossMinor: 150000, expenseMinor: 25000, netMinor: 125000 }, expenses: [{ id: "expense-a", currency: "USD", amountMinor: 25000 }], invoices: [] }],
+    projects: [], completedTasks: [], campaignRecipients: []
+  });
+  const answer = intelligence.deterministicManagerChat(managerFacts({ outcomeReview: review }), "What did we learn from our recent shows?", now);
+  assert.match(answer.answer, /120/);
+  assert.match(answer.answer, /finalized net USD 1,250\.00/);
+  assert.ok(answer.citations.includes("event-a"));
+  assert.equal(answer.recommendation, null);
+});
+
 test("reviewed outcomes suppress repeated advice only for a bounded cooldown", () => {
   const recommendation = intelligence.deterministicManagerBrief(managerFacts(), now).thisWeek.find((item) => item.stableKey === "goal-goal-a");
   assert.ok(recommendation);
@@ -390,6 +442,20 @@ test("operations validation rejects unknown fields, invalid money, and bad settl
   assert.equal(operationSchemas.settlementCreateSchema.safeParse({ eventId: "event-a", splits: [{ bandMemberId: "a", basisPoints: 4000 }, { bandMemberId: "b", basisPoints: 4000 }] }).success, false);
   assert.equal(operationSchemas.paymentRecordSchema.safeParse({ idempotencyKey: "payment-a", amountMinor: 100, method: "check", receivedAt: "2026-07-11T12:00:00.000Z" }).success, true);
   assert.equal(operationSchemas.expenseCreateSchema.safeParse({ category: "travel", description: "Fuel", amountMinor: 100, incurredAt: "2026-07-11T12:00:00.000Z" }).success, false);
+});
+
+test("settlement math includes only expenses in the settlement currency", async () => {
+  let aggregateWhere = null;
+  const client = {
+    bandEvent: { findFirst: async () => ({ id: "event-a" }) },
+    expense: { aggregate: async ({ where }) => { aggregateWhere = where; return { _sum: { amountMinor: 2500 } }; } },
+    settlement: { create: async ({ data }) => ({ id: "settlement-a", ...data, splits: [] }) }
+  };
+  const service = new operationsMod.OperationsService({ client }, { log: async () => undefined }, {});
+  const row = await service.createSettlement("artist-a", { eventId: "event-a", currency: "USD", grossMinor: 10000, splits: [] }, "member@test", "operator-a");
+  assert.deepEqual(aggregateWhere, { artistId: "artist-a", eventId: "event-a", currency: { equals: "USD", mode: "insensitive" } });
+  assert.equal(row.expenseMinor, 2500);
+  assert.equal(row.netMinor, 7500);
 });
 
 test("show readiness is date-aware, evidence-backed, and transparent about incomplete records", () => {
