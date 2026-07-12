@@ -110,7 +110,7 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v10`
+already performed an outside action. Prompt/policy version `manager_os_v11`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, and respectful
 missing-context guidance. Before applying the five-item Today limit, the
@@ -175,13 +175,20 @@ missing question. The score measures recorded coverage, never artistic quality
 or potential. Members can edit the full operating profile and working-lineup
 responsibilities after intake; updates immediately change the shared brief,
 conversation, and model snapshot without turning unknowns into guesses.
-The **What your manager remembers** panel lets the band correct or archive
-confirmed memory, while sensitive memory remains owner-controlled. Provider
-context follows the same boundary: normal memory may enter the standard
-redacted snapshot, sensitive memory requires the owner's separate full-context
-consent, and restricted memory never enters a model snapshot. Owners can see
-the current mode and included/withheld counts without exposing the withheld
-values. Reviewed feedback influences future ranking and evaluation only—it never lets
+The **What your manager remembers** panel now distinguishes canonical
+operating-profile facts from other saved memory. Profile-backed band mode,
+home market, ambition, and constraints synchronize atomically on every profile
+save and cannot be edited through the generic memory route. The
+`manager_knowledge_v1` policy marks memory current, stale, unconfirmed,
+low-confidence, or conflicted; the profile wins any duplicate conflict, and
+the Manager asks for confirmation instead of asserting an unreliable value.
+Members can confirm, correct, or archive non-profile memory, while sensitive
+memory remains owner-controlled. Provider context follows the same boundary:
+normal memory may enter the standard redacted snapshot, sensitive memory
+requires the owner's separate full-context consent, and restricted memory
+never enters a model snapshot. Owners can see the current mode and
+included/withheld counts without exposing the withheld values. Reviewed
+feedback influences future ranking and evaluation only—it never lets
 the model rewrite prompts, policy, schemas, or application code. Owners can
 explicitly promote decided recommendations into a bounded local eval set for
 offline candidate-version testing. They can also promote an exact rated answer:

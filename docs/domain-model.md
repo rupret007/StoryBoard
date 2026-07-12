@@ -74,8 +74,15 @@ initiatives, blockers, task ownership/state, and elapsed timeline. Nullable,
 artist-unique `sourceKey` values on goals, initiatives, and tasks identify
 `manager_plan_v1` starter records without constraining normal user-created
 work. They make fill-missing generation idempotent while leaving user edits
-authoritative. `ManagerMemoryFact.archivedAt` removes incorrect or
-obsolete memory from reasoning without destructive deletion. These records
+authoritative. `ArtistOperatingProfile` is also authoritative for the
+profile-backed Manager memory keys `band_mode`, `home_market`,
+`twelve_month_ambition`, and `constraints`. Profile writes upsert those rows in
+the same transaction; `manager_knowledge_v1` derives current, stale,
+unconfirmed, low-confidence, or conflicted state from source, confirmation,
+confidence, and bounded review age. Runtime reasoning projects the profile
+value over a duplicate conflict. `ManagerMemoryFact.archivedAt` removes
+incorrect or obsolete non-profile memory from reasoning without destructive
+deletion. These records
 never store hidden reasoning. `ManagerEvalExample` is an owner-reviewed,
 tenant-scoped recommendation/outcome snapshot used for offline evaluation; its
 existence never changes the active runtime version. Owner-triggered

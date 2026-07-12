@@ -128,6 +128,11 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   with source-keyed Task creation. The action is immediately complete and
   replay-safe; this does not expose arbitrary operations or provider tools.
 - Manager provider context is a code-owned projection, not a prompt request.
+  `ArtistOperatingProfile` is the canonical source for band mode, home market,
+  ambition, and constraints; profile writes synchronize compatibility memory
+  in the same transaction. `manager_knowledge_v1` records consistency,
+  confirmation, confidence, and review age, and runtime projection replaces a
+  contradictory duplicate with the profile value before reasoning.
   Redacted mode includes only normal memory; full-context owner consent may add
   sensitive memory; restricted memory is always excluded. Model citations are
   checked against the same projected evidence IDs, while persisted run inputs
@@ -143,7 +148,9 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   replies, approvals, receivables, reviews, follow-ups, and project health.
   Grounded model candidates are merged and deduplicated before the same pass,
   so a model cannot remove an authoritative signal by omission. Bounded factor
-  codes and omitted candidates live in the redacted trace; hidden reasoning is
+  codes keep operational deadlines ahead of routine knowledge refresh, while a
+  true source conflict remains visible until repaired. Those factors and
+  omitted candidates live in the redacted trace; hidden reasoning is
   never stored. Cache reuse additionally requires the current policy version
   and no newer audit across the operating aggregates that feed the brief.
 - Show readiness is deterministic derived data, not a model assertion or an

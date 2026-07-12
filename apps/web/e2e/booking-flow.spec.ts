@@ -96,14 +96,15 @@ test("novice manager intake produces grounded work and band operations records",
   const alexContext = context.getByLabel("Responsibilities for Alex").locator("xpath=ancestor::div[contains(@class,'grid')][1]");
   await context.getByLabel("Responsibilities for Alex").fill("bandleader, booking");
   await context.getByLabel("Instruments for Alex").fill("vocals, guitar");
+  const alexSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/manager/members/") && response.ok());
   await alexContext.getByRole("button", { name: "Save" }).click();
-  await expect(alexContext.getByRole("button", { name: "Save" })).toBeEnabled();
+  await alexSaved;
   const morganContext = context.getByLabel("Responsibilities for Morgan").locator("xpath=ancestor::div[contains(@class,'grid')][1]");
   await context.getByLabel("Responsibilities for Morgan").fill("production, finances");
   await context.getByLabel("Instruments for Morgan").fill("drums");
-  await expect(morganContext.getByRole("button", { name: "Save" })).toBeEnabled();
+  const morganSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/manager/members/") && response.ok());
   await morganContext.getByRole("button", { name: "Save" }).click();
-  await expect(morganContext.getByRole("button", { name: "Save" })).toBeEnabled();
+  await morganSaved;
   await context.getByLabel("Availability expectations").fill("Respond to holds within 48 hours and protect two weekends each month.");
   await context.getByLabel("Current revenue sources (one per line)").fill("Private events\nTicketed shows");
   await context.getByLabel("Usable assets (one per line)").fill("Finished EP masters\nLive performance video");
@@ -152,6 +153,8 @@ test("novice manager intake produces grounded work and band operations records",
   await page.reload();
   await expect(page.getByText(/plan-health score is/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: "What your manager remembers" })).toBeVisible();
+  await expect(page.getByTestId("manager-knowledge-health")).toContainText(/healthy/i);
+  await expect(page.getByText("Profile source", { exact: true }).first()).toBeVisible();
   const correctAmbition = page.getByRole("button", { name: "Correct Twelve month ambition" });
   if (await correctAmbition.isVisible().catch(() => false)) {
     const correctedAmbition = `Release an EP before the regional run ${suffix}`;
@@ -171,7 +174,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v10", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v11", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 

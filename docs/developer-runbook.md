@@ -290,6 +290,9 @@ Manager routes:
   waiting, ownerless, due-soon, and unscheduled task commitments
 - `GET /manager/context-health` — a deterministic, tenant-scoped projection of
   recorded identity, people, business, and current-execution context
+- `GET /manager/knowledge-health` — consistency, confirmation, confidence, and
+  review age for the caller-visible Manager memory. Owners include sensitive
+  rows; restricted values remain excluded from provider context.
 - `GET /manager/plan`; `POST /manager/plan/ensure` fills only missing
   `manager_plan_v1` records and never replaces user edits
 - `GET` / `POST /manager/decisions`; `PATCH /manager/decisions/:id` records a
@@ -314,7 +317,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v10`)
+  (owner-only; currently accepts only the code-registered `manager_os_v11`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -341,14 +344,20 @@ Scheduled briefs create no email,
 Telegram, calendar, Drive, legal, financial, or other provider action and never
 accept their own recommendations.
 
-The provider projection enforces memory sensitivity before the read tool is
-called. Standard redacted context may include `normal` memory only. Full-context
-owner consent may add `sensitive` memory and CRM/operating notes. `restricted`
-memory is never supplied to the model. Model citations are validated against
-the same projected ID set, and `ManagerRun.inputFacts` remains redacted in all
-modes. Run traces record only policy counts plus whether provider context was
-attempted and accepted; `GET /manager/provider-context-policy` exposes the same
-value-free summary to owners.
+The provider projection enforces source precedence, freshness, and sensitivity
+before the read tool is called. `ArtistOperatingProfile` is authoritative for
+`band_mode`, `home_market`, `twelve_month_ambition`, and `constraints`; every
+profile write synchronizes those compatibility memory rows in one transaction,
+and generic memory PATCH rejects them. `manager_knowledge_v1` labels conflicting,
+unconfirmed, low-confidence, and stale facts so neither fallback nor model prose
+treats them as settled. Standard redacted context may include `normal` memory
+only. Full-context owner consent may add `sensitive` memory and CRM/operating
+notes. `restricted` memory is never supplied to the model. Model citations are
+validated against the same projected ID set, and `ManagerRun.inputFacts`
+remains redacted in all modes. Run traces record only policy summaries plus
+whether provider context was attempted and accepted;
+`GET /manager/provider-context-policy` exposes the same value-free summary to
+owners.
 
 Owner-reviewed response evals store a bounded question/answer/feedback snapshot
 and refer back to the assistant message's linked, already-redacted
@@ -364,7 +373,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v10` retains the current operator question and at most 12
+version `manager_os_v11` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -422,9 +431,11 @@ working lineup/responsibilities, active goals, events, projects, and booking
 opportunities. A zero-dollar budget is known context. The score describes
 record coverage only; it is never a judgment or forecast about the artist.
 Dismissal reasons, response helpfulness, correction reasons, and 90-day
-acceptance/completion metrics are visible in the Manager workspace. Normal confirmed memory can be corrected by members;
-sensitive/restricted memory and sensitivity changes remain owner-controlled.
-Archiving a memory removes it from reasoning without deleting audit history.
+acceptance/completion metrics are visible in the Manager workspace. Members
+edit profile-owned facts through Band context. Other normal memory can be
+confirmed, corrected, or archived by members; sensitive/restricted memory and
+sensitivity changes remain owner-controlled. Archiving memory removes it from
+reasoning without deleting audit history.
 An owner may promote a decided recommendation to the local eval set with
 `{ "label": "useful|not_useful|needs_revision", "notes": "..." }`.
 The snapshot contains the bounded recommendation/outcome shape, not full input

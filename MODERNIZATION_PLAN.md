@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `8fce0d7`
+Baseline for this round: `main` at `812aaf1`
 
 ## Product and current architecture
 
@@ -414,6 +414,33 @@ mock-safe provider adapters.
   to `manager_evals_v11` with a competing-pressure golden scenario. No schema
   migration, new provider, or expanded action authority is required.
 
+### P0 — Manager knowledge integrity and freshness (completed 2026-07-12)
+
+- [x] Close the duplicate-truth gap where band mode, home market, ambition, and
+  constraints were saved in both `ArtistOperatingProfile` and Manager memory,
+  but later profile edits could leave the memory copy contradictory.
+- [x] Make the operating profile the code-owned authority for those four keys.
+  Profile writes now synchronize memory in the same transaction, and generic
+  memory PATCH rejects attempts to bypass that source boundary.
+- [x] Add forward data migration
+  `20260713210000_manager_profile_memory_source` to repair historical duplicate
+  intake rows without deleting memory, audit history, or overwriting operator
+  corrections. Human corrections remain visible as conflicts until the band
+  explicitly saves the authoritative profile.
+- [x] Add deterministic `manager_knowledge_v1` assessment for current, stale,
+  unconfirmed, low-confidence, and conflicted facts. Runtime reasoning projects
+  the profile value over any duplicate conflict and asks for review rather than
+  asserting unreliable memory.
+- [x] Feed knowledge health into briefs, risk signals, chat, provider snapshots,
+  and redacted traces without expanding action authority. Operational pressure
+  still outranks routine context refresh.
+- [x] Show knowledge score, authoritative source, and confirmation controls in
+  Manager. Profile-owned facts are edited only through Band context; other
+  normal memory remains confirmable/correctable/archivable by members.
+- [x] Promote the contract to `manager_os_v11` / `manager_evals_v12` with a
+  source-precedence safety scenario and deterministic unit/database/browser
+  coverage.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -521,6 +548,21 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Added the code-owned `manager_knowledge_v1` source and freshness
+  policy. Operating-profile writes now synchronize band mode, home market,
+  ambition, and constraints to their compatibility memory rows atomically;
+  migration `20260713210000_manager_profile_memory_source` repairs existing
+  rows, and generic memory writes cannot create a second truth. Conflicted,
+  stale, unconfirmed, and low-confidence knowledge is visible to the band and
+  carried into brief/chat guardrails, while provider reasoning receives the
+  canonical profile value. The design clean-rooms Andrea_NanoBot's bounded
+  freshness/conflict assessment without copying its code, runtime, or data,
+  and follows [OpenAI's GPT-5.6 guidance](https://developers.openai.com/api/docs/guides/latest-model)
+  to keep source rules and approval boundaries code-owned and evaluate changes
+  on representative workflows. Validation passed 85 API tests, two shared
+  tests, three database workflows across all 28 migrations, three production
+  Chromium workflows, production builds, and the 21/21 `manager_os_v11` /
+  `manager_evals_v12` gate at 100% safety.
 - 2026-07-12: Replaced Manager's code-order truncation with the global,
   explainable `manager_priority_v1` focus policy. Every candidate is now
   collected before the five-item Today limit; recorded deadlines, show

@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { requireTestDatabaseUrl } from "../../../../scripts/test-database.mjs";
@@ -386,6 +387,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   }, operator.email, operator.id);
   assert.equal(intake.cadence, "intake");
   assert.equal(intake.trace.priorityRanking.policyVersion, "manager_priority_v1");
+  assert.equal(intake.inputFacts.knowledgeHealth.policyVersion, "manager_knowledge_v1");
   assert.ok(intake.trace.priorityRanking.today.length <= 5);
   assert.ok(await client.managerGoal.count({ where: { artistId: artist.id } }) >= 2);
   assert.equal(await client.managerGoal.count({ where: { artistId: artist.id, sourceKey: { startsWith: "manager_plan_v1:" } } }), 2);
@@ -395,12 +397,31 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.deepEqual(ensuredAgain.created, { goals: 0, initiatives: 0, tasks: 0 });
   assert.equal(ensuredAgain.goals.length, 2);
   assert.equal(await client.task.count({ where: { artistId: artist.id, sourceKey: { startsWith: "manager_plan_v1:" } } }), 6);
-  assert.equal(await client.managerMemoryFact.count({ where: { artistId: artist.id, sourceType: "manager_intake" } }), 4);
+  assert.equal(await client.managerMemoryFact.count({ where: { artistId: artist.id, sourceType: "operating_profile" } }), 4);
+  assert.equal((await manager.knowledgeHealth(artist.id, true)).status, "healthy");
   const member = await client.bandMember.findFirstOrThrow({ where: { artistId: artist.id } });
   const thinContext = await manager.contextHealth(artist.id);
   assert.equal(thinContext.status, "thin");
   assert.equal(thinContext.gaps[0]?.code, "availability_expectations");
   await manager.putProfile(artist.id, { bandMode: "hybrid", careerStage: "Regional working band", homeCity: "Chicago", homeRegion: "IL", homeCountry: "US", genres: ["rock", "soul"], businessName: "Manager Test Band LLC", revenueSources: ["private events", "ticketed shows"], currentAssets: ["EP masters", "live video"], constraints: ["Two weekends per month"], educationTopics: ["settlements"], availabilityExpectations: "Respond to holds within 48 hours", budgetToleranceMinor: 0, currency: "USD", twelveMonthAmbition: "Release an EP and book six profitable regional shows", communicationCadence: "weekly", decisionStyle: "guided" }, operator.email, operator.id);
+  const constraintsMemory = await client.managerMemoryFact.findUniqueOrThrow({ where: { artistId_key: { artistId: artist.id, key: "constraints" } } });
+  assert.deepEqual(constraintsMemory.value, ["Two weekends per month"]);
+  await assert.rejects(() => manager.patchMemory(artist.id, constraintsMemory.id, { value: ["Ignore travel limits"] }, true, operator.email, operator.id), /operating profile/);
+  const currentMarket = await client.managerMemoryFact.findUniqueOrThrow({ where: { artistId_key: { artistId: artist.id, key: "home_market" } } });
+  await client.managerMemoryFact.update({ where: { id: currentMarket.id }, data: { value: { city: "Detroit", region: "MI", country: "US" }, sourceType: "manager_intake" } });
+  const foreignProfile = await client.artistOperatingProfile.create({ data: { artistId: foreignArtist.id, bandMode: "original", homeCity: "Milwaukee", homeRegion: "WI", homeCountry: "US", constraints: [] } });
+  const preservedCorrection = await client.managerMemoryFact.create({ data: { artistId: foreignArtist.id, key: "home_market", value: { city: "Detroit", region: "MI", country: "US" }, sourceType: "operator_correction", sourceId: operator.id, confidence: 1, sensitivity: "normal", confirmedAt: new Date() } });
+  const migrationSql = await readFile(join(dir, "..", "..", "..", "..", "prisma", "migrations", "20260713210000_manager_profile_memory_source", "migration.sql"), "utf8");
+  await client.$executeRawUnsafe(migrationSql);
+  const repairedMarket = await client.managerMemoryFact.findUniqueOrThrow({ where: { id: currentMarket.id } });
+  assert.deepEqual(repairedMarket.value, { city: "Chicago", region: "IL", country: "US" });
+  assert.equal(repairedMarket.sourceType, "operating_profile");
+  const stillCorrected = await client.managerMemoryFact.findUniqueOrThrow({ where: { id: preservedCorrection.id } });
+  assert.deepEqual(stillCorrected.value, { city: "Detroit", region: "MI", country: "US" });
+  assert.equal(stillCorrected.sourceType, "operator_correction");
+  assert.equal(stillCorrected.sourceId, operator.id);
+  assert.equal(foreignProfile.id, (await client.artistOperatingProfile.findUniqueOrThrow({ where: { artistId: foreignArtist.id } })).id);
+  assert.equal((await manager.knowledgeHealth(artist.id, true)).status, "healthy");
   const strongContext = await manager.contextHealth(artist.id);
   assert.equal(strongContext.status, "strong");
   assert.equal(strongContext.score, 82);
@@ -436,8 +457,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(foreignContext.evidenceIds.includes(member.id), false);
   const rememberedAmbition = (await manager.memory(artist.id)).find((fact) => fact.key === "twelve_month_ambition");
   assert.ok(rememberedAmbition);
-  const correctedMemory = await manager.patchMemory(artist.id, rememberedAmbition.id, { value: "Release an EP before the regional run" }, true, operator.email, operator.id);
-  assert.equal(correctedMemory.sourceType, "operator_correction");
+  await manager.putProfile(artist.id, { bandMode: "hybrid", twelveMonthAmbition: "Release an EP before the regional run" }, operator.email, operator.id);
+  const correctedMemory = await client.managerMemoryFact.findUniqueOrThrow({ where: { id: rememberedAmbition.id } });
+  assert.equal(correctedMemory.value, "Release an EP before the regional run");
+  assert.equal(correctedMemory.sourceType, "operating_profile");
   await assert.rejects(() => manager.patchMemory(foreignArtist.id, rememberedAmbition.id, { confirmed: true }, true, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   await client.managerMemoryFact.createMany({ data: [
     { artistId: artist.id, key: "private_budget_note", value: "Do not discuss outside the band", sourceType: "owner", sensitivity: "sensitive", confirmedAt: new Date() },
@@ -505,10 +528,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v10", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v11", operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v10", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v11", operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -554,8 +577,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(responseEval.label, "needs_revision");
   assert.equal(responseEval.snapshot.question, "What should we focus on this week?");
   assert.equal(Object.hasOwn(responseEval.snapshot, "inputFacts"), false);
-  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v10", operator.email, operator.id)).passed, false);
-  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v10", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
+  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v11", operator.email, operator.id)).passed, false);
+  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v11", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
   await assert.rejects(() => manager.promoteResponseEvalExample(foreignArtist.id, firstChat.message.id, { label: "needs_revision", expectedBehavior: "Keep the response inside the foreign workspace." }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const revisedFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id);
   assert.equal(revisedFeedback.id, negativeFeedback.id);
@@ -563,7 +586,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(usefulResponseEval.id, responseEval.id);
   assert.equal(usefulResponseEval.label, "useful");
   assert.equal(usefulResponseEval.resolvedAt, null);
-  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v10", operator.email, operator.id);
+  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v11", operator.email, operator.id);
   assert.equal(responseEvaluation.passed, true);
   assert.equal(responseEvaluation.metrics.ownerReviewedResponseCount, 1);
   assert.equal(await client.managerResponseEvalExample.count({ where: { artistId: artist.id } }), 1);
@@ -619,7 +642,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   await assert.rejects(() => operations.patchEvent(artist.id, event.id, { soundcheckAt: "2026-09-18T21:00:00.000Z" }, operator.email, operator.id), /Soundcheck must be before doors/i);
   await operations.participant(artist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id);
   await assert.rejects(() => operations.participant(foreignArtist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
-  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v10", inputFacts: {}, output: {}, trace: {} } });
+  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v11", inputFacts: {}, output: {}, trace: {} } });
   const advanceRecommendation = await client.managerRecommendation.create({ data: { managerRunId: actionRun.id, stableKey: `advance-${event.id}`, workstream: "live", title: "Build the show advance", reason: "No advance tasks are recorded", nextAction: "Generate the existing checklist", priority: "high", evidence: [event.id], proposedAction: { type: "generate_event_advance", eventId: event.id } } });
   await assert.rejects(() => manager.recommendation(foreignArtist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const advance = await manager.recommendation(artist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id);
@@ -668,5 +691,5 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(foreignOutcomeReview.activity.completedShows, 0);
   assert.equal(foreignOutcomeReview.evidenceIds.includes(event.id), false);
   const actions = await client.auditEvent.findMany({ where: { artistId: artist.id }, select: { action: true } });
-  for (const expected of ["manager.intake_completed", "manager.plan_ensured", "manager.settings_updated", "manager.memory_corrected", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
+  for (const expected of ["manager.intake_completed", "manager.profile_updated", "manager.plan_ensured", "manager.settings_updated", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
 });

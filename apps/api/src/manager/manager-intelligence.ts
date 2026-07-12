@@ -4,6 +4,7 @@ import type { EventDayOfView } from "../operations/event-day-of";
 import type { ProjectReadiness } from "../operations/project-plan";
 import type { ManagerOutcomeReview } from "./manager-outcome-review";
 import type { ManagerContextHealth } from "./manager-context-health";
+import type { ManagerKnowledgeHealth } from "./manager-knowledge-health";
 import { managerQuestionAsksAboutCommitments, type ManagerCommitmentHealth } from "./manager-commitment-health";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -80,6 +81,7 @@ export type ManagerFacts = {
   settlements: { id: string; status: string; currency: string; grossMinor: number; expenseMinor: number; netMinor: number; event: { title: string } }[];
   outcomeReview?: ManagerOutcomeReview;
   contextHealth?: ManagerContextHealth;
+  knowledgeHealth?: ManagerKnowledgeHealth;
   commitmentHealth?: ManagerCommitmentHealth;
   recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null }[];
 };
@@ -235,6 +237,7 @@ function recommendationRank(
 
   if (item.stableKey === "complete-intake") add("manager_setup_missing", 35, "manager setup is incomplete");
   if (item.stableKey.startsWith("context-")) add("context_can_wait", -60, "context improvement can wait behind active delivery pressure");
+  if (item.stableKey === "knowledge-refresh") add(facts.knowledgeHealth?.status === "conflicted" ? "knowledge_conflict" : "knowledge_refresh_can_wait", facts.knowledgeHealth?.status === "conflicted" ? 45 : -45, facts.knowledgeHealth?.status === "conflicted" ? "authoritative band facts conflict" : "knowledge refresh can wait behind active delivery pressure");
   if (item.stableKey === "weekly-focus") add("fallback_focus", -25, "fallback focus has no recorded urgency");
   if (item.evidenceIds.length) add("recorded_evidence", 5, "supported by StoryBoard records");
 
@@ -581,6 +584,21 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
     if (facts.contextHealth!.status === "thin") addToday(item); else addWeek(item);
   }
 
+  if (facts.profile?.intakeCompletedAt && facts.knowledgeHealth && facts.knowledgeHealth.status !== "healthy") {
+    const conflicted = facts.knowledgeHealth.status === "conflicted";
+    const item: ManagerRecommendationDraft = {
+      stableKey: "knowledge-refresh",
+      title: conflicted ? "Resolve conflicting band knowledge" : "Refresh an aging band fact",
+      reason: facts.knowledgeHealth.summary,
+      nextAction: facts.knowledgeHealth.nextAction,
+      workstream: "band_operations",
+      priority: conflicted ? "med" : "low",
+      evidenceIds: facts.knowledgeHealth.evidenceIds.slice(0, 8),
+      proposedAction: null
+    };
+    if (conflicted) addToday(item); else addWeek(item);
+  }
+
   const upcomingEvent = facts.events.find((event) => event.startsAt && event.startsAt >= now && event.startsAt.getTime() <= now.getTime() + 21 * DAY_MS);
   if (upcomingEvent) {
     const responses = new Map(upcomingEvent.participants.map((participant) => [participant.bandMemberId, participant.response]));
@@ -756,6 +774,7 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
       ...facts.campaignRecipients.filter((recipient) => recipient.status === "sent").map((recipient) => ({ title: "Booking outreach awaiting reply", dueAt: recipient.followUpDueAt?.toISOString() ?? null, evidenceIds: [recipient.id] }))
     ].slice(0, 10),
     risksAndOpportunities: [
+      ...(facts.knowledgeHealth && facts.knowledgeHealth.status !== "healthy" ? [{ title: facts.knowledgeHealth.status === "conflicted" ? "Conflicting manager knowledge" : "Band knowledge needs review", detail: facts.knowledgeHealth.summary, confidence: 1, evidenceIds: facts.knowledgeHealth.evidenceIds.slice(0, 8) }] : []),
       ...(availabilityConflicts.length ? [{ title: "Member availability conflict", detail: `${availabilityConflicts.length} upcoming event${availabilityConflicts.length === 1 ? " has" : "s have"} an unavailable participant.`, confidence: 1, evidenceIds: availabilityConflicts.slice(0, 8).map((event) => event.id) }] : []),
       ...(readinessRisks.length ? [{ title: "Show readiness gaps", detail: `${readinessRisks.length} upcoming show${readinessRisks.length === 1 ? " has" : "s have"} unresolved operational gaps; the nearest is ${readinessRisks[0]?.readiness?.score ?? 0}/100.`, confidence: readinessRisks[0]?.readiness?.confidence ?? 0.5, evidenceIds: readinessRisks.slice(0, 8).map((event) => event.id) }] : []),
       ...(overdueInvoices.length ? [{ title: "Overdue receivables", detail: `${overdueInvoices.length} invoice${overdueInvoices.length === 1 ? " is" : "s are"} past the recorded due date.`, confidence: 1, evidenceIds: overdueInvoices.slice(0, 8).map((item) => item.id) }] : []),
@@ -800,6 +819,7 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
   const outcomeQuestion = questionHas(question, /\b(last show|recent shows?|what worked|what did(?:n't| not) work|how did we do|outcomes?|learn(?:ed|ing)|post-show|review the show|recent results?|show results?|campaign results?)\b/);
   const decisionQuestion = Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
   const contextQuestion = questionHas(question, /\b(what do you (?:still )?(?:need|know)|what are you missing|missing context|band context|about (?:us|the band)|know about (?:us|the band)|setup|profile completeness)\b/);
+  const knowledgeQuestion = questionHas(question, /\b(what do you remember|manager memory|saved memory|is (?:that|this) current|stale|out of date|trust your memory|confirm(?:ed|ation)? facts?)\b/);
 
   if (externalRequest) {
     const recommendation = matchingRecommendation(brief);
@@ -807,6 +827,17 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
       answer: `I can help prepare that, but I won't send, sign, pay, publish, or execute outside work from this conversation. Those actions need the exact payload reviewed in Approvals.\n\nThe useful next move is to prepare the internal work first${recommendation ? `: ${recommendation.nextAction}` : "."}`,
       citations: recommendation?.evidenceIds ?? [],
       recommendation: recommendation?.proposedAction ? recommendation : null
+    };
+  }
+
+  if (knowledgeQuestion && facts.knowledgeHealth) {
+    const health = facts.knowledgeHealth;
+    const attention = health.items.filter((item) => item.state !== "current").slice(0, 3);
+    const lines = attention.map((item) => `• ${item.key.replaceAll("_", " ")} — ${item.reason}`);
+    return {
+      answer: `${health.summary} Knowledge health is ${health.score}/100; that measures consistency, confirmation, confidence, and age—not whether the band is doing well.${lines.length ? `\n\nCheck these first:\n${lines.join("\n")}\n\n${health.nextAction}` : " Nothing currently needs reconfirmation."}`,
+      citations: health.evidenceIds.slice(0, 10),
+      recommendation: null
     };
   }
 

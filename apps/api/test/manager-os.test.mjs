@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, commitmentHealth, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, commitmentHealth, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -18,6 +18,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-response-quality.js"),
   loadApi("manager/manager-outcome-review.js"),
   loadApi("manager/manager-context-health.js"),
+  loadApi("manager/manager-knowledge-health.js"),
   loadApi("manager/manager-commitment-health.js"),
   loadApi("manager/manager-schedule.js"),
   loadApi("manager/manager-provider-context.js"),
@@ -123,9 +124,9 @@ test("manager settings require explicit, compatible schedule and model consent",
 
 test("manager provider context enforces memory sensitivity independently of model output", () => {
   const memoryFacts = [
-    { id: "normal-a", sensitivity: "normal", value: "Chicago" },
-    { id: "sensitive-a", sensitivity: "sensitive", value: "Private budget" },
-    { id: "restricted-a", sensitivity: "restricted", value: "Never share" }
+    { id: "normal-a", key: "normal_note", sourceType: "operator", sourceId: null, confidence: 1, confirmedAt: now, updatedAt: now, sensitivity: "normal", value: "Chicago" },
+    { id: "sensitive-a", key: "private_budget", sourceType: "owner", sourceId: null, confidence: 1, confirmedAt: now, updatedAt: now, sensitivity: "sensitive", value: "Private budget" },
+    { id: "restricted-a", key: "restricted_health", sourceType: "owner", sourceId: null, confidence: 1, confirmedAt: now, updatedAt: now, sensitivity: "restricted", value: "Never share" }
   ];
   assert.deepEqual(providerContext.projectManagerMemoryForProvider(memoryFacts, false).map((fact) => fact.id), ["normal-a"]);
   assert.deepEqual(providerContext.projectManagerMemoryForProvider(memoryFacts, true).map((fact) => fact.id), ["normal-a", "sensitive-a"]);
@@ -145,9 +146,11 @@ test("manager provider context enforces memory sensitivity independently of mode
   assert.equal(full.restrictedMemoryNeverShared, true);
 
   const service = new managerMod.ManagerService({ client: {} }, { log: async () => undefined }, { get: () => false });
-  const facts = managerFacts({ memoryFacts, outcomeReview: { recordedLessons: [], evidenceIds: [] } });
+  const facts = managerFacts({ memoryFacts, knowledgeHealth: knowledgeHealth.deterministicManagerKnowledgeHealth({ profile: null, memoryFacts: [memoryFacts[0]] }, now), outcomeReview: { recordedLessons: [], evidenceIds: [] } });
   assert.deepEqual(service.providerFacts(facts, false).memoryFacts.map((fact) => fact.id), ["normal-a"]);
   assert.deepEqual(service.providerFacts(facts, true).memoryFacts.map((fact) => fact.id), ["normal-a", "sensitive-a"]);
+  assert.deepEqual(service.providerFacts(facts, false).knowledgeHealth.evidenceIds, ["normal-a"]);
+  assert.equal(service.providerFacts(facts, true).knowledgeHealth.evidenceIds.includes("restricted-a"), false);
   const redactedIds = service.providerKnownIds(facts, false);
   assert.equal(redactedIds.has("normal-a"), true);
   assert.equal(redactedIds.has("sensitive-a"), false);
@@ -380,7 +383,7 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v10", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v11", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
 });
 
@@ -491,7 +494,7 @@ test("brief and plan conversation advance an existing linked step instead of inv
 test("a pre-intake cached brief is invalidated when setup completes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v10", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v11", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-12T11:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
@@ -503,7 +506,7 @@ test("a pre-intake cached brief is invalidated when setup completes", async () =
 test("a cached brief is invalidated when commitment facts change", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => ({ updatedAt: new Date("2026-07-12T11:00:00.000Z") }) } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v10", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v11", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
@@ -515,12 +518,12 @@ test("a cached brief is invalidated when commitment facts change", async () => {
 test("a cached brief is invalidated when the Manager priority policy changes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "v9-brief", promptVersion: "manager_os_v9", createdAt: new Date() });
+  service.latestBrief = async () => ({ id: "v10-brief", promptVersion: "manager_os_v10", createdAt: new Date() });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
-  service.generateBrief = async () => { generations += 1; return { id: "v10-brief" }; };
+  service.generateBrief = async () => { generations += 1; return { id: "v11-brief" }; };
   const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
-  assert.equal(result.id, "v10-brief");
+  assert.equal(result.id, "v11-brief");
   assert.equal(generations, 1);
 });
 
@@ -528,7 +531,7 @@ test("a cached brief is invalidated when an audited operating fact changes", asy
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   const createdAt = new Date(Date.now() - 60_000);
-  service.latestBrief = async () => ({ id: "stale-brief", promptVersion: "manager_os_v10", createdAt });
+  service.latestBrief = async () => ({ id: "stale-brief", promptVersion: "manager_os_v11", createdAt });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => ({ createdAt: new Date(createdAt.getTime() + 1_000) });
   service.generateBrief = async () => { generations += 1; return { id: "fresh-brief" }; };
@@ -558,22 +561,22 @@ test("goal progress is append-only, artist-scoped, and audited", async () => {
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v10", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v11", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v10", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v10", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v11", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v11", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v10", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v10", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v11", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v11", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v10", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v9", resolutionVersion: "manager_os_v10", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v10", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v11", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v10", resolutionVersion: "manager_os_v11", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v11", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 
@@ -591,6 +594,29 @@ test("sensitive manager memory stays owner-controlled and corrections are audita
   assert.equal(updated.sourceType, "operator_correction");
   assert.equal(updates, 1);
   assert.equal(audits, 1);
+});
+
+test("operating-profile facts are synchronized atomically and cannot drift through memory edits", async () => {
+  const upserts = [];
+  const profile = { id: "profile-a", artistId: "artist-a", bandMode: "hybrid", homeCity: "Chicago", homeRegion: "IL", homeCountry: "US", twelveMonthAmbition: "Release an EP", constraints: ["Two weekends per month"], updatedAt: now };
+  const client = {
+    artistOperatingProfile: { upsert: async () => profile },
+    managerMemoryFact: {
+      upsert: async (input) => { upserts.push(input); return input.create; },
+      findFirst: async () => ({ id: "memory-market", artistId: "artist-a", key: "home_market", value: { city: "Detroit" }, sensitivity: "normal" })
+    }
+  };
+  client.$transaction = async (fn) => fn(client);
+  let audits = 0;
+  const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
+  await service.putProfile("artist-a", { bandMode: "hybrid" }, "member@test", "operator-a");
+  assert.equal(upserts.length, 4);
+  assert.deepEqual(upserts.find((row) => row.create.key === "home_market").create.value, { city: "Chicago", region: "IL", country: "US" });
+  assert.ok(upserts.every((row) => row.create.sourceType === "operating_profile" && row.create.sourceId === "profile-a"));
+  assert.equal(audits, 1);
+  await assert.rejects(() => service.patchMemory("artist-a", "memory-market", { value: { city: "Detroit" } }, true, "owner@test", "operator-owner"), /operating profile/);
+  const migration = await readFile(join(dir, "..", "..", "..", "prisma", "migrations", "20260713210000_manager_profile_memory_source", "migration.sql"), "utf8");
+  assert.match(migration, /memory\."sourceType" = 'manager_intake'/);
 });
 
 test("manager golden scenarios cover original, cover, hybrid, and adversarial inputs", async () => {
@@ -713,6 +739,31 @@ test("manager context health asks for missing authoritative facts and reaches fu
   assert.equal(strong.status, "strong");
   assert.equal(strong.nextQuestion, null);
   assert.deepEqual(strong.gaps, []);
+});
+
+test("manager knowledge health detects conflict and staleness while enforcing profile precedence", () => {
+  const empty = knowledgeHealth.deterministicManagerKnowledgeHealth({ profile: null, memoryFacts: [] }, now);
+  assert.equal(empty.status, "attention");
+  assert.match(empty.nextAction, /operating profile/i);
+  const profile = { id: "profile-a", bandMode: "hybrid", homeCity: "Chicago", homeRegion: "IL", homeCountry: "US", twelveMonthAmbition: "Release an EP", constraints: ["Two weekends per month"], updatedAt: now };
+  const memoryFacts = [
+    { id: "memory-market", key: "home_market", value: { city: "Detroit", region: "MI", country: "US" }, sourceType: "manager_intake", sourceId: "operator-a", confidence: 1, sensitivity: "normal", confirmedAt: now, updatedAt: now },
+    { id: "memory-contact-style", key: "buyer_contact_style", value: "Short and direct", sourceType: "operator_correction", sourceId: "operator-a", confidence: 1, sensitivity: "normal", confirmedAt: new Date("2025-01-01T00:00:00.000Z"), updatedAt: new Date("2025-01-01T00:00:00.000Z") }
+  ];
+  const health = knowledgeHealth.deterministicManagerKnowledgeHealth({ profile, memoryFacts }, now);
+  assert.equal(health.status, "conflicted");
+  assert.equal(health.counts.conflicted, 1);
+  assert.equal(health.counts.stale, 1);
+  assert.match(health.nextAction, /home market/i);
+  const projected = knowledgeHealth.projectManagerMemoryForReasoning(profile, memoryFacts);
+  assert.deepEqual(projected[0].value, { city: "Chicago", region: "IL", country: "US" });
+  assert.equal(projected[0].sourceType, "operating_profile");
+  const facts = managerFacts({ knowledgeHealth: health });
+  assert.ok(intelligence.deterministicManagerBrief(facts, now).today.some((item) => item.stableKey === "knowledge-refresh"));
+  const answer = intelligence.deterministicManagerChat(facts, "Can we trust your saved memory, or is it stale?", now);
+  assert.match(answer.answer, /conflicts with the operating profile/i);
+  assert.doesNotMatch(answer.answer, /Detroit/);
+  assert.equal(answer.recommendation, null);
 });
 
 test("manager briefs and conversation expose context gaps without judging the band", () => {
