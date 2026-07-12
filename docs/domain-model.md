@@ -35,6 +35,19 @@ reads return at most 50. Every delivered assistant message may link its exact
 helpful/correction verdict per response and operator. Free-text corrections are
 retained for human review but are not sent back through model instructions;
 only bounded reason aggregates affect code-owned response presentation.
+The non-persistent `manager_conversation_continuity_v1` projection reads only
+the immediately preceding assistant message's structured recommendation. It
+classifies bounded explain, recheck, blocking, details, and action follow-ups,
+then rechecks the stable key or exact typed-action identity against current
+deterministic projections. It never treats prior assistant prose as a referent
+and never creates a second recommendation from the follow-up.
+The non-persistent `manager_subject_reference_v1` projection builds candidates
+only from the active artist's bounded Manager facts for goals, tasks, events,
+projects, decisions, opportunities, prospects, offers, invoices, and
+settlements. A conservative match binds a direct answer to one current record;
+ambiguous and missing quoted references clarify instead of selecting a list's
+first record. Only policy, match type, confidence, kind hints, and record IDs
+are retained in the run trace.
 `ManagerSettings` holds owner-controlled AI/data choices and an optional
 operating cadence. The schedule uses the profile's daily/weekly cadence plus a
 validated timezone, local hour, weekly day, and owner/team audience. Claim and

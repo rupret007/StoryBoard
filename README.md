@@ -88,6 +88,15 @@ produces a daily/weekly brief grounded in
 artist-owned records. Manager conversations retain a bounded recent thread,
 resume after reload, and answer common questions about priorities, shows,
 booking, availability, approvals, and money from the corresponding records.
+Short follow-ups such as “why that?”, “is that still right?”, and “do that”
+resolve only to the immediately preceding structured recommendation. The
+Manager rechecks current source projections, asks which item was meant when the
+reference is missing, and never accepts or duplicates work from a pronoun.
+Named questions such as “Is the Bluebird show ready?” or “What is the balance
+on Invoice 1042?” resolve against bounded records owned by the active artist.
+The code-owned resolver uses exact labels, quoted fragments, or a unique typed
+token, asks when two records collide, and never silently answers from the first
+record in a list.
 The deterministic path is question-aware rather than a generic canned reply,
 so local/mock operation remains useful. Optional OpenAI reasoning uses `OPENAI_MANAGER_MODEL`
 (`gpt-5.6-terra` by default); disabled or failed requests use a deterministic
@@ -110,7 +119,7 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v20`
+already performed an outside action. Prompt/policy version `manager_os_v22`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only

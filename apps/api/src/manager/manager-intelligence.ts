@@ -14,6 +14,8 @@ import { calibrateManagerChatResult, type ManagerEvidenceHealth } from "./manage
 import { managerQuestionAsksAboutWorkSequence, type ManagerWorkSequence } from "./manager-work-sequence";
 import { managerQuestionAsksAboutGoalPath, type ManagerGoalPath } from "./manager-goal-path";
 import { deterministicManagerGoalTarget, type ManagerGoalTargetAssessment } from "./manager-goal-target";
+import { managerConversationRecommendationMatchesCurrent, type ManagerConversationContinuity } from "./manager-conversation-continuity";
+import type { ManagerSubjectReference } from "./manager-subject-reference";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -881,6 +883,33 @@ function actionableRecommendation(recommendation: ManagerRecommendationDraft | n
   return recommendation?.proposedAction ? recommendation : null;
 }
 
+function currentContinuityRecommendation(
+  prior: NonNullable<ManagerConversationContinuity["recommendation"]>,
+  brief: ManagerBrief,
+  facts: ManagerFacts
+): ManagerRecommendationDraft | null {
+  const briefMatch = [...brief.today, ...brief.thisWeek].find((item) => managerConversationRecommendationMatchesCurrent(prior, item));
+  if (briefMatch) return briefMatch;
+  if (prior.proposedAction?.type === "assign_task" && facts.teamLoad) {
+    const taskId = typeof prior.proposedAction.taskId === "string" ? prior.proposedAction.taskId : null;
+    const bandMemberId = typeof prior.proposedAction.bandMemberId === "string" ? prior.proposedAction.bandMemberId : null;
+    const checkInId = typeof prior.proposedAction.checkInId === "string" ? prior.proposedAction.checkInId : prior.proposedAction.checkInId === null ? null : undefined;
+    const availability = typeof prior.proposedAction.availability === "string" ? prior.proposedAction.availability : null;
+    const suggestion = facts.teamLoad.suggestions.find((item) => item.taskId === taskId && item.memberId === bandMemberId && item.checkInId === checkInId && item.availability === availability);
+    if (suggestion) return {
+      stableKey: prior.stableKey,
+      title: prior.title,
+      reason: suggestion.reason,
+      nextAction: `Review the role match, then assign “${suggestion.taskTitle}” to ${suggestion.memberName}.`,
+      workstream: "band_operations",
+      priority: "med",
+      evidenceIds: suggestion.evidenceIds.slice(0, 8),
+      proposedAction: { type: "assign_task", taskId: suggestion.taskId, bandMemberId: suggestion.memberId, checkInId: suggestion.checkInId, availability: suggestion.availability }
+    };
+  }
+  return null;
+}
+
 function questionHas(question: string, words: RegExp) {
   return words.test(question.toLowerCase());
 }
@@ -889,25 +918,86 @@ export function managerQuestionAsksAboutPlanHealth(question: string) {
   return /\b(goal|plan|progress|on track|off track|realistic|strategy|90-day|90 day|target|under budget|over budget)\b/i.test(question);
 }
 
-function deterministicManagerChatBase(facts: ManagerFacts, question: string, now = new Date()): ManagerChatResult {
+function deterministicManagerChatBase(
+  facts: ManagerFacts,
+  question: string,
+  now = new Date(),
+  continuity?: ManagerConversationContinuity,
+  subjectReference?: ManagerSubjectReference
+): ManagerChatResult {
   const brief = suppressRepeatedManagerAdvice(deterministicManagerBrief(facts, now), facts.recommendationHistory, now);
   const proposedDecisionDraft = decisionDraftFromQuestion(question);
   const externalRequest = questionHas(question, /\b(send|email|message|post|publish|pay|sign|execute|accept the contract|call them)\b/);
-  const moneyQuestion = questionHas(question, /\b(money|invoice|paid|payment|deposit|deal|settlement|settle|profit|revenue|expense|cash)\b/);
-  const liveQuestion = questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/);
-  const bookingQuestion = questionHas(question, /\b(booking|buyer|venue|festival|prospect|campaign|reply|outreach|pitch)\b/);
+  const subject = subjectReference?.status === "resolved" ? subjectReference.subject : null;
+  const moneyQuestion = ["deal", "invoice", "settlement"].includes(subject?.kind ?? "") || questionHas(question, /\b(money|invoice|paid|payment|deposit|deal|settlement|settle|profit|revenue|expense|cash)\b/);
+  const liveQuestion = subject?.kind === "event" || questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/);
+  const bookingQuestion = ["opportunity", "prospect"].includes(subject?.kind ?? "") || questionHas(question, /\b(booking|buyer|venue|festival|prospect|campaign|reply|outreach|pitch)\b/);
   const teamQuestion = questionHas(question, /\b(member|lineup|bandmate|who|available)\b/);
-  const planQuestion = managerQuestionAsksAboutPlanHealth(question);
-  const releaseQuestion = questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
-  const commitmentQuestion = managerQuestionAsksAboutCommitments(question);
+  const planQuestion = subject?.kind === "goal" || managerQuestionAsksAboutPlanHealth(question);
+  const releaseQuestion = subject?.kind === "project" || questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
+  const commitmentQuestion = subject?.kind === "task" || managerQuestionAsksAboutCommitments(question);
   const workSequenceQuestion = managerQuestionAsksAboutWorkSequence(question);
   const goalPathQuestion = managerQuestionAsksAboutGoalPath(question);
   const teamLoadQuestion = managerQuestionAsksAboutTeamLoad(question);
   const outcomeQuestion = questionHas(question, /\b(last show|recent shows?|what worked|what did(?:n't| not) work|how did we do|outcomes?|learn(?:ed|ing)|post-show|review the show|recent results?|show results?|campaign results?)\b/);
-  const decisionQuestion = Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
+  const decisionQuestion = subject?.kind === "decision" || Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
   const contextQuestion = questionHas(question, /\b(what do you (?:still )?(?:need|know)|what are you missing|missing context|band context|about (?:us|the band)|know about (?:us|the band)|setup|profile completeness)\b/);
   const knowledgeQuestion = questionHas(question, /\b(what do you remember|manager memory|saved memory|is (?:that|this) current|stale|out of date|trust your memory|confirm(?:ed|ation)? facts?)\b/);
   const memoryCapture = assessManagerMemoryCapture(question);
+
+  if (subjectReference?.status === "needs_clarification") return {
+    answer: subjectReference.clarification ?? "Which StoryBoard record do you mean?",
+    citations: subjectReference.candidates.map((candidate) => candidate.id).slice(0, 10),
+    recommendation: null
+  };
+
+  if (continuity?.status === "needs_clarification") return {
+    answer: continuity.clarification ?? "Which recommendation do you mean?",
+    citations: [],
+    recommendation: null
+  };
+
+  if (continuity?.status === "resolved" && continuity.recommendation && continuity.intent) {
+    const prior = continuity.recommendation;
+    const current = currentContinuityRecommendation(prior, brief, facts);
+    const currentEvidence = current?.evidenceIds ?? prior.evidenceIds;
+    if (continuity.intent === "explain") return {
+      answer: current
+        ? `I recommended “${current.title}” because ${current.reason} The current next step is ${current.nextAction}`
+        : `The recorded reason for “${prior.title}” was ${prior.reason} I do not see that same recommendation in the current brief now, so treat it as prior advice—not a current instruction.` ,
+      citations: currentEvidence.slice(0, 10),
+      recommendation: null
+    };
+    if (continuity.intent === "recheck") return {
+      answer: current
+        ? `Yes—“${current.title}” is still supported by the current records. ${current.reason} The next step remains ${current.nextAction}`
+        : `No—not as a current priority. “${prior.title}” is no longer present in the current brief. Recheck the underlying task, show, goal, or project before acting on the older recommendation.`,
+      citations: currentEvidence.slice(0, 10),
+      recommendation: null
+    };
+    if (continuity.intent === "blocking") return {
+      answer: current
+        ? `For “${current.title},” the current record says: ${current.reason} ${current.nextAction}`
+        : `I cannot tie a current blocker to “${prior.title}” because it is no longer in the current brief. Name the underlying task, show, goal, or project and I will check that record directly.`,
+      citations: currentEvidence.slice(0, 10),
+      recommendation: null
+    };
+    if (continuity.intent === "details") return {
+      answer: `${current ? `“${current.title}” is still current. ${current.reason} ${current.nextAction}` : `“${prior.title}” was based on this recorded reason: ${prior.reason} The proposed next step was ${prior.nextAction} It is not in the current brief now, so recheck the underlying record before using it.`}`,
+      citations: currentEvidence.slice(0, 10),
+      recommendation: null
+    };
+    const outcome = prior.outcome.replaceAll("_", " ");
+    return {
+      answer: prior.outcome !== "suggested"
+        ? `“${prior.title}” is already ${outcome}. I will not create or accept a duplicate action from “do that.”`
+        : current
+          ? `The reviewed internal action is “${current.title}.” ${current.nextAction} Use the Review action on my previous message to accept the exact proposal; I will not turn a pronoun into an unreviewed or duplicate write.`
+          : `Do not act on the older “${prior.title}” recommendation yet. It is no longer in the current brief, so recheck the underlying record first.`,
+      citations: currentEvidence.slice(0, 10),
+      recommendation: null
+    };
+  }
 
   if (memoryCapture.status === "ready") return {
     answer: `I can keep that as normal band memory after you review it. It will be treated as a confirmed operator note, not as a command or a fact inferred from somewhere else.`,
@@ -936,7 +1026,7 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
     };
   }
 
-  const coaching = deterministicManagerCoaching(facts, question, now);
+  const coaching = subject ? null : deterministicManagerCoaching(facts, question, now);
   if (coaching) return { answer: coaching.answer, citations: coaching.citations, recommendation: null };
 
   if (knowledgeQuestion && facts.knowledgeHealth) {
@@ -1001,7 +1091,7 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
     const due = facts.decisions.filter((decision) => decision.status === "decided" && decision.reviewAt && decision.reviewAt <= now);
     const upcoming = facts.decisions.filter((decision) => decision.status === "decided" && (!decision.reviewAt || decision.reviewAt > now));
     const reviewed = facts.decisions.filter((decision) => decision.status === "reviewed").sort((a, b) => (b.reviewedAt?.getTime() ?? 0) - (a.reviewedAt?.getTime() ?? 0));
-    const target = due[0] ?? open[0] ?? upcoming[0] ?? reviewed[0];
+    const target = subject?.kind === "decision" ? facts.decisions.find((decision) => decision.id === subject.id) : due[0] ?? open[0] ?? upcoming[0] ?? reviewed[0];
     if (!target) return { answer: "There is no open or scheduled band decision in StoryBoard. When the band faces a real tradeoff, record the options, what you choose, what you expect to happen, and when you will check the result.", citations: [], recommendation: null };
     const citations = [target.id];
     if (target.status === "open") {
@@ -1063,7 +1153,9 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
 
   if (goalPathQuestion && facts.goalPath) {
     const normalizedQuestion = question.toLocaleLowerCase();
-    const namedPaths = facts.goalPath.goals.filter((path) => normalizedQuestion.includes(path.goalTitle.toLocaleLowerCase()));
+    const namedPaths = subject?.kind === "goal"
+      ? facts.goalPath.goals.filter((path) => path.goalId === subject.id)
+      : facts.goalPath.goals.filter((path) => normalizedQuestion.includes(path.goalTitle.toLocaleLowerCase()));
     const paths = (namedPaths.length ? namedPaths : facts.goalPath.goals).slice(0, 3);
     const lines = paths.map((path) => `• ${path.goalTitle} — ${path.reason} ${path.nextAction}`);
     return {
@@ -1074,21 +1166,31 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
   }
 
   if (commitmentQuestion && facts.commitmentHealth) {
-    const pressure = facts.commitmentHealth.items.filter((item) => item.state !== "active").slice(0, 3);
+    const pressure = (subject?.kind === "task"
+      ? facts.commitmentHealth.items.filter((item) => item.taskId === subject.id)
+      : facts.commitmentHealth.items.filter((item) => item.state !== "active")).slice(0, 3);
     const lines = pressure.map((item) => `• ${item.title} — ${item.reasons.join(" ")} ${item.ownerLabel ? `Owner: ${item.ownerLabel}.` : "No owner is recorded."}`);
     return {
-      answer: `${facts.commitmentHealth.summary}${lines.length ? `\n\n${lines.join("\n")}` : ""}\n\n${facts.commitmentHealth.nextAction}`,
+      answer: subject?.kind === "task"
+        ? pressure[0]
+          ? `“${pressure[0].title}” is ${pressure[0].state.replaceAll("_", " ")}. ${pressure[0].reasons.join(" ")}${pressure[0].ownerLabel ? ` Owner: ${pressure[0].ownerLabel}.` : " No owner is recorded."}\n\nOpen that task to finish it, record the blocker, choose an owner, or set a credible date from the current facts.`
+          : `I do not see the named task in the current commitment projection. Refresh Tasks before relying on an older status.`
+        : `${facts.commitmentHealth.summary}${lines.length ? `\n\n${lines.join("\n")}` : ""}\n\n${facts.commitmentHealth.nextAction}`,
       citations: pressure.map((item) => item.taskId),
       recommendation: null
     };
   }
 
   if (releaseQuestion && !planQuestion) {
-    const activeProjects = facts.projects.filter((project) => !["completed", "cancelled"].includes(project.status));
+    const activeProjects = subject?.kind === "project"
+      ? facts.projects.filter((project) => project.id === subject.id)
+      : facts.projects.filter((project) => !["completed", "cancelled"].includes(project.status));
     const lines = activeProjects.slice(0, 5).map((project) => project.readiness
       ? `• ${project.name} — ${project.readiness.status.replaceAll("_", " ")} at ${project.readiness.score}/100; ${project.readiness.nextMilestone ? `next: ${project.readiness.nextMilestone.title}` : project.readiness.nextAction}`
       : `• ${project.name} — ${project.status}${project.dueAt ? `; due ${eventDate(project.dueAt)}` : "; no due date recorded"}`);
-    const recommendation = matchingRecommendation(brief, ["releases", "content", "band_operations"]);
+    const recommendation = subject?.kind === "project"
+      ? [...brief.today, ...brief.thisWeek].find((item) => item.evidenceIds.includes(subject.id)) ?? null
+      : matchingRecommendation(brief, ["releases", "content", "band_operations"]);
     return {
       answer: activeProjects.length ? `Here is the recorded project picture:\n${lines.join("\n")}\n\n${recommendation ? recommendation.nextAction : "Open the highest-risk project and assign its next milestone."}` : "There is no active release, content, tour, or business project in StoryBoard. Create the real project and its target date before relying on a release plan.",
       citations: unique(activeProjects.flatMap((project) => project.readiness?.evidenceIds ?? [project.id])).slice(0, 10),
@@ -1101,20 +1203,44 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
     const ambition = facts.profile?.twelveMonthAmbition?.toLowerCase() ?? "";
     const unrealistic = /\b(globally famous|overnight|next month|guaranteed|no budget)\b/.test(ambition);
     const normalizedQuestion = question.toLocaleLowerCase();
-    const namedGoal = health.goals.find((goal) => normalizedQuestion.includes(goal.title.toLocaleLowerCase()));
+    const namedGoal = subject?.kind === "goal"
+      ? health.goals.find((goal) => goal.goalId === subject.id)
+      : health.goals.find((goal) => normalizedQuestion.includes(goal.title.toLocaleLowerCase()));
     const attention = namedGoal ?? health.goals.find((goal) => goal.status === "off_track") ?? health.goals.find((goal) => goal.status === "at_risk" || goal.status === "needs_measurement") ?? health.goals.find((goal) => goal.status === "target_reached");
     const nextPlannedTask = facts.tasks
       .filter((task) => task.status !== "done" && task.initiativeId)
       .sort((a, b) => (a.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER))[0];
     const drift = facts.goalMeasurements.find((measurement) => (!namedGoal || measurement.goalId === namedGoal.goalId) && !["manual", "in_sync"].includes(measurement.status));
+    const recommendation = subject?.kind === "goal"
+      ? [...brief.today, ...brief.thisWeek].find((item) => item.evidenceIds.includes(subject.id)) ?? null
+      : matchingRecommendation(brief);
     return {
       answer: `${unrealistic ? "The ambition is useful as a direction, but the recorded timeframe or constraints do not support treating it as a forecast. " : ""}${health.summary} The plan-health score is ${health.score}/100; it checks target direction, deadlines, measurement integrity, linked work, and blockers—not elapsed-time pace or probability.${drift ? `\n\nBefore trusting the recorded value for “${drift.goalTitle},” reconcile it: ${drift.summary} ${drift.nextAction}` : attention ? `\n\nFor “${attention.title}”: ${attention.target.summary} ${attention.reasons[0]} ${attention.target.nextAction}` : nextPlannedTask ? `\n\nThe next recorded step is “${nextPlannedTask.title}”. Assign a real owner if it still says the band generally.` : "\n\nSet one measurable goal with a deadline, then link an initiative and a next task."}`,
-      citations: unique([...health.goals.flatMap((goal) => goal.evidenceIds), ...(nextPlannedTask ? [nextPlannedTask.id] : [])]).slice(0, 10),
-      recommendation: actionableRecommendation(matchingRecommendation(brief))
+      citations: unique(subject?.kind === "goal" ? (namedGoal?.evidenceIds ?? [subject.id]) : [...health.goals.flatMap((goal) => goal.evidenceIds), ...(nextPlannedTask ? [nextPlannedTask.id] : [])]).slice(0, 10),
+      recommendation: actionableRecommendation(recommendation)
     };
   }
 
   if (moneyQuestion) {
+    if (subject?.kind === "invoice") {
+      const invoice = facts.invoices.find((item) => item.id === subject.id);
+      if (invoice) {
+        const balance = Math.max(0, invoice.totalMinor - invoice.paidMinor);
+        return {
+          answer: `Invoice ${invoice.number} is ${invoice.status.replaceAll("_", " ")}. The recorded total is ${money(invoice.totalMinor, invoice.currency)}, paid is ${money(invoice.paidMinor, invoice.currency)}, and the remaining balance is ${money(balance, invoice.currency)}${invoice.dueAt ? `; it is due ${eventDate(invoice.dueAt)}` : "; no due date is recorded"}.`,
+          citations: [invoice.id],
+          recommendation: null
+        };
+      }
+    }
+    if (subject?.kind === "deal") {
+      const deal = facts.deals.find((item) => item.id === subject.id);
+      if (deal) return { answer: `“${deal.title}” is recorded as ${deal.status.replaceAll("_", " ")}${deal.expiresAt ? ` and expires ${eventDate(deal.expiresAt)}` : "; no expiration is recorded"}. Open the offer before making a legal or financial decision from that status alone.`, citations: [deal.id], recommendation: null };
+    }
+    if (subject?.kind === "settlement") {
+      const settlement = facts.settlements.find((item) => item.id === subject.id);
+      if (settlement) return { answer: `The settlement for “${settlement.event.title}” is ${settlement.status.replaceAll("_", " ")}: gross ${money(settlement.grossMinor, settlement.currency)}, recorded expenses ${money(settlement.expenseMinor, settlement.currency)}, and net ${money(settlement.netMinor, settlement.currency)}.${settlement.status === "finalized" ? " That is the finalized StoryBoard record." : " Review the underlying income and expenses before finalizing it."}`, citations: [settlement.id], recommendation: null };
+    }
     const balances = new Map<string, number>();
     for (const invoice of facts.invoices) {
       const balance = Math.max(0, invoice.totalMinor - invoice.paidMinor);
@@ -1133,7 +1259,9 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
   }
 
   if (liveQuestion) {
-    const upcoming = facts.events.filter((event) => event.startsAt && event.startsAt >= now).slice(0, 3);
+    const upcoming = (subject?.kind === "event"
+      ? facts.events.filter((event) => event.id === subject.id)
+      : facts.events.filter((event) => event.startsAt && event.startsAt >= now)).slice(0, 3);
     const lines = upcoming.map((event) => {
       const showDay = event.dayOf && event.startsAt && event.startsAt.getTime() <= now.getTime() + DAY_MS;
       if (event.readiness) {
@@ -1145,7 +1273,9 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
       const unresolved = facts.members.filter((member) => !responses.has(member.id)).length + event.participants.filter((participant) => ["unknown", "tentative"].includes(participant.response)).length;
       return `• ${event.title} — ${eventDate(event.startsAt)}${unavailable ? `; ${unavailable} unavailable` : unresolved ? `; ${unresolved} availability response${unresolved === 1 ? "" : "s"} unresolved` : "; recorded availability is clear"}`;
     });
-    const recommendation = matchingRecommendation(brief, ["live"]);
+    const recommendation = subject?.kind === "event"
+      ? [...brief.today, ...brief.thisWeek].find((item) => item.evidenceIds.includes(subject.id)) ?? null
+      : matchingRecommendation(brief, ["live"]);
     return {
       answer: upcoming.length
         ? `Here is the live calendar I would manage first:\n${lines.join("\n")}\n\n${recommendation ? recommendation.nextAction : "No immediate live action is recorded."}`
@@ -1156,6 +1286,14 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
   }
 
   if (bookingQuestion) {
+    if (subject?.kind === "opportunity") {
+      const opportunity = facts.opportunities.find((item) => item.id === subject.id);
+      if (opportunity) return { answer: `“${opportunity.title}” is in the ${opportunity.stage.replaceAll("_", " ")} stage${opportunity.targetDate ? ` for ${eventDate(opportunity.targetDate)}` : ", with no target date recorded"}. Open that opportunity to update the stage or next follow-up deliberately.`, citations: [opportunity.id], recommendation: null };
+    }
+    if (subject?.kind === "prospect") {
+      const prospect = facts.prospects.find((item) => item.id === subject.id);
+      if (prospect) return { answer: `“${prospect.name}” is a ${prospect.kind.replaceAll("_", " ")} prospect in ${prospect.city}, currently ${prospect.status.replaceAll("_", " ")}. Open that prospect to qualify, disqualify, attach a buyer, or convert it from the current record.`, citations: [prospect.id], recommendation: null };
+    }
     const unread = facts.bookingReplies.filter((reply) => reply.processingStatus === "unread");
     const qualified = facts.prospects.filter((prospect) => prospect.status === "qualified");
     const overdueFollowUps = facts.campaignRecipients.filter((recipient) => recipient.followUpDueAt && recipient.followUpDueAt < now && ["drafted", "sent"].includes(recipient.status));
@@ -1192,6 +1330,12 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
   };
 }
 
-export function deterministicManagerChat(facts: ManagerFacts, question: string, now = new Date()): ManagerChatResult {
-  return calibrateManagerChatResult(deterministicManagerChatBase(facts, question, now), facts, question);
+export function deterministicManagerChat(
+  facts: ManagerFacts,
+  question: string,
+  now = new Date(),
+  continuity?: ManagerConversationContinuity,
+  subjectReference?: ManagerSubjectReference
+): ManagerChatResult {
+  return calibrateManagerChatResult(deterministicManagerChatBase(facts, question, now, continuity, subjectReference), facts, question);
 }

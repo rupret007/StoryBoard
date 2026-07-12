@@ -152,7 +152,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialMemberChe
   }
   async function runEvaluation() {
     setBusy(true); setError("");
-    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v20" } })); }
+    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v22" } })); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function submitMessageFeedback(messageId: string, payload: { helpful: boolean; reason?: string | null; note?: string | null }) {

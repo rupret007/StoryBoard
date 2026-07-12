@@ -361,7 +361,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v20`)
+  (owner-only; currently accepts only the code-registered `manager_os_v22`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -436,7 +436,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v20` retains the current operator question and at most 12
+version `manager_os_v22` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -552,6 +552,25 @@ the workspace can also record a waiting party and reschedule a date.
 `ManagerCommitmentHealth` is
 derived from current task facts and deferral history, never edited as a score.
 Re-running plan ensure is idempotent.
+
+Manager chat supports a bounded set of natural follow-ups—“why that?”, “is
+that still right?”, “what is blocking it?”, “tell me more”, and “do that”.
+`manager_conversation_continuity_v1` uses only the immediately preceding
+structured recommendation in the same conversation. It rechecks that exact
+stable key or typed action against current deterministic projections. If the
+reference is absent or ambiguous, the response asks the operator to name the
+task, show, goal, or project. A pronoun never accepts or duplicates work; the
+original reviewed action remains the only acceptance surface.
+
+Direct named-record questions use `manager_subject_reference_v1`. Candidate
+goals, tasks, shows, projects, decisions, opportunities, prospects, offers,
+invoices, and settlements come only from the active artist's bounded Manager
+snapshot. The resolver accepts full labels, quoted fragments, or a unique
+distinctive token paired with a compatible record-kind word. It asks which
+record was meant when names collide and returns an explicit missing-record
+question for an unmatched quoted name. Resolved and ambiguous routes bypass
+the optional model so OpenAI-on and deterministic operation enforce the same
+tenant and evidence boundary.
 
 The evaluation runner is offline and makes no provider request. It executes
 the code-registered golden scenarios and checks owner-reviewed examples. An

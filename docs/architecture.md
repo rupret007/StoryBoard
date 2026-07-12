@@ -111,6 +111,21 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   the tenant-scoped audited write. Briefs and ordinary model prose cannot save
   memory. Profile-owned facts redirect to their canonical form, and sensitive
   values fail closed without being echoed.
+  Conversational continuity is also structured rather than inferred from
+  prose. `manager_conversation_continuity_v1` recognizes a small allowlist of
+  reference-bound follow-ups and binds them only to the immediately preceding
+  `ManagerRun` recommendation in the same conversation. Currentness is checked
+  against the latest deterministic brief or exact typed-action source
+  projection. A missing or multiple reference asks for clarification; “do
+  that” never accepts or duplicates a recommendation. Traces retain only the
+  policy, classification, confidence, reason code, and referenced IDs.
+  Direct named-record questions use the separate code-owned
+  `manager_subject_reference_v1` resolver. Its candidates come only from the
+  active artist's bounded facts; it accepts conservative full-label, quoted,
+  or unique typed-token matches and asks when candidates collide. A resolved
+  subject bypasses provider prose and binds the answer, citations, and any
+  eligible recommendation to that exact current projection. Traces store only
+  resolution metadata and record IDs.
   Owner-promoted `ManagerEvalExample` rows are bounded local fixtures, not an
   online training or self-deployment mechanism. Code-owned plan health derives
   explainable status from authoritative goals/initiatives/tasks, while numeric

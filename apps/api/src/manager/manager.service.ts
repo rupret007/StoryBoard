@@ -41,6 +41,8 @@ import { currentManagerMemberCheckIn, deterministicManagerTeamLoad, managerTaskM
 import { deterministicManagerWorkSequence, managerQuestionAsksAboutWorkSequence } from "./manager-work-sequence";
 import { deterministicManagerGoalPath, managerQuestionAsksAboutGoalPath } from "./manager-goal-path";
 import { deterministicManagerGoalTarget, MANAGER_GOAL_TARGET_POLICY_VERSION } from "./manager-goal-target";
+import { MANAGER_CONVERSATION_CONTINUITY_POLICY_VERSION, resolveManagerConversationContinuity } from "./manager-conversation-continuity";
+import { MANAGER_SUBJECT_REFERENCE_POLICY_VERSION, managerSubjectCandidates, resolveManagerSubjectReference } from "./manager-subject-reference";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const MANAGER_FACT_AGGREGATES = [
@@ -1176,7 +1178,19 @@ export class ManagerService {
       this.facts(artistId),
       this.prisma.client.managerMessage.findMany({
         where: { conversationId: conversation.id },
-        select: { id: true, role: true, content: true, createdAt: true },
+        select: {
+          id: true,
+          role: true,
+          content: true,
+          createdAt: true,
+          managerRun: {
+            select: {
+              recommendations: {
+                select: { id: true, stableKey: true, title: true, reason: true, nextAction: true, outcome: true, evidence: true, proposedAction: true }
+              }
+            }
+          }
+        },
         orderBy: { createdAt: "desc" },
         take: 12
       }),
@@ -1189,13 +1203,18 @@ export class ManagerService {
     ]);
     history.reverse();
     const safeFacts = this.safeFacts(facts);
-    const fallback = deterministicManagerChat(facts, input.message);
+    const now = new Date();
+    const continuity = resolveManagerConversationContinuity(input.message, history);
+    const subjectReference = resolveManagerSubjectReference(input.message, managerSubjectCandidates(facts));
+    const fallback = deterministicManagerChat(facts, input.message, now, continuity, subjectReference);
     const coachingTopics = managerCoachingTopics(input.message).map((topic) => topic.id);
     const unknownCoachingTopic = managerUnrecognizedCoachingTopic(input.message);
     const coachingRoute = coachingTopics.length > 0 || Boolean(unknownCoachingTopic);
     const workSequenceRoute = managerQuestionAsksAboutWorkSequence(input.message);
     const goalPathRoute = managerQuestionAsksAboutGoalPath(input.message);
     const planHealthRoute = managerQuestionAsksAboutPlanHealth(input.message);
+    const continuityRoute = continuity.status !== "not_follow_up";
+    const subjectRoute = subjectReference.status !== "not_requested";
     let content = fallback.answer;
     let citations = fallback.citations;
     let recommendation: ManagerRecommendationDraft | null = fallback.recommendation;
@@ -1208,7 +1227,7 @@ export class ManagerService {
     const settings = await this.settings(artistId);
     const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, settings);
     let providerAttempted = false;
-    if (!coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
+    if (!continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       try {
         model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
@@ -1262,7 +1281,7 @@ export class ManagerService {
           factsRead: [...this.knownIds(facts)],
           conversationMessageIds: history.map((message) => message.id),
           toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
-          guardrails: ["known-evidence", "bounded-history", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", "code-owned-manager-coaching", "team-load-premise-check"],
+          guardrails: ["known-evidence", "bounded-history", "structured-conversation-continuity", "tenant-subject-resolution", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", "code-owned-manager-coaching", "team-load-premise-check"],
           providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
           coaching: { policyVersion: MANAGER_COACHING_POLICY_VERSION, topicIds: coachingTopics, unrecognized: Boolean(unknownCoachingTopic), providerBypassed: coachingRoute },
           teamLoad: { policyVersion: facts.teamLoad.policyVersion, status: facts.teamLoad.status, confidence: facts.teamLoad.confidence, suggestionCount: facts.teamLoad.suggestions.length },
@@ -1270,6 +1289,8 @@ export class ManagerService {
           workSequence: { policyVersion: facts.workSequence.policyVersion, status: facts.workSequence.status, readyNow: facts.workSequence.counts.readyNow + facts.workSequence.counts.inProgress, waiting: facts.workSequence.counts.waitingOnPrerequisites, conflicted: facts.workSequence.counts.conflicted, providerBypassed: workSequenceRoute },
           goalPath: { policyVersion: facts.goalPath.policyVersion, status: facts.goalPath.status, ready: facts.goalPath.counts.ready, blocked: facts.goalPath.counts.blocked, missingPlan: facts.goalPath.counts.missingPlan, monitoring: facts.goalPath.counts.targetMonitoring, conflicted: facts.goalPath.counts.conflicted, providerBypassed: goalPathRoute },
           goalTarget: { policyVersion: MANAGER_GOAL_TARGET_POLICY_VERSION, providerBypassed: planHealthRoute, directions: Object.fromEntries(["at_least", "at_most", "exact"].map((direction) => [direction, facts.goals.filter((goal) => goal.targetDirection === direction).length])) },
+          conversationContinuity: { policyVersion: MANAGER_CONVERSATION_CONTINUITY_POLICY_VERSION, status: continuity.status, intent: continuity.intent, confidence: continuity.confidence, reasonCode: continuity.reasonCode, recommendationId: continuity.recommendation?.id ?? null, stableKey: continuity.recommendation?.stableKey ?? null, providerBypassed: continuityRoute },
+          subjectReference: { policyVersion: MANAGER_SUBJECT_REFERENCE_POLICY_VERSION, status: subjectReference.status, matchType: subjectReference.matchType, confidence: subjectReference.confidence, kindHints: subjectReference.kindHints, subjectId: subjectReference.subject?.id ?? null, subjectKind: subjectReference.subject?.kind ?? null, candidateIds: subjectReference.candidates.map((candidate) => candidate.id), providerBypassed: subjectRoute },
           responseQuality,
           responseFeedbackSignals: summarizeManagerResponseFeedback(responseFeedback)
         },

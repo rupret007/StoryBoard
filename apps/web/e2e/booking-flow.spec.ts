@@ -166,6 +166,11 @@ test("novice manager intake produces grounded work and band operations records",
   const assignmentProposal = page.getByText("Suggested task owner", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
   await expect(assignmentProposal).toContainText(/role match/i);
   await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: /current voluntary check-ins/i }).last()).toBeVisible();
+  await managerMessage.fill("Why that?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const continuityReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "I recommended" }).last();
+  await expect(continuityReply).toContainText(/role match/i);
+  await expect(page.getByText("Suggested task owner", { exact: true })).toHaveCount(1);
   await assignmentProposal.getByRole("button", { name: "Assign task" }).click();
   await expect(assignmentProposal.getByText("completed", { exact: true })).toBeVisible();
   const coachingPrompts = page.getByTestId("manager-coaching-prompts");
@@ -247,7 +252,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v20", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v22", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -495,6 +500,11 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(outcomes.getByText("135", { exact: true })).toBeVisible();
   await expect(outcomes.getByText(/Finalized net \$475\.00/)).toBeVisible();
   const outcomeQuestion = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
+  await outcomeQuestion.fill(`What is the balance on Invoice E2E-${suffix}?`);
+  await page.getByRole("button", { name: "Send message" }).click();
+  const invoiceReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: `Invoice E2E-${suffix} is` }).last();
+  await expect(invoiceReply).toContainText(/remaining balance is USD 400\.00/);
+  await expect(invoiceReply).not.toContainText(/An invoice is a request for payment/);
   await outcomeQuestion.fill("What did we learn from our recent shows?");
   await page.getByRole("button", { name: "Send message" }).click();
   const outcomeReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "Recorded attendance totals 135" });

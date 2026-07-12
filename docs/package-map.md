@@ -43,7 +43,9 @@ The NestJS orchestration backend. Current responsibilities:
   `manager_work_sequence_v1`, goal-to-action `manager_goal_path_v1`, explicit
   minimum/cap/exact `manager_goal_target_v1` assessment, linked task ownership, append-only
   member capacity check-ins, and bounded `manager_team_load_v2` assignment
-  proposals, conversation-to-decision drafts,
+  proposals, structured `manager_conversation_continuity_v1` follow-ups,
+  tenant-bounded `manager_subject_reference_v1` named-record resolution,
+  conversation-to-decision drafts,
   timezone-safe/idempotent brief scheduling, response-quality policy,
   readiness-bound event/project action proposals, provider-context sensitivity
   projection, profile-over-memory source precedence, knowledge freshness and

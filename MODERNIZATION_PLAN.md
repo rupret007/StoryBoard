@@ -851,6 +851,105 @@ Implementation and validation:
   safety, typecheck, lint, production builds, container readiness, and
   `git diff --check`.
 
+### P0 — Grounded Manager conversation continuity (completed 2026-07-12)
+
+- [x] Add one code-owned `manager_conversation_continuity_v1` classifier for
+  bounded follow-ups such as “why that?”, “is that still right?”, “what is
+  blocking it?”, “tell me more”, and “do that”. Store only classification and
+  referenced record IDs in traces, never hidden reasoning.
+- [x] Resolve a follow-up only from the immediately preceding structured
+  Manager recommendation in the same artist conversation. Do not infer a
+  referent from assistant prose, another tenant, or an old unrelated thread;
+  missing or multiple candidates must produce one concise clarification.
+- [x] Recheck the prior recommendation's stable key or exact typed-action
+  identity against the current deterministic brief and source projection
+  before calling it current. Explain the recorded reason and evidence, but do
+  not duplicate the recommendation or accept an action from a pronoun.
+- [x] Make this behavior identical with OpenAI enabled or disabled by routing
+  resolved/ambiguous follow-ups through the code-owned path. Keep all existing
+  approval and serializable acceptance checks as the only execution boundary.
+- [x] Add unit, prompt-injection, disposable-database, Chromium, and golden-eval
+  coverage; update the Manager policy/dataset versions and operator docs.
+
+Root cause and design evidence:
+
+- `ManagerService.chat` loads bounded conversation history for the optional
+  provider, but `deterministicManagerChat` receives only the latest message.
+  A short natural follow-up therefore loses its subject whenever the provider
+  is off or fails, and can accidentally fall through to an unrelated global
+  priority response.
+- The clean-room design adopts only the principle visible in Andrea_NanoBot's
+  committed cognitive-executive routing: classify reference-bound asks with an
+  explicit reason/confidence and choose clarification when the subject is not
+  grounded. No Andrea code, schema, runtime, or dirty worktree content is
+  copied.
+
+Implementation and validation:
+
+- The continuity classifier resolves five bounded follow-up intents from the
+  immediately preceding assistant run, ignores prose-only history, and records
+  only policy, classification, confidence, reason, and reference metadata.
+  Missing or multiple structured recommendations ask one clarification.
+- Prior advice is compared with the current deterministic brief or exact
+  typed-action source projection. The browser run exposed and fixed a real
+  cross-route identity case where team-load and global-brief stable keys differ;
+  task, member, check-in, and availability must all still match.
+- No schema migration was needed. Validation passed 107 API + 2 shared tests,
+  all 35 migrations and 3 disposable-Postgres workflows, the complete
+  relationship diagnostic, 3 Chromium journeys, the 45/45
+  `manager_os_v21` / `manager_evals_v23` gate at 100% safety, typecheck, lint,
+  production builds, container readiness, and `git diff --check`.
+
+### P0 — Tenant-grounded Manager subject resolution (completed 2026-07-12)
+
+- [x] Add one code-owned `manager_subject_reference_v1` resolver for named
+  goals, tasks, events, projects, decisions, opportunities, prospects, deals,
+  invoices, and settlements. Candidate records come only from the current
+  artist's bounded Manager facts.
+- [x] Resolve only full normalized labels, explicitly quoted fragments, or a
+  unique distinctive token paired with a compatible record-kind word. Do not
+  use fuzzy embeddings, cross-tenant search, or silent first-record selection.
+- [x] Bind direct answers to the resolved record and its existing projection:
+  show readiness, project readiness, goal health/path, task commitment state,
+  decision status, booking stage, or financial balance. Cite that subject and
+  do not recommend work for a different record.
+- [x] When two current records remain plausible, name the bounded choices and
+  ask which one the operator means. Keep the same behavior with OpenAI enabled
+  or disabled, and persist only resolution metadata in the Manager trace.
+- [x] Add unit, tenant-database, Chromium, and golden-eval coverage; update the
+  current Manager policy/dataset versions and operator documentation.
+
+Root cause and design evidence:
+
+- `deterministicManagerChat` currently routes from broad keywords, then often
+  lists the first three events, first five projects, first pressured task, or
+  first decision. Even an explicitly named later record can receive an answer
+  about another subject. Goal matching is a one-off full-title check rather
+  than a shared record-selection contract.
+- The clean-room design applies only Andrea_NanoBot's committed subject-data
+  principle: continuation or routing is valid when it is attached to explicit
+  structured state, otherwise it falls back or clarifies. No Andrea code,
+  schema, runtime, or dirty worktree content is copied.
+
+Implementation and validation:
+
+- `manager_subject_reference_v1` builds a bounded candidate list from the
+  current artist's Manager facts and resolves only conservative label, quoted,
+  or typed-token matches. Generic asks retain normal aggregate routing, while
+  missing quoted records and same-name collisions ask a bounded clarification.
+- Deterministic chat now answers the selected goal, task, event, project,
+  decision, opportunity, prospect, offer, invoice, or settlement from that
+  record's current projection. Exact-record routes bypass the optional model,
+  cite only supporting tenant records, and cannot attach a recommendation for
+  another subject. Traces retain resolution metadata rather than free-form
+  inference.
+- No schema migration was needed. Validation passed 109 API + 2 shared tests,
+  all 35 migrations and 3 disposable-Postgres workflows (including owned and
+  foreign invoice subject checks), the complete relationship diagnostic, 3
+  Chromium journeys including exact invoice selection, the 48/48
+  `manager_os_v22` / `manager_evals_v24` gate at 100% safety, typecheck, lint,
+  production builds, container readiness, and `git diff --check`.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,
