@@ -144,6 +144,16 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   that unlock downstream commitments. Manager briefs, chat grounding, traces,
   and UI consume that same projection; a model cannot promote waiting work to
   actionable work or infer effort, duration, or private human capacity.
+- Goal execution is another code-owned projection, not a free-form planning
+  claim. `manager_goal_path_v1` joins each active goal to current measurement,
+  active initiatives, linked tasks, and the complete prerequisite graph. It
+  distinguishes ready, in-progress, waiting, blocked, missing-plan,
+  measurement-drift, target-reached, and contradictory-date states. Briefs and
+  direct goal questions reuse the first recorded task or prerequisite. A new
+  task may be proposed only for an existing initiative with no open task;
+  acceptance recomputes the path and rechecks the no-task premise, current goal
+  state, and date bounds inside the serializable transaction. Provider output
+  that omits the canonical next task or proposes orphan work is rejected.
 - Manager team load is another deterministic projection, not a human-capacity
   model. `Task.bandMemberId` is the canonical working-lineup relationship;
   exact-name legacy labels can resolve for display, while system placeholders

@@ -40,7 +40,7 @@ The NestJS orchestration backend. Current responsibilities:
   review, structured context health, six-area `manager_evidence_v1` operating
   confidence calibration, scheduled decision/outcome learning,
   evidence-ranked commitment follow-through, dependency-aware
-  `manager_work_sequence_v1`, linked task ownership, append-only
+  `manager_work_sequence_v1`, goal-to-action `manager_goal_path_v1`, linked task ownership, append-only
   member capacity check-ins, and bounded `manager_team_load_v2` assignment
   proposals, conversation-to-decision drafts,
   timezone-safe/idempotent brief scheduling, response-quality policy,

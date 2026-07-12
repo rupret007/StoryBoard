@@ -307,6 +307,10 @@ Manager routes:
   `{ "observedValue": 2 }`; the API recomputes inside the transaction, rejects
   stale evidence with `409`, and creates an audited progress event only when
   the value changes
+- `GET /manager/goal-paths` — read-only `manager_goal_path_v1` joins each active
+  goal to its measurement, initiative, linked work, and ready prerequisite. It
+  exposes missing/blocked/conflicting paths and never predicts effort,
+  conversion, duration, or private capacity.
 - `GET /manager/commitment-health` — ranked blocked, overdue, deferred,
   waiting, ownerless, due-soon, and unscheduled task commitments
 - `GET /manager/context-health` — a deterministic, tenant-scoped projection of
@@ -357,7 +361,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v18`)
+  (owner-only; currently accepts only the code-registered `manager_os_v19`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -432,7 +436,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v18` retains the current operator question and at most 12
+version `manager_os_v19` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.

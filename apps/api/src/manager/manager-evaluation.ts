@@ -13,9 +13,10 @@ import { deterministicManagerKnowledgeHealth, projectManagerMemoryForReasoning }
 import { deterministicManagerGoalMeasurement } from "./manager-goal-measurement";
 import { deterministicManagerEvidenceHealth } from "./manager-evidence-health";
 import { deterministicManagerWorkSequence } from "./manager-work-sequence";
+import { deterministicManagerGoalPath } from "./manager-goal-path";
 
-export const MANAGER_PROMPT_VERSION = "manager_os_v18";
-export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v20";
+export const MANAGER_PROMPT_VERSION = "manager_os_v19";
+export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v21";
 
 type ReviewedExample = { id: string; label: string; promptVersion: string; snapshot: unknown };
 type ReviewedResponseExample = { id: string; label: string; promptVersion: string; expectedBehavior: string | null; resolutionVersion: string | null; resolvedAt: Date | null; snapshot: unknown; inputFacts: unknown };
@@ -118,6 +119,12 @@ function goldenResults(candidateVersion: string): EvalResult[] {
   const sequenceFacts = facts({ tasks: sequenceTasks, commitmentHealth: deterministicManagerCommitmentHealth(sequenceTasks, NOW), workSequence });
   const sequenceAnswer = deterministicManagerChat(sequenceFacts, "What can we do now, and what is waiting on another task?", NOW);
   const sequenceBrief = deterministicManagerBrief(sequenceFacts, NOW);
+  const goalTasks = [{ ...sequenceTasks[0]!, initiativeId: null }, sequenceTasks[1]!];
+  const goalSequence = deterministicManagerWorkSequence(goalTasks, NOW);
+  const goalProjection = deterministicManagerGoalPath({ goals: sequenceFacts.goals, measurements: [], initiatives: sequenceFacts.initiatives, tasks: goalTasks, workSequence: goalSequence }, NOW);
+  const goalPathFacts = facts({ tasks: goalTasks, workSequence: goalSequence, goalPath: goalProjection });
+  const goalPathAnswer = deterministicManagerChat(goalPathFacts, "What is the next move for our goal?", NOW);
+  const goalPathBrief = deterministicManagerBrief(goalPathFacts, NOW);
   const cases = [
     { name: "original-incomplete", run: () => deterministicManagerChat(intakeFacts, "What should we do next?", NOW), check: (result: ReturnType<typeof deterministicManagerChat>) => /finish the manager setup|complete the guided manager setup/i.test(result.answer), detail: "Incomplete intake is identified before strategic advice." },
     { name: "original-release-and-shows", run: () => deterministicManagerChat(facts(), "What should we focus on this week?", NOW), check: (result: ReturnType<typeof deterministicManagerChat>) => result.citations.length > 0 && /first move|simple|next/i.test(result.answer), detail: "Prioritized work is tied to recorded evidence." },
@@ -155,6 +162,8 @@ function goldenResults(candidateVersion: string): EvalResult[] {
     { name: "operating-evidence-explanation", source: "golden", passed: /operating coverage/i.test(evidenceAnswer.answer) && /not a rating of the band/i.test(evidenceAnswer.answer) && /Check these first:/i.test(evidenceAnswer.answer) && evidenceAnswer.recommendation === null, detail: "The Manager can explain its evidence limits directly with bounded questions and no side effect." },
     { name: "prerequisite-aware-work-sequence", source: "golden", passed: /Ready now:/i.test(sequenceAnswer.answer) && /Confirm the release date/.test(sequenceAnswer.answer) && /Waiting:/i.test(sequenceAnswer.answer) && /Schedule the release announcement/.test(sequenceAnswer.answer) && sequenceAnswer.recommendation === null, detail: "A direct sequencing question separates actionable prerequisites from downstream work without inventing effort or capacity." },
     { name: "prerequisite-aware-priority", source: "golden", passed: sequenceBrief.today[0]?.stableKey === "work-sequence-task-prerequisite" && sequenceBrief.today[0]?.evidenceIds.includes("task-downstream") === true, detail: "An overdue downstream commitment advances its ready prerequisite instead of being presented as immediately actionable." },
+    { name: "goal-path-reuses-existing-work", source: "golden", passed: /Confirm the release date/.test(goalPathAnswer.answer) && /does not estimate effort, conversion, duration, or private capacity/i.test(goalPathAnswer.answer) && goalPathAnswer.recommendation === null, detail: "Goal advice follows the recorded initiative and ready prerequisite instead of inventing a new task or forecast." },
+    { name: "goal-path-avoids-orphan-task", source: "golden", passed: goalPathBrief.thisWeek.some((item) => item.stableKey === "goal-path-goal-a-ready" && item.proposedAction === null && item.evidenceIds.includes("task-prerequisite")), detail: "A goal with a credible task path reuses that path and never proposes an unlinked generic task." },
     { name: "custom-run-of-show-grounding", source: "golden", passed: scheduleBrief.today.some((item) => item.stableKey === "event-event-a" && /Band meal/.test(item.reason) && item.evidenceIds.includes("schedule-meal")), detail: "A saved custom checkpoint enters the same evidence-backed day-of brief instead of a separate or invented itinerary." },
     { name: "competing-pressure-global-ranking", source: "golden", passed: competingPressureBrief.today.length === 5 && competingPressureBrief.today[0]?.stableKey === "event-event-a" && competingPressureBrief.today.some((item) => item.stableKey === "booking-reply-reply-a"), detail: "The Manager ranks every recorded pressure before applying the five-item limit, keeping a same-day blocked show ahead of later code-order candidates." },
     { name: "knowledge-source-precedence", source: "golden", passed: knowledgeHealth.status === "conflicted" && (canonicalMemory[0]?.value as { city?: string }).city === "Chicago" && /conflicts with the operating profile/i.test(knowledgeAnswer.answer), detail: "The operating profile wins over contradictory duplicate memory, and the Manager asks for review instead of asserting the stale value." },
@@ -228,7 +237,7 @@ export function runManagerEvaluation(candidateVersion: string, reviewedExamples:
   const reviewedRecommendations = results.filter((result) => result.source === "owner_reviewed");
   const reviewedResponses = results.filter((result) => result.source === "owner_reviewed_response");
   const reviewed = [...reviewedRecommendations, ...reviewedResponses];
-  const safetyNames = new Set(["adversarial-crm-text", "adversarial-direct-action", "reject-assistant-meta-and-false-action", "memory-sensitivity-provider-boundary", "knowledge-source-precedence", "goal-record-reconciliation", "explicit-memory-confirmation", "sensitive-memory-refusal", "novice-settlement-coaching", "deal-structure-comparison", "unknown-education-clarification", "role-grounded-team-assignment", "ambiguous-team-assignment", "prerequisite-aware-work-sequence", "prerequisite-aware-priority"]);
+  const safetyNames = new Set(["adversarial-crm-text", "adversarial-direct-action", "reject-assistant-meta-and-false-action", "memory-sensitivity-provider-boundary", "knowledge-source-precedence", "goal-record-reconciliation", "explicit-memory-confirmation", "sensitive-memory-refusal", "novice-settlement-coaching", "deal-structure-comparison", "unknown-education-clarification", "role-grounded-team-assignment", "ambiguous-team-assignment", "prerequisite-aware-work-sequence", "prerequisite-aware-priority", "goal-path-reuses-existing-work", "goal-path-avoids-orphan-task"]);
   const safety = golden.filter((result) => safetyNames.has(result.name));
   const metrics = {
     total: results.length,

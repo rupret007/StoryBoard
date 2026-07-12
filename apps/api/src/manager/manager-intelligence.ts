@@ -12,6 +12,7 @@ import { deterministicManagerCoaching } from "./manager-coaching";
 import { managerQuestionAsksAboutTeamLoad, type ManagerTeamLoad } from "./manager-team-load";
 import { calibrateManagerChatResult, type ManagerEvidenceHealth } from "./manager-evidence-health";
 import { managerQuestionAsksAboutWorkSequence, type ManagerWorkSequence } from "./manager-work-sequence";
+import { managerQuestionAsksAboutGoalPath, type ManagerGoalPath } from "./manager-goal-path";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -105,6 +106,7 @@ export type ManagerFacts = {
   teamLoad?: ManagerTeamLoad;
   evidenceHealth?: ManagerEvidenceHealth;
   workSequence?: ManagerWorkSequence;
+  goalPath?: ManagerGoalPath;
   recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null }[];
 };
 
@@ -768,19 +770,26 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
   }
 
   const goal = facts.goals.find((candidate) => candidate.status === "active");
-  if (goal) {
-    const progress = goal.targetValue && goal.currentValue !== null
-      ? ` Current recorded progress is ${goal.currentValue} of ${goal.targetValue}.`
-      : " No measurable current value is recorded yet.";
+  for (const goalPath of facts.goalPath?.goals.slice(0, 6) ?? []) {
+    const initiativeId = goalPath.status === "missing_task" ? goalPath.initiativeIds[0] ?? null : null;
+    const futureDateBounds = [
+      new Date(now.getTime() + 7 * DAY_MS),
+      ...(goalPath.deadline ? [new Date(goalPath.deadline)] : []),
+      ...facts.initiatives.filter((initiative) => goalPath.initiativeIds.includes(initiative.id) && initiative.dueAt).map((initiative) => initiative.dueAt!)
+    ].filter((date) => date > now);
+    const suggestedDueAt = futureDateBounds.length ? new Date(Math.min(...futureDateBounds.map((date) => date.getTime()))).toISOString() : null;
+    const proposedAction = initiativeId
+      ? { type: "create_task" as const, title: `Next measurable step for ${goalPath.goalTitle}`, dueAt: suggestedDueAt, initiativeId }
+      : null;
     addWeek({
-      stableKey: `goal-${goal.id}`,
-      title: `Move ${goal.title}`,
-      reason: `Active goals need a concrete weekly commitment.${progress}`,
-      nextAction: "Choose the smallest measurable action that advances this goal and assign it.",
-      workstream: goal.workstream,
-      priority: "med",
-      evidenceIds: [goal.id],
-      proposedAction: { type: "create_task", title: `Next step for ${goal.title}`, dueAt: dueAt(7, now), initiativeId: null }
+      stableKey: `goal-path-${goalPath.goalId}-${goalPath.status}`,
+      title: goalPath.nextTask ? `Advance ${goalPath.nextTask.title}` : goalPath.status === "target_reached" ? `Review ${goalPath.goalTitle}` : `Repair the path to ${goalPath.goalTitle}`,
+      reason: goalPath.reason,
+      nextAction: goalPath.nextAction,
+      workstream: goalPath.workstream,
+      priority: ["blocked", "conflicted"].includes(goalPath.status) ? "high" : "med",
+      evidenceIds: goalPath.evidenceIds.slice(0, 8),
+      proposedAction
     });
   }
 
@@ -880,6 +889,7 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
   const releaseQuestion = questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
   const commitmentQuestion = managerQuestionAsksAboutCommitments(question);
   const workSequenceQuestion = managerQuestionAsksAboutWorkSequence(question);
+  const goalPathQuestion = managerQuestionAsksAboutGoalPath(question);
   const teamLoadQuestion = managerQuestionAsksAboutTeamLoad(question);
   const outcomeQuestion = questionHas(question, /\b(last show|recent shows?|what worked|what did(?:n't| not) work|how did we do|outcomes?|learn(?:ed|ing)|post-show|review the show|recent results?|show results?|campaign results?)\b/);
   const decisionQuestion = Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
@@ -1035,6 +1045,18 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
     return {
       answer: `${sequence.summary}${readyLines.length ? `\n\nReady now:\n${readyLines.join("\n")}` : "\n\nNothing is currently ready to start."}${waitingLines.length ? `\n\nWaiting:\n${waitingLines.join("\n")}` : ""}\n\nThis order uses recorded task prerequisites and blockers. It does not estimate effort, duration, or anyone's private capacity.`,
       citations: unique([...ready.flatMap((item) => item.evidenceIds), ...waiting.flatMap((item) => item.evidenceIds)]).slice(0, 10),
+      recommendation: null
+    };
+  }
+
+  if (goalPathQuestion && facts.goalPath) {
+    const normalizedQuestion = question.toLocaleLowerCase();
+    const namedPaths = facts.goalPath.goals.filter((path) => normalizedQuestion.includes(path.goalTitle.toLocaleLowerCase()));
+    const paths = (namedPaths.length ? namedPaths : facts.goalPath.goals).slice(0, 3);
+    const lines = paths.map((path) => `• ${path.goalTitle} — ${path.reason} ${path.nextAction}`);
+    return {
+      answer: `${facts.goalPath.summary}${lines.length ? `\n\n${lines.join("\n")}` : ""}\n\nThis path uses recorded goals, initiatives, measurements, tasks, and prerequisites. It does not estimate effort, conversion, duration, or private capacity.`,
+      citations: unique(paths.flatMap((path) => path.evidenceIds)).slice(0, 10),
       recommendation: null
     };
   }

@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `2db5851`
+Baseline for this round: `main` at `2881dac`
 
 ## Product and current architecture
 
@@ -759,6 +759,49 @@ Implementation and validation:
   disposable-Postgres workflows across all 34 migrations, the complete
   relationship diagnostic including graph cycles/state/date order, 3 Chromium
   journeys, `git diff --check`, and the 36/36 Manager safety/usefulness gate.
+
+### P0 — Goal-to-action reasoning (completed 2026-07-12)
+
+- [x] Add one deterministic, non-persistent `manager_goal_path_v1` projection
+  that joins each active goal to its active initiative, linked tasks, explicit
+  prerequisites, and current measurement state.
+- [x] Distinguish a credible ready next move from in-progress, waiting, blocked,
+  missing-initiative, missing-task, measurement-drift, completed-target, and
+  date-conflict states. Do not infer task duration, effort, conversion rate, or
+  human capacity.
+- [x] Replace the generic goal fallback that can create an unlinked task. Reuse
+  the real ready task or prerequisite when it exists; only prepare a new task
+  when a real initiative has no task, and bind that task to the initiative.
+- [x] Apply the same path to Manager briefs, direct goal questions, provider
+  grounding, traces, and the Manager workspace so model prose cannot substitute
+  a different or orphan next move.
+- [x] Add unit, disposable-database, Chromium, and golden-eval coverage for
+  prerequisite unlockers, missing links, measurement drift, deadline conflicts,
+  tenant isolation, and linked-task acceptance. No schema migration is needed.
+
+Design evidence:
+
+- StoryBoard already owns goals, initiatives, tasks, measurements, and task
+  prerequisites, but evaluates them in separate projections. The clean-room
+  design uses only Andrea's committed principle that causal claims name their
+  evidence, contradictions, confidence limits, and safest next verification.
+  No Andrea source, runtime, data model, or dirty working-tree content is copied.
+
+Implementation and validation:
+
+- `GET /manager/goal-paths`, briefs, chat, traces, provider grounding, and the
+  Manager workspace now share the same code-owned path. Existing linked tasks
+  and transitive ready prerequisites win over generated work; a missing task is
+  prepared only against its existing active initiative.
+- Recommendation acceptance recomputes the path before the transaction and
+  rechecks the goal, initiative, open-task premise, measurement state, and date
+  bounds inside the serializable write. A stale recommendation is rejected
+  without a duplicate task or audit event.
+- Validation passed: `pnpm typecheck`, `pnpm lint`, 102 API + 2 shared tests,
+  `pnpm build`, 3 disposable-Postgres workflows across all 34 migrations, the
+  complete relationship diagnostic, 3 Chromium journeys, the 38/38 Manager
+  evaluation gate at 100% safety, container health/readiness checks, and
+  `git diff --check`.
 
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 

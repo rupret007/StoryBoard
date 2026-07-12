@@ -88,11 +88,12 @@ test("novice manager intake produces grounded work and band operations records",
   await cadenceCard.getByRole("button", { name: "Save cadence" }).click();
   await expect(cadenceCard.getByText("Manager cadence saved.", { exact: true })).toBeVisible();
   await expect(cadenceCard.getByText(/Mondays after 9:00 AM in America\/Chicago/)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "90-day plan" })).toBeVisible();
+  const planCard = page.getByRole("heading", { name: "90-day plan" }).locator("xpath=ancestor::div[contains(@class,'shadow-')][1]");
+  await expect(planCard).toBeVisible();
   await expect(page.getByText(/65\/100 · At risk/i)).toBeVisible();
-  await expect(page.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
-  await expect(page.getByText("Complete the next release cycle", { exact: true })).toHaveCount(1);
-  const liveGoalCard = page.getByText("Grow dependable show revenue", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-lg') and contains(@class,'border')][1]");
+  await expect(planCard.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
+  await expect(planCard.getByText("Complete the next release cycle", { exact: true })).toHaveCount(1);
+  const liveGoalCard = planCard.getByText("Grow dependable show revenue", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-lg') and contains(@class,'border')][1]");
   await expect(liveGoalCard.getByLabel("Progress source")).toHaveValue("qualified_prospects");
   const liveGoalMeasurement = liveGoalCard.getByLabel("Progress source").locator("xpath=ancestor::div[@data-testid][1]");
   await expect(liveGoalMeasurement.getByText(/StoryBoard can verify 1/i)).toBeVisible();
@@ -131,7 +132,7 @@ test("novice manager intake produces grounded work and band operations records",
   await Promise.all([profileSaved, profileContextRefreshed]);
   await expect(context.getByText(/82\/100 · Strong/i)).toBeVisible();
   await page.getByRole("button", { name: "Fill missing steps" }).click();
-  await expect(page.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
+  await expect(planCard.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
   const newConversation = page.getByRole("button", { name: "New", exact: true });
   if (await newConversation.isVisible().catch(() => false)) await newConversation.click();
   const managerMessage = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
@@ -237,7 +238,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v18", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v19", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -295,6 +296,9 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByLabel("Blocker for Finish the booking profile and define what a good-fit show means")).toHaveValue("The band has not agreed on the target room size.");
 
   await page.goto("/manager");
+  const goalPath = page.getByTestId("manager-goal-path");
+  await expect(goalPath.getByRole("heading", { name: "Goals connected to real work" })).toBeVisible();
+  await expect(goalPath).toContainText(/linked goal task|ready prerequisite|next:/i);
   const workSequence = page.getByTestId("manager-work-sequence");
   await expect(workSequence.getByRole("heading", { name: "What can move now" })).toBeVisible();
   await expect(workSequence).toContainText(downstreamTaskTitle);
@@ -311,6 +315,10 @@ test("novice manager intake produces grounded work and band operations records",
   const sequenceReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "Ready now:" }).last();
   await expect(sequenceReply).toContainText("Waiting:");
   await expect(sequenceReply).toContainText(downstreamTaskTitle);
+  await blockedQuestion.fill("What is the next move for our goal?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const goalPathReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: /goal path|active goal path/i }).last();
+  await expect(goalPathReply).toContainText(/does not estimate effort, conversion, duration, or private capacity/i);
 
   await page.goto("/operations");
   await page.getByLabel("Title").fill(`E2E rehearsal ${suffix}`);

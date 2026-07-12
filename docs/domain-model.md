@@ -83,9 +83,19 @@ source label, and evidence IDs. `ManagerGoalProgressEvent` is the append-only
 source for both manual numeric updates and member-approved reconciliation; it
 retains prior/current values, actor, policy source, and source kind. The sync
 route recomputes evidence in a serializable transaction and creates no event
-when already aligned. Plan health is derived—not stored—from goal measurement, deadlines, linked
-initiatives, blockers, task ownership/state, and elapsed timeline. Nullable,
-artist-unique `sourceKey` values on goals, initiatives, and tasks identify
+when already aligned. Plan health is derived—not stored—from goal measurement,
+deadlines, linked initiatives, blockers, task ownership/state, and elapsed
+timeline.
+`ManagerGoalPath` is the non-persistent `manager_goal_path_v1` view that joins
+that goal state to active initiatives, linked tasks, and
+`manager_work_sequence_v1`. It names one ready linked task or transitive
+prerequisite when one exists, exposes missing links and contradictory dates,
+and never estimates task duration, conversion, effort, or member capacity. A
+goal-path task proposal is valid only while its cited initiative remains active
+and has no open task; acceptance revalidates those facts before the audited
+write.
+
+Nullable, artist-unique `sourceKey` values on goals, initiatives, and tasks identify
 `manager_plan_v1` starter records without constraining normal user-created
 work. They make fill-missing generation idempotent while leaving user edits
 authoritative. `ArtistOperatingProfile` is also authoritative for the
