@@ -35,7 +35,9 @@ The NestJS orchestration backend. Current responsibilities:
 - **Integrations:** adapter registry, Google OAuth, **Telegram** real/mock adapters
 - **Workflow automation:** BullMQ jobs (`workflow-automation/`, `queue/`), in-app notifications, email drafts, digests, **Telegram urgent scan**
 - **Manager OS:** tenant snapshots, deterministic briefs/chat, post-show outcome
-  review, response-quality policy, and exact-message feedback in `src/manager/`
+  review, structured context health, scheduled decision/outcome learning,
+  conversation-to-decision drafts, response-quality policy, and exact-message
+  feedback in `src/manager/`
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
 - Global **`CsrfOriginGuard`** (OAuth + Telegram webhook paths excluded for POST)
 
@@ -59,7 +61,8 @@ Reusable React UI components intended for the web app.
 
 `prisma/schema.prisma` defines the PostgreSQL model. Notable models include
 **`Operator`**, **`Artist`**, **`ArtistMembership`**, manager runs/messages and
-**`ManagerMessageFeedback`**, **`WorkflowNotification`**,
+**`ManagerMessageFeedback`**, reviewable **`ManagerDecision`** outcomes,
+**`WorkflowNotification`**,
 **`TelegramUrgentDedupe`**, and **`TelegramRegistrationToken`**.
 
 Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run **`pnpm db:generate`** after clone or schema change.

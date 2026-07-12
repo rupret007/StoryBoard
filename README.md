@@ -97,10 +97,12 @@ provider inbox data. The OpenAI path must first call the single explicit,
 read-only `read_manager_snapshot` function; code supplies the tenant snapshot
 and records token usage. Any unknown evidence ID rejects the whole model result
 and uses deterministic fallback. Model output cannot invent tools: code permits direct
-acceptance only for low-risk internal task creation; email, calendar, Drive,
-legal, and financial work remains human-reviewed and approval-gated.
-Accepted recommendations are single-use and linked to their task; completing
-that task records the outcome automatically. Dismissal reasons and bounded
+acceptance only for low-risk internal task creation and open decision drafts.
+Decision drafts must be corrected and saved by the band before a separate
+choice can be recorded. Email, calendar, Drive, legal, and financial work
+remains human-reviewed and approval-gated. Accepted recommendations are
+single-use and linked to their task or decision; completing a task or reviewing
+a decision records the outcome automatically. Dismissal reasons and bounded
 cooldowns keep the Manager from repeating recently rejected or finished work.
 Every delivered conversational answer is linked to its exact Manager run and
 can be rated helpful or corrected with a bounded reason. Recent explicit
@@ -108,8 +110,9 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v4`
-and its offline eval suite cover these response-quality rules.
+already performed an outside action. Prompt/policy version `manager_os_v7`
+and its offline eval suite cover response quality, conversation-created
+decision framing/review, and respectful missing-context guidance.
 The Manager also has one shared, deterministic 90-day outcome review. Completed
 shows, projects, tasks, campaign results, attendance, post-show notes,
 relationship outcomes, invoices, expenses, and finalized settlements are
@@ -117,6 +120,24 @@ combined by tenant and currency. It reports premise coverage as confidence,
 keeps unknown net income unknown until settlement, and asks for the missing
 fact instead of turning free-text notes into a success claim. The same review
 drives the Manager card, retrospective chat answers, and weekly attention item.
+The **Band decisions** workspace makes important tradeoffs testable instead of
+ephemeral: members record two to six real options, choose one with a rationale
+and observable expected result, set a review date, and later save one immutable
+`worked`, `mixed`, `did_not_work`, or `inconclusive` lesson. Stale concurrent
+writes fail closed instead of replacing another member's choice. Due reviews
+enter the daily brief, and recent reviewed decisions remain available to
+conversation as one bounded observation—not an automatically generalized rule.
+An explicit two-option Manager question can prepare this open decision as a
+draft. The draft labels its tradeoffs unknown and remains unchoosable until a
+member reviews and saves the real framing; generic advice questions do not
+create decisions.
+The **Band context** panel makes the Manager's information quality inspectable.
+It derives four 25-point dimensions—identity, people, business, and current
+execution—from artist-owned structured records, then asks the highest-value
+missing question. The score measures recorded coverage, never artistic quality
+or potential. Members can edit the full operating profile and working-lineup
+responsibilities after intake; updates immediately change the shared brief,
+conversation, and model snapshot without turning unknowns into guesses.
 The **What your manager remembers** panel lets the band correct or archive
 confirmed memory, while sensitive memory remains owner-controlled. This
 reviewed feedback influences future ranking and evaluation only—it never lets

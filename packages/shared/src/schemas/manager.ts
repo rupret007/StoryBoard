@@ -20,7 +20,25 @@ export const managerGoalProgressSchema = z.object({
 }).strict().refine((input) => (input.value === undefined) !== (input.delta === undefined), { message: "Provide exactly one of value or delta" });
 export const managerInitiativeCreateSchema = z.object({ goalId: z.string().trim().min(1).nullable().optional(), workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), description: z.string().trim().max(2000).nullable().optional(), status: z.enum(["proposed","active","completed","blocked","abandoned"]).default("proposed"), startsAt: z.string().datetime({ offset: true }).nullable().optional(), dueAt: z.string().datetime({ offset: true }).nullable().optional(), successMetric: z.string().trim().max(500).nullable().optional() }).strict();
 export const managerInitiativePatchSchema = managerInitiativeCreateSchema.partial().strict();
-export const managerDecisionCreateSchema = z.object({ workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), context: z.string().trim().max(3000).nullable().optional(), options: z.array(z.object({ label: z.string().trim().min(1).max(200), tradeoff: z.string().trim().max(1000) }).strict()).min(2).max(6), choice: z.string().trim().max(200).nullable().optional(), rationale: z.string().trim().max(2000).nullable().optional(), evidence: z.array(z.string().trim().min(1).max(200)).max(20).default([]), reviewAt: z.string().datetime({ offset: true }).nullable().optional() }).strict();
+const managerDecisionOptionSchema = z.object({ label: z.string().trim().min(1).max(200), tradeoff: z.string().trim().min(1).max(1000) }).strict();
+const managerDecisionFields = {
+  workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), context: z.string().trim().max(3000).nullable().optional(),
+  options: z.array(managerDecisionOptionSchema).min(2).max(6), choice: z.string().trim().min(1).max(200).nullable().optional(), rationale: z.string().trim().max(2000).nullable().optional(), expectedOutcome: z.string().trim().max(2000).nullable().optional(),
+  evidence: z.array(z.string().trim().min(1).max(200)).max(20), reviewAt: z.string().datetime({ offset: true }).nullable().optional()
+} as const;
+function validateDecisionChoice(input: { options?: { label: string }[] | undefined; choice?: string | null | undefined }, context: z.RefinementCtx) {
+  if (input.options) {
+    const labels = input.options.map((option) => option.label.toLocaleLowerCase());
+    if (new Set(labels).size !== labels.length) context.addIssue({ code: "custom", path: ["options"], message: "Decision options must have unique labels" });
+    if (input.choice && !input.options.some((option) => option.label === input.choice)) context.addIssue({ code: "custom", path: ["choice"], message: "Choice must match one of the decision options" });
+  }
+}
+export const managerDecisionCreateSchema = z.object({ ...managerDecisionFields, evidence: managerDecisionFields.evidence.default([]) }).strict().superRefine(validateDecisionChoice);
+export const managerDecisionPatchSchema = z.object(managerDecisionFields).partial().strict().superRefine((input, context) => {
+  if (!Object.keys(input).length) context.addIssue({ code: "custom", message: "At least one decision change is required" });
+  validateDecisionChoice(input, context);
+});
+export const managerDecisionReviewSchema = z.object({ outcome: z.enum(["worked", "mixed", "did_not_work", "inconclusive"]), note: z.string().trim().min(1).max(3000), evidence: z.array(z.string().trim().min(1).max(200)).max(20).default([]) }).strict();
 export const managerSettingsSchema = z.object({ aiEnabled: z.boolean().optional(), fullContextEnabled: z.boolean().optional(), scheduleEnabled: z.boolean().optional(), timezone: z.string().trim().max(80).nullable().optional(), dailyHour: z.number().int().min(6).max(20).optional() }).strict();
 export const managerChatSchema = z.object({ conversationId: z.string().trim().min(1).nullable().optional(), message: z.string().trim().min(1).max(10000) }).strict();
 export const managerMessageFeedbackReasons = ["incorrect", "missed_question", "too_vague", "too_long", "wrong_tone", "missing_context", "other"] as const;
@@ -32,10 +50,10 @@ export const managerMessageFeedbackSchema = z.object({
   if (input.helpful && input.reason) context.addIssue({ code: "custom", path: ["reason"], message: "Helpful feedback cannot include a correction reason" });
   if (!input.helpful && !input.reason) context.addIssue({ code: "custom", path: ["reason"], message: "Choose what needs improvement" });
 });
-export const managerRecommendationReasons = ["accepted", "task_completed", "already_handled", "not_relevant", "wrong_priority", "bad_timing", "missing_context", "other"] as const;
+export const managerRecommendationReasons = ["accepted", "task_completed", "decision_reviewed", "already_handled", "not_relevant", "wrong_priority", "bad_timing", "missing_context", "other"] as const;
 export const managerRecommendationFeedbackSchema = z.object({ reason: z.enum(managerRecommendationReasons).optional(), note: z.string().trim().max(1000).nullable().optional() }).strict();
 export const managerEvalPromotionSchema = z.object({ label: z.enum(["useful", "not_useful", "needs_revision"]), notes: z.string().trim().max(2000).nullable().optional() }).strict();
-export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v4").default("manager_os_v4") }).strict();
+export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v7").default("manager_os_v7") }).strict();
 export const managerMemoryPatchSchema = z.object({
   value: z.json().optional(),
   confirmed: z.boolean().optional(),
@@ -48,6 +66,9 @@ export type BandMemberCreateInput = z.infer<typeof bandMemberCreateSchema>;
 export type ManagerGoalCreateInput = z.infer<typeof managerGoalCreateSchema>;
 export type ManagerGoalProgressInput = z.infer<typeof managerGoalProgressSchema>;
 export type ManagerInitiativeCreateInput = z.infer<typeof managerInitiativeCreateSchema>;
+export type ManagerDecisionCreateInput = z.infer<typeof managerDecisionCreateSchema>;
+export type ManagerDecisionPatchInput = z.infer<typeof managerDecisionPatchSchema>;
+export type ManagerDecisionReviewInput = z.infer<typeof managerDecisionReviewSchema>;
 export type ManagerRecommendationFeedbackInput = z.infer<typeof managerRecommendationFeedbackSchema>;
 export type ManagerMessageFeedbackInput = z.infer<typeof managerMessageFeedbackSchema>;
 export type ManagerEvalPromotionInput = z.infer<typeof managerEvalPromotionSchema>;

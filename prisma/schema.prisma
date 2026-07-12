@@ -201,7 +201,15 @@ enum ManagerInitiativeStatus {
 enum ManagerDecisionStatus {
   open
   decided
+  reviewed
   superseded
+}
+
+enum ManagerDecisionReviewOutcome {
+  worked
+  mixed
+  did_not_work
+  inconclusive
 }
 
 enum ManagerRunCadence {
@@ -533,21 +541,28 @@ model ManagerInitiative {
 }
 
 model ManagerDecision {
-  id         String                @id @default(cuid())
-  artistId   String
-  workstream ManagerWorkstream
-  title      String
-  context    String?
-  options    Json
-  choice     String?
-  rationale  String?
-  evidence   Json                  @default("[]")
-  status     ManagerDecisionStatus @default(open)
-  reviewAt   DateTime?
-  decidedAt  DateTime?
-  createdAt  DateTime              @default(now())
-  updatedAt  DateTime              @updatedAt
-  artist     Artist                @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  id              String                       @id @default(cuid())
+  artistId        String
+  workstream      ManagerWorkstream
+  title           String
+  context         String?
+  options         Json
+  choice          String?
+  rationale       String?
+  expectedOutcome String?
+  needsFraming     Boolean                      @default(false)
+  evidence        Json                         @default("[]")
+  status          ManagerDecisionStatus        @default(open)
+  reviewAt        DateTime?
+  decidedAt       DateTime?
+  reviewOutcome   ManagerDecisionReviewOutcome?
+  reviewNote      String?
+  reviewEvidence  Json                         @default("[]")
+  reviewedAt      DateTime?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+  artist          Artist                       @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  recommendation  ManagerRecommendation?
 
   @@index([artistId, status, reviewAt])
 }
@@ -609,11 +624,13 @@ model ManagerRecommendation {
   outcomeNote    String?
   outcomeAt      DateTime?
   taskId         String?
+  decisionId     String?                      @unique
   createdAt      DateTime                     @default(now())
   updatedAt      DateTime                     @updatedAt
   managerRun     ManagerRun                   @relation(fields: [managerRunId], references: [id], onDelete: Cascade)
   initiative     ManagerInitiative?           @relation(fields: [initiativeId], references: [id], onDelete: SetNull)
   task           Task?                        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  decision       ManagerDecision?             @relation(fields: [decisionId], references: [id], onDelete: SetNull)
   evalExample    ManagerEvalExample?
 
   @@unique([managerRunId, stableKey])

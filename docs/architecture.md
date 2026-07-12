@@ -122,6 +122,20 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   coverage, separates currencies, and preserves unknown net until a settlement
   exists. Operations UI, Manager briefs/chat, and model snapshots consume this
   one projection so post-show learning cannot diverge across surfaces.
+- Manager decisions preserve the distinction between option, choice, expected
+  result, and observed result. Choosing and reviewing use tenant-scoped
+  compare-and-set writes; stale concurrent screens fail without audit or
+  replacement. Reviewed choices are immutable and feed bounded brief/chat
+  evidence, but never expand action authority or become automatic policy.
+  Conversation may propose a `create_decision` only when it can parse two
+  explicit options. Acceptance creates one linked open draft with unknown
+  tradeoffs; a separate member write must establish framing before choice.
+  Brief generation remains limited to `create_task` proposals.
+- Manager context health is one deterministic projection over the operating
+  profile, working lineup, goals, events, projects, and opportunities. Briefs,
+  conversation, and the workspace consume the same four-dimension score and
+  ordered questions, preventing separate model-authored opinions about what is
+  known. The score measures record coverage only, not artist quality or odds.
 - Project templates reuse tenant-scoped Tasks and nullable unique source keys;
   they do not create a competing milestone authority. Readiness is derived
   from project/task/expense/event records, and Manager consumes that same view.

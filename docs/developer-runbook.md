@@ -280,9 +280,13 @@ Manager routes:
 - `GET` / `POST` / `PATCH /manager/members`, `/manager/goals`, and
   `/manager/initiatives`
 - `GET /manager/plan-health`; `GET` / `POST /manager/goals/:id/progress`
+- `GET /manager/context-health` — a deterministic, tenant-scoped projection of
+  recorded identity, people, business, and current-execution context
 - `GET /manager/plan`; `POST /manager/plan/ensure` fills only missing
   `manager_plan_v1` records and never replaces user edits
-- `GET` / `POST /manager/decisions`
+- `GET` / `POST /manager/decisions`; `PATCH /manager/decisions/:id` records a
+  choice, rationale, expected result, and review date; and
+  `POST /manager/decisions/:id/review` records one immutable outcome lesson
 - `GET /manager/brief?cadence=daily|weekly` and
   `POST /manager/brief/generate`
 - `POST /manager/chat`
@@ -297,7 +301,7 @@ Manager routes:
 - `GET /manager/eval-examples` and
   `POST /manager/recommendations/:id/promote-eval` (owner-only)
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v4`)
+  (owner-only; currently accepts only the code-registered `manager_os_v7`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -308,10 +312,14 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v4` retains the current operator question and at most 12
+version `manager_os_v7` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
+Conversation may propose one `create_decision` draft only for an explicit
+two-option choice. Acceptance creates an open, linked, tenant-owned decision;
+the band must save real framing in a separate write before it can choose.
+Generated briefs remain limited to `create_task` proposals.
 Each assistant message links to the exact `ManagerRun` that produced it.
 Members can record one idempotent feedback row per response/operator; feedback
 is tenant-scoped and audited. Only aggregate helpful/correction signals enter
@@ -329,6 +337,16 @@ Recommendation acceptance uses a transaction so concurrent clicks cannot
 create duplicate tasks. Finishing a linked task attributes completion back to
 the recommendation. Accepted work stays suppressed while its task is open;
 completed work has a 14-day cooldown and dismissed work a 7-day cooldown.
+Manager decisions use compare-and-set writes so concurrent choices cannot
+silently overwrite each other. A choice becomes immutable once recorded; its
+expected result and review date create a checkpoint, and a reviewed outcome is
+append-only from the application's perspective. Open, due, and recently
+reviewed decisions are included in the bounded Manager context.
+`ManagerContextHealth` is derived rather than editable. Its four 25-point
+dimensions and ordered missing questions come from the operating profile,
+working lineup/responsibilities, active goals, events, projects, and booking
+opportunities. A zero-dollar budget is known context. The score describes
+record coverage only; it is never a judgment or forecast about the artist.
 Dismissal reasons, response helpfulness, correction reasons, and 90-day
 acceptance/completion metrics are visible in the Manager workspace. Normal confirmed memory can be corrected by members;
 sensitive/restricted memory and sensitivity changes remain owner-controlled.

@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -17,6 +17,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-intelligence.js"),
   loadApi("manager/manager-response-quality.js"),
   loadApi("manager/manager-outcome-review.js"),
+  loadApi("manager/manager-context-health.js"),
   loadApi("tasks/tasks.service.js"),
   loadApi("manager/manager-evaluation.js"),
   loadApi("manager/manager-plan.js"),
@@ -57,14 +58,108 @@ test("manager intake is strict, supports every band mode, and preserves unknowns
   }
   assert.equal(managerSchemas.managerProfileSchema.safeParse({ bandMode: "original", inventedAudienceSize: 10000 }).success, false);
   assert.equal(managerSchemas.managerDecisionCreateSchema.safeParse({ workstream: "business", title: "Sign?", options: [{ label: "Yes", tradeoff: "Commit" }, { label: "No", tradeoff: "Decline" }], evidence: [] }).success, true);
+  assert.equal(managerSchemas.managerDecisionCreateSchema.safeParse({ workstream: "business", title: "Sign?", options: [{ label: "Yes", tradeoff: "Commit" }, { label: "yes", tradeoff: "Decline" }], evidence: [] }).success, false);
+  assert.equal(managerSchemas.managerDecisionCreateSchema.safeParse({ workstream: "business", title: "Sign?", options: [{ label: "Yes", tradeoff: "Commit" }, { label: "No", tradeoff: "Decline" }], choice: "Maybe", evidence: [] }).success, false);
+  assert.equal(managerSchemas.managerDecisionPatchSchema.safeParse({}).success, false);
+  assert.equal(managerSchemas.managerDecisionReviewSchema.safeParse({ outcome: "mixed", note: "Worth repeating with a smaller room", evidence: [] }).success, true);
+  assert.equal(managerSchemas.managerDecisionReviewSchema.safeParse({ outcome: "successful", note: "Invented status", evidence: [] }).success, false);
+});
+
+test("manager decisions preserve the choice, require a review checkpoint, and record one immutable lesson", async () => {
+  let row = { id: "decision-a", artistId: "artist-a", workstream: "live", title: "Which market?", context: "One weekend available", options: [{ label: "Milwaukee", tradeoff: "Closer but smaller" }, { label: "Detroit", tradeoff: "Farther but stronger fit" }], choice: null, rationale: null, expectedOutcome: null, evidence: [], status: "open", reviewAt: null, decidedAt: null, reviewOutcome: null, reviewNote: null, reviewEvidence: [], reviewedAt: null, updatedAt: new Date("2026-07-01T12:00:00.000Z") };
+  let audits = 0;
+  const client = {
+    managerDecision: {
+      findFirst: async ({ where }) => where.id === row.id && where.artistId === row.artistId ? { ...row } : null,
+      updateMany: async ({ where, data }) => {
+        if (where.id !== row.id || where.artistId !== row.artistId || (where.status && row.status !== where.status) || (where.reviewedAt === null && row.reviewedAt)) return { count: 0 };
+        row = { ...row, ...data };
+        return { count: 1 };
+      },
+      findUniqueOrThrow: async () => ({ ...row })
+    },
+    managerRecommendation: { updateMany: async () => ({ count: 0 }) }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
+  await assert.rejects(() => service.patchDecision("artist-b", row.id, { choice: "Milwaukee" }, "member@test", "operator-a"), (error) => error?.getStatus?.() === 404);
+  await assert.rejects(() => service.reviewDecision("artist-a", row.id, { outcome: "worked", note: "Too early", evidence: [] }, "member@test", "operator-a"), /Choose an option/);
+  await assert.rejects(() => service.patchDecision("artist-a", row.id, { choice: "Milwaukee", rationale: "Short drive" }, "member@test", "operator-a"), /expected/i);
+  const decided = await service.patchDecision("artist-a", row.id, { choice: "Milwaukee", rationale: "The drive fits the band's schedule", expectedOutcome: "At least 75 attendees and one return invitation", reviewAt: "2026-08-15T12:00:00.000Z" }, "member@test", "operator-a");
+  assert.equal(decided.status, "decided");
+  assert.equal(decided.choice, "Milwaukee");
+  assert.ok(decided.decidedAt instanceof Date);
+  await assert.rejects(() => service.patchDecision("artist-a", row.id, { choice: "Detroit" }, "member@test", "operator-a"), /immutable/);
+  await assert.rejects(() => service.patchDecision("artist-a", row.id, { expectedOutcome: "Rewrite the forecast after choosing" }, "member@test", "operator-a"), /immutable/);
+  const reviewed = await service.reviewDecision("artist-a", row.id, { outcome: "mixed", note: "Attendance reached 80, but no return invitation yet", evidence: [] }, "member@test", "operator-a");
+  assert.equal(reviewed.status, "reviewed");
+  assert.equal(reviewed.reviewOutcome, "mixed");
+  assert.ok(reviewed.reviewedAt instanceof Date);
+  await assert.rejects(() => service.reviewDecision("artist-a", row.id, { outcome: "worked", note: "Rewrite history", evidence: [] }, "member@test", "operator-a"), /already been reviewed/);
+  await assert.rejects(() => service.patchDecision("artist-a", row.id, { title: "Rewrite history" }, "member@test", "operator-a"), /immutable/);
+  assert.equal(audits, 2);
+});
+
+test("concurrent band decision writes fail closed instead of overwriting another choice", async () => {
+  let audits = 0;
+  let claimedWhere = null;
+  const client = { managerDecision: {
+    findFirst: async () => ({ id: "decision-a", artistId: "artist-a", workstream: "live", title: "Which market?", options: [{ label: "Milwaukee", tradeoff: "Closer" }, { label: "Detroit", tradeoff: "Stronger fit" }], choice: null, rationale: null, expectedOutcome: null, status: "open", reviewAt: null, updatedAt: new Date("2026-07-01T12:00:00.000Z") }),
+    updateMany: async ({ where }) => { claimedWhere = where; return { count: 0 }; },
+    findUniqueOrThrow: async () => { throw new Error("must not read after a lost update"); }
+  } };
+  const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
+  await assert.rejects(() => service.patchDecision("artist-a", "decision-a", { choice: "Milwaukee", rationale: "Closer", expectedOutcome: "Draw 75 people", reviewAt: "2026-08-15T12:00:00.000Z" }, "member@test", "operator-a"), /changed while you were reviewing/i);
+  assert.equal(claimedWhere.updatedAt.toISOString(), "2026-07-01T12:00:00.000Z");
+  assert.equal(audits, 0);
 });
 
 test("manager action authorization is code-owned and defaults to forbidden", () => {
   assert.equal(policy.classifyManagerAction("create_task"), "internal");
+  assert.equal(policy.classifyManagerAction("create_decision"), "internal");
+  assert.equal(policy.classifyManagerAction("create_draft_record"), "forbidden");
   assert.equal(policy.classifyManagerAction("send_email"), "approval_required");
   assert.equal(policy.classifyManagerAction("financial_action"), "owner_approval_required");
   assert.equal(policy.classifyManagerAction("run_sql"), "forbidden");
   assert.equal(policy.managerActionMayExecuteDirectly("send_email"), false);
+});
+
+test("conversation decision acceptance creates one linked open draft and never chooses for the band", async () => {
+  let decisionCreates = 0; let taskCreates = 0; let audits = 0;
+  const action = { type: "create_decision", workstream: "live", title: "Should we focus on Milwaukee or Detroit", context: "Prepared from conversation", options: [{ label: "focus on Milwaukee", tradeoff: "Not recorded yet—add the real cost, benefit, or risk before choosing." }, { label: "Detroit", tradeoff: "Not recorded yet—add the real cost, benefit, or risk before choosing." }] };
+  const client = {
+    managerRecommendation: {
+      findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-decision", outcome: "suggested", taskId: null, decisionId: null, task: null, decision: null, proposedAction: action, evidence: ["profile-a"] } : null,
+      updateMany: async () => ({ count: 1 }),
+      update: async ({ data }) => ({ id: "rec-decision", ...data })
+    },
+    managerDecision: { create: async ({ data }) => { decisionCreates += 1; assert.equal(data.artistId, "artist-a"); assert.equal(data.needsFraming, true); assert.equal(data.choice, undefined); return { id: "decision-draft", ...data }; } },
+    task: { create: async () => { taskCreates += 1; return { id: "task-a" }; } },
+    $transaction: async (fn) => fn(client)
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
+  const accepted = await service.recommendation("artist-a", "rec-decision", "accepted", {}, "member@test", "operator-a");
+  assert.equal(accepted.decisionId, "decision-draft");
+  assert.equal(accepted.taskId, null);
+  assert.equal(decisionCreates, 1);
+  assert.equal(taskCreates, 0);
+  assert.equal(audits, 2);
+  await assert.rejects(() => service.recommendation("artist-b", "rec-decision", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+});
+
+test("conversation decision drafts cannot be chosen until a member saves real framing", async () => {
+  let row = { id: "decision-draft", artistId: "artist-a", workstream: "live", title: "Which market?", context: null, options: [{ label: "Milwaukee", tradeoff: "Missing" }, { label: "Detroit", tradeoff: "Missing" }], choice: null, rationale: null, expectedOutcome: null, needsFraming: true, status: "open", reviewAt: null, updatedAt: new Date("2026-07-01T12:00:00.000Z") };
+  const client = { managerDecision: {
+    findFirst: async () => ({ ...row }),
+    updateMany: async ({ data }) => { row = { ...row, ...data, updatedAt: new Date(row.updatedAt.getTime() + 1) }; return { count: 1 }; },
+    findUniqueOrThrow: async () => ({ ...row })
+  } };
+  const service = new managerMod.ManagerService({ client }, { log: async () => undefined }, { get: () => false });
+  await assert.rejects(() => service.patchDecision("artist-a", row.id, { choice: "Milwaukee", rationale: "Closer", expectedOutcome: "Draw 75 people", reviewAt: "2026-08-15T12:00:00.000Z" }, "member@test", "operator-a"), /Review and save/);
+  const framed = await service.patchDecision("artist-a", row.id, { options: [{ label: "Milwaukee", tradeoff: "Lower travel cost but a smaller venue list" }, { label: "Detroit", tradeoff: "Higher travel cost but stronger genre fit" }] }, "member@test", "operator-a");
+  assert.equal(framed.needsFraming, false);
+  const decided = await service.patchDecision("artist-a", row.id, { choice: "Milwaukee", rationale: "The date fits the lineup", expectedOutcome: "Draw 75 people", reviewAt: "2026-08-15T12:00:00.000Z" }, "member@test", "operator-a");
+  assert.equal(decided.status, "decided");
 });
 
 test("recommendation acceptance can create a tenant task but cannot execute provider actions", async () => {
@@ -261,11 +356,11 @@ test("goal progress is append-only, artist-scoped, and audited", async () => {
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v4", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v7", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v4", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v4", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v7", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v7", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
@@ -334,6 +429,80 @@ test("deterministic manager chat answers the question asked instead of repeating
   const bookingAnswer = intelligence.deterministicManagerChat(facts, "What should we do about booking?", now);
   assert.match(bookingAnswer.answer, /1 active opportunity/);
   assert.match(bookingAnswer.answer, /1 qualified prospect/);
+});
+
+test("due decisions become manager work and conversation preserves the recorded tradeoff", () => {
+  const openDecision = { id: "decision-open", workstream: "live", title: "Which market next?", context: "Only one travel weekend is available", options: [{ label: "Milwaukee", tradeoff: "Lower travel cost, smaller room list" }, { label: "Detroit", tradeoff: "Higher travel cost, stronger genre fit" }], choice: null, rationale: null, expectedOutcome: null, evidence: [], status: "open", reviewAt: null, decidedAt: null };
+  const openAnswer = intelligence.deterministicManagerChat(managerFacts({ decisions: [openDecision] }), "Help us decide between the options", now);
+  assert.match(openAnswer.answer, /Milwaukee/);
+  assert.match(openAnswer.answer, /Detroit/);
+  assert.match(openAnswer.answer, /expected result/i);
+  assert.deepEqual(openAnswer.citations, ["decision-open"]);
+
+  const dueDecision = { ...openDecision, id: "decision-due", status: "decided", choice: "Milwaukee", rationale: "It fits the band's work schedules", expectedOutcome: "Draw at least 75 people and earn a return invitation", reviewAt: new Date("2026-07-01T12:00:00.000Z"), decidedAt: new Date("2026-06-01T12:00:00.000Z") };
+  const brief = intelligence.deterministicManagerBrief(managerFacts({ decisions: [dueDecision] }), now);
+  assert.ok(brief.today.some((item) => item.stableKey === "decision-review-decision-due"));
+  assert.ok(brief.decisionsNeeded.some((item) => item.title === "Review: Which market next?"));
+  const dueAnswer = intelligence.deterministicManagerChat(managerFacts({ decisions: [dueDecision] }), "What did we decide and should we review that choice?", now);
+  assert.match(dueAnswer.answer, /chose “Milwaukee”/);
+  assert.match(dueAnswer.answer, /review date has arrived/i);
+  assert.deepEqual(dueAnswer.citations, ["decision-due"]);
+  assert.equal(dueAnswer.recommendation, null);
+  const reviewedDecision = { ...dueDecision, status: "reviewed", reviewOutcome: "mixed", reviewNote: "Attendance reached 80, but there was no return invitation", reviewedAt: now };
+  const reviewedAnswer = intelligence.deterministicManagerChat(managerFacts({ decisions: [reviewedDecision] }), "What did we learn from that decision?", now);
+  assert.match(reviewedAnswer.answer, /recorded result is mixed/i);
+  assert.match(reviewedAnswer.answer, /Attendance reached 80/);
+  assert.match(reviewedAnswer.answer, /not a universal rule/i);
+});
+
+test("a two-option conversation creates a reviewable decision proposal without inventing tradeoffs", () => {
+  const answer = intelligence.deterministicManagerChat(managerFacts(), "Should we book Milwaukee or Detroit?", now);
+  assert.match(answer.answer, /real decision/i);
+  assert.match(answer.answer, /tradeoffs are still unknown/i);
+  assert.deepEqual(answer.citations, []);
+  assert.equal(answer.recommendation?.proposedAction?.type, "create_decision");
+  assert.equal(answer.recommendation?.workstream, "live");
+  assert.deepEqual(answer.recommendation?.proposedAction?.options.map((option) => option.label), ["book Milwaukee", "Detroit"]);
+  assert.ok(answer.recommendation?.proposedAction?.options.every((option) => /Not recorded yet/.test(option.tradeoff)));
+
+  const generic = intelligence.deterministicManagerChat(managerFacts({ prospects: [{ id: "prospect-a", name: "Good Room", status: "qualified", kind: "venue", city: "Madison" }] }), "What should we do about booking?", now);
+  assert.match(generic.answer, /qualified prospect/i);
+  assert.equal(generic.recommendation?.proposedAction?.type === "create_decision", false);
+});
+
+test("manager context health asks for missing authoritative facts and reaches full coverage only from recorded context", () => {
+  const thin = contextHealth.deterministicManagerContextHealth({
+    profile: { id: "profile-a", bandMode: "hybrid", careerStage: "Local working band", homeCity: "Chicago", genres: ["rock"], twelveMonthAmbition: "Release an EP and play regionally", constraints: ["Weeknight jobs"], availabilityExpectations: null, revenueSources: [], currentAssets: [], budgetToleranceMinor: null, businessName: null, currency: "USD" },
+    members: [{ id: "member-a", name: "Alex", roles: [], instruments: [] }], goals: [{ id: "goal-a" }], events: [], projects: [], opportunities: []
+  });
+  assert.equal(thin.status, "thin");
+  assert.equal(thin.score, 45);
+  assert.equal(thin.gaps[0].code, "member_responsibilities");
+  assert.match(thin.nextQuestion, /Alex/);
+  assert.ok(thin.evidenceIds.includes("profile-a"));
+  assert.ok(thin.evidenceIds.includes("member-a"));
+
+  const strong = contextHealth.deterministicManagerContextHealth({
+    profile: { id: "profile-a", bandMode: "hybrid", careerStage: "Regional working band", homeCity: "Chicago", genres: ["rock", "soul"], twelveMonthAmbition: "Release an EP and play six profitable regional shows", constraints: ["Two weekends per month"], availabilityExpectations: "Respond to holds within 48 hours", revenueSources: ["private events", "ticketed shows"], currentAssets: ["EP masters", "live video"], budgetToleranceMinor: 100000, businessName: "Example Band LLC", currency: "USD" },
+    members: [{ id: "member-a", name: "Alex", roles: ["bandleader"], instruments: ["guitar"] }], goals: [{ id: "goal-a" }], events: [{ id: "event-a" }], projects: [{ id: "project-a" }], opportunities: [{ id: "opp-a" }]
+  });
+  assert.equal(strong.score, 100);
+  assert.equal(strong.status, "strong");
+  assert.equal(strong.nextQuestion, null);
+  assert.deepEqual(strong.gaps, []);
+});
+
+test("manager briefs and conversation expose context gaps without judging the band", () => {
+  const health = contextHealth.deterministicManagerContextHealth({ profile: { id: "profile-a", bandMode: "original", careerStage: "Local", homeCity: "Chicago", genres: ["rock"], twelveMonthAmbition: "Build a regional audience", constraints: ["Weeknight work"], availabilityExpectations: null, revenueSources: [], currentAssets: [], budgetToleranceMinor: null, businessName: null, currency: "USD" }, members: [{ id: "member-a", name: "Alex", roles: [], instruments: [] }], goals: [{ id: "goal-a" }], events: [], projects: [], opportunities: [] });
+  const facts = managerFacts({ contextHealth: health });
+  const brief = intelligence.deterministicManagerBrief(facts, now);
+  assert.ok(brief.today.some((item) => item.stableKey === "context-member_responsibilities"));
+  const answer = intelligence.deterministicManagerChat(facts, "What do you still need to know about our band?", now);
+  assert.match(answer.answer, /45\/100/);
+  assert.match(answer.answer, /Alex/);
+  assert.match(answer.answer, /not the band's quality or potential/i);
+  assert.ok(answer.citations.includes("profile-a"));
+  assert.equal(answer.recommendation, null);
 });
 
 test("manager outcome review is explicit when no result evidence exists", () => {
@@ -434,6 +603,10 @@ test("manager grounding rejects a whole response with invented evidence", () => 
   const facts = managerFacts();
   assert.equal(service.chatOutputIsGrounded({ answer: "Grounded", citations: ["goal-a"], recommendation: null }, facts), true);
   assert.equal(service.chatOutputIsGrounded({ answer: "Invented", citations: ["not-a-real-record"], recommendation: null }, facts), false);
+  assert.equal(service.chatOutputIsGrounded({ answer: "Decision", citations: [], recommendation: { stableKey: "decision-a", title: "Choose", reason: "Tradeoff", nextAction: "Review", workstream: "live", priority: "med", evidenceIds: [], proposedAction: { type: "create_decision", workstream: "live", title: "Which market?", context: null, options: [{ label: "Milwaukee", tradeoff: "Closer" }] } } }, facts), false);
+  assert.equal(service.chatOutputIsGrounded({ answer: "Decision", citations: [], recommendation: { stableKey: "decision-a", title: "Choose", reason: "Tradeoff", nextAction: "Review", workstream: "live", priority: "med", evidenceIds: [], proposedAction: { type: "create_decision", workstream: "live", title: "Which market?", context: null, options: [{ label: "Milwaukee", tradeoff: "Closer" }, { label: "Detroit", tradeoff: "Stronger fit" }] } } }, facts), true);
+  const emptyBrief = { summary: "Brief", today: [], thisWeek: [], decisionsNeeded: [], waitingOn: [], risksAndOpportunities: [] };
+  assert.equal(service.briefIsGrounded({ ...emptyBrief, today: [{ stableKey: "decision-a", title: "Choose", reason: "Tradeoff", nextAction: "Review", workstream: "live", priority: "med", evidenceIds: [], proposedAction: { type: "create_decision", workstream: "live", title: "Which market?", context: null, options: [{ label: "Milwaukee", tradeoff: "Closer" }, { label: "Detroit", tradeoff: "Stronger fit" }] } }] }, facts), false);
 });
 
 test("operations validation rejects unknown fields, invalid money, and bad settlement splits", () => {

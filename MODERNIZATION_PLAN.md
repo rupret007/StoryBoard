@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `582699f`
+Baseline for this round: `main` at `da3628d`
 
 ## Product and current architecture
 
@@ -154,7 +154,7 @@ mock-safe provider adapters.
   progress stays explicit; completed recommendation tasks contribute through
   their linked initiative without inventing a numeric goal increment.
 - [x] Add an owner-triggered offline evaluation runner over versioned golden
-  scenarios (currently eleven) plus owner-reviewed examples. Candidate versions are code-allowlisted,
+  scenarios (currently fifteen) plus owner-reviewed examples. Candidate versions are code-allowlisted,
   unresolved same-version revision labels fail the run, results are persisted,
   and there is no automatic activation endpoint.
 - [x] Make guided intake deliver the promised executable 90-day plan: two
@@ -211,6 +211,79 @@ mock-safe provider adapters.
 - [x] Cover empty/complete/incomplete/multi-currency outcomes, tenant isolation,
   database settlement evidence, and the full browser path from show completion
   through Manager retrospective advice.
+
+### P0 — Evidence-to-decision learning loop (completed 2026-07-12)
+
+- [x] Turn the existing write-only `ManagerDecision` record into a practical
+  Manager workspace for two to six options and explicit tradeoffs.
+- [x] Require a recorded choice to include rationale, an observable expected
+  result, and a review date. Validate unique option labels and exact choice
+  membership at both the boundary and service layer.
+- [x] Add one immutable reviewed result (`worked`, `mixed`, `did_not_work`, or
+  `inconclusive`) plus the band's observed lesson. Preserve reviewed history
+  instead of rewriting it after the result is known.
+- [x] Use tenant-scoped compare-and-set writes for choice and review transitions
+  so concurrent members cannot silently replace one another's decision. Stale
+  writes fail without a mutation or audit event.
+- [x] Promote due reviews into the daily brief and decisions-needed list. Keep
+  recent reviewed choices in the bounded Manager snapshot and conversational
+  recall as one observation, never an automatically generalized rule.
+- [x] Add forward migration `20260713160000_manager_decision_reviews`, strict
+  shared schemas, member/owner mutation routes, audited service behavior, and
+  viewer-readable retrieval.
+- [x] Promote the reviewed policy to `manager_os_v5` / `manager_evals_v4` with
+  a decision-grounding case. The offline gate passes 13/13 at 100% safety and
+  still has no self-activation path.
+- [x] Cover validation, wrong-tenant access, incomplete choice, concurrent
+  updates, immutable review, brief/chat grounding, database audit history, and
+  the production browser path from option framing through conversational
+  lesson recall.
+
+### P0 — Guided operating context and active unknowns (completed 2026-07-12)
+
+- [x] Add one deterministic, non-persistent context-health policy over the
+  operating profile, active working lineup, goals, events, projects, and booking
+  opportunities. Keep the policy shared by API, brief, conversation, model
+  snapshot, and UI instead of letting each surface invent its own completeness.
+- [x] Make coverage transparent as four 25-point dimensions: identity/strategy,
+  people/responsibilities, business facts, and current execution. Explicitly
+  state that the score measures recorded context—not talent, quality, success,
+  or potential.
+- [x] Order missing questions by operational value and preserve unknowns as
+  questions. Treat zero budget as a known answer and never fill missing revenue,
+  assets, availability rules, responsibilities, or commitments with guesses.
+- [x] Expose viewer-readable `GET /manager/context-health`; retain member/owner
+  permissions and existing audited profile/member mutation routes.
+- [x] Add a post-intake Band context workspace for the complete operating
+  profile plus working-member onstage/offstage responsibilities and instruments.
+  Refresh context coverage immediately after each tenant-scoped write.
+- [x] Feed thin context into Today, usable gaps into This week, and answer
+  “what do you still need to know?” in direct, respectful language with evidence.
+- [x] Promote the reviewed policy to `manager_os_v6` / `manager_evals_v5`; the
+  14/14 offline gate retains 100% safety and no self-activation path.
+- [x] Cover thin/strong scoring, question order, zero/unknown distinctions,
+  database updates/isolation, and the production browser path from 45/100 novice
+  context through structured completion and grounded 82/100 explanation.
+
+### P0 — Conversation-to-decision operating loop (completed 2026-07-12)
+
+- [x] Recognize only explicit two-option questions or unambiguous decision
+  language. Generic “what should we do?” questions retain their normal booking,
+  plan, project, money, or show routing.
+- [x] Add `create_decision` as a separate code-allowlisted internal proposal.
+  Conversation may prepare an open draft, but cannot choose, review, create a
+  provider action, or broaden the allowlist.
+- [x] Require a member to correct and save the title, context, workstream,
+  options, and real tradeoffs in a separate audited write before any choice.
+  Placeholder tradeoffs remain explicitly unknown.
+- [x] Link the accepted recommendation to exactly one tenant-owned decision.
+  Reviewing that decision closes the recommendation as `decision_reviewed`;
+  acceptance remains compare-and-set and idempotent.
+- [x] Add forward migration `20260713170000_manager_conversation_decisions`,
+  strict action grounding, tenant-reference diagnostics, and a complete UI path
+  from chat proposal through framing, choice, observed outcome, and recall.
+- [x] Promote the reviewed policy to `manager_os_v7` / `manager_evals_v6`.
+  The 15/15 offline gate retains 100% safety and no self-activation path.
 
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
@@ -319,6 +392,34 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Connected Manager conversation to the evidence-to-decision loop.
+  A direct two-option question can now become one linked open draft, while
+  generic advice keeps its existing intent. The band must replace unknown
+  tradeoffs and save framing before choosing; later review automatically
+  completes the originating recommendation without enabling any external
+  action. Validation passed 71 API tests, all three 24-migration database
+  workflows, three production Chromium workflows, and the 15/15
+  `manager_os_v7` gate at 100% safety.
+- 2026-07-12: Closed the post-intake context blind spot without another schema
+  migration. One deterministic context projection now tells the band exactly
+  what is known, what is missing, and why the next answer matters across four
+  transparent dimensions. Members can edit the full operating profile and
+  working-lineup responsibilities in Manager; briefs and conversation consume
+  the same result without judging artistic quality or inventing unknown facts.
+  The design clean-rooms Andrea_NanoBot's bounded active-perception principle;
+  no code, source store, or broader agency was imported. Validation passed 68
+  API tests, all three 23-migration database workflows, three production
+  Chromium workflows, and the 14/14 `manager_os_v6` gate at 100% safety.
+- 2026-07-12: Added the evidence-to-decision learning loop and forward migration
+  `20260713160000_manager_decision_reviews`. The Manager workspace now carries a
+  real band tradeoff from options through choice, expected result, scheduled
+  review, and immutable observed lesson. Compare-and-set transitions prevent
+  concurrent overwrites; due reviews enter Today; recent reviewed choices stay
+  available to bounded conversation without becoming universal rules. Clean-room
+  principles came from Andrea_NanoBot's verified-outcome design, with no source
+  code or broader authority imported. Validation passed 66 API tests, all three
+  23-migration database workflows, three production Chromium workflows, and the
+  13/13 `manager_os_v5` offline gate at 100% safety.
 - 2026-07-12: Closed the post-show learning blind spot without a migration.
   Gig editing now captures attendance, gross, lessons, and relationship outcome;
   a deterministic 7–365 day Manager review reports completed activity, explicit

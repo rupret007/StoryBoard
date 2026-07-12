@@ -271,17 +271,19 @@ const checks = [
     `
   },
   {
-    relation: "ManagerRecommendation → task, initiative, and eval example",
+    relation: "ManagerRecommendation → task, decision, initiative, and eval example",
     query: `
       SELECT r."id" AS "recordId", run."artistId" AS "recordArtistId",
-             COALESCE(r."taskId", r."initiativeId", x."id") AS "relatedId",
-             COALESCE(t."artistId", i."artistId", x."artistId") AS "relatedArtistId"
+             COALESCE(r."taskId", r."decisionId", r."initiativeId", x."id") AS "relatedId",
+             COALESCE(t."artistId", d."artistId", i."artistId", x."artistId") AS "relatedArtistId"
       FROM "ManagerRecommendation" r
       INNER JOIN "ManagerRun" run ON run."id" = r."managerRunId"
       LEFT JOIN "Task" t ON t."id" = r."taskId"
+      LEFT JOIN "ManagerDecision" d ON d."id" = r."decisionId"
       LEFT JOIN "ManagerInitiative" i ON i."id" = r."initiativeId"
       LEFT JOIN "ManagerEvalExample" x ON x."recommendationId" = r."id"
       WHERE (t."id" IS NOT NULL AND run."artistId" <> t."artistId")
+         OR (d."id" IS NOT NULL AND run."artistId" <> d."artistId")
          OR (i."id" IS NOT NULL AND run."artistId" <> i."artistId")
          OR (x."id" IS NOT NULL AND run."artistId" <> x."artistId")
       ORDER BY r."id";

@@ -395,6 +395,16 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(await client.task.count({ where: { artistId: artist.id, sourceKey: { startsWith: "manager_plan_v1:" } } }), 6);
   assert.equal(await client.managerMemoryFact.count({ where: { artistId: artist.id, sourceType: "manager_intake" } }), 4);
   const member = await client.bandMember.findFirstOrThrow({ where: { artistId: artist.id } });
+  const thinContext = await manager.contextHealth(artist.id);
+  assert.equal(thinContext.status, "thin");
+  assert.equal(thinContext.gaps[0]?.code, "availability_expectations");
+  await manager.putProfile(artist.id, { bandMode: "hybrid", careerStage: "Regional working band", homeCity: "Chicago", homeRegion: "IL", homeCountry: "US", genres: ["rock", "soul"], businessName: "Manager Test Band LLC", revenueSources: ["private events", "ticketed shows"], currentAssets: ["EP masters", "live video"], constraints: ["Two weekends per month"], educationTopics: ["settlements"], availabilityExpectations: "Respond to holds within 48 hours", budgetToleranceMinor: 0, currency: "USD", twelveMonthAmbition: "Release an EP and book six profitable regional shows", communicationCadence: "weekly", decisionStyle: "guided" }, operator.email, operator.id);
+  const strongContext = await manager.contextHealth(artist.id);
+  assert.equal(strongContext.status, "strong");
+  assert.equal(strongContext.score, 82);
+  assert.equal(strongContext.gaps.some((gap) => gap.code === "budget_tolerance"), false);
+  const foreignContext = await manager.contextHealth(foreignArtist.id);
+  assert.equal(foreignContext.evidenceIds.includes(member.id), false);
   const rememberedAmbition = (await manager.memory(artist.id)).find((fact) => fact.key === "twelve_month_ambition");
   assert.ok(rememberedAmbition);
   const correctedMemory = await manager.patchMemory(artist.id, rememberedAmbition.id, { value: "Release an EP before the regional run" }, true, operator.email, operator.id);
@@ -432,13 +442,44 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v4", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v7", operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v4", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v7", operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+
+  const decisionChat = await manager.chat(artist.id, { message: "Should we book Milwaukee or Detroit?" }, operator.email, operator.id);
+  assert.equal(decisionChat.recommendation?.proposedAction?.type, "create_decision");
+  const acceptedDecisionRecommendation = await manager.recommendation(artist.id, decisionChat.recommendation.id, "accepted", {}, operator.email, operator.id);
+  assert.ok(acceptedDecisionRecommendation.decisionId);
+  assert.equal(acceptedDecisionRecommendation.taskId, null);
+  const conversationDecision = await client.managerDecision.findUniqueOrThrow({ where: { id: acceptedDecisionRecommendation.decisionId } });
+  assert.equal(conversationDecision.artistId, artist.id);
+  assert.equal(conversationDecision.needsFraming, true);
+  assert.equal(conversationDecision.choice, null);
+  await assert.rejects(() => manager.patchDecision(foreignArtist.id, conversationDecision.id, { options: [{ label: "Milwaukee", tradeoff: "Closer" }, { label: "Detroit", tradeoff: "Stronger fit" }] }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  await assert.rejects(() => manager.patchDecision(artist.id, conversationDecision.id, { choice: "Milwaukee", rationale: "Closer", expectedOutcome: "Draw 75 people", reviewAt: "2026-08-15T12:00:00.000Z" }, operator.email, operator.id), /Review and save/);
+  const framedConversationDecision = await manager.patchDecision(artist.id, conversationDecision.id, { title: "Which regional market should get the next booking sprint?", context: "The band has one open travel weekend.", options: [{ label: "Milwaukee", tradeoff: "Lower travel cost and a smaller venue list" }, { label: "Detroit", tradeoff: "Higher travel cost and a stronger genre fit" }] }, operator.email, operator.id);
+  assert.equal(framedConversationDecision.needsFraming, false);
+  await manager.patchDecision(artist.id, conversationDecision.id, { choice: "Milwaukee", rationale: "The date fits the lineup's work schedules", expectedOutcome: "Draw at least 75 people and earn a return invitation", reviewAt: "2026-08-15T12:00:00.000Z" }, operator.email, operator.id);
+  await manager.reviewDecision(artist.id, conversationDecision.id, { outcome: "mixed", note: "Attendance reached 80, but the return invitation is still unknown", evidence: [] }, operator.email, operator.id);
+  const completedDecisionRecommendation = await client.managerRecommendation.findUniqueOrThrow({ where: { id: decisionChat.recommendation.id } });
+  assert.equal(completedDecisionRecommendation.outcome, "completed");
+  assert.equal(completedDecisionRecommendation.outcomeReason, "decision_reviewed");
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: conversationDecision.id, action: "manager.decision_draft_created" } }), 1);
+
+  const decision = await manager.createDecision(artist.id, { workstream: "live", title: "Which nearby market should get the next sprint?", context: "The band has one open weekend", options: [{ label: "Milwaukee", tradeoff: "Lower travel cost and a smaller venue list" }, { label: "Detroit", tradeoff: "Higher travel cost and a stronger genre fit" }], evidence: [] }, operator.email, operator.id);
+  await assert.rejects(() => manager.patchDecision(foreignArtist.id, decision.id, { choice: "Milwaukee", rationale: "Closer", expectedOutcome: "Draw 75 people", reviewAt: "2026-08-15T12:00:00.000Z" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  const decided = await manager.patchDecision(artist.id, decision.id, { choice: "Milwaukee", rationale: "The date fits the lineup's work schedules", expectedOutcome: "Draw at least 75 people and earn a return invitation", reviewAt: "2026-08-15T12:00:00.000Z" }, operator.email, operator.id);
+  assert.equal(decided.status, "decided");
+  const reviewed = await manager.reviewDecision(artist.id, decision.id, { outcome: "mixed", note: "Attendance reached 80, but the return invitation is still unknown", evidence: [] }, operator.email, operator.id);
+  assert.equal(reviewed.status, "reviewed");
+  assert.equal(reviewed.choice, "Milwaukee");
+  assert.equal(reviewed.reviewOutcome, "mixed");
+  await assert.rejects(() => manager.reviewDecision(artist.id, decision.id, { outcome: "worked", note: "Rewrite the result", evidence: [] }, operator.email, operator.id), /already been reviewed/);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: decision.id, action: "manager.decision_reviewed" } }), 1);
 
   const firstChat = await manager.chat(artist.id, { message: "What should we focus on this week?" }, operator.email, operator.id);
   const secondChat = await manager.chat(artist.id, { conversationId: firstChat.conversationId, message: "And what about our next show?" }, operator.email, operator.id);
@@ -456,7 +497,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const persistedConversation = await manager.conversation(artist.id, firstChat.conversationId, operator.id);
   assert.deepEqual(persistedConversation.messages.map((message) => message.role), ["user", "assistant", "user", "assistant"]);
   assert.equal(persistedConversation.messages.find((message) => message.id === firstChat.message.id)?.feedback?.helpful, true);
-  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 2);
+  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 3);
   await assert.rejects(() => manager.conversation(foreignArtist.id, firstChat.conversationId, operator.id), (error) => error?.getStatus?.() === 404);
 
   const venue = await client.venue.create({ data: { artistId: artist.id, name: "Owned Room", city: "Chicago" } });

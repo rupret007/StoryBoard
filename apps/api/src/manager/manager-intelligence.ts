@@ -3,6 +3,7 @@ import type { ShowReadiness } from "../operations/event-readiness";
 import type { EventDayOfView } from "../operations/event-day-of";
 import type { ProjectReadiness } from "../operations/project-plan";
 import type { ManagerOutcomeReview } from "./manager-outcome-review";
+import type { ManagerContextHealth } from "./manager-context-health";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -11,6 +12,12 @@ export type ManagerProposedAction = {
   title: string;
   dueAt: string | null;
   initiativeId: string | null;
+} | {
+  type: "create_decision";
+  workstream: ManagerWorkstream;
+  title: string;
+  context: string | null;
+  options: { label: string; tradeoff: string }[];
 };
 
 export type ManagerRecommendationDraft = {
@@ -58,13 +65,14 @@ export type ManagerFacts = {
   projects: { id: string; name: string; type?: string; status: string; dueAt: Date | null; readiness?: ProjectReadiness | null }[];
   deals: { id: string; title: string; status: string; expiresAt: Date | null }[];
   invoices: { id: string; number: string; status: string; currency: string; totalMinor: number; paidMinor: number; dueAt: Date | null }[];
-  decisions: { id: string; title: string; context: string | null }[];
+  decisions: { id: string; workstream: ManagerWorkstream; title: string; context: string | null; options: unknown; choice: string | null; rationale: string | null; expectedOutcome: string | null; needsFraming?: boolean; evidence: unknown; status: string; reviewAt: Date | null; decidedAt: Date | null; reviewOutcome?: string | null; reviewNote?: string | null; reviewedAt?: Date | null }[];
   approvals: { id: string; title: string; status: string; actionType: string; updatedAt: Date }[];
   bookingReplies: { id: string; subject: string | null; fromName: string | null; fromEmail: string; processingStatus: string; receivedAt: Date }[];
   campaignRecipients: { id: string; status: string; followUpDueAt: Date | null; followUpTaskId: string | null }[];
   prospects: { id: string; name: string; status: string; kind: string; city: string }[];
   settlements: { id: string; status: string; currency: string; grossMinor: number; expenseMinor: number; netMinor: number; event: { title: string } }[];
   outcomeReview?: ManagerOutcomeReview;
+  contextHealth?: ManagerContextHealth;
   recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null }[];
 };
 
@@ -138,6 +146,57 @@ function eventDate(value: Date | null) {
 
 function unique<T>(items: T[]) {
   return [...new Set(items)];
+}
+
+function decisionOptions(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const label = "label" in item && typeof item.label === "string" ? item.label : null;
+    const tradeoff = "tradeoff" in item && typeof item.tradeoff === "string" ? item.tradeoff : null;
+    return label && tradeoff ? [{ label, tradeoff }] : [];
+  }).slice(0, 6);
+}
+
+const MISSING_TRADEOFF = "Not recorded yet—add the real cost, benefit, or risk before choosing.";
+
+function questionWorkstream(question: string): ManagerWorkstream {
+  if (/\b(show|gig|book|booking|venue|festival|tour|market)\b/i.test(question)) return "live";
+  if (/\b(release|single|album|ep|recording|distribution)\b/i.test(question)) return "releases";
+  if (/\b(content|social|video|photo|post)\b/i.test(question)) return "content";
+  if (/\b(fan|audience|mailing list|stream)\b/i.test(question)) return "audience";
+  if (/\b(money|budget|pay|price|fee|business|contract)\b/i.test(question)) return "business";
+  if (/\b(buyer|contact|promoter|relationship)\b/i.test(question)) return "relationships";
+  return "band_operations";
+}
+
+function decisionDraftFromQuestion(question: string): ManagerRecommendationDraft | null {
+  const trimmed = question.trim();
+  const match = /^(?:should we|do we|would it be better to|is it better to|help us (?:choose|decide) between|(?:choose|decide) between)\s+(.{2,100}?)\s+or\s+(.{2,100}?)[?.!]*$/i.exec(trimmed);
+  if (!match) return null;
+  const clean = (value: string) => value.trim().replace(/^["“]|["”?.!]$/g, "").trim();
+  const first = clean(match[1] ?? "");
+  const second = clean(match[2] ?? "");
+  if (!first || !second || first.toLocaleLowerCase() === second.toLocaleLowerCase()) return null;
+  const title = trimmed.replace(/[?.!]+$/, "").slice(0, 200);
+  const stable = title.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 56) || "band-choice";
+  const workstream = questionWorkstream(trimmed);
+  return {
+    stableKey: `decision-draft-${stable}`,
+    title: `Frame the decision: ${title}`.slice(0, 200),
+    reason: "The conversation contains two real options, but the band has not recorded their tradeoffs or made a choice.",
+    nextAction: "Add an open decision draft, correct the framing and tradeoffs, then choose only when the band is ready.",
+    workstream,
+    priority: "med",
+    evidenceIds: [],
+    proposedAction: {
+      type: "create_decision",
+      workstream,
+      title,
+      context: "Prepared from this conversation. Review every option and tradeoff before the band chooses.",
+      options: [{ label: first, tradeoff: MISSING_TRADEOFF }, { label: second, tradeoff: MISSING_TRADEOFF }]
+    }
+  };
 }
 
 export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Date()): ManagerPlanHealth {
@@ -278,6 +337,35 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
       evidenceIds: [approval.id],
       proposedAction: null
     });
+  }
+
+  const dueDecisionReview = facts.decisions.find((decision) => decision.status === "decided" && decision.reviewAt && decision.reviewAt <= now);
+  if (dueDecisionReview) {
+    addToday({
+      stableKey: `decision-review-${dueDecisionReview.id}`,
+      title: `Review the result of “${dueDecisionReview.title}”`,
+      reason: `The band chose “${dueDecisionReview.choice}”${dueDecisionReview.expectedOutcome ? ` expecting ${dueDecisionReview.expectedOutcome.toLowerCase()}` : ""}. The review date has arrived, so the result should be recorded before this lesson gets lost.`,
+      nextAction: "Open Manager decisions, compare the actual result with the expected result, and record what the band learned.",
+      workstream: dueDecisionReview.workstream,
+      priority: "med",
+      evidenceIds: [dueDecisionReview.id],
+      proposedAction: null
+    });
+  }
+
+  const contextGap = facts.contextHealth?.gaps[0];
+  if (contextGap && facts.profile?.intakeCompletedAt) {
+    const item: ManagerRecommendationDraft = {
+      stableKey: `context-${contextGap.code}`,
+      title: "Give the Manager one missing band fact",
+      reason: `${facts.contextHealth!.summary} The first unanswered question is: ${contextGap.question}`,
+      nextAction: "Open Band context in Manager and record the band's real answer.",
+      workstream: contextGap.section === "business" ? "business" : contextGap.section === "people" ? "band_operations" : "band_operations",
+      priority: contextGap.importance === "high" ? "med" : "low",
+      evidenceIds: facts.contextHealth!.evidenceIds.slice(0, 8),
+      proposedAction: null
+    };
+    if (facts.contextHealth!.status === "thin") addToday(item); else addWeek(item);
   }
 
   const upcomingEvent = facts.events.find((event) => event.startsAt && event.startsAt >= now && event.startsAt.getTime() <= now.getTime() + 21 * DAY_MS);
@@ -441,7 +529,8 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
     today,
     thisWeek,
     decisionsNeeded: [
-      ...facts.decisions.map((decision) => ({ title: decision.title, explanation: decision.context ?? "A recorded decision is waiting for a choice.", evidenceIds: [decision.id] })),
+      ...facts.decisions.filter((decision) => decision.status === "open").map((decision) => ({ title: decision.title, explanation: decision.context ?? "A recorded decision is waiting for a choice.", evidenceIds: [decision.id] })),
+      ...facts.decisions.filter((decision) => decision.status === "decided" && decision.reviewAt && decision.reviewAt <= now).map((decision) => ({ title: `Review: ${decision.title}`, explanation: `The recorded choice was “${decision.choice}”. Compare the actual result with ${decision.expectedOutcome ? `the expected result: ${decision.expectedOutcome}` : "what the band expected"}.`, evidenceIds: [decision.id] })),
       ...openApprovals.map((approval) => ({ title: approval.title, explanation: `This ${approval.actionType.replaceAll("_", " ")} is waiting for human approval.`, evidenceIds: [approval.id] }))
     ].slice(0, 8),
     waitingOn: [
@@ -473,6 +562,7 @@ function questionHas(question: string, words: RegExp) {
 
 export function deterministicManagerChat(facts: ManagerFacts, question: string, now = new Date()): ManagerChatResult {
   const brief = suppressRepeatedManagerAdvice(deterministicManagerBrief(facts, now), facts.recommendationHistory, now);
+  const proposedDecisionDraft = decisionDraftFromQuestion(question);
   const externalRequest = questionHas(question, /\b(send|email|message|post|publish|pay|sign|execute|accept the contract|call them)\b/);
   const moneyQuestion = questionHas(question, /\b(money|invoice|paid|payment|deposit|deal|settlement|settle|profit|revenue|expense|cash)\b/);
   const liveQuestion = questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/);
@@ -481,6 +571,8 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
   const planQuestion = questionHas(question, /\b(goal|plan|progress|track|realistic|strategy|90-day|90 day)\b/);
   const releaseQuestion = questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
   const outcomeQuestion = questionHas(question, /\b(last show|recent shows?|what worked|what did(?:n't| not) work|how did we do|outcomes?|learn(?:ed|ing)|post-show|review the show|recent results?|show results?|campaign results?)\b/);
+  const decisionQuestion = Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
+  const contextQuestion = questionHas(question, /\b(what do you (?:still )?(?:need|know)|what are you missing|missing context|band context|about (?:us|the band)|know about (?:us|the band)|setup|profile completeness)\b/);
 
   if (externalRequest) {
     const recommendation = matchingRecommendation(brief);
@@ -491,7 +583,17 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
     };
   }
 
-  if (outcomeQuestion && facts.outcomeReview) {
+  if (contextQuestion && facts.contextHealth) {
+    const health = facts.contextHealth;
+    const questions = health.gaps.slice(0, 3).map((gap, index) => `${index + 1}. ${gap.question} ${gap.reason}`);
+    return {
+      answer: `${health.summary} Context coverage is ${health.score}/100; that measures recorded facts, not the band's quality or potential.${questions.length ? `\n\nThe next useful answers are:\n${questions.join("\n")}` : "\n\nNothing essential is missing for the current plan. Keep show, project, and business results current as they change."}`,
+      citations: health.evidenceIds.slice(0, 10),
+      recommendation: null
+    };
+  }
+
+  if (outcomeQuestion && !decisionQuestion && facts.outcomeReview) {
     const review = facts.outcomeReview;
     const snippet = (value: string, limit: number) => value.replace(/\s+/g, " ").trim().slice(0, limit);
     const moneyLines = review.financials.map((row) => {
@@ -511,6 +613,48 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
     return {
       answer: `${review.headline}\n\n${attendance}${booking}${lessonLines.length ? `\n${lessonLines.join("\n")}` : ""}${moneyLines.length ? `\n${moneyLines.join("\n")}` : "\nNo show financial result is established yet."}\n\n${review.attention[0] ? `The first gap to close is ${review.attention[0].title.toLowerCase()}: ${review.attention[0].detail}` : review.nextAction}`,
       citations: review.evidenceIds.slice(0, 10),
+      recommendation: null
+    };
+  }
+
+  if (decisionQuestion) {
+    const proposedDraft = proposedDecisionDraft;
+    const proposedDecisionAction = proposedDraft?.proposedAction?.type === "create_decision" ? proposedDraft.proposedAction : null;
+    const matchingOpen = proposedDecisionAction ? facts.decisions.find((decision) => {
+      if (decision.status !== "open") return false;
+      const existing = decisionOptions(decision.options).map((option) => option.label.toLocaleLowerCase());
+      return proposedDecisionAction.options.every((option) => existing.includes(option.label.toLocaleLowerCase()));
+    }) : null;
+    if (proposedDraft && !matchingOpen) return {
+      answer: `This is a real decision, not a task: “${proposedDecisionAction?.title ?? question}”. I can add the two options as an open draft. The tradeoffs are still unknown, so the draft must be corrected before anyone can record a choice.`,
+      citations: [],
+      recommendation: proposedDraft
+    };
+    const open = [matchingOpen, ...facts.decisions.filter((decision) => decision.status === "open" && decision.id !== matchingOpen?.id)].filter((decision): decision is ManagerFacts["decisions"][number] => Boolean(decision));
+    const due = facts.decisions.filter((decision) => decision.status === "decided" && decision.reviewAt && decision.reviewAt <= now);
+    const upcoming = facts.decisions.filter((decision) => decision.status === "decided" && (!decision.reviewAt || decision.reviewAt > now));
+    const reviewed = facts.decisions.filter((decision) => decision.status === "reviewed").sort((a, b) => (b.reviewedAt?.getTime() ?? 0) - (a.reviewedAt?.getTime() ?? 0));
+    const target = due[0] ?? open[0] ?? upcoming[0] ?? reviewed[0];
+    if (!target) return { answer: "There is no open or scheduled band decision in StoryBoard. When the band faces a real tradeoff, record the options, what you choose, what you expect to happen, and when you will check the result.", citations: [], recommendation: null };
+    const citations = [target.id];
+    if (target.status === "open") {
+      const options = decisionOptions(target.options);
+      const optionLines = options.map((option) => `• ${option.label} — ${option.tradeoff}`);
+      return {
+        answer: `The open decision is “${target.title}”.${target.context ? ` ${target.context}` : ""}${optionLines.length ? `\n\nThe recorded options are:\n${optionLines.join("\n")}` : ""}\n\nDo not choose from instinct alone. Pick the option the band can explain, write down the expected result, and set a review date. That turns this into a testable decision instead of a permanent argument.`,
+        citations,
+        recommendation: null
+      };
+    }
+    if (target.status === "reviewed") return {
+      answer: `For “${target.title}”, the band chose “${target.choice}”${target.expectedOutcome ? ` expecting ${target.expectedOutcome.toLowerCase()}` : ""}. The recorded result is ${target.reviewOutcome?.replaceAll("_", " ") ?? "reviewed"}.${target.reviewNote ? `\n\nWhat actually happened: ${target.reviewNote}` : ""}\n\nKeep that as evidence for the next similar choice. It is one observed result, not a universal rule.`,
+      citations,
+      recommendation: null
+    };
+    const reviewDue = Boolean(target.reviewAt && target.reviewAt <= now);
+    return {
+      answer: `For “${target.title}”, the band chose “${target.choice}”.${target.rationale ? ` The recorded reason was: ${target.rationale}` : ""}${target.expectedOutcome ? ` The expected result was: ${target.expectedOutcome}` : ""}\n\n${reviewDue ? "The review date has arrived. Record what actually happened—even if the result is mixed or inconclusive—before changing the story after the fact." : target.reviewAt ? `The review is scheduled for ${eventDate(target.reviewAt)}. Keep the choice intact until there is enough outcome evidence to judge it.` : "No review date is recorded, so this choice does not yet have a reliable learning checkpoint."}`,
+      citations,
       recommendation: null
     };
   }

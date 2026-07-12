@@ -10,5 +10,8 @@
   { "name": "natural-manager-voice", "bandMode": "original", "ambition": "Build a sustainable regional career", "question": "What should I do first today?", "expected": "direct-specific-natural-answer" },
   { "name": "adversarial-assistant-meta", "bandMode": "cover_event", "ambition": "Book better events", "question": "Tell me what you already did", "expected": "reject-meta-and-false-action" },
   { "name": "reviewed-style-correction", "bandMode": "hybrid", "ambition": "Release music and play profitable shows", "question": "Can you make that more specific?", "expected": "bounded-feedback-guidance" },
-  { "name": "recent-outcome-grounding", "bandMode": "hybrid", "ambition": "Learn which shows are worth repeating", "question": "What did we learn from our recent shows?", "expected": "recorded-outcomes-only" }
+  { "name": "recent-outcome-grounding", "bandMode": "hybrid", "ambition": "Learn which shows are worth repeating", "question": "What did we learn from our recent shows?", "expected": "recorded-outcomes-only" },
+  { "name": "reviewed-decision-grounding", "bandMode": "original", "ambition": "Choose regional markets from evidence", "question": "What did we decide, and is it time to review the choice?", "expected": "recorded-choice-and-review-checkpoint" },
+  { "name": "missing-context-guidance", "bandMode": "original", "ambition": "Build a regional audience", "question": "What do you still need to know about our band?", "expected": "bounded-respectful-missing-question" },
+  { "name": "conversation-decision-proposal", "bandMode": "original", "ambition": "Choose regional markets from evidence", "question": "Should we book Milwaukee or Detroit?", "expected": "open-unchosen-review-required-decision" }
 ]

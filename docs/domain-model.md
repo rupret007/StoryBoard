@@ -13,7 +13,12 @@ runs, and integrations.
 `ArtistOperatingProfile` stores how the band works and what it is trying to
 achieve. `BandMember` describes real performers/crew independently of app
 logins. `ManagerGoal`, `ManagerInitiative`, and `ManagerDecision` turn ambition
-into measurable, reviewable work. `ManagerMemoryFact` stores only explicit
+into measurable, reviewable work. A decision stores two to six options and
+their tradeoffs; a recorded choice also requires rationale, expected outcome,
+and review date. A later immutable review records `worked`, `mixed`,
+`did_not_work`, or `inconclusive` plus the band's observed result. Due reviews
+are operating work, while reviewed results are bounded evidence rather than a
+rule the system may generalize automatically. `ManagerMemoryFact` stores only explicit
 facts with source, confidence, sensitivity, and confirmation time.
 `ManagerRun` and `ManagerRecommendation` preserve the prompt/model version,
 facts read, structured output, safe proposed actions, outcome, and runtime
@@ -27,8 +32,11 @@ only bounded reason aggregates affect code-owned response presentation.
 Assistant messages can reference a reviewable
 `ManagerRecommendation`, but cannot directly perform provider, legal, or
 financial actions. Recommendation outcome reason/note/time support reviewed
-learning; accepted recommendations link to a task and task completion is
-attributed automatically. `ManagerGoalProgressEvent` is the append-only source
+learning; accepted recommendations link to a task or one open decision draft.
+Conversation-created decisions have `needsFraming=true`, cannot be chosen until
+a member saves real options/tradeoffs, and complete the linked recommendation
+only after an outcome review. Task completion is attributed automatically.
+`ManagerGoalProgressEvent` is the append-only source
 for manual numeric progress updates and retains prior/current values and actor.
 Plan health is derived—not stored—from goal measurement, deadlines, linked
 initiatives, blockers, task ownership/state, and elapsed timeline. Nullable,
@@ -46,6 +54,11 @@ scenario results; they cannot activate a version.
 events, projects, tasks, campaign outcomes, invoices, expenses, and settlements.
 It carries premise-coverage confidence and evidence IDs, groups money by
 currency, and never derives net income for a show without a settlement.
+`ManagerContextHealth` is another derived, non-persistent view. It measures
+recorded identity/strategy, people/responsibilities, business facts, and active
+execution on four transparent 25-point dimensions. It orders unanswered
+questions by operational importance and carries evidence IDs; it never scores
+talent, artistic quality, likelihood of success, or facts that were not saved.
 
 ### Events, music, projects, and deals
 
