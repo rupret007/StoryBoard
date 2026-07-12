@@ -179,8 +179,21 @@ mock-safe provider adapters.
 - [x] Expose bounded read APIs for one show or the next 1–365 days and render
   the same signal in Band operations, including direct generation of a missing
   advance checklist.
+- [x] Make the readiness diagnosis actionable in the event card: record every
+  active member's availability and edit artist-owned venue/contact/setlist,
+  location, ordered show-day timing, money, production notes, and technical
+  links without leaving the workflow.
+- [x] Validate partial event schedule edits against the merged saved record so
+  impossible load-in/soundcheck/doors/set/curfew ordering cannot be introduced
+  by changing a single field.
 - [x] Feed the shared signal into Manager briefs and conversation so the model
   and deterministic fallback cannot create competing readiness opinions.
+- [x] Add a derived day-of operating view with current/next timing, open and
+  overdue work, lineup state, contacts, setlist/production facts, and recorded
+  fee/deposit/payment/balance state. Keep it evidence-backed and non-persistent.
+- [x] Ship the phone-oriented `/operations/events/:id` workspace with explicit
+  availability and task completion actions, and let Manager prioritize the
+  same day-of signal only inside the 24-hour show window.
 - [x] Add deterministic regressions for incomplete records, urgency,
   unavailable-performer blocking, confidence, evidence, and a fully recorded
   ready show. No migration or provider access is required.
@@ -210,9 +223,26 @@ mock-safe provider adapters.
   snapshot, and requires the human to attach it. Do not claim automatic
   attachment until binary Drive upload and Gmail attachment adapters pass real
   provider acceptance tests.
-- [ ] Rich schedule-item editing, project milestone/budget line-item UI,
+- [ ] Rich schedule-item editing, project budget line-item UI,
   technician public setlist pages, and evidence-file upload are follow-on UX
   packages; their underlying event/project/document boundaries are in place.
+
+### P0 — Executable release and project management (completed 2026-07-12)
+
+- [x] Reuse artist-scoped Tasks as project milestones and permit tenant-checked
+  nullable `projectId` links through the task API; do not create a competing
+  milestone authority.
+- [x] Add `project_plan_v1` release, content campaign, tour, and business
+  templates dated backward from the project's real target date. Stable source
+  keys make generation idempotent without overwriting user work.
+- [x] Derive explainable readiness from date, milestone completion/ownership,
+  overdue/blocked work, metrics, assets, budget/spend, expenses, and events.
+- [x] Ship a focused project workspace for milestone owners/status, project
+  facts, success metrics, budget, and working asset links.
+- [x] Feed the same project readiness and next milestone into Manager briefs
+  and release/project conversation; unsupported project outcomes remain unknown.
+- [x] Cover tailored templates, risk classification, foreign project-link
+  rejection, generation replay, audits, browser execution, and Manager grounding.
 
 ### P2 — requires deployment or product decisions
 
@@ -245,6 +275,32 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Added executable project management without a new milestone
+  table. `project_plan_v1` generates type-specific, source-keyed Task sequences;
+  project readiness explains progress, ownership, blockers, metrics, assets,
+  and budget/spend; the focused workspace and Manager consume the same signal.
+  Validation passed 56 API tests, all three database workflows, and all three
+  production Chromium workflows including release generation, assignment,
+  completion, assets/budget/metrics, and grounded Manager reporting. No schema
+  migration or provider access was required.
+- 2026-07-12: Added the deterministic `EventDayOfView`, tenant-safe
+  `GET /events/:id/day-of`, phone-oriented show workspace, and Manager 24-hour
+  day-of prioritization. The view identifies the next checkpoint, work and
+  lineup pressure, contacts, setlist/production references, and recorded money
+  without inventing missing facts. Validation passed 53 API tests, all three
+  database workflows, and all three production Chromium workflows including
+  day-of rendering and audited advance-task completion. No migration or
+  provider access was required.
+- 2026-07-12: Completed the actionable gig-readiness loop. Band operations now
+  edits lineup responses and the show facts used by the shared readiness
+  policy; service-layer validation preserves tenant ownership and the complete
+  show-day timeline across partial patches. Validation passed 51 API tests,
+  all three database workflows, and three Chromium workflows including event
+  editing, score improvement, advance generation, and Manager reporting the
+  same evidence-backed score. Repeated local builds may require the documented
+  4 GB Node heap fallback; changing test emission to SWC was rejected because
+  it breaks Node ESM discovery of compiled CommonJS named exports. No migration
+  or provider access was required.
 - 2026-07-12: Added shared, deterministic show-readiness intelligence across
   lineup, schedule, contacts, deal/payment, advance, and performance records.
   The new tenant-scoped APIs, Band operations card, Manager brief/chat signal,

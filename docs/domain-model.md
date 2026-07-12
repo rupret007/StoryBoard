@@ -47,11 +47,25 @@ expenses, and one settlement. Confirmed opportunities have at most one event.
 `ShowReadiness` is a derived, non-persistent view over those artist-owned
 records. It exposes category scores, confidence, evidence IDs, and prioritized
 gaps so the event workspace and Manager use one explainable readiness policy.
+Event timeline writes preserve `startsAt <= endsAt` and the recorded show-day
+order load-in → soundcheck → doors → set → curfew. Patch validation merges the
+new values with existing values before checking this invariant.
+`EventDayOfView` is another non-persistent projection. It combines the shared
+readiness result with the ordered timeline, active-member responses, event
+tasks, accepted terms, and unique invoices to identify the current/next
+checkpoint, work pressure, and recorded payment state. It never infers that an
+unrecorded payment, agreement, contact, or schedule fact exists.
 
 `Song` and `Setlist` provide a practical artist-owned library with duration,
 key, BPM, lead vocalist, ordered songs/breaks/notes, and event linkage.
 `ArtistProject` groups release, content, tour, and business work with goals,
 assets, metrics, budget, events, tasks, and expenses.
+Project-linked `Task` rows are the executable milestones; template-created
+milestones carry nullable `project_plan_v1:<project>:<step>` source keys for
+idempotent fill-missing behavior. `ProjectReadiness` is a non-persistent view of
+target date, milestone progress/ownership/blockers, metrics, assets, budget,
+expenses, and linked events. It exposes its score, confidence, gaps, next
+milestone, and evidence rather than asserting an unsupported project outcome.
 
 `DealOffer` and immutable versioned `DealMemo` snapshots lead into an
 `Agreement` based on an owner-activated `DocumentTemplate`. Generated

@@ -19,6 +19,8 @@ import {
 import { MANAGER_PROMPT_VERSION, runManagerEvaluation } from "./manager-evaluation";
 import { MANAGER_PLAN_TEMPLATE_VERSION, managerPlanTemplate } from "./manager-plan";
 import { deterministicShowReadiness } from "../operations/event-readiness";
+import { deterministicEventDayOf } from "../operations/event-day-of";
+import { deterministicProjectReadiness } from "../operations/project-plan";
 import { managerActionMayExecuteDirectly } from "./manager-policy";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
@@ -271,8 +273,8 @@ export class ManagerService {
       this.prisma.client.managerInitiative.findMany({ where: { artistId, status: { in: [ManagerInitiativeStatus.proposed, ManagerInitiativeStatus.active, ManagerInitiativeStatus.blocked] } }, take: 30 }),
       this.prisma.client.task.findMany({ where: { artistId, OR: [{ status: { not: "done" } }, { initiativeId: { not: null } }] }, orderBy: { dueAt: "asc" }, take: 100 }),
       this.prisma.client.bookingOpportunity.findMany({ where: { artistId, stage: { not: "closed" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
-      this.prisma.client.bandEvent.findMany({ where: { artistId, status: { in: ["draft", "hold", "confirmed"] } }, include: { participants: true, tasks: true, setlist: { include: { items: { select: { id: true } } } }, deals: { include: { agreements: { select: { id: true, status: true } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } }, orderBy: { startsAt: "asc" }, take: 30 }),
-      this.prisma.client.artistProject.findMany({ where: { artistId, status: { in: ["draft", "active", "paused"] } }, orderBy: { dueAt: "asc" }, take: 30 }),
+      this.prisma.client.bandEvent.findMany({ where: { artistId, status: { in: ["draft", "hold", "confirmed"] } }, include: { participants: true, tasks: true, schedule: { orderBy: { sortOrder: "asc" } }, setlist: { include: { items: { select: { id: true } } } }, deals: { include: { agreements: { select: { id: true, status: true } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } }, orderBy: { startsAt: "asc" }, take: 30 }),
+      this.prisma.client.artistProject.findMany({ where: { artistId, status: { in: ["draft", "active", "paused"] } }, include: { tasks: true, expenses: true, events: { select: { id: true } } }, orderBy: { dueAt: "asc" }, take: 30 }),
       this.prisma.client.dealOffer.findMany({ where: { artistId, status: { in: ["draft", "proposed", "negotiating", "accepted"] } }, orderBy: { updatedAt: "desc" }, take: 30 }),
       this.prisma.client.invoice.findMany({ where: { artistId, status: { in: ["issued", "partially_paid", "overdue"] } }, orderBy: { dueAt: "asc" }, take: 30 }),
       this.prisma.client.managerDecision.findMany({ where: { artistId, status: "open" }, orderBy: { updatedAt: "desc" }, take: 20 }),
@@ -284,6 +286,12 @@ export class ManagerService {
       this.prisma.client.settlement.findMany({ where: { artistId, status: "draft" }, select: { id: true, status: true, currency: true, grossMinor: true, expenseMinor: true, netMinor: true, event: { select: { title: true } } }, orderBy: { updatedAt: "asc" }, take: 20 }),
       this.prisma.client.managerRecommendation.findMany({ where: { managerRun: { artistId }, outcome: { not: "suggested" } }, select: { id: true, stableKey: true, outcome: true, outcomeReason: true, outcomeAt: true, updatedAt: true, task: { select: { status: true } } }, orderBy: { updatedAt: "desc" }, take: 100 })
     ]);
+    const eventsWithSignals = events.map((event) => {
+      if (event.type !== "gig") return { ...event, readiness: null, dayOf: null };
+      const readiness = deterministicShowReadiness(event, members);
+      return { ...event, readiness, dayOf: deterministicEventDayOf(event, readiness, members) };
+    });
+    const projectsWithSignals = projects.map((project) => ({ ...project, readiness: deterministicProjectReadiness(project) }));
     return {
       artist,
       profile,
@@ -292,8 +300,8 @@ export class ManagerService {
       initiatives,
       tasks,
       opportunities,
-      events: events.map((event) => ({ ...event, readiness: event.type === "gig" ? deterministicShowReadiness(event, members) : null })),
-      projects,
+      events: eventsWithSignals,
+      projects: projectsWithSignals,
       deals,
       invoices,
       decisions,
@@ -321,8 +329,8 @@ export class ManagerService {
       initiatives: facts.initiatives,
       tasks: facts.tasks.map((row) => ({ id: row.id, title: row.title, status: row.status, ownerLabel: row.ownerLabel, dueAt: row.dueAt, opportunityId: row.opportunityId, eventId: row.eventId, projectId: row.projectId, initiativeId: row.initiativeId })),
       opportunities: facts.opportunities.map((row) => ({ id: row.id, title: row.title, stage: row.stage, targetDate: row.targetDate, venueId: row.venueId })),
-      events: facts.events.map((row) => ({ id: row.id, type: row.type, status: row.status, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, venueId: row.venueId, guaranteeMinor: row.guaranteeMinor, depositMinor: row.depositMinor, currency: row.currency, readiness: row.readiness, participants: row.participants.map((participant) => ({ id: participant.id, bandMemberId: participant.bandMemberId, response: participant.response })) })),
-      projects: facts.projects.map((row) => ({ id: row.id, type: row.type, status: row.status, name: row.name, startsAt: row.startsAt, dueAt: row.dueAt, budgetMinor: row.budgetMinor, currency: row.currency, successMetrics: row.successMetrics })),
+      events: facts.events.map((row) => ({ id: row.id, type: row.type, status: row.status, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, venueId: row.venueId, guaranteeMinor: row.guaranteeMinor, depositMinor: row.depositMinor, currency: row.currency, readiness: row.readiness, dayOf: row.dayOf, participants: row.participants.map((participant) => ({ id: participant.id, bandMemberId: participant.bandMemberId, response: participant.response })) })),
+      projects: facts.projects.map((row) => ({ id: row.id, type: row.type, status: row.status, name: row.name, startsAt: row.startsAt, dueAt: row.dueAt, budgetMinor: row.budgetMinor, currency: row.currency, successMetrics: row.successMetrics, readiness: row.readiness })),
       deals: facts.deals.map((row) => ({ id: row.id, eventId: row.eventId, opportunityId: row.opportunityId, status: row.status, title: row.title, offerAmountMinor: row.offerAmountMinor, currency: row.currency, depositMinor: row.depositMinor, depositDueAt: row.depositDueAt, balanceDueAt: row.balanceDueAt, performanceDate: row.performanceDate, expiresAt: row.expiresAt })),
       invoices: facts.invoices.map((row) => ({ id: row.id, dealOfferId: row.dealOfferId, eventId: row.eventId, number: row.number, status: row.status, currency: row.currency, totalMinor: row.totalMinor, paidMinor: row.paidMinor, dueAt: row.dueAt })),
       decisions: facts.decisions,
@@ -613,6 +621,9 @@ export class ManagerService {
       ...facts.events.flatMap((x) => x.deals.flatMap((deal) => [deal.id, ...deal.agreements.map((agreement) => agreement.id), ...deal.invoices.map((invoice) => invoice.id)])),
       ...facts.events.flatMap((x) => x.invoices.map((invoice) => invoice.id)),
       ...facts.projects.map((x) => x.id),
+      ...facts.projects.flatMap((x) => x.tasks.map((task) => task.id)),
+      ...facts.projects.flatMap((x) => x.expenses.map((expense) => expense.id)),
+      ...facts.projects.flatMap((x) => x.events.map((event) => event.id)),
       ...facts.deals.map((x) => x.id),
       ...facts.invoices.map((x) => x.id),
       ...facts.decisions.map((x) => x.id),

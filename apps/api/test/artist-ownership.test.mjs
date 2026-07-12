@@ -146,8 +146,8 @@ test("booking venue links stay within the current artist and may be cleared", as
   assert.equal(events.length, 2);
 });
 
-test("task opportunity links stay within the current artist and may be cleared", async () => {
-  const calls = { opportunityLookups: 0, creates: 0, updates: 0 };
+test("task opportunity and project links stay within the current artist and may be cleared", async () => {
+  const calls = { opportunityLookups: 0, projectLookups: 0, creates: 0, updates: 0 };
   const { audit, events } = auditSpy();
   const service = new tasksMod.TasksService(
     {
@@ -158,6 +158,12 @@ test("task opportunity links stay within the current artist and may be cleared",
             return where.id === "opportunity-a" && where.artistId === "artist-a"
               ? { id: "opportunity-a" }
               : null;
+          }
+        },
+        artistProject: {
+          findFirst: async ({ where }) => {
+            calls.projectLookups += 1;
+            return where.id === "project-a" && where.artistId === "artist-a" ? { id: "project-a" } : null;
           }
         },
         task: {
@@ -194,14 +200,28 @@ test("task opportunity links stay within the current artist and may be cleared",
   assert.equal(calls.updates, 0);
   assert.equal(events.length, 0);
 
+  await assert.rejects(
+    () => service.create("artist-a", { title: "Off-tenant project task", projectId: "project-b" }),
+    (error) => assertNotFound(error, "Project not found")
+  );
+  await assert.rejects(
+    () => service.patch("artist-a", "task-a", { projectId: "project-b" }),
+    (error) => assertNotFound(error, "Project not found")
+  );
+  assert.equal(calls.creates, 0);
+  assert.equal(calls.updates, 0);
+  assert.equal(events.length, 0);
+
   await service.create("artist-a", {
     title: "Owned opportunity task",
     opportunityId: "opportunity-a"
   });
   await service.patch("artist-a", "task-a", { opportunityId: null });
-  assert.equal(calls.creates, 1);
-  assert.equal(calls.updates, 1);
-  assert.equal(events.length, 2);
+  await service.create("artist-a", { title: "Owned project task", projectId: "project-a" });
+  await service.patch("artist-a", "task-a", { projectId: null });
+  assert.equal(calls.creates, 2);
+  assert.equal(calls.updates, 2);
+  assert.equal(events.length, 4);
 });
 
 test("booking and task request schemas reject malformed values and unknown fields", () => {
@@ -230,6 +250,7 @@ test("booking and task request schemas reject malformed values and unknown field
     taskSchemaMod.taskCreateSchema.safeParse({
       title: "Confirm backline",
       opportunityId: "opportunity-a",
+      projectId: "project-a",
       dueAt: "2026-07-10"
     }).success,
     true

@@ -125,8 +125,21 @@ use the same signal instead of inventing a second readiness opinion.
 **Band operations:** Confirming a booking opportunity idempotently creates a
 gig event. Events hold availability, logistics, show advance tasks, setlists,
 deal/invoice links, expenses, and settlement state. The same workspace includes
-a shared song library, practical setlists, release/content/tour/business
-projects, versioned deal memos, owner-activated agreement templates, immutable
+a readiness editor for every active performer, venue/location, day-of contact,
+setlist, ordered show-day timing, guarantee/deposit, production notes, and
+technical-document links. Partial edits are checked against the complete saved
+schedule, so an impossible load-in/soundcheck/doors/set/curfew order is rejected
+before write or audit. Each gig also has a phone-friendly **day-of view** with
+the next checkpoint, run of show, contact/map actions, lineup assignments,
+advance-task completion, setlist, production links, and recorded payment state.
+Manager uses that same day-of signal inside 24 hours of a show instead of
+falling back to generic advice. It also includes a shared song library and
+release/content/tour/business projects. Project workspaces generate idempotent,
+type-specific milestones backward from the target date; track real owners,
+progress, blockers, metrics, assets, budget, spend, and linked events; and feed
+the same explainable readiness signal into Manager conversation and briefs. The
+operations layer also includes versioned deal memos, owner-activated agreement
+templates, immutable
 PDF snapshots, idempotent manual payments, and finalized settlements. Financial
 values are integer minor units with US/USD defaults. Agreement templates are
 starting points only and explicitly not legal advice. Gmail/calendar/Drive

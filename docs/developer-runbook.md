@@ -203,6 +203,9 @@ database/Redis/worker state; it never returns URLs, credentials, or queue data.
 
 - `GET /tasks/overdue` — tasks with `dueAt` before now (not `done`), same rule as the dashboard overdue count.
 - `GET /tasks/stale-followups?days=7` — incomplete tasks whose `updatedAt` is older than `days` (stale follow-ups).
+- `POST /tasks` and `PATCH /tasks/:id` accept nullable artist-owned
+  `opportunityId` and `projectId` links. Each relation is checked before write;
+  a foreign ID returns generic not-found with no audit event.
 
 ## Commands (`POST /commands/execute`)
 
@@ -354,7 +357,12 @@ Operations routes:
 - `GET /events/readiness?days=90` and `GET /events/:id/readiness` — bounded,
   tenant-scoped, read-only readiness signals with category scores, confidence,
   evidence IDs, and prioritized gaps; `days` accepts 1–365
+- `GET /events/:id/day-of` — the tenant-scoped event, active lineup, shared
+  readiness result, and deterministic current/next show-day view
 - `GET` / `POST` / `PATCH /songs`, `/setlists`, and `/projects`
+- `GET /projects/readiness`, `GET /projects/:id/readiness`, and
+  `POST /projects/:id/generate-plan` — explainable active-project health plus
+  idempotent type-specific milestone generation
 - `GET` / `POST` / `PATCH /deals`, document generation, and approval-gated
   delivery preparation
 - `GET` / `POST /document-templates`, `PUT /document-templates/:id/activate`
@@ -380,6 +388,35 @@ contacts (10), deal/payment (20), advance (15), and performance preparation
 (10). A missing date or unavailable active performer blocks readiness. Missing
 premises lower confidence, and proximity raises unresolved gaps to higher
 urgency. Manager briefs and chat consume this same result.
+
+In Band operations, expand **Manage readiness details** on an event to record
+each active member's availability, attach an artist-owned venue/contact/setlist,
+and edit the location, show-day schedule, guarantee/deposit, production notes,
+and technical URLs. Relationship IDs are revalidated by the API. Schedule
+patches are validated against both the submitted fields and the event's saved
+timestamps; load-in, soundcheck, doors, set, and curfew cannot be reordered by
+a partial update. Every successful event or availability write is audited.
+
+Open **Day-of view** from a gig card for the phone-oriented live workspace. It
+derives the next checkpoint from load-in, soundcheck, doors, set, curfew, and
+custom schedule items; shows overdue/open advance work, availability,
+contact/map actions, setlist, production links, expected fee/deposit, recorded
+payments, and invoice balance; and permits explicit availability and task-state
+updates through the existing audited APIs. Refresh recomputes all relative time
+against the server clock. Manager uses this same derived signal only when the
+show is within 24 hours.
+
+Project readiness is also derived rather than editable. It scores target date,
+milestone existence/completion, dated work, real owners, success metrics,
+assets, and budget/spend; explicitly reports overdue/blocked/unassigned work
+and overruns; and carries record evidence. **Generate missing milestones**
+works backward from the target date using `project_plan_v1` templates for
+release, content campaign, tour, or business projects. Generated rows are
+ordinary project-linked Tasks with nullable artist-unique source keys, so
+reruns fill only missing template work and preserve renamed, completed, or
+re-dated tasks. The focused project workspace manages owners/status, facts,
+metrics, budget, and asset links. Manager uses the same readiness result for
+release/project questions and weekly prioritization.
 
 ## Booking acquisition
 
@@ -492,7 +529,7 @@ pnpm test
 pnpm build
 ```
 
-**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (`nest build` then `node --test` on `apps/api/test/*.test.mjs`). The API suite covers tenant links, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database.
+**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (`nest build` then `node --test` on `apps/api/test/*.test.mjs`). The API suite covers tenant links, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. If repeated local builds exhaust Node's default heap, rerun the gate with `NODE_OPTIONS=--max-old-space-size=4096`; the container already uses lower-memory SWC emission after the separate typecheck.
 
 **Database integration tests:** Set `STORYBOARD_TEST_DATABASE_URL` to a disposable PostgreSQL database whose name contains `test`, then run:
 

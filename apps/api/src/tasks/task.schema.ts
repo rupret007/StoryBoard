@@ -3,6 +3,7 @@ import { z } from "zod";
 const taskStatusValues = ["todo", "in_progress", "blocked", "done"] as const;
 
 const relatedOpportunityId = z.string().trim().min(1);
+const relatedProjectId = z.string().trim().min(1).max(128);
 const dueAt = z.union([
   z.iso.date(),
   z.iso.datetime({ offset: true, local: true })
@@ -13,6 +14,7 @@ export const taskCreateSchema = z
   .object({
     title: z.string().trim().min(1),
     opportunityId: relatedOpportunityId.nullable().optional(),
+    projectId: relatedProjectId.nullable().optional(),
     status: z.enum(taskStatusValues).optional(),
     ownerLabel: z.string().nullable().optional(),
     dueAt: dueAt.nullable().optional()
@@ -24,6 +26,7 @@ export const taskPatchSchema = z
   .object({
     title: z.string().trim().min(1).optional(),
     opportunityId: relatedOpportunityId.nullable().optional(),
+    projectId: relatedProjectId.nullable().optional(),
     status: z.enum(taskStatusValues).optional(),
     ownerLabel: z.string().nullable().optional(),
     dueAt: dueAt.nullable().optional()

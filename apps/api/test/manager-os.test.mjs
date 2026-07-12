@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, tasksMod, evaluation, managerPlan, eventReadiness] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -18,7 +18,9 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("tasks/tasks.service.js"),
   loadApi("manager/manager-evaluation.js"),
   loadApi("manager/manager-plan.js"),
-  loadApi("operations/event-readiness.js")
+  loadApi("operations/event-readiness.js"),
+  loadApi("operations/event-day-of.js"),
+  loadApi("operations/project-plan.js")
 ]);
 
 const now = new Date("2026-07-12T12:00:00.000Z");
@@ -400,6 +402,97 @@ test("show readiness blocks on an unavailable performer and becomes ready only f
   assert.deepEqual(ready.gaps, []);
 });
 
+test("day-of intelligence identifies the next checkpoint, work pressure, and recorded money", () => {
+  const event = {
+    id: "event-day", status: "confirmed", startsAt: new Date("2026-07-12T21:00:00.000Z"), endsAt: null,
+    loadInAt: new Date("2026-07-12T17:00:00.000Z"), soundcheckAt: new Date("2026-07-12T18:00:00.000Z"),
+    doorsAt: new Date("2026-07-12T20:00:00.000Z"), setAt: new Date("2026-07-12T21:00:00.000Z"), curfewAt: new Date("2026-07-12T23:00:00.000Z"),
+    guaranteeMinor: 100000, depositMinor: 25000, currency: "USD",
+    participants: [{ id: "participant-a", bandMemberId: "member-a", response: "available" }],
+    tasks: [{ id: "task-a", title: "Confirm parking", status: "todo", dueAt: new Date("2026-07-11T12:00:00.000Z") }],
+    schedule: [],
+    deals: [{ id: "deal-a", status: "accepted", offerAmountMinor: 100000, depositMinor: 25000, invoices: [{ id: "invoice-a", totalMinor: 100000, paidMinor: 25000 }] }],
+    invoices: []
+  };
+  const readiness = { eventId: event.id, title: "Show", startsAt: event.startsAt.toISOString(), daysUntil: 0, score: 80, status: "attention", confidence: 1, confidenceLabel: "high", observedAt: now.toISOString(), headline: "One gap remains.", nextAction: null, categories: [], gaps: [], evidenceIds: [event.id] };
+  const view = eventDayOf.deterministicEventDayOf(event, readiness, [{ id: "member-a" }], now);
+  assert.equal(view.mode, "pre_show");
+  assert.equal(view.nextCheckpoint.label, "Load-in");
+  assert.equal(view.nextCheckpoint.minutesUntil, 300);
+  assert.equal(view.overdueTaskCount, 1);
+  assert.equal(view.expectedFeeMinor, 100000);
+  assert.equal(view.depositRemainingMinor, 0);
+  assert.equal(view.openInvoiceBalanceMinor, 75000);
+  assert.match(view.nextAction, /Confirm parking/);
+  assert.ok(view.evidenceIds.includes("invoice-a"));
+  event.status = "cancelled";
+  const closed = eventDayOf.deterministicEventDayOf(event, readiness, [{ id: "member-a" }], now);
+  assert.equal(closed.mode, "closed");
+  assert.equal(closed.nextCheckpoint, null);
+  assert.ok(closed.timeline.every((item) => item.state !== "next"));
+  assert.match(closed.nextAction, /cancellation outcome/i);
+});
+
+test("manager prioritizes the concrete day-of sequence for a show within 24 hours", () => {
+  const dayOf = { eventId: "event-a", mode: "pre_show", observedAt: now.toISOString(), headline: "Next checkpoint: Load-in in 120 minutes.", nextAction: "Confirm load-in readiness before the next checkpoint.", nextCheckpoint: null, timeline: [], openTaskCount: 1, overdueTaskCount: 0, unavailableCount: 0, unresolvedAvailabilityCount: 0, expectedFeeMinor: 1000, expectedDepositMinor: 0, recordedPaidMinor: 0, openInvoiceBalanceMinor: 0, depositRemainingMinor: 0, currency: "USD", evidenceIds: ["event-a", "task-a"] };
+  const readiness = { eventId: "event-a", title: "Tonight", startsAt: "2026-07-12T22:00:00.000Z", daysUntil: 0, score: 85, status: "attention", confidence: 0.9, confidenceLabel: "high", observedAt: now.toISOString(), headline: "Tonight has one remaining gap.", nextAction: "Review the event.", categories: [], gaps: [], evidenceIds: ["event-a"] };
+  const facts = managerFacts({ events: [{ id: "event-a", title: "Tonight", type: "gig", status: "confirmed", startsAt: new Date("2026-07-12T22:00:00.000Z"), participants: [{ response: "available", bandMemberId: "member-a" }, { response: "available", bandMemberId: "member-b" }], readiness, dayOf }] });
+  const brief = intelligence.deterministicManagerBrief(facts, now);
+  const show = brief.today.find((item) => item.stableKey === "event-event-a");
+  assert.equal(show.title, "Run Tonight day-of");
+  assert.match(show.reason, /Next checkpoint: Load-in/);
+  assert.equal(show.nextAction, dayOf.nextAction);
+  assert.ok(show.evidenceIds.includes("task-a"));
+});
+
+test("project templates are bounded, dated backward, and tailored by project type", () => {
+  const dueAt = new Date("2026-10-01T12:00:00.000Z");
+  for (const type of ["release", "content_campaign", "tour", "business"]) {
+    const template = projectPlan.projectPlanTemplate(type, dueAt);
+    assert.ok(template.length >= 5 && template.length <= 6);
+    assert.equal(new Set(template.map((item) => item.key)).size, template.length);
+    assert.ok(template.every((item) => item.dueAt <= dueAt));
+    assert.equal(template.at(-1).dueAt.toISOString(), dueAt.toISOString());
+  }
+  assert.match(projectPlan.projectPlanTemplate("release", dueAt)[1].title, /masters/i);
+  assert.match(projectPlan.projectPlanTemplate("tour", dueAt)[0].title, /route/i);
+});
+
+test("project readiness explains missing plans, ownership, progress, and overdue work", () => {
+  const dueAt = new Date("2026-10-01T12:00:00.000Z");
+  const base = { id: "project-a", name: "New EP", type: "release", status: "active", dueAt, budgetMinor: 50000, currency: "USD", successMetrics: ["100 saves"], assets: [{ label: "Master", url: "https://example.test/master" }], expenses: [], events: [] };
+  const empty = projectPlan.deterministicProjectReadiness({ ...base, tasks: [] }, now);
+  assert.equal(empty.status, "needs_plan");
+  assert.equal(empty.gaps[0].code, "plan_missing");
+  const specs = projectPlan.projectPlanTemplate("release", dueAt);
+  const tasks = specs.map((spec, index) => ({ id: `task-${index}`, title: spec.title, status: index < 3 ? "done" : "todo", ownerLabel: index < 3 ? "Alex" : null, dueAt: spec.dueAt, sourceKey: `${projectPlan.PROJECT_PLAN_VERSION}:project-a:${spec.key}` }));
+  const ownershipGap = projectPlan.deterministicProjectReadiness({ ...base, tasks }, now);
+  assert.equal(ownershipGap.status, "at_risk");
+  assert.ok(ownershipGap.gaps.some((gap) => gap.code === "milestones_unassigned"));
+  const owned = projectPlan.deterministicProjectReadiness({ ...base, tasks: tasks.map((task) => ({ ...task, ownerLabel: "Alex" })) }, now);
+  assert.equal(owned.status, "on_track");
+  assert.equal(owned.nextMilestone.id, "task-3");
+  const overdue = projectPlan.deterministicProjectReadiness({ ...base, tasks: tasks.map((task, index) => ({ ...task, status: index === 0 ? "todo" : task.status, ownerLabel: "Alex", dueAt: index === 0 ? new Date("2026-07-01T00:00:00.000Z") : task.dueAt })) }, now);
+  assert.equal(overdue.status, "off_track");
+  assert.equal(overdue.gaps[0].code, "milestones_overdue");
+  const inconsistent = projectPlan.deterministicProjectReadiness({ ...base, status: "completed", tasks }, now);
+  assert.equal(inconsistent.status, "at_risk");
+  assert.ok(inconsistent.gaps.some((gap) => gap.code === "completion_inconsistent"));
+  const closed = projectPlan.deterministicProjectReadiness({ ...base, status: "cancelled", tasks }, now);
+  assert.equal(closed.status, "closed");
+  assert.match(closed.nextAction, /cancellation reason/i);
+});
+
+test("manager answers release questions from project readiness rather than generic plan text", () => {
+  const readiness = { projectId: "project-a", score: 72, status: "at_risk", confidence: 0.8, headline: "New EP is at risk; 2 gaps need attention.", nextAction: "Assign a real person to each open milestone.", nextMilestone: { id: "task-a", title: "Complete masters", dueAt: "2026-08-01T00:00:00.000Z", ownerLabel: null }, completedMilestones: 1, totalMilestones: 6, overdueMilestones: 0, blockedMilestones: 0, spendMinor: 0, budgetRemainingMinor: 50000, gaps: [], evidenceIds: ["project-a", "task-a"], observedAt: now.toISOString() };
+  const facts = managerFacts({ projects: [{ id: "project-a", name: "New EP", type: "release", status: "active", dueAt: new Date("2026-09-01T00:00:00.000Z"), readiness }] });
+  const answer = intelligence.deterministicManagerChat(facts, "How is our EP release project going?", now);
+  assert.match(answer.answer, /New EP/);
+  assert.match(answer.answer, /72\/100/);
+  assert.match(answer.answer, /Complete masters/);
+  assert.ok(answer.citations.includes("task-a"));
+});
+
 test("reviewed document snapshots are real deterministic PDFs with SHA-256", () => {
   const first = pdf.renderTextPdf("Agreement", "Line one\nLine two");
   const second = pdf.renderTextPdf("Agreement", "Line one\nLine two");
@@ -413,6 +506,31 @@ test("event creation rejects a cross-artist relation before write or audit", asy
   const service = new operationsMod.OperationsService({ client: { venue: { findFirst: async () => null }, bandEvent: { create: async () => { creates += 1; } } } }, { log: async () => { audits += 1; } }, {});
   await assert.rejects(() => service.createEvent("artist-a", { type: "gig", status: "draft", title: "Foreign room", venueId: "venue-b", currency: "USD" }, "owner@test", "operator-a"), (error) => error?.getStatus?.() === 404);
   assert.equal(creates, 0);
+  assert.equal(audits, 0);
+});
+
+test("event patches validate the merged schedule before write or audit", async () => {
+  let updates = 0; let audits = 0;
+  const existing = {
+    startsAt: new Date("2026-09-18T18:00:00.000Z"), endsAt: null,
+    loadInAt: new Date("2026-09-18T18:00:00.000Z"), soundcheckAt: null,
+    doorsAt: new Date("2026-09-18T20:00:00.000Z"), setAt: new Date("2026-09-18T21:00:00.000Z"), curfewAt: null
+  };
+  const service = new operationsMod.OperationsService({ client: {
+    bandEvent: {
+      findFirst: async ({ where }) => where.artistId === "artist-a" ? existing : null,
+      update: async () => { updates += 1; return { id: "event-a", status: "confirmed" }; }
+    }
+  } }, { log: async () => { audits += 1; } }, {});
+  await assert.rejects(
+    () => service.patchEvent("artist-a", "event-a", { soundcheckAt: "2026-09-18T22:00:00.000Z" }, "owner@test", "operator-a"),
+    /Soundcheck must be before doors/i
+  );
+  await assert.rejects(
+    () => service.patchEvent("artist-b", "event-a", { locationName: "Foreign edit" }, "owner@test", "operator-b"),
+    (error) => error?.getStatus?.() === 404
+  );
+  assert.equal(updates, 0);
   assert.equal(audits, 0);
 });
 

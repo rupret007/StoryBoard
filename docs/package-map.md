@@ -67,7 +67,7 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
 ## Tests
 
 - **`packages/shared/test/`** — Node test runner (e.g. Telegram Zod helpers)
-- **`apps/api/test/`** — smoke + Telegram parse/hash tests (API package **`test`** script runs **`nest build`** first, then `node --test`)
+- **`apps/api/test/`** — compiled API regressions (the API package **`test`** script runs **`nest build`** first, then `node --test`)
 
 ## Tooling docs
 

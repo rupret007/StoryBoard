@@ -105,6 +105,17 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   editable status. It uses the tenant-scoped event graph, active lineup, dated
   urgency, explicit evidence IDs, and premise-coverage confidence. Operations
   and Manager consume the same function to prevent conflicting advice.
+- Event edits reuse strict shared schemas and service-layer artist ownership.
+  Timeline validation operates on the merged stored record, preventing a
+  partial PATCH from introducing an impossible show-day sequence.
+- The day-of view is recomputed from authoritative event data and the shared
+  readiness policy. It carries evidence IDs and has no separate editable score.
+  Manager consumes it only inside the 24-hour show window, keeping longer-range
+  planning distinct from live operational guidance.
+- Project templates reuse tenant-scoped Tasks and nullable unique source keys;
+  they do not create a competing milestone authority. Readiness is derived
+  from project/task/expense/event records, and Manager consumes that same view.
+  Foreign `projectId` task links fail before write or audit.
 - Agreement templates require owner activation. Payment replay keys and
   immutable deal/document/settlement history take precedence over destructive
   replacement.

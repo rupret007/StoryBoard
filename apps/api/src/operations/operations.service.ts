@@ -8,6 +8,8 @@ import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { renderTextPdf } from "./simple-pdf";
 import { deterministicShowReadiness } from "./event-readiness";
+import { deterministicEventDayOf } from "./event-day-of";
+import { deterministicProjectReadiness, PROJECT_PLAN_VERSION, projectPlanTemplate } from "./project-plan";
 
 type EventCreate = z.infer<typeof eventCreateSchema>;
 type EventPatch = z.infer<typeof eventPatchSchema>;
@@ -43,8 +45,36 @@ const eventDetailInclude = {
   expenses: true,
   settlement: { include: { splits: { include: { bandMember: true } } } }
 } as const;
+const projectDetailInclude = { goal: true, events: true, tasks: { orderBy: [{ dueAt: "asc" as const }, { createdAt: "asc" as const }] }, expenses: { orderBy: { incurredAt: "desc" as const } } } satisfies Prisma.ArtistProjectInclude;
 function cleanDates(input: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined).map(([key, value]) => [key, dateFields.has(key) && typeof value === "string" ? new Date(value) : value]));
+}
+
+type EventTimeline = { startsAt: Date | null; endsAt: Date | null; loadInAt: Date | null; soundcheckAt: Date | null; doorsAt: Date | null; setAt: Date | null; curfewAt: Date | null };
+function eventDate(value: string | null | undefined, fallback: Date | null = null) { return value === undefined ? fallback : value === null ? null : new Date(value); }
+function validateEventTimeline(input: EventCreate | EventPatch, existing?: EventTimeline) {
+  const timeline: EventTimeline = {
+    startsAt: eventDate(input.startsAt, existing?.startsAt),
+    endsAt: eventDate(input.endsAt, existing?.endsAt),
+    loadInAt: eventDate(input.loadInAt, existing?.loadInAt),
+    soundcheckAt: eventDate(input.soundcheckAt, existing?.soundcheckAt),
+    doorsAt: eventDate(input.doorsAt, existing?.doorsAt),
+    setAt: eventDate(input.setAt, existing?.setAt),
+    curfewAt: eventDate(input.curfewAt, existing?.curfewAt)
+  };
+  if (timeline.startsAt && timeline.endsAt && timeline.endsAt < timeline.startsAt) throw new BadRequestException("Event end must be after its start");
+  const schedule = [
+    ["Load-in", timeline.loadInAt],
+    ["Soundcheck", timeline.soundcheckAt],
+    ["Doors", timeline.doorsAt],
+    ["Set time", timeline.setAt],
+    ["Curfew", timeline.curfewAt]
+  ].filter((item): item is [string, Date] => item[1] instanceof Date);
+  for (let index = 1; index < schedule.length; index += 1) {
+    const previous = schedule[index - 1]!;
+    const current = schedule[index]!;
+    if (current[1] < previous[1]) throw new BadRequestException(`${previous[0]} must be before ${current[0].toLowerCase()}`);
+  }
 }
 
 @Injectable()
@@ -74,7 +104,6 @@ export class OperationsService {
     if (input.contactId) await this.assertArtistRecord("contact", artistId, input.contactId);
     if (input.projectId) await this.assertArtistRecord("project", artistId, input.projectId);
     if (input.setlistId) await this.assertArtistRecord("setlist", artistId, input.setlistId);
-    if (input.startsAt && input.endsAt && new Date(input.endsAt) < new Date(input.startsAt)) throw new BadRequestException("Event end must be after its start");
   }
 
   events(artistId: string) { return this.prisma.client.bandEvent.findMany({ where: { artistId }, include: { venue: true, contact: true, participants: { include: { bandMember: true } }, settlement: true }, orderBy: [{ startsAt: "asc" }, { createdAt: "desc" }] }); }
@@ -87,6 +116,15 @@ export class OperationsService {
     if (!event) throw new NotFoundException("Event not found");
     return deterministicShowReadiness(event, members, now);
   }
+  async eventDayOf(artistId: string, id: string, now = new Date()) {
+    const [event, members] = await Promise.all([
+      this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, include: eventDetailInclude }),
+      this.prisma.client.bandMember.findMany({ where: { artistId, active: true }, select: { id: true, name: true, email: true, roles: true, instruments: true, active: true } })
+    ]);
+    if (!event) throw new NotFoundException("Event not found");
+    const readiness = deterministicShowReadiness(event, members, now);
+    return { event, activeMembers: members, readiness, dayOf: deterministicEventDayOf(event, readiness, members, now) };
+  }
   async eventReadinessList(artistId: string, days = 90, now = new Date()) {
     const through = new Date(now.getTime() + days * 86400000);
     const [events, members] = await Promise.all([
@@ -95,8 +133,8 @@ export class OperationsService {
     ]);
     return events.map((event) => deterministicShowReadiness(event, members, now));
   }
-  async createEvent(artistId: string, input: EventCreate, actorLabel: string, actorOperatorId: string) { await this.validateEventRelations(artistId, input); const row = await this.prisma.client.bandEvent.create({ data: { artistId, ...cleanDates(input) } as Prisma.BandEventUncheckedCreateInput }); await this.auditWrite(artistId, "BandEvent", row.id, "event.created", actorLabel, actorOperatorId, { type: row.type, status: row.status }); return this.event(artistId, row.id); }
-  async patchEvent(artistId: string, id: string, input: EventPatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("event", artistId, id); await this.validateEventRelations(artistId, input); const row = await this.prisma.client.bandEvent.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "BandEvent", id, "event.updated", actorLabel, actorOperatorId, { fields: Object.keys(input), status: row.status }); return this.event(artistId, id); }
+  async createEvent(artistId: string, input: EventCreate, actorLabel: string, actorOperatorId: string) { await this.validateEventRelations(artistId, input); validateEventTimeline(input); const row = await this.prisma.client.bandEvent.create({ data: { artistId, ...cleanDates(input) } as Prisma.BandEventUncheckedCreateInput }); await this.auditWrite(artistId, "BandEvent", row.id, "event.created", actorLabel, actorOperatorId, { type: row.type, status: row.status }); return this.event(artistId, row.id); }
+  async patchEvent(artistId: string, id: string, input: EventPatch, actorLabel: string, actorOperatorId: string) { const existing = await this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, select: { startsAt: true, endsAt: true, loadInAt: true, soundcheckAt: true, doorsAt: true, setAt: true, curfewAt: true } }); if (!existing) throw new NotFoundException("Record not found"); await this.validateEventRelations(artistId, input); validateEventTimeline(input, existing); const row = await this.prisma.client.bandEvent.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "BandEvent", id, "event.updated", actorLabel, actorOperatorId, { fields: Object.keys(input), status: row.status }); return this.event(artistId, id); }
   async eventFromOpportunity(artistId: string, opportunityId: string, actorLabel: string, actorOperatorId: string) { const opportunity = await this.prisma.client.bookingOpportunity.findFirst({ where: { id: opportunityId, artistId }, include: { venue: true } }); if (!opportunity) throw new NotFoundException("Booking opportunity not found"); const existing = await this.prisma.client.bandEvent.findUnique({ where: { opportunityId } }); const row = await this.prisma.client.bandEvent.upsert({ where: { opportunityId }, create: { artistId, opportunityId, venueId: opportunity.venueId, type: "gig", status: "confirmed", title: opportunity.title, startsAt: opportunity.targetDate, locationName: opportunity.venue?.name ?? null }, update: {} }); if (!existing) await this.auditWrite(artistId, "BandEvent", row.id, "event.created_from_opportunity", actorLabel, actorOperatorId, { opportunityId }); return this.event(artistId, row.id); }
   async participant(artistId: string, eventId: string, input: ParticipantInput, actorLabel: string, actorOperatorId: string) { await Promise.all([this.assertArtistRecord("event", artistId, eventId), this.assertArtistRecord("member", artistId, input.bandMemberId)]); const row = await this.prisma.client.eventParticipant.upsert({ where: { eventId_bandMemberId: { eventId, bandMemberId: input.bandMemberId } }, create: { eventId, bandMemberId: input.bandMemberId, response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt: input.response === "unknown" ? null : new Date() }, update: { response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt: input.response === "unknown" ? null : new Date() } }); await this.auditWrite(artistId, "EventParticipant", row.id, "event.availability_recorded", actorLabel, actorOperatorId, { eventId, response: row.response }); return row; }
   async generateAdvance(artistId: string, eventId: string, actorLabel: string, actorOperatorId: string) { const event = await this.event(artistId, eventId); if (!event.startsAt) throw new BadRequestException("Event start time is required before generating an advance"); const specs = [[30,"Confirm agreement, deposit, and primary contacts"],[14,"Confirm production, hospitality, parking, and travel"],[7,"Confirm member availability, setlist, and day-of schedule"],[1,"Run final show-day readiness check"]] as const; const existing = await this.prisma.client.task.findMany({ where: { artistId, eventId, ownerLabel: "Show advance" }, select: { title: true } }); const titles = new Set(existing.map((task) => task.title)); const created = []; for (const [days, title] of specs) { if (titles.has(title)) continue; const dueAt = new Date(event.startsAt.getTime() - days * 86400000); const task = await this.prisma.client.task.create({ data: { artistId, eventId, opportunityId: event.opportunityId, title, ownerLabel: "Show advance", dueAt } }); created.push(task); } await this.auditWrite(artistId, "BandEvent", eventId, "event.advance_generated", actorLabel, actorOperatorId, { createdCount: created.length }); return { eventId, created, existingCount: existing.length }; }
@@ -110,9 +148,13 @@ export class OperationsService {
   async createSetlist(artistId: string, input: SetlistCreate, actorLabel: string, actorOperatorId: string) { await this.validateSongs(artistId, input.items); const row = await this.prisma.client.setlist.create({ data: { artistId, name: input.name, status: input.status, notes: input.notes ?? null, items: { create: input.items.map((item, sortOrder) => ({ ...item, songId: item.songId ?? null, label: item.label ?? null, transitionNotes: item.transitionNotes ?? null, sortOrder })) } }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } } }); await this.auditWrite(artistId, "Setlist", row.id, "setlist.created", actorLabel, actorOperatorId, { itemCount: row.items.length }); return row; }
   async patchSetlist(artistId: string, id: string, input: SetlistPatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("setlist", artistId, id); if (input.items) await this.validateSongs(artistId, input.items); const row = await this.prisma.client.$transaction(async (tx) => { if (input.items) { await tx.setlistItem.deleteMany({ where: { setlistId: id } }); await tx.setlistItem.createMany({ data: input.items.map((item, sortOrder) => ({ setlistId: id, songId: item.songId ?? null, itemType: item.itemType, label: item.label ?? null, transitionNotes: item.transitionNotes ?? null, sortOrder })) }); } return tx.setlist.update({ where: { id }, data: { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.status !== undefined ? { status: input.status } : {}), ...(input.notes !== undefined ? { notes: input.notes } : {}) }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } } }); }); await this.auditWrite(artistId, "Setlist", id, "setlist.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) }); return row; }
 
-  projects(artistId: string) { return this.prisma.client.artistProject.findMany({ where: { artistId }, include: { goal: true, events: true, tasks: true }, orderBy: [{ status: "asc" }, { dueAt: "asc" }] }); }
-  async createProject(artistId: string, input: ProjectCreate, actorLabel: string, actorOperatorId: string) { if (input.goalId) await this.assertArtistRecord("goal", artistId, input.goalId); const row = await this.prisma.client.artistProject.create({ data: { artistId, ...cleanDates(input) } as Prisma.ArtistProjectUncheckedCreateInput }); await this.auditWrite(artistId, "ArtistProject", row.id, "project.created", actorLabel, actorOperatorId, { type: row.type, name: row.name }); return row; }
-  async patchProject(artistId: string, id: string, input: ProjectPatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("project", artistId, id); if (input.goalId) await this.assertArtistRecord("goal", artistId, input.goalId); const row = await this.prisma.client.artistProject.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "ArtistProject", id, "project.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) }); return row; }
+  async projects(artistId: string, now = new Date()) { const rows = await this.prisma.client.artistProject.findMany({ where: { artistId }, include: projectDetailInclude, orderBy: [{ status: "asc" }, { dueAt: "asc" }] }); return rows.map((project) => ({ ...project, readiness: deterministicProjectReadiness(project, now) })); }
+  async project(artistId: string, id: string) { const row = await this.prisma.client.artistProject.findFirst({ where: { id, artistId }, include: projectDetailInclude }); if (!row) throw new NotFoundException("Project not found"); return row; }
+  async projectReadiness(artistId: string, id: string, now = new Date()) { const project = await this.project(artistId, id); return { project, readiness: deterministicProjectReadiness(project, now) }; }
+  async projectReadinessList(artistId: string, now = new Date()) { const projects = await this.prisma.client.artistProject.findMany({ where: { artistId, status: { in: ["draft", "active", "paused"] } }, include: projectDetailInclude, orderBy: [{ dueAt: "asc" }, { createdAt: "asc" }], take: 50 }); return projects.map((project) => deterministicProjectReadiness(project, now)); }
+  async createProject(artistId: string, input: ProjectCreate, actorLabel: string, actorOperatorId: string) { if (input.goalId) await this.assertArtistRecord("goal", artistId, input.goalId); const row = await this.prisma.client.artistProject.create({ data: { artistId, ...cleanDates(input) } as Prisma.ArtistProjectUncheckedCreateInput }); await this.auditWrite(artistId, "ArtistProject", row.id, "project.created", actorLabel, actorOperatorId, { type: row.type, name: row.name }); return this.project(artistId, row.id); }
+  async patchProject(artistId: string, id: string, input: ProjectPatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("project", artistId, id); if (input.goalId) await this.assertArtistRecord("goal", artistId, input.goalId); await this.prisma.client.artistProject.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "ArtistProject", id, "project.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) }); return this.project(artistId, id); }
+  async generateProjectPlan(artistId: string, id: string, actorLabel: string, actorOperatorId: string) { const project = await this.project(artistId, id); if (!project.dueAt) throw new BadRequestException("Project due date is required before generating milestones"); const specs = projectPlanTemplate(project.type, project.dueAt); const result = await this.prisma.client.task.createMany({ data: specs.map((spec) => ({ artistId, projectId: id, title: spec.title, dueAt: spec.dueAt, sourceKey: `${PROJECT_PLAN_VERSION}:${id}:${spec.key}` })), skipDuplicates: true }); if (result.count) await this.auditWrite(artistId, "ArtistProject", id, "project.plan_generated", actorLabel, actorOperatorId, { version: PROJECT_PLAN_VERSION, createdCount: result.count }); return { projectId: id, version: PROJECT_PLAN_VERSION, createdCount: result.count, project: await this.project(artistId, id) }; }
 
   deals(artistId: string) { return this.prisma.client.dealOffer.findMany({ where: { artistId }, include: { event: true, contact: true, memos: { orderBy: { version: "desc" }, take: 1 }, agreements: { orderBy: { version: "desc" }, take: 1 }, invoices: true }, orderBy: { updatedAt: "desc" } }); }
   private async validateDealRelations(artistId: string, input: DealCreate | DealPatch) { if (input.eventId) await this.assertArtistRecord("event", artistId, input.eventId); if (input.opportunityId) await this.assertArtistRecord("opportunity", artistId, input.opportunityId); if (input.contactId) await this.assertArtistRecord("contact", artistId, input.contactId); }

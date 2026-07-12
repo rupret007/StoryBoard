@@ -1,5 +1,7 @@
 import type { ManagerWorkstream } from "../generated/prisma/enums";
 import type { ShowReadiness } from "../operations/event-readiness";
+import type { EventDayOfView } from "../operations/event-day-of";
+import type { ProjectReadiness } from "../operations/project-plan";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -50,8 +52,9 @@ export type ManagerFacts = {
     startsAt: Date | null;
     participants: { response: string; bandMemberId: string }[];
     readiness?: ShowReadiness | null;
+    dayOf?: EventDayOfView | null;
   }[];
-  projects: { id: string; name: string; status: string; dueAt: Date | null }[];
+  projects: { id: string; name: string; type?: string; status: string; dueAt: Date | null; readiness?: ProjectReadiness | null }[];
   deals: { id: string; title: string; status: string; expiresAt: Date | null }[];
   invoices: { id: string; number: string; status: string; currency: string; totalMinor: number; paidMinor: number; dueAt: Date | null }[];
   decisions: { id: string; title: string; context: string | null }[];
@@ -285,14 +288,15 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
       : unresolved > 0
         ? `${unresolved} member response${unresolved === 1 ? " is" : "s are"} still unresolved.`
         : "Availability is clear; logistics still need a final pass.";
+    const showDay = upcomingEvent.dayOf && upcomingEvent.startsAt && upcomingEvent.startsAt.getTime() <= now.getTime() + DAY_MS;
     addToday({
       stableKey: `event-${upcomingEvent.id}`,
-      title: upcomingEvent.readiness?.status === "ready" ? `Keep ${upcomingEvent.title} show-ready` : `Get ${upcomingEvent.title} show-ready`,
-      reason: upcomingEvent.readiness ? `${eventDate(upcomingEvent.startsAt)} is within three weeks. ${upcomingEvent.readiness.headline} Confidence is ${upcomingEvent.readiness.confidenceLabel}.` : `${eventDate(upcomingEvent.startsAt)} is within three weeks. ${availabilitySummary}`,
-      nextAction: upcomingEvent.readiness?.nextAction ?? "Open Band operations and review availability, schedule, contacts, payment terms, and the advance checklist.",
+      title: showDay ? `Run ${upcomingEvent.title} day-of` : upcomingEvent.readiness?.status === "ready" ? `Keep ${upcomingEvent.title} show-ready` : `Get ${upcomingEvent.title} show-ready`,
+      reason: showDay ? `${upcomingEvent.dayOf!.headline} ${upcomingEvent.readiness?.headline ?? availabilitySummary}` : upcomingEvent.readiness ? `${eventDate(upcomingEvent.startsAt)} is within three weeks. ${upcomingEvent.readiness.headline} Confidence is ${upcomingEvent.readiness.confidenceLabel}.` : `${eventDate(upcomingEvent.startsAt)} is within three weeks. ${availabilitySummary}`,
+      nextAction: showDay ? upcomingEvent.dayOf!.nextAction : upcomingEvent.readiness?.nextAction ?? "Open Band operations and review availability, schedule, contacts, payment terms, and the advance checklist.",
       workstream: "live",
-      priority: upcomingEvent.readiness ? (["blocked", "not_ready"].includes(upcomingEvent.readiness.status) ? "high" : "med") : unavailable > 0 || unresolved > 0 ? "high" : "med",
-      evidenceIds: upcomingEvent.readiness?.evidenceIds.slice(0, 8) ?? [upcomingEvent.id],
+      priority: showDay || upcomingEvent.readiness ? (["blocked", "not_ready"].includes(upcomingEvent.readiness?.status ?? "") || (upcomingEvent.dayOf?.overdueTaskCount ?? 0) > 0 ? "high" : "med") : unavailable > 0 || unresolved > 0 ? "high" : "med",
+      evidenceIds: (showDay ? upcomingEvent.dayOf?.evidenceIds : upcomingEvent.readiness?.evidenceIds)?.slice(0, 8) ?? [upcomingEvent.id],
       proposedAction: null
     });
   }
@@ -333,17 +337,20 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
     });
   }
 
-  const overdueProject = facts.projects.find((project) => project.dueAt && project.dueAt < now);
-  if (overdueProject) {
+  const projectAttention = facts.projects.find((project) => ["blocked", "off_track"].includes(project.readiness?.status ?? ""))
+    ?? facts.projects.find((project) => ["needs_plan", "at_risk"].includes(project.readiness?.status ?? ""))
+    ?? facts.projects.find((project) => project.dueAt && project.dueAt < now);
+  if (projectAttention) {
+    const projectWorkstream: ManagerWorkstream = projectAttention.type === "release" ? "releases" : projectAttention.type === "content_campaign" ? "content" : "band_operations";
     addWeek({
-      stableKey: `project-${overdueProject.id}`,
-      title: `Re-plan ${overdueProject.name}`,
-      reason: `Its recorded due date was ${eventDate(overdueProject.dueAt)}, so the current plan is no longer credible.`,
-      nextAction: "Choose a new milestone, owner, and date or deliberately pause the project.",
-      workstream: "band_operations",
-      priority: "high",
-      evidenceIds: [overdueProject.id],
-      proposedAction: { type: "create_task", title: `Re-plan ${overdueProject.name}`, dueAt: dueAt(3, now), initiativeId: null }
+      stableKey: `project-${projectAttention.id}`,
+      title: projectAttention.readiness?.status === "needs_plan" ? `Build the plan for ${projectAttention.name}` : `Move ${projectAttention.name}`,
+      reason: projectAttention.readiness?.headline ?? `Its recorded due date was ${eventDate(projectAttention.dueAt)}, so the current plan is no longer credible.`,
+      nextAction: projectAttention.readiness?.nextAction ?? "Choose a new milestone, owner, and date or deliberately pause the project.",
+      workstream: projectWorkstream,
+      priority: ["blocked", "off_track"].includes(projectAttention.readiness?.status ?? "") || Boolean(projectAttention.dueAt && projectAttention.dueAt < now) ? "high" : "med",
+      evidenceIds: projectAttention.readiness?.evidenceIds.slice(0, 8) ?? [projectAttention.id],
+      proposedAction: null
     });
   }
 
@@ -456,6 +463,7 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
   const bookingQuestion = questionHas(question, /\b(booking|buyer|venue|festival|prospect|campaign|reply|outreach|pitch)\b/);
   const teamQuestion = questionHas(question, /\b(member|lineup|bandmate|who|available)\b/);
   const planQuestion = questionHas(question, /\b(goal|plan|progress|track|realistic|strategy|90-day|90 day)\b/);
+  const releaseQuestion = questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
 
   if (externalRequest) {
     const recommendation = matchingRecommendation(brief);
@@ -463,6 +471,19 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
       answer: `I can help prepare that, but I won't send, sign, pay, publish, or execute outside work from this conversation. Those actions need the exact payload reviewed in Approvals.\n\nThe useful next move is to prepare the internal work first${recommendation ? `: ${recommendation.nextAction}` : "."}`,
       citations: recommendation?.evidenceIds ?? [],
       recommendation: recommendation?.proposedAction ? recommendation : null
+    };
+  }
+
+  if (releaseQuestion) {
+    const activeProjects = facts.projects.filter((project) => !["completed", "cancelled"].includes(project.status));
+    const lines = activeProjects.slice(0, 5).map((project) => project.readiness
+      ? `• ${project.name} — ${project.readiness.status.replaceAll("_", " ")} at ${project.readiness.score}/100; ${project.readiness.nextMilestone ? `next: ${project.readiness.nextMilestone.title}` : project.readiness.nextAction}`
+      : `• ${project.name} — ${project.status}${project.dueAt ? `; due ${eventDate(project.dueAt)}` : "; no due date recorded"}`);
+    const recommendation = matchingRecommendation(brief, ["releases", "content", "band_operations"]);
+    return {
+      answer: activeProjects.length ? `Here is the recorded project picture:\n${lines.join("\n")}\n\n${recommendation ? recommendation.nextAction : "Open the highest-risk project and assign its next milestone."}` : "There is no active release, content, tour, or business project in StoryBoard. Create the real project and its target date before relying on a release plan.",
+      citations: unique(activeProjects.flatMap((project) => project.readiness?.evidenceIds ?? [project.id])).slice(0, 10),
+      recommendation: actionableRecommendation(recommendation)
     };
   }
 
@@ -502,9 +523,10 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
   if (liveQuestion) {
     const upcoming = facts.events.filter((event) => event.startsAt && event.startsAt >= now).slice(0, 3);
     const lines = upcoming.map((event) => {
+      const showDay = event.dayOf && event.startsAt && event.startsAt.getTime() <= now.getTime() + DAY_MS;
       if (event.readiness) {
         const firstGap = event.readiness.gaps[0];
-        return `• ${event.title} — ${eventDate(event.startsAt)}; ${event.readiness.status.replaceAll("_", " ")} at ${event.readiness.score}/100 (${event.readiness.confidenceLabel} confidence)${firstGap ? `; first gap: ${firstGap.title.toLowerCase()}` : ""}`;
+        return `• ${event.title} — ${eventDate(event.startsAt)}; ${event.readiness.status.replaceAll("_", " ")} at ${event.readiness.score}/100 (${event.readiness.confidenceLabel} confidence)${showDay ? `; ${event.dayOf!.headline.toLowerCase()}` : firstGap ? `; first gap: ${firstGap.title.toLowerCase()}` : ""}`;
       }
       const unavailable = event.participants.filter((participant) => participant.response === "unavailable").length;
       const responses = new Set(event.participants.map((participant) => participant.bandMemberId));
@@ -516,7 +538,7 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
       answer: upcoming.length
         ? `Here is the live calendar I would manage first:\n${lines.join("\n")}\n\n${recommendation ? recommendation.nextAction : "No immediate live action is recorded."}`
         : "There are no upcoming shows, rehearsals, or other band events with a date in StoryBoard. If something is actually booked, add it before relying on this schedule.",
-      citations: unique(upcoming.flatMap((event) => event.readiness?.evidenceIds ?? [event.id])).slice(0, 10),
+      citations: unique(upcoming.flatMap((event) => event.dayOf && event.startsAt && event.startsAt.getTime() <= now.getTime() + DAY_MS ? event.dayOf.evidenceIds : event.readiness?.evidenceIds ?? [event.id])).slice(0, 10),
       recommendation: actionableRecommendation(recommendation)
     };
   }

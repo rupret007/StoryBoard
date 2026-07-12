@@ -15,7 +15,7 @@ export class TasksService {
   list(artistId: string) {
     return this.prisma.client.task.findMany({
       where: { artistId },
-      include: { opportunity: { include: { venue: true } } },
+      include: { opportunity: { include: { venue: true } }, project: true, event: true },
       orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }]
     });
   }
@@ -81,6 +81,11 @@ export class TasksService {
     }
   }
 
+  private async assertProjectBelongsToArtist(artistId: string, projectId: string): Promise<void> {
+    const project = await this.prisma.client.artistProject.findFirst({ where: { id: projectId, artistId }, select: { id: true } });
+    if (!project) throw new NotFoundException("Project not found");
+  }
+
   async create(
     artistId: string,
     data: TaskCreateInput,
@@ -93,11 +98,13 @@ export class TasksService {
         data.opportunityId
       );
     }
+    if (data.projectId != null) await this.assertProjectBelongsToArtist(artistId, data.projectId);
     const row = await this.prisma.client.task.create({
       data: {
         artistId,
         title: data.title,
         opportunityId: data.opportunityId ?? null,
+        projectId: data.projectId ?? null,
         status: data.status ?? TaskStatus.todo,
         ownerLabel: data.ownerLabel ?? null,
         dueAt: data.dueAt ? new Date(data.dueAt) : null
@@ -129,6 +136,7 @@ export class TasksService {
         data.opportunityId
       );
     }
+    if (data.projectId != null) await this.assertProjectBelongsToArtist(artistId, data.projectId);
     const patchData: Prisma.TaskUncheckedUpdateInput = {};
     if (data.title !== undefined) {
       patchData.title = data.title;
@@ -142,6 +150,7 @@ export class TasksService {
     if (data.opportunityId !== undefined) {
       patchData.opportunityId = data.opportunityId;
     }
+    if (data.projectId !== undefined) patchData.projectId = data.projectId;
     if (data.dueAt !== undefined) {
       patchData.dueAt = data.dueAt ? new Date(data.dueAt) : null;
     }
