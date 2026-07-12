@@ -110,10 +110,15 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v8`
+already performed an outside action. Prompt/policy version `manager_os_v9`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, and respectful
-missing-context guidance.
+missing-context guidance. When the same readiness evidence shows that an event
+has no advance or a dated project has no milestone plan, Manager may offer one
+additional explicit internal action: build the existing source-keyed show
+advance or project plan. Acceptance revalidates the artist and current date,
+uses the existing Task authority, and completes atomically; it does not grant
+arbitrary tool or provider access.
 The Manager also has one shared, deterministic 90-day outcome review. Completed
 shows, projects, tasks, campaign results, attendance, post-show notes,
 relationship outcomes, invoices, expenses, and finalized settlements are

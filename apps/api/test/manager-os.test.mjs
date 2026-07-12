@@ -185,6 +185,8 @@ test("concurrent band decision writes fail closed instead of overwriting another
 test("manager action authorization is code-owned and defaults to forbidden", () => {
   assert.equal(policy.classifyManagerAction("create_task"), "internal");
   assert.equal(policy.classifyManagerAction("create_decision"), "internal");
+  assert.equal(policy.classifyManagerAction("generate_event_advance"), "internal");
+  assert.equal(policy.classifyManagerAction("generate_project_plan"), "internal");
   assert.equal(policy.classifyManagerAction("create_draft_record"), "forbidden");
   assert.equal(policy.classifyManagerAction("send_email"), "approval_required");
   assert.equal(policy.classifyManagerAction("financial_action"), "owner_approval_required");
@@ -252,6 +254,59 @@ test("recommendation acceptance can create a tenant task but cannot execute prov
   await assert.rejects(() => service.recommendation("artist-a", "rec-a", "accepted", {}, "member@test", "operator-a"), /Unsupported manager action/);
   assert.equal(taskCreates, 1);
   await assert.rejects(() => service.recommendation("artist-b", "rec-a", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+});
+
+test("manager recommendations execute existing event and project generators atomically and once", async () => {
+  async function exercise(action) {
+    let recommendationOutcome = "suggested";
+    let recommendationReason = null;
+    let taskCreates = 0;
+    const audits = [];
+    const client = {
+      managerRecommendation: {
+        findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-action", outcome: recommendationOutcome, taskId: null, decisionId: null, task: null, decision: null, proposedAction: action, evidence: [action.eventId ?? action.projectId] } : null,
+        updateMany: async ({ where, data }) => {
+          if (!where.outcome.in.includes(recommendationOutcome)) return { count: 0 };
+          recommendationOutcome = data.outcome;
+          recommendationReason = data.outcomeReason;
+          return { count: 1 };
+        },
+        update: async () => ({ id: "rec-action", outcome: recommendationOutcome, outcomeReason: recommendationReason, taskId: null, decisionId: null })
+      },
+      bandEvent: { findFirst: async ({ where }) => where.id === "event-a" && where.artistId === "artist-a" ? { id: "event-a", startsAt: new Date("2026-08-01T01:00:00.000Z"), opportunityId: "opp-a" } : null },
+      artistProject: { findFirst: async ({ where }) => where.id === "project-a" && where.artistId === "artist-a" ? { id: "project-a", type: "release", dueAt: new Date("2026-10-01T00:00:00.000Z") } : null },
+      task: {
+        findMany: async () => [],
+        createMany: async ({ data }) => { taskCreates += data.length; return { count: data.length }; }
+      }
+    };
+    client.$transaction = async (fn) => fn(client);
+    const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+    const accepted = await service.recommendation("artist-a", "rec-action", "accepted", {}, "member@test", "operator-a");
+    assert.equal(accepted.outcome, "completed");
+    assert.equal(accepted.outcomeReason, "action_executed");
+    await assert.rejects(() => service.recommendation("artist-a", "rec-action", "accepted", {}, "member@test", "operator-a"), /already been decided/);
+    return { taskCreates, audits };
+  }
+
+  const advance = await exercise({ type: "generate_event_advance", eventId: "event-a" });
+  assert.equal(advance.taskCreates, 4);
+  assert.equal(advance.audits.some((entry) => entry.action === "event.advance_generated" && entry.aggregateId === "event-a"), true);
+  const project = await exercise({ type: "generate_project_plan", projectId: "project-a" });
+  assert.equal(project.taskCreates, 6);
+  assert.equal(project.audits.some((entry) => entry.action === "project.plan_generated" && entry.aggregateId === "project-a"), true);
+});
+
+test("manager action targets are tenant-bound and revalidated before any write", async () => {
+  let writes = 0;
+  const client = {
+    managerRecommendation: { findFirst: async () => ({ id: "rec-action", outcome: "suggested", taskId: null, decisionId: null, task: null, decision: null, proposedAction: { type: "generate_event_advance", eventId: "foreign-event" }, evidence: ["foreign-event"] }) },
+    bandEvent: { findFirst: async () => null },
+    task: { createMany: async () => { writes += 1; return { count: 0 }; } }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => undefined }, { get: () => false });
+  await assert.rejects(() => service.recommendation("artist-a", "rec-action", "accepted", {}, "member@test", "operator-a"), (error) => error?.getStatus?.() === 404);
+  assert.equal(writes, 0);
 });
 
 test("concurrent recommendation acceptance cannot create duplicate tasks", async () => {
@@ -435,11 +490,11 @@ test("goal progress is append-only, artist-scoped, and audited", async () => {
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v8", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v9", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v8", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v8", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v9", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v9", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
@@ -733,6 +788,24 @@ test("manager chat refuses direct outside action and offers only reviewable inte
   assert.ok(!result.recommendation || result.recommendation.proposedAction?.type === "create_task");
 });
 
+test("manager bridges recorded show and project planning gaps to the existing internal generators", () => {
+  const showInput = {
+    id: "event-a", title: "Saturday show", startsAt: new Date("2026-07-18T01:00:00.000Z"), participants: [], tasks: [], deals: [], invoices: []
+  };
+  const show = {
+    id: showInput.id, title: showInput.title, type: "gig", status: "confirmed", startsAt: showInput.startsAt, participants: [],
+    readiness: eventReadiness.deterministicShowReadiness(showInput, [{ id: "member-a" }, { id: "member-b" }], now)
+  };
+  const projectInput = { id: "project-a", name: "Autumn EP", type: "release", status: "active", dueAt: new Date("2026-10-01T00:00:00.000Z"), budgetMinor: null, currency: "USD", successMetrics: [], assets: [], tasks: [], expenses: [], events: [] };
+  const project = { id: projectInput.id, name: projectInput.name, type: projectInput.type, status: projectInput.status, dueAt: projectInput.dueAt, readiness: projectPlan.deterministicProjectReadiness(projectInput, now) };
+  const facts = managerFacts({ events: [show], projects: [project] });
+  const brief = intelligence.deterministicManagerBrief(facts, now);
+  assert.deepEqual(brief.today.find((item) => item.stableKey === "event-event-a")?.proposedAction, { type: "generate_event_advance", eventId: "event-a" });
+  assert.deepEqual(brief.thisWeek.find((item) => item.stableKey === "project-project-a")?.proposedAction, { type: "generate_project_plan", projectId: "project-a" });
+  assert.equal(intelligence.deterministicManagerChat(facts, "Are we ready for Saturday?", now).recommendation?.proposedAction?.type, "generate_event_advance");
+  assert.equal(intelligence.deterministicManagerChat(facts, "How is the EP project going?", now).recommendation?.proposedAction?.type, "generate_project_plan");
+});
+
 test("snapshot tool continuation retains the operator request", async () => {
   const calls = [];
   const client = { responses: { create: async (input) => { calls.push(input); return { output: [{ type: "function_call", name: "read_manager_snapshot", call_id: "call-a", arguments: "{}" }], usage: { input_tokens: 2, output_tokens: 1 } }; } } };
@@ -752,6 +825,12 @@ test("manager grounding rejects a whole response with invented evidence", () => 
   assert.equal(service.chatOutputIsGrounded({ answer: "Decision", citations: [], recommendation: { stableKey: "decision-a", title: "Choose", reason: "Tradeoff", nextAction: "Review", workstream: "live", priority: "med", evidenceIds: [], proposedAction: { type: "create_decision", workstream: "live", title: "Which market?", context: null, options: [{ label: "Milwaukee", tradeoff: "Closer" }, { label: "Detroit", tradeoff: "Stronger fit" }] } } }, facts), true);
   const emptyBrief = { summary: "Brief", today: [], thisWeek: [], decisionsNeeded: [], waitingOn: [], risksAndOpportunities: [] };
   assert.equal(service.briefIsGrounded({ ...emptyBrief, today: [{ stableKey: "decision-a", title: "Choose", reason: "Tradeoff", nextAction: "Review", workstream: "live", priority: "med", evidenceIds: [], proposedAction: { type: "create_decision", workstream: "live", title: "Which market?", context: null, options: [{ label: "Milwaukee", tradeoff: "Closer" }, { label: "Detroit", tradeoff: "Stronger fit" }] } }] }, facts), false);
+  const advanceReadiness = eventReadiness.deterministicShowReadiness({ id: "event-a", title: "Saturday show", startsAt: new Date("2026-07-18T01:00:00.000Z"), participants: [], tasks: [], deals: [], invoices: [] }, facts.members, now);
+  const actionFacts = managerFacts({ events: [{ id: "event-a", title: "Saturday show", type: "gig", status: "confirmed", startsAt: new Date("2026-07-18T01:00:00.000Z"), participants: [], tasks: [], deals: [], invoices: [], setlist: null, readiness: advanceReadiness }] });
+  const advanceItem = { stableKey: "advance-event-a", title: "Build advance", reason: "Missing", nextAction: "Generate it", workstream: "live", priority: "high", evidenceIds: ["event-a"], proposedAction: { type: "generate_event_advance", eventId: "event-a" } };
+  assert.equal(service.chatOutputIsGrounded({ answer: "Build it", citations: ["event-a"], recommendation: advanceItem }, actionFacts), true);
+  assert.equal(service.briefIsGrounded({ ...emptyBrief, today: [advanceItem] }, actionFacts), true);
+  assert.equal(service.chatOutputIsGrounded({ answer: "Wrong tenant", citations: ["event-a"], recommendation: { ...advanceItem, proposedAction: { type: "generate_event_advance", eventId: "foreign-event" } } }, actionFacts), false);
   const commitmentTasks = [{ id: "task-blocked", title: "Confirm stage dimensions", status: "blocked", ownerLabel: "Alex", dueAt: new Date("2026-07-20T12:00:00.000Z"), blockedReason: "Promoter has not supplied the stage plot", waitingOn: "Promoter", deferralCount: 0 }];
   const commitmentFacts = managerFacts({ tasks: commitmentTasks, commitmentHealth: commitmentHealth.deterministicManagerCommitmentHealth(commitmentTasks, now) });
   assert.equal(service.chatOutputIsGrounded({ answer: "Grounded but irrelevant", citations: ["goal-a"], recommendation: null }, commitmentFacts, "What is blocked or slipping?"), false);

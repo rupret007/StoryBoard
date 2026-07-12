@@ -162,7 +162,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v8", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v9", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -276,9 +276,15 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByLabel("Project due date").fill(projectDue);
   await page.getByRole("button", { name: "Create project" }).click();
   await expect(page.getByText(`E2E release ${suffix}`, { exact: true })).toBeVisible();
+  await page.goto("/manager");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Build milestone plan" })).toBeVisible();
+  await page.getByRole("button", { name: "Build milestone plan" }).click();
+  await expect(page.getByText("Milestone plan created.", { exact: true })).toBeVisible();
+  await page.goto("/operations");
+  await page.getByRole("tab", { name: "Projects" }).click();
   await page.getByRole("link", { name: "Open project" }).click();
   await expect(page.getByRole("heading", { name: "Milestone plan", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Generate missing milestones" }).click();
   await expect(page.getByText(/0\/6 milestones complete/)).toBeVisible();
   const firstReleaseMilestone = "Lock the release goal, audience, and story";
   await page.getByLabel(`Owner for project milestone ${firstReleaseMilestone}`).selectOption("Alex");

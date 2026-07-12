@@ -40,6 +40,12 @@ Assistant messages can reference a reviewable
 `ManagerRecommendation`, but cannot directly perform provider, legal, or
 financial actions. Recommendation outcome reason/note/time support reviewed
 learning; accepted recommendations link to a task or one open decision draft.
+Two immediate internal recommendation types reuse existing authorities:
+`generate_event_advance` creates `show_advance_v1` Tasks for a cited event and
+`generate_project_plan` creates `project_plan_v1` Tasks for a cited project.
+Their target ownership and date are revalidated, task source keys make replay
+idempotent, and a successful acceptance records `action_executed` and completes
+the recommendation in the same transaction.
 Conversation-created decisions have `needsFraming=true`, cannot be chosen until
 a member saves real options/tradeoffs, and complete the linked recommendation
 only after an outcome review. Task completion is attributed automatically.
@@ -76,6 +82,8 @@ expenses, and one settlement. Confirmed opportunities have at most one event.
 `ShowReadiness` is a derived, non-persistent view over those artist-owned
 records. It exposes category scores, confidence, evidence IDs, and prioritized
 gaps so the event workspace and Manager use one explainable readiness policy.
+Show-advance tasks use artist-unique `show_advance_v1:<event>:<step>` source
+keys whether generated from Operations or an accepted Manager recommendation.
 Event timeline writes preserve `startsAt <= endsAt` and the recorded show-day
 order load-in → soundcheck → doors → set → curfew. Patch validation merges the
 new values with existing values before checking this invariant.

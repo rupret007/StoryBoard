@@ -486,10 +486,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v8", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v9", operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v8", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v9", operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -555,8 +555,13 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
 
   const operations = new operationsMod.OperationsService(prisma, audit, {});
   const releaseProject = await operations.createProject(artist.id, { type: "release", status: "active", name: "Integration EP", dueAt: "2026-11-01T12:00:00.000Z", budgetMinor: 75000, currency: "USD", successMetrics: ["100 saves"], assets: [{ label: "Working folder", url: "https://example.test/ep" }] }, operator.email, operator.id);
-  const generatedProjectPlan = await operations.generateProjectPlan(artist.id, releaseProject.id, operator.email, operator.id);
-  assert.equal(generatedProjectPlan.createdCount, 6);
+  const projectPlanBrief = await manager.generateBrief(artist.id, "weekly", operator.email, operator.id);
+  const projectPlanRecommendation = projectPlanBrief.recommendations.find((recommendation) => recommendation.proposedAction?.type === "generate_project_plan" && recommendation.proposedAction.projectId === releaseProject.id);
+  assert.ok(projectPlanRecommendation);
+  const generatedProjectPlan = await manager.recommendation(artist.id, projectPlanRecommendation.id, "accepted", {}, operator.email, operator.id);
+  assert.equal(generatedProjectPlan.outcome, "completed");
+  assert.equal(generatedProjectPlan.outcomeReason, "action_executed");
+  assert.equal(await client.task.count({ where: { artistId: artist.id, projectId: releaseProject.id } }), 6);
   assert.equal((await operations.generateProjectPlan(artist.id, releaseProject.id, operator.email, operator.id)).createdCount, 0);
   const releaseReadiness = await operations.projectReadiness(artist.id, releaseProject.id, new Date("2026-07-12T12:00:00.000Z"));
   assert.equal(releaseReadiness.readiness.totalMilestones, 6);
@@ -580,8 +585,13 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   await assert.rejects(() => operations.patchEvent(artist.id, event.id, { soundcheckAt: "2026-09-18T21:00:00.000Z" }, operator.email, operator.id), /Soundcheck must be before doors/i);
   await operations.participant(artist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id);
   await assert.rejects(() => operations.participant(foreignArtist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
-  const advance = await operations.generateAdvance(artist.id, event.id, operator.email, operator.id);
-  assert.equal(advance.created.length, 4);
+  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v9", inputFacts: {}, output: {}, trace: {} } });
+  const advanceRecommendation = await client.managerRecommendation.create({ data: { managerRunId: actionRun.id, stableKey: `advance-${event.id}`, workstream: "live", title: "Build the show advance", reason: "No advance tasks are recorded", nextAction: "Generate the existing checklist", priority: "high", evidence: [event.id], proposedAction: { type: "generate_event_advance", eventId: event.id } } });
+  await assert.rejects(() => manager.recommendation(foreignArtist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  const advance = await manager.recommendation(artist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id);
+  assert.equal(advance.outcome, "completed");
+  assert.equal(advance.outcomeReason, "action_executed");
+  assert.equal(await client.task.count({ where: { artistId: artist.id, eventId: event.id, ownerLabel: "Show advance" } }), 4);
   assert.equal((await operations.generateAdvance(artist.id, event.id, operator.email, operator.id)).created.length, 0);
   const readiness = await operations.eventReadiness(artist.id, event.id, new Date("2026-09-01T12:00:00.000Z"));
   assert.equal(readiness.categories.find((category) => category.category === "people")?.score, 25);

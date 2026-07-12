@@ -309,7 +309,7 @@ Manager routes:
 - `GET /manager/eval-examples` and
   `POST /manager/recommendations/:id/promote-eval` (owner-only)
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v8`)
+  (owner-only; currently accepts only the code-registered `manager_os_v9`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -340,7 +340,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v8` retains the current operator question and at most 12
+version `manager_os_v9` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -358,7 +358,12 @@ A deterministic post-output gate rejects canned openings, assistant/meta
 language, excessive length/formatting, and claims of completed outside actions;
 the deterministic manager answer is used when model output fails the gate.
 Chat may return one reviewable recommendation through the same recommendation
-API. Acceptance permits only `create_task` and an open `create_decision` draft.
+API. Acceptance permits `create_task`, an open `create_decision` draft, or one
+of two readiness-bound operations: `generate_event_advance` and
+`generate_project_plan`. Those generators only create source-keyed internal
+Tasks, require the cited current target to belong to the artist, recheck the
+event/project date, and commit with the recommendation claim. They cannot call
+a provider or prepare/execute an Approval.
 For commitment questions, code requires the top recorded pressure item as
 evidence and rejects duplicate task proposals. Generated briefs must keep a
 high-severity commitment first or fall back to deterministic output. The model does not

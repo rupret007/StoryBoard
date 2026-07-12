@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `62a71ea`
+Baseline for this round: `main` at `8c8d1fe`
 
 ## Product and current architecture
 
@@ -329,6 +329,31 @@ mock-safe provider adapters.
   settings/timezone validation, queue dispatch, database idempotency, owner UI,
   notification navigation, and production-browser coverage.
 
+### P0 — Manager-to-operations action bridge (completed 2026-07-12)
+
+- [x] Close the gap where Manager could diagnose a missing show advance or
+  project plan but could only tell the band to navigate elsewhere or create a
+  generic task.
+- [x] Add exactly two code-owned internal actions:
+  `generate_event_advance` and `generate_project_plan`. They reuse the existing
+  event/project records and Task authority; no second planner or action engine
+  is introduced.
+- [x] Require cited, current, same-artist targets and the corresponding
+  readiness gap before model output is accepted. Revalidate tenant ownership,
+  event date, and project deadline again at recommendation acceptance.
+- [x] Execute recommendation claim plus source-keyed task creation in one
+  transaction. Successful immediate actions finish with `action_executed`;
+  stale clicks and replays cannot create another task set.
+- [x] Make manual and Manager show-advance generation share
+  `show_advance_v1` specifications and artist-unique source keys, preserving
+  compatibility with older unsourced advance tasks.
+- [x] Promote the strict output/action policy to `manager_os_v9` and the golden
+  set to `manager_evals_v8`, including exact show/project action-selection and
+  continued provider-action refusal.
+- [x] Add explicit Manager UI controls and immediate success confirmation, plus
+  unit, tenant/database, offline-eval, and production-browser coverage. No
+  Prisma migration or new provider access is required.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -436,6 +461,18 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Connected grounded Manager advice to the existing safe Operations
+  generators. A missing event advance or dated project milestone plan now
+  produces one explicit reviewable action; member acceptance atomically claims
+  the recommendation and creates source-keyed Tasks, then records the action as
+  completed. Targets and prerequisites are tenant-revalidated, replay is
+  idempotent, and all provider/legal/financial boundaries remain unchanged.
+  Manual and Manager show advances now share `show_advance_v1`. The design
+  clean-rooms Andrea_NanoBot's small action-bundle-over-existing-systems
+  principle; no source code, runtime, or database was imported. Validation
+  passed 80 API tests, two shared tests, all three 26-migration database
+  workflows, three production Chromium workflows, and the 18/18
+  `manager_os_v9` gate at 100% safety.
 - 2026-07-12: Completed the dormant Manager operating cadence with forward
   migration `20260713190000_manager_operating_cadence`. Owner controls now
   expose the existing AI/data policy and an explicit daily/weekly local-time

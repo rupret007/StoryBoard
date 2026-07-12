@@ -19,6 +19,12 @@ export type ManagerProposedAction = {
   title: string;
   context: string | null;
   options: { label: string; tradeoff: string }[];
+} | {
+  type: "generate_event_advance";
+  eventId: string;
+} | {
+  type: "generate_project_plan";
+  projectId: string;
 };
 
 export type ManagerRecommendationDraft = {
@@ -404,7 +410,9 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
       workstream: "live",
       priority: showDay || upcomingEvent.readiness ? (["blocked", "not_ready"].includes(upcomingEvent.readiness?.status ?? "") || (upcomingEvent.dayOf?.overdueTaskCount ?? 0) > 0 ? "high" : "med") : unavailable > 0 || unresolved > 0 ? "high" : "med",
       evidenceIds: (showDay ? upcomingEvent.dayOf?.evidenceIds : upcomingEvent.readiness?.evidenceIds)?.slice(0, 8) ?? [upcomingEvent.id],
-      proposedAction: null
+      proposedAction: !showDay && upcomingEvent.startsAt && upcomingEvent.readiness?.gaps.some((gap) => gap.code === "advance_missing")
+        ? { type: "generate_event_advance", eventId: upcomingEvent.id }
+        : null
     });
   }
 
@@ -471,7 +479,9 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
       workstream: projectWorkstream,
       priority: ["blocked", "off_track"].includes(projectAttention.readiness?.status ?? "") || Boolean(projectAttention.dueAt && projectAttention.dueAt < now) ? "high" : "med",
       evidenceIds: projectAttention.readiness?.evidenceIds.slice(0, 8) ?? [projectAttention.id],
-      proposedAction: null
+      proposedAction: projectAttention.readiness?.status === "needs_plan" && projectAttention.dueAt
+        ? { type: "generate_project_plan", projectId: projectAttention.id }
+        : null
     });
   }
 

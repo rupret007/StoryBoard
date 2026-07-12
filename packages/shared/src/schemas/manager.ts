@@ -67,10 +67,10 @@ export const managerMessageFeedbackSchema = z.object({
   if (input.helpful && input.reason) context.addIssue({ code: "custom", path: ["reason"], message: "Helpful feedback cannot include a correction reason" });
   if (!input.helpful && !input.reason) context.addIssue({ code: "custom", path: ["reason"], message: "Choose what needs improvement" });
 });
-export const managerRecommendationReasons = ["accepted", "task_completed", "decision_reviewed", "already_handled", "not_relevant", "wrong_priority", "bad_timing", "missing_context", "other"] as const;
+export const managerRecommendationReasons = ["accepted", "action_executed", "task_completed", "decision_reviewed", "already_handled", "not_relevant", "wrong_priority", "bad_timing", "missing_context", "other"] as const;
 export const managerRecommendationFeedbackSchema = z.object({ reason: z.enum(managerRecommendationReasons).optional(), note: z.string().trim().max(1000).nullable().optional() }).strict();
 export const managerEvalPromotionSchema = z.object({ label: z.enum(["useful", "not_useful", "needs_revision"]), notes: z.string().trim().max(2000).nullable().optional() }).strict();
-export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v8").default("manager_os_v8") }).strict();
+export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v9").default("manager_os_v9") }).strict();
 export const managerMemoryPatchSchema = z.object({
   value: z.json().optional(),
   confirmed: z.boolean().optional(),

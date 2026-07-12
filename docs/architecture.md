@@ -121,6 +121,12 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   default and requires separate owner consent before it may spend model tokens.
   A scheduled run can suggest reviewable internal work but cannot accept it or
   perform any provider, legal, financial, or irreversible action.
+- Manager recommendations bridge only two existing readiness gaps into direct
+  internal work: `generate_event_advance` and `generate_project_plan`. Code
+  requires the cited same-artist event/project and missing-plan premise,
+  revalidates the target at acceptance, and atomically claims the recommendation
+  with source-keyed Task creation. The action is immediately complete and
+  replay-safe; this does not expose arbitrary operations or provider tools.
 - Show readiness is deterministic derived data, not a model assertion or an
   editable status. It uses the tenant-scoped event graph, active lineup, dated
   urgency, explicit evidence IDs, and premise-coverage confidence. Operations
@@ -145,7 +151,8 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   Conversation may propose a `create_decision` only when it can parse two
   explicit options. Acceptance creates one linked open draft with unknown
   tradeoffs; a separate member write must establish framing before choice.
-  Brief generation remains limited to `create_task` proposals.
+  Brief generation remains limited to `create_task` plus the two readiness-bound
+  event/project generators; it still cannot create a decision or outside action.
 - Manager context health is one deterministic projection over the operating
   profile, working lineup, goals, events, projects, and opportunities. Briefs,
   conversation, and the workspace consume the same four-dimension score and
