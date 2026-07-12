@@ -219,6 +219,13 @@ database/Redis/worker state; it never returns URLs, credentials, or queue data.
   records `lastDeferredAt`.
 - Task patches use tenant-scoped compare-and-set updates. A stale screen returns
   an error without overwriting newer status, ownership, blocker, or date data.
+- `POST /tasks/:id/prerequisites` with `{ "prerequisiteTaskId": "..." }`
+  adds one idempotent artist-owned prerequisite;
+  `DELETE /tasks/:id/prerequisites/:prerequisiteTaskId` removes it. The service rejects
+  self-links, cycles, cross-artist IDs, and a prerequisite due after the task it
+  unlocks. A dependent task cannot be completed until every prerequisite is
+  done, and a completed prerequisite cannot be reopened while completed
+  downstream work still depends on it. The Tasks page manages these links.
 
 ## Commands (`POST /commands/execute`)
 
@@ -311,6 +318,10 @@ Manager routes:
   live work, booking, projects, money, goals, and the working team. Each area is
   current, needs confirmation, stale, missing, or conflicted and carries a
   bounded next question plus tenant evidence IDs.
+- `GET /manager/work-sequence` — read-only `manager_work_sequence_v1` task
+  ordering. It separates ready-now work, in-progress work, manual blockers,
+  unfinished prerequisites, and invalid historical order; and identifies which
+  actionable task unlocks downstream commitments.
 - `GET /manager/plan`; `POST /manager/plan/ensure` fills only missing
   `manager_plan_v1` records and never replaces user edits
 - `GET` / `POST /manager/decisions`; `PATCH /manager/decisions/:id` records a
@@ -346,7 +357,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v17`)
+  (owner-only; currently accepts only the code-registered `manager_os_v18`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -399,6 +410,14 @@ trace, and applied after either deterministic or model response generation. At
 most one relevant record check is appended to a normal answer. A direct
 confidence question returns the highest-risk areas and proposes no action.
 
+`manager_work_sequence_v1` is also derived rather than editable. The source of
+truth remains Tasks plus their explicit prerequisite links. It ranks ready work
+by overdue state, downstream unlocks, and due date; waiting work stays distinct
+from manual blockers. Direct sequence questions use this code-owned result and
+bypass provider improvisation. Optional-model briefs and other chat responses
+are rejected when they present a downstream task without its ready prerequisite.
+The policy never estimates effort, duration, or actual member capacity.
+
 Owner-reviewed response evals store a bounded question/answer/feedback snapshot
 and refer back to the assistant message's linked, already-redacted
 `ManagerRun.inputFacts` during offline replay. Useful examples must pass the
@@ -413,7 +432,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v17` retains the current operator question and at most 12
+version `manager_os_v18` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -745,7 +764,7 @@ pnpm test
 pnpm build
 ```
 
-**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The API suite covers tenant links, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
+**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
 
 **Database integration tests:** Set `STORYBOARD_TEST_DATABASE_URL` to a disposable PostgreSQL database whose name contains `test`, then run:
 

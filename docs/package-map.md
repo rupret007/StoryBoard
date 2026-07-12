@@ -29,6 +29,8 @@ The NestJS orchestration backend. Current responsibilities:
 
 - REST modules for venues, contacts, booking opportunities, tasks, approvals,
   audit events, commands, weekly summary, dashboard stats, **insights**
+- **Tasks:** artist-scoped prerequisite graph, cycle/date/state preflight,
+  serializable completion guards, audit history, and relationship diagnostics
 - **Memberships** / invites / onboarding; **auth** (Google OIDC + dev bypass)
 - Prisma via **`PrismaService`** (`apps/api/src/prisma/`)
 - **`AuditService`** on important actions; approval execution paths
@@ -37,7 +39,8 @@ The NestJS orchestration backend. Current responsibilities:
 - **Manager OS:** tenant snapshots, deterministic briefs/chat, post-show outcome
   review, structured context health, six-area `manager_evidence_v1` operating
   confidence calibration, scheduled decision/outcome learning,
-  evidence-ranked commitment follow-through, linked task ownership, append-only
+  evidence-ranked commitment follow-through, dependency-aware
+  `manager_work_sequence_v1`, linked task ownership, append-only
   member capacity check-ins, and bounded `manager_team_load_v2` assignment
   proposals, conversation-to-decision drafts,
   timezone-safe/idempotent brief scheduling, response-quality policy,

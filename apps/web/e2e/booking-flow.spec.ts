@@ -237,7 +237,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v17", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v18", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -275,13 +275,19 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "recorded result is mixed" })).toContainText("Attendance reached 80");
 
   await page.goto("/tasks");
+  const downstreamTaskTitle = "Choose one target market and qualify real prospects";
+  const prerequisiteTaskTitle = "Finish the booking profile and define what a good-fit show means";
+  await page.getByLabel(`Prerequisite for ${downstreamTaskTitle}`).selectOption({ label: prerequisiteTaskTitle });
+  const downstreamTaskRow = page.getByLabel(`Prerequisite for ${downstreamTaskTitle}`).locator("xpath=ancestor::tr");
+  await downstreamTaskRow.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByRole("button", { name: `Remove prerequisite ${prerequisiteTaskTitle} from ${downstreamTaskTitle}` })).toBeVisible();
   const firstPlanOwner = page.getByLabel("Owner for Finish the booking profile and define what a good-fit show means");
   const firstPlanTaskRow = firstPlanOwner.locator("xpath=ancestor::tr");
   await firstPlanOwner.selectOption({ label: "Alex" });
   await firstPlanTaskRow.getByLabel("Status for Finish the booking profile and define what a good-fit show means").selectOption("blocked");
   await firstPlanTaskRow.getByLabel("Waiting on for Finish the booking profile and define what a good-fit show means").fill("Bandleader");
   await firstPlanTaskRow.getByLabel("Blocker for Finish the booking profile and define what a good-fit show means").fill("The band has not agreed on the target room size.");
-  const deferredDate = new Date(Date.now() + 180 * 86400000).toISOString().slice(0, 10);
+  const deferredDate = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
   await firstPlanTaskRow.getByLabel("Due date for Finish the booking profile and define what a good-fit show means").fill(deferredDate);
   await firstPlanTaskRow.getByRole("button", { name: "Save" }).click();
   await expect(page.getByLabel("Owner for Finish the booking profile and define what a good-fit show means").locator("option:checked")).toHaveText("Alex");
@@ -289,6 +295,10 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByLabel("Blocker for Finish the booking profile and define what a good-fit show means")).toHaveValue("The band has not agreed on the target room size.");
 
   await page.goto("/manager");
+  const workSequence = page.getByTestId("manager-work-sequence");
+  await expect(workSequence.getByRole("heading", { name: "What can move now" })).toBeVisible();
+  await expect(workSequence).toContainText(downstreamTaskTitle);
+  await expect(workSequence).toContainText(/waiting for.*Finish the booking profile/i);
   const followThrough = page.getByTestId("manager-commitments");
   await expect(followThrough.getByText(/open commitment.*intervention now/i)).toBeVisible();
   await expect(followThrough.getByText("The band has not agreed on the target room size.", { exact: false }).first()).toBeVisible();
@@ -296,6 +306,11 @@ test("novice manager intake produces grounded work and band operations records",
   await blockedQuestion.fill("What is blocked or slipping?");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "target room size" })).toContainText("Bandleader");
+  await blockedQuestion.fill("What can we do now, and what is waiting on another task?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const sequenceReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "Ready now:" }).last();
+  await expect(sequenceReply).toContainText("Waiting:");
+  await expect(sequenceReply).toContainText(downstreamTaskTitle);
 
   await page.goto("/operations");
   await page.getByLabel("Title").fill(`E2E rehearsal ${suffix}`);

@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
-import { CheckCircle2, CircleAlert, ListTodo } from "lucide-react";
+import { CheckCircle2, CircleAlert, Link2, ListTodo, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -149,6 +149,7 @@ export function TasksClient({
             tone="danger"
             onSaved={() => router.refresh()}
             members={members}
+            allTasks={initialTasks}
           />
           <TaskSection
             title="Overdue"
@@ -157,6 +158,7 @@ export function TasksClient({
             tone="warning"
             onSaved={() => router.refresh()}
             members={members}
+            allTasks={initialTasks}
           />
           <TaskSection
             title="Open"
@@ -165,6 +167,7 @@ export function TasksClient({
             tone="neutral"
             onSaved={() => router.refresh()}
             members={members}
+            allTasks={initialTasks}
           />
           <TaskSection
             title="Done"
@@ -173,6 +176,7 @@ export function TasksClient({
             tone="success"
             onSaved={() => router.refresh()}
             members={members}
+            allTasks={initialTasks}
           />
         </div>
       )}
@@ -186,7 +190,8 @@ function TaskSection({
   tasks,
   tone,
   onSaved,
-  members
+  members,
+  allTasks
 }: {
   title: string;
   subtitle: string;
@@ -194,6 +199,7 @@ function TaskSection({
   tone: "danger" | "warning" | "neutral" | "success";
   onSaved: () => void;
   members: BandMember[];
+  allTasks: Task[];
 }) {
   if (tasks.length === 0) {
     return null;
@@ -230,7 +236,7 @@ function TaskSection({
         </Badge>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1180px] text-left text-sm">
+        <table className="w-full min-w-[1420px] text-left text-sm">
           <thead className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             <tr>
               <th className="pb-2 pr-4">Task</th>
@@ -239,13 +245,14 @@ function TaskSection({
               <th className="pb-2 pr-4">Due</th>
               <th className="pb-2 pr-4">Waiting on</th>
               <th className="pb-2 pr-4">Blocker</th>
+              <th className="pb-2 pr-4">Prerequisites</th>
               <th className="pb-2 pr-4">Opportunity</th>
               <th className="pb-2 w-24" />
             </tr>
           </thead>
           <tbody>
             {tasks.map((t) => (
-              <TaskRow key={t.id} task={t} onSaved={onSaved} members={members} />
+              <TaskRow key={t.id} task={t} onSaved={onSaved} members={members} allTasks={allTasks} />
             ))}
           </tbody>
         </table>
@@ -257,11 +264,13 @@ function TaskSection({
 function TaskRow({
   task: t,
   onSaved,
-  members
+  members,
+  allTasks
 }: {
   task: Task;
   onSaved: () => void;
   members: BandMember[];
+  allTasks: Task[];
 }) {
   const savedOwnerValue = t.bandMemberId ?? (t.ownerLabel ? `legacy:${t.ownerLabel}` : "");
   const [status, setStatus] = useState(t.status);
@@ -269,6 +278,7 @@ function TaskRow({
   const [dueAt, setDueAt] = useState(t.dueAt?.slice(0, 10) ?? "");
   const [waitingOn, setWaitingOn] = useState(t.waitingOn ?? "");
   const [blockedReason, setBlockedReason] = useState(t.blockedReason ?? "");
+  const [prerequisiteTaskId, setPrerequisiteTaskId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -296,6 +306,34 @@ function TaskRow({
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Task update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addPrerequisite() {
+    if (!prerequisiteTaskId) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch(`/tasks/${t.id}/prerequisites`, { method: "POST", json: { prerequisiteTaskId } });
+      setPrerequisiteTaskId("");
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add prerequisite");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removePrerequisite(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch(`/tasks/${t.id}/prerequisites/${id}`, { method: "DELETE" });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove prerequisite");
     } finally {
       setBusy(false);
     }
@@ -334,6 +372,12 @@ function TaskRow({
       </td>
       <td className="py-3 pr-4">
         {status === "blocked" ? <input className="sb-input min-w-56 py-1.5 text-xs" aria-label={`Blocker for ${t.title}`} value={blockedReason} required maxLength={1000} onChange={(event) => setBlockedReason(event.target.value)} placeholder="What prevents the next step?" /> : <span className="text-[var(--text-muted)]">—</span>}
+      </td>
+      <td className="py-3 pr-4">
+        <div className="min-w-64 space-y-2">
+          {(t.prerequisites ?? []).map((dependency) => <div key={dependency.id} className="flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs"><Link2 className="h-3 w-3 shrink-0 text-[var(--accent)]" /><span className="min-w-0 flex-1 truncate">{dependency.prerequisiteTask.title}</span><Badge variant={dependency.prerequisiteTask.status === "done" ? "success" : "warning"}>{dependency.prerequisiteTask.status.replace("_", " ")}</Badge><button type="button" className="rounded p-0.5 hover:bg-[var(--surface-1)]" aria-label={`Remove prerequisite ${dependency.prerequisiteTask.title} from ${t.title}`} disabled={busy} onClick={() => void removePrerequisite(dependency.prerequisiteTaskId)}><X className="h-3.5 w-3.5" /></button></div>)}
+          {status !== "done" ? <div className="flex gap-1"><select className="sb-select min-w-0 flex-1 py-1.5 text-xs" aria-label={`Prerequisite for ${t.title}`} value={prerequisiteTaskId} onChange={(event) => setPrerequisiteTaskId(event.target.value)}><option value="">Add prerequisite…</option>{allTasks.filter((candidate) => candidate.id !== t.id && !(t.prerequisites ?? []).some((dependency) => dependency.prerequisiteTaskId === candidate.id)).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.title}{candidate.status === "done" ? " (done)" : ""}</option>)}</select><button type="button" className="sb-btn-ghost px-2 py-1.5 text-xs" disabled={busy || !prerequisiteTaskId} onClick={() => void addPrerequisite()}>Add</button></div> : null}
+        </div>
       </td>
       <td className="py-3 pr-4 text-[var(--text-muted)]">
         {t.opportunity?.title ?? "—"}

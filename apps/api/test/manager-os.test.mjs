@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, evidenceHealth, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, evidenceHealth, workSequence, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -20,6 +20,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-context-health.js"),
   loadApi("manager/manager-knowledge-health.js"),
   loadApi("manager/manager-evidence-health.js"),
+  loadApi("manager/manager-work-sequence.js"),
   loadApi("manager/manager-memory-capture.js"),
   loadApi("manager/manager-goal-measurement.js"),
   loadApi("manager/manager-coaching.js"),
@@ -492,7 +493,7 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v17", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v18", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "available", effectiveUntil: "2026-07-20T12:00:00.000Z" }).success, true);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "busy" }).success, false);
@@ -767,22 +768,22 @@ test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v17", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v18", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v17", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v17", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v18", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v18", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v17", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v17", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v18", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v18", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v17", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v16", resolutionVersion: "manager_os_v17", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v17", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v18", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v17", resolutionVersion: "manager_os_v18", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v18", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 
@@ -993,6 +994,32 @@ test("manager conversation calibrates incomplete operating evidence without inve
   assert.match(confidence.answer, /not a rating of the band/i);
   assert.match(confidence.answer, /Check these first:/);
   assert.equal(confidence.recommendation, null);
+});
+
+test("manager work sequence keeps downstream commitments waiting and ranks ready unlockers", () => {
+  const tasks = [
+    { id: "task-a", title: "Confirm release date", status: "todo", ownerLabel: "Alex", dueAt: null },
+    { id: "task-b", title: "Schedule announcement", status: "todo", ownerLabel: "Jordan", dueAt: new Date("2026-07-11T00:00:00.000Z"), prerequisites: [{ prerequisiteTask: { id: "task-a", title: "Confirm release date", status: "todo", dueAt: null } }] },
+    { id: "task-c", title: "Resolve artwork blocker", status: "blocked", ownerLabel: "Jordan", dueAt: new Date("2026-07-13T00:00:00.000Z"), blockedReason: "Designer has not delivered the final files" }
+  ];
+  const sequence = workSequence.deterministicManagerWorkSequence(tasks, now);
+  assert.equal(sequence.status, "waiting");
+  assert.equal(sequence.readyNow[0].taskId, "task-a");
+  assert.deepEqual(sequence.readyNow[0].unlocksTaskIds, ["task-b"]);
+  assert.equal(sequence.items.find((item) => item.taskId === "task-b")?.state, "waiting_on_prerequisites");
+  assert.equal(sequence.items.find((item) => item.taskId === "task-c")?.state, "manually_blocked");
+  const priorityTasks = tasks.slice(0, 2);
+  const prioritySequence = workSequence.deterministicManagerWorkSequence(priorityTasks, now);
+  const priorityFacts = managerFacts({ tasks: priorityTasks, workSequence: prioritySequence, commitmentHealth: commitmentHealth.deterministicManagerCommitmentHealth(priorityTasks, now) });
+  const brief = intelligence.deterministicManagerBrief(priorityFacts, now);
+  assert.equal(brief.today[0].stableKey, "work-sequence-task-a");
+  assert.ok(brief.today[0].evidenceIds.includes("task-b"));
+  const answer = intelligence.deterministicManagerChat(managerFacts({ tasks, workSequence: sequence, commitmentHealth: commitmentHealth.deterministicManagerCommitmentHealth(tasks, now) }), "What can we do now, and what is waiting on another task?", now);
+  assert.match(answer.answer, /Ready now:/);
+  assert.match(answer.answer, /Confirm release date/);
+  assert.match(answer.answer, /Waiting:/);
+  assert.match(answer.answer, /Schedule announcement/);
+  assert.equal(answer.recommendation, null);
 });
 
 test("manager knowledge health detects conflict and staleness while enforcing profile precedence", () => {
@@ -1358,6 +1385,16 @@ test("manager grounding rejects a whole response with invented evidence", () => 
   assert.equal(service.chatOutputIsGrounded({ answer: "Exact blocker", citations: ["task-blocked"], recommendation: null }, commitmentFacts, "What is blocked or slipping?"), true);
   assert.equal(service.chatOutputIsGrounded({ answer: "Duplicate work", citations: ["task-blocked"], recommendation: { stableKey: "duplicate-task", title: "Duplicate", reason: "Wrong", nextAction: "Create it", workstream: "band_operations", priority: "med", evidenceIds: ["task-blocked"], proposedAction: { type: "create_task", title: "Confirm stage dimensions", dueAt: null, initiativeId: null } } }, commitmentFacts, "What is blocked or slipping?"), false);
   assert.equal(service.briefIsGrounded({ ...emptyBrief, today: [{ stableKey: "other-work", title: "Other", reason: "Lower priority", nextAction: "Do it", workstream: "band_operations", priority: "med", evidenceIds: ["goal-a"], proposedAction: null }] }, commitmentFacts), false);
+
+  const sequenceTasks = [{ id: "task-prerequisite", title: "Confirm release date", status: "todo", ownerLabel: "Alex", dueAt: null }, { id: "task-downstream", title: "Schedule announcement", status: "todo", ownerLabel: "Jordan", dueAt: new Date("2026-07-11T00:00:00.000Z"), prerequisites: [{ prerequisiteTask: { id: "task-prerequisite", title: "Confirm release date", status: "todo", dueAt: null } }] }];
+  const sequence = workSequence.deterministicManagerWorkSequence(sequenceTasks, now);
+  const sequenceFacts = managerFacts({ tasks: sequenceTasks, workSequence: sequence, commitmentHealth: commitmentHealth.deterministicManagerCommitmentHealth(sequenceTasks, now) });
+  assert.equal(service.chatOutputIsGrounded({ answer: "Do the downstream work now", citations: ["task-downstream"], recommendation: null }, sequenceFacts, "What should we do first?"), false);
+  assert.equal(service.chatOutputIsGrounded({ answer: "Confirm the date before the announcement", citations: ["task-prerequisite", "task-downstream"], recommendation: null }, sequenceFacts, "What should we do first?"), true);
+  const unsafeSequenceItem = { stableKey: "downstream-now", title: "Schedule announcement", reason: "Overdue", nextAction: "Do it now", workstream: "band_operations", priority: "high", evidenceIds: ["task-downstream"], proposedAction: null };
+  const safeSequenceItem = { ...unsafeSequenceItem, stableKey: "prerequisite-first", title: "Confirm release date first", evidenceIds: ["task-prerequisite", "task-downstream"] };
+  assert.equal(service.briefIsGrounded({ ...emptyBrief, today: [unsafeSequenceItem] }, sequenceFacts), false);
+  assert.equal(service.briefIsGrounded({ ...emptyBrief, today: [safeSequenceItem] }, sequenceFacts), true);
 
   const assignmentTasks = [{ id: "task-owner", title: "Send venue follow-up", status: "todo", ownerLabel: "Manager recommendation", bandMemberId: null, dueAt: null }];
   const assignmentMembers = [{ id: "member-a", name: "Alex", roles: ["booking"], instruments: [], checkIn: { id: "checkin-a", status: "available", note: null, effectiveUntil: new Date("2026-07-20T12:00:00.000Z"), createdAt: now } }, { id: "member-b", name: "Morgan", roles: ["production"], instruments: [] }];

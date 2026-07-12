@@ -133,6 +133,17 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   ranking drives Manager Today, Waiting on, risks, chat, and UI. Model briefs
   cannot displace a high-severity commitment, and blocker questions cannot
   propose duplicate work.
+- Task sequencing is an explicit artist-scoped graph rather than a prompt
+  inference. `TaskDependency` records a dependent task and one prerequisite;
+  task service preflight rejects foreign IDs, self-links, cycles, conflicting
+  dates, and state changes that would leave completed downstream work depending
+  on unfinished work. Dependency creation and task completion use serializable
+  transactions so concurrent requests cannot bypass those checks. The derived
+  `manager_work_sequence_v1` projection distinguishes ready, in-progress,
+  manually blocked, waiting, and conflicted work and identifies ready tasks
+  that unlock downstream commitments. Manager briefs, chat grounding, traces,
+  and UI consume that same projection; a model cannot promote waiting work to
+  actionable work or infer effort, duration, or private human capacity.
 - Manager team load is another deterministic projection, not a human-capacity
   model. `Task.bandMemberId` is the canonical working-lineup relationship;
   exact-name legacy labels can resolve for display, while system placeholders

@@ -255,6 +255,69 @@ test("task opportunity, project, and owner links stay within the current artist 
   assert.equal(events.length, 7);
 });
 
+test("task prerequisites are tenant-safe, idempotent, acyclic, ordered, and completion-safe", async () => {
+  const { audit, events } = auditSpy();
+  const rows = new Map([
+    ["task-a", { id: "task-a", artistId: "artist-a", title: "Confirm the release date", status: "todo", dueAt: null, updatedAt: new Date("2026-07-01T00:00:00.000Z") }],
+    ["task-b", { id: "task-b", artistId: "artist-a", title: "Schedule the announcement", status: "todo", dueAt: new Date("2026-07-12T00:00:00.000Z"), updatedAt: new Date("2026-07-01T00:00:00.000Z") }],
+    ["task-late", { id: "task-late", artistId: "artist-a", title: "Late prerequisite", status: "todo", dueAt: new Date("2026-07-15T00:00:00.000Z"), updatedAt: new Date("2026-07-01T00:00:00.000Z") }],
+    ["task-foreign", { id: "task-foreign", artistId: "artist-b", title: "Foreign task", status: "todo", dueAt: null, updatedAt: new Date("2026-07-01T00:00:00.000Z") }]
+  ]);
+  const edges = [];
+  const withRelations = (row) => row ? {
+    ...row,
+    prerequisites: edges.filter((edge) => edge.taskId === row.id).map((edge) => ({ ...edge, prerequisiteTask: { ...rows.get(edge.prerequisiteTaskId) } })),
+    dependents: edges.filter((edge) => edge.prerequisiteTaskId === row.id).map((edge) => ({ ...edge, task: { ...rows.get(edge.taskId) } }))
+  } : null;
+  const client = {
+    task: {
+      findFirst: async ({ where }) => {
+        const row = rows.get(where.id);
+        return row?.artistId === where.artistId ? withRelations(row) : null;
+      }
+    },
+    taskDependency: {
+      findUnique: async ({ where }) => {
+        const key = where.taskId_prerequisiteTaskId;
+        const edge = edges.find((item) => item.taskId === key.taskId && item.prerequisiteTaskId === key.prerequisiteTaskId);
+        return edge ? { ...edge, prerequisiteTask: { ...rows.get(edge.prerequisiteTaskId) } } : null;
+      },
+      findMany: async ({ where }) => edges.filter((edge) => edge.artistId === where.artistId).map((edge) => ({ ...edge })),
+      create: async ({ data }) => {
+        const edge = { id: `dependency-${edges.length + 1}`, ...data };
+        edges.push(edge);
+        return { ...edge, prerequisiteTask: { ...rows.get(edge.prerequisiteTaskId) } };
+      },
+      findFirst: async ({ where }) => edges.find((edge) => edge.artistId === where.artistId && edge.taskId === where.taskId && edge.prerequisiteTaskId === where.prerequisiteTaskId) ?? null,
+      deleteMany: async ({ where }) => {
+        const index = edges.findIndex((edge) => edge.id === where.id && edge.artistId === where.artistId && edge.taskId === where.taskId && edge.prerequisiteTaskId === where.prerequisiteTaskId);
+        if (index < 0) return { count: 0 };
+        edges.splice(index, 1);
+        return { count: 1 };
+      }
+    }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new tasksMod.TasksService({ client }, audit);
+
+  const created = await service.addPrerequisite("artist-a", "task-b", "task-a", "member@test", "operator-a");
+  assert.equal(created.prerequisiteTaskId, "task-a");
+  await service.addPrerequisite("artist-a", "task-b", "task-a", "member@test", "operator-a");
+  assert.equal(edges.length, 1);
+  assert.equal(events.length, 1);
+  await assert.rejects(() => service.addPrerequisite("artist-a", "task-a", "task-b", "member@test", "operator-a"), /create a task cycle/);
+  await assert.rejects(() => service.addPrerequisite("artist-a", "task-b", "task-late", "member@test", "operator-a"), /due after the task/);
+  await assert.rejects(() => service.addPrerequisite("artist-a", "task-b", "task-foreign", "member@test", "operator-a"), (error) => assertNotFound(error, "Task not found"));
+  await assert.rejects(() => service.patch("artist-a", "task-b", { status: "done" }, "member@test", "operator-a"), /Complete every prerequisite/);
+  rows.get("task-a").status = "done";
+  rows.get("task-b").status = "done";
+  await assert.rejects(() => service.patch("artist-a", "task-a", { status: "todo" }, "member@test", "operator-a"), /cannot be reopened/);
+  assert.equal(events.length, 1);
+  await service.removePrerequisite("artist-a", "task-b", "task-a", "member@test", "operator-a");
+  assert.equal(edges.length, 0);
+  assert.equal(events.length, 2);
+});
+
 test("booking and task request schemas reject malformed values and unknown fields", () => {
   assert.equal(
     bookingSchemaMod.bookingOpportunityCreateSchema.safeParse({
@@ -302,4 +365,6 @@ test("booking and task request schemas reject malformed values and unknown field
   assert.equal(taskSchemaMod.taskCreateSchema.safeParse({ title: "Already done", status: "done", waitingOn: "Promoter" }).success, false);
   assert.equal(taskSchemaMod.taskPatchSchema.safeParse({ status: "in_progress", blockedReason: "Contradictory state" }).success, false);
   assert.equal(taskSchemaMod.taskPatchSchema.safeParse({ blockedReason: "Reason", surprise: true }).success, false);
+  assert.equal(taskSchemaMod.taskDependencyCreateSchema.safeParse({ prerequisiteTaskId: "task-a" }).success, true);
+  assert.equal(taskSchemaMod.taskDependencyCreateSchema.safeParse({ prerequisiteTaskId: "task-a", unexpected: true }).success, false);
 });

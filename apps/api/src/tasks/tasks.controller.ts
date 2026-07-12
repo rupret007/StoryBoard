@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -17,7 +18,7 @@ import { MembershipService } from "../auth/membership.service";
 import { RolePolicyService } from "../auth/role-policy.service";
 import type { RequestOperator } from "../auth/request-operator";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
-import { taskCreateSchema, taskPatchSchema } from "./task.schema";
+import { taskCreateSchema, taskDependencyCreateSchema, taskPatchSchema } from "./task.schema";
 import { TasksService } from "./tasks.service";
 
 @Controller("tasks")
@@ -116,5 +117,33 @@ export class TasksController {
       throw new BadRequestException(parsed.error.flatten());
     }
     return this.tasks.patch(artistId, id, parsed.data, operator.email, operator.id);
+  }
+
+  @Post(":id/prerequisites")
+  async addPrerequisite(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator.id, req, artistHeader);
+    await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    const parsed = taskDependencyCreateSchema.safeParse(body ?? {});
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.tasks.addPrerequisite(artistId, id, parsed.data.prerequisiteTaskId, operator.email, operator.id);
+  }
+
+  @Delete(":id/prerequisites/:prerequisiteTaskId")
+  async removePrerequisite(
+    @Param("id") id: string,
+    @Param("prerequisiteTaskId") prerequisiteTaskId: string,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator.id, req, artistHeader);
+    await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    return this.tasks.removePrerequisite(artistId, id, prerequisiteTaskId, operator.email, operator.id);
   }
 }

@@ -15,7 +15,14 @@ export class TasksService {
   list(artistId: string) {
     return this.prisma.client.task.findMany({
       where: { artistId },
-      include: { opportunity: { include: { venue: true } }, project: true, event: true, bandMember: true },
+      include: {
+        opportunity: { include: { venue: true } },
+        project: true,
+        event: true,
+        bandMember: true,
+        prerequisites: { include: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } }, orderBy: { createdAt: "asc" } },
+        dependents: { include: { task: { select: { id: true, title: true, status: true, dueAt: true } } }, orderBy: { createdAt: "asc" } }
+      },
       orderBy: [{ dueAt: "asc" }, { updatedAt: "desc" }]
     });
   }
@@ -60,12 +67,101 @@ export class TasksService {
   async get(artistId: string, id: string) {
     const row = await this.prisma.client.task.findFirst({
       where: { id, artistId },
-      include: { opportunity: true, project: true, event: true, bandMember: true }
+      include: {
+        opportunity: true,
+        project: true,
+        event: true,
+        bandMember: true,
+        prerequisites: { include: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } }, orderBy: { createdAt: "asc" } },
+        dependents: { include: { task: { select: { id: true, title: true, status: true, dueAt: true } } }, orderBy: { createdAt: "asc" } }
+      }
     });
     if (!row) {
       throw new NotFoundException("Task not found");
     }
     return row;
+  }
+
+  private dependencyWouldCycle(taskId: string, prerequisiteTaskId: string, edges: { taskId: string; prerequisiteTaskId: string }[]) {
+    const graph = new Map<string, string[]>();
+    for (const edge of edges) graph.set(edge.taskId, [...(graph.get(edge.taskId) ?? []), edge.prerequisiteTaskId]);
+    const pending = [prerequisiteTaskId];
+    const visited = new Set<string>();
+    while (pending.length) {
+      const current = pending.pop()!;
+      if (current === taskId) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      pending.push(...(graph.get(current) ?? []));
+    }
+    return false;
+  }
+
+  async addPrerequisite(artistId: string, taskId: string, prerequisiteTaskId: string, actorLabel?: string | null, actorOperatorId?: string | null) {
+    if (taskId === prerequisiteTaskId) throw new BadRequestException("A task cannot depend on itself");
+    const attempt = () => this.prisma.client.$transaction(async (tx) => {
+      const [task, prerequisite] = await Promise.all([
+        tx.task.findFirst({ where: { id: taskId, artistId }, select: { id: true, title: true, status: true, dueAt: true } }),
+        tx.task.findFirst({ where: { id: prerequisiteTaskId, artistId }, select: { id: true, title: true, status: true, dueAt: true } })
+      ]);
+      if (!task || !prerequisite) throw new NotFoundException("Task not found");
+      if (task.dueAt && prerequisite.dueAt && prerequisite.dueAt > task.dueAt) throw new BadRequestException("A prerequisite cannot be due after the task it unlocks");
+      if (task.status === TaskStatus.done && prerequisite.status !== TaskStatus.done) throw new BadRequestException("Completed work cannot gain an unfinished prerequisite");
+      const existing = await tx.taskDependency.findUnique({
+        where: { taskId_prerequisiteTaskId: { taskId, prerequisiteTaskId } },
+        include: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } }
+      });
+      if (existing) return { row: existing, created: false };
+      const edges = await tx.taskDependency.findMany({ where: { artistId }, select: { taskId: true, prerequisiteTaskId: true }, take: 1000 });
+      if (this.dependencyWouldCycle(taskId, prerequisiteTaskId, edges)) throw new BadRequestException("That prerequisite would create a task cycle");
+      const row = await tx.taskDependency.create({
+        data: { artistId, taskId, prerequisiteTaskId },
+        include: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } }
+      });
+      return { row, created: true };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    let result: Awaited<ReturnType<typeof attempt>> | null = null;
+    let lastError: unknown = null;
+    for (let retry = 0; retry < 3 && !result; retry += 1) {
+      try {
+        result = await attempt();
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error ? String(error.code) : null;
+        if (code !== "P2002" && code !== "P2034") throw error;
+        lastError = error;
+      }
+    }
+    if (!result) throw lastError;
+    if (result.created) await this.audit.log({
+      artistId,
+      aggregateType: "TaskDependency",
+      aggregateId: result.row.id,
+      action: "task.prerequisite_added",
+      actorLabel,
+      actorOperatorId: actorOperatorId ?? null,
+      metadata: { taskId, prerequisiteTaskId }
+    });
+    return result.row;
+  }
+
+  async removePrerequisite(artistId: string, taskId: string, prerequisiteTaskId: string, actorLabel?: string | null, actorOperatorId?: string | null) {
+    const [task, dependency] = await Promise.all([
+      this.prisma.client.task.findFirst({ where: { id: taskId, artistId }, select: { id: true } }),
+      this.prisma.client.taskDependency.findFirst({ where: { artistId, taskId, prerequisiteTaskId }, select: { id: true } })
+    ]);
+    if (!task || !dependency) throw new NotFoundException("Task prerequisite not found");
+    const removed = await this.prisma.client.taskDependency.deleteMany({ where: { id: dependency.id, artistId, taskId, prerequisiteTaskId } });
+    if (removed.count !== 1) throw new NotFoundException("Task prerequisite not found");
+    await this.audit.log({
+      artistId,
+      aggregateType: "TaskDependency",
+      aggregateId: dependency.id,
+      action: "task.prerequisite_removed",
+      actorLabel,
+      actorOperatorId: actorOperatorId ?? null,
+      metadata: { taskId, prerequisiteTaskId }
+    });
+    return { removed: true };
   }
 
   private async assertOpportunityBelongsToArtist(
@@ -156,6 +252,10 @@ export class TasksService {
     if (targetStatus === TaskStatus.blocked && !targetBlockedReason?.trim()) throw new BadRequestException("A blocked task requires a reason");
     if (targetStatus !== TaskStatus.blocked && data.blockedReason) throw new BadRequestException("A blocker may only be recorded on a blocked task");
     if (targetStatus === TaskStatus.done && data.waitingOn) throw new BadRequestException("Completed work cannot remain waiting on someone");
+    const prerequisites = current.prerequisites ?? [];
+    const dependents = current.dependents ?? [];
+    if (targetStatus === TaskStatus.done && prerequisites.some((dependency) => dependency.prerequisiteTask.status !== TaskStatus.done)) throw new BadRequestException("Complete every prerequisite before finishing this task");
+    if (current.status === TaskStatus.done && targetStatus !== TaskStatus.done && dependents.some((dependency) => dependency.task.status === TaskStatus.done)) throw new BadRequestException("This task cannot be reopened while completed downstream work depends on it");
     const patchData: Prisma.TaskUncheckedUpdateManyInput = {};
     if (data.title !== undefined) {
       patchData.title = data.title;
@@ -187,23 +287,39 @@ export class TasksService {
       patchData.blockedReason = data.blockedReason;
     }
     const nextDueAt = data.dueAt === undefined ? current.dueAt : data.dueAt ? new Date(data.dueAt) : null;
+    if (nextDueAt && prerequisites.some((dependency) => dependency.prerequisiteTask.dueAt && dependency.prerequisiteTask.dueAt > nextDueAt)) throw new BadRequestException("A task cannot be due before one of its prerequisites");
+    if (nextDueAt && dependents.some((dependency) => dependency.task.dueAt && dependency.task.dueAt < nextDueAt)) throw new BadRequestException("A prerequisite cannot be due after a task it unlocks");
     const deferred = current.status !== TaskStatus.done && Boolean(current.dueAt) && (!nextDueAt || nextDueAt.getTime() > current.dueAt!.getTime());
     if (deferred) {
       patchData.deferralCount = { increment: 1 };
       patchData.lastDeferredAt = new Date();
     }
-    const { row, attributed } = await this.prisma.client.$transaction(async (tx) => {
-      const updated = await tx.task.updateMany({ where: { id, artistId, updatedAt: current.updatedAt }, data: patchData });
-      if (updated.count !== 1) throw new BadRequestException("This task changed while you were editing it; reload before saving");
-      const completed = targetStatus === TaskStatus.done
-        ? await tx.managerRecommendation.updateMany({
-            where: { taskId: id, outcome: ManagerRecommendationOutcome.accepted },
-            data: { outcome: ManagerRecommendationOutcome.completed, outcomeReason: "task_completed", outcomeAt: new Date() }
-          })
-        : { count: 0 };
-      const row = await tx.task.findUniqueOrThrow({ where: { id }, include: { opportunity: { include: { venue: true } }, project: true, event: true, bandMember: true } });
-      return { row, attributed: completed };
-    });
+    let result: { row: Awaited<ReturnType<TasksService["get"]>>; attributed: { count: number } };
+    try {
+      result = await this.prisma.client.$transaction(async (tx) => {
+        const fresh = await tx.task.findFirst({ where: { id, artistId }, select: { status: true, dueAt: true, prerequisites: { select: { prerequisiteTask: { select: { status: true, dueAt: true } } } }, dependents: { select: { task: { select: { status: true, dueAt: true } } } } } });
+        if (!fresh) throw new NotFoundException("Task not found");
+        if (targetStatus === TaskStatus.done && (fresh.prerequisites ?? []).some((dependency) => dependency.prerequisiteTask.status !== TaskStatus.done)) throw new BadRequestException("Complete every prerequisite before finishing this task");
+        if (fresh.status === TaskStatus.done && targetStatus !== TaskStatus.done && (fresh.dependents ?? []).some((dependency) => dependency.task.status === TaskStatus.done)) throw new BadRequestException("This task cannot be reopened while completed downstream work depends on it");
+        if (nextDueAt && (fresh.prerequisites ?? []).some((dependency) => dependency.prerequisiteTask.dueAt && dependency.prerequisiteTask.dueAt > nextDueAt)) throw new BadRequestException("A task cannot be due before one of its prerequisites");
+        if (nextDueAt && (fresh.dependents ?? []).some((dependency) => dependency.task.dueAt && dependency.task.dueAt < nextDueAt)) throw new BadRequestException("A prerequisite cannot be due after a task it unlocks");
+        const updated = await tx.task.updateMany({ where: { id, artistId, updatedAt: current.updatedAt }, data: patchData });
+        if (updated.count !== 1) throw new BadRequestException("This task changed while you were editing it; reload before saving");
+        const completed = targetStatus === TaskStatus.done
+          ? await tx.managerRecommendation.updateMany({
+              where: { taskId: id, outcome: ManagerRecommendationOutcome.accepted },
+              data: { outcome: ManagerRecommendationOutcome.completed, outcomeReason: "task_completed", outcomeAt: new Date() }
+            })
+          : { count: 0 };
+        const row = await tx.task.findUniqueOrThrow({ where: { id }, include: { opportunity: { include: { venue: true } }, project: true, event: true, bandMember: true, prerequisites: { include: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } }, orderBy: { createdAt: "asc" } }, dependents: { include: { task: { select: { id: true, title: true, status: true, dueAt: true } } }, orderBy: { createdAt: "asc" } } } });
+        return { row, attributed: completed };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : null;
+      if (code === "P2034") throw new BadRequestException("This task or its prerequisites changed while you were editing it; reload before saving");
+      throw error;
+    }
+    const { row, attributed } = result;
     await this.audit.log({
       artistId,
       aggregateType: "Task",

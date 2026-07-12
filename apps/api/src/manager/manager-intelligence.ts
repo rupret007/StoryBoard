@@ -11,6 +11,7 @@ import { assessManagerMemoryCapture } from "./manager-memory-capture";
 import { deterministicManagerCoaching } from "./manager-coaching";
 import { managerQuestionAsksAboutTeamLoad, type ManagerTeamLoad } from "./manager-team-load";
 import { calibrateManagerChatResult, type ManagerEvidenceHealth } from "./manager-evidence-health";
+import { managerQuestionAsksAboutWorkSequence, type ManagerWorkSequence } from "./manager-work-sequence";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -76,7 +77,7 @@ export type ManagerFacts = {
   goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; measurementKind?: string; createdAt?: Date; updatedAt?: Date }[];
   goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
-  tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null }[];
+  tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null; prerequisites?: { prerequisiteTask: { id: string; title: string; status: string; dueAt: Date | null } }[] }[];
   opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null }[];
   events: {
     id: string;
@@ -103,6 +104,7 @@ export type ManagerFacts = {
   commitmentHealth?: ManagerCommitmentHealth;
   teamLoad?: ManagerTeamLoad;
   evidenceHealth?: ManagerEvidenceHealth;
+  workSequence?: ManagerWorkSequence;
   recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null }[];
 };
 
@@ -542,7 +544,23 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
 
   const overdueTasks = facts.tasks.filter((task) => task.status !== "done" && task.dueAt && task.dueAt < now);
   const commitment = facts.commitmentHealth?.items[0];
-  if (commitment && commitment.state !== "active") {
+  const commitmentSequence = commitment ? facts.workSequence?.items.find((item) => item.taskId === commitment.taskId) : null;
+  const prerequisiteUnlocker = commitment && commitmentSequence?.state === "waiting_on_prerequisites"
+    ? facts.workSequence?.readyNow.find((item) => item.unlocksTaskIds.includes(commitment.taskId))
+    : null;
+  if (commitment && prerequisiteUnlocker) {
+    const item: ManagerRecommendationDraft = {
+      stableKey: `work-sequence-${prerequisiteUnlocker.taskId}`,
+      title: `Finish ${prerequisiteUnlocker.title} first`,
+      reason: `“${commitment.title}” is not actionable until its recorded prerequisite is complete. ${prerequisiteUnlocker.reason}`,
+      nextAction: `Open Tasks and advance “${prerequisiteUnlocker.title}” before recommitting the downstream work.`,
+      workstream: "band_operations",
+      priority: commitment.severity === "high" ? "high" : "med",
+      evidenceIds: unique([commitment.taskId, ...prerequisiteUnlocker.evidenceIds]).slice(0, 8),
+      proposedAction: null
+    };
+    if (commitment.severity === "high") addToday(item); else addWeek(item);
+  } else if (commitment && commitment.state !== "active" && commitmentSequence?.state !== "waiting_on_prerequisites") {
     const assignment = commitment.state === "unassigned" ? facts.teamLoad?.suggestions.find((suggestion) => suggestion.taskId === commitment.taskId) : null;
     const item = {
       stableKey: `commitment-${commitment.state}-${commitment.taskId}`,
@@ -811,6 +829,7 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
       ...openApprovals.map((approval) => ({ title: approval.title, explanation: `This ${approval.actionType.replaceAll("_", " ")} is waiting for human approval.`, evidenceIds: [approval.id] }))
     ].slice(0, 8),
     waitingOn: [
+      ...(facts.workSequence?.waiting.filter((item) => item.state === "waiting_on_prerequisites").map((item) => ({ title: `${item.title} — ${item.reason}`, dueAt: item.dueAt, evidenceIds: item.evidenceIds.slice(0, 8) })) ?? []),
       ...(facts.commitmentHealth?.items.filter((item) => item.waitingOn).map((item) => ({ title: `${item.title} — waiting on ${item.waitingOn}`, dueAt: item.dueAt, evidenceIds: [item.taskId] })) ?? []),
       ...proposedDeals.map((deal) => ({ title: deal.title, dueAt: deal.expiresAt?.toISOString() ?? null, evidenceIds: [deal.id] })),
       ...facts.campaignRecipients.filter((recipient) => recipient.status === "sent").map((recipient) => ({ title: "Booking outreach awaiting reply", dueAt: recipient.followUpDueAt?.toISOString() ?? null, evidenceIds: [recipient.id] }))
@@ -823,6 +842,7 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
       ...(overdueInvoices.length ? [{ title: "Overdue receivables", detail: `${overdueInvoices.length} invoice${overdueInvoices.length === 1 ? " is" : "s are"} past the recorded due date.`, confidence: 1, evidenceIds: overdueInvoices.slice(0, 8).map((item) => item.id) }] : []),
       ...(facts.commitmentHealth?.counts.blocked ? [{ title: "Blocked commitments", detail: `${facts.commitmentHealth.counts.blocked} task${facts.commitmentHealth.counts.blocked === 1 ? " is" : "s are"} blocked with a recorded reason.`, confidence: 1, evidenceIds: facts.commitmentHealth.items.filter((item) => item.state === "blocked").slice(0, 8).map((item) => item.taskId) }] : []),
       ...(facts.commitmentHealth?.counts.repeatedlyDeferred ? [{ title: "Repeatedly deferred work", detail: `${facts.commitmentHealth.counts.repeatedlyDeferred} task${facts.commitmentHealth.counts.repeatedlyDeferred === 1 ? " has" : "s have"} moved at least twice and should be re-scoped before another date change.`, confidence: 1, evidenceIds: facts.commitmentHealth.items.filter((item) => item.deferralCount >= 2).slice(0, 8).map((item) => item.taskId) }] : []),
+      ...(facts.workSequence?.counts.conflicted ? [{ title: "Task sequence conflict", detail: facts.workSequence.summary, confidence: 1, evidenceIds: facts.workSequence.evidenceIds.slice(0, 8) }] : []),
       ...(unreadReplies.length ? [{ title: "Fresh booking interest", detail: `${unreadReplies.length} booking repl${unreadReplies.length === 1 ? "y is" : "ies are"} waiting for review.`, confidence: 1, evidenceIds: unreadReplies.slice(0, 8).map((reply) => reply.id) }] : []),
       ...(activeOpportunities.length ? [{ title: "Active live pipeline", detail: `${activeOpportunities.length} booking opportunit${activeOpportunities.length === 1 ? "y can" : "ies can"} be advanced deliberately.`, confidence: 1, evidenceIds: activeOpportunities.slice(0, 8).map((opportunity) => opportunity.id) }] : [])
     ]
@@ -859,6 +879,7 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
   const planQuestion = questionHas(question, /\b(goal|plan|progress|track|realistic|strategy|90-day|90 day)\b/);
   const releaseQuestion = questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
   const commitmentQuestion = managerQuestionAsksAboutCommitments(question);
+  const workSequenceQuestion = managerQuestionAsksAboutWorkSequence(question);
   const teamLoadQuestion = managerQuestionAsksAboutTeamLoad(question);
   const outcomeQuestion = questionHas(question, /\b(last show|recent shows?|what worked|what did(?:n't| not) work|how did we do|outcomes?|learn(?:ed|ing)|post-show|review the show|recent results?|show results?|campaign results?)\b/);
   const decisionQuestion = Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
@@ -1002,6 +1023,19 @@ function deterministicManagerChatBase(facts: ManagerFacts, question: string, now
       answer: `${load.summary}${lines.length ? `\n\n${lines.join("\n")}` : ""}\n\n${suggestion ? `The clearest recorded match is “${suggestion.taskTitle}” for ${suggestion.memberName}: ${suggestion.reason}` : load.nextAction}\n\nThis combines recorded task pressure with current voluntary check-ins. It still does not know hours, effort, health, work, or family commitments, and no private explanation is required.`,
       citations: load.evidenceIds.slice(0, 10),
       recommendation
+    };
+  }
+
+  if (workSequenceQuestion && facts.workSequence) {
+    const sequence = facts.workSequence;
+    const ready = sequence.readyNow.slice(0, 4);
+    const waiting = sequence.waiting.slice(0, 4);
+    const readyLines = ready.map((item) => `• ${item.title} — ${item.reason}${item.ownerLabel ? ` Owner: ${item.ownerLabel}.` : " No owner is recorded."}`);
+    const waitingLines = waiting.map((item) => `• ${item.title} — ${item.reason}`);
+    return {
+      answer: `${sequence.summary}${readyLines.length ? `\n\nReady now:\n${readyLines.join("\n")}` : "\n\nNothing is currently ready to start."}${waitingLines.length ? `\n\nWaiting:\n${waitingLines.join("\n")}` : ""}\n\nThis order uses recorded task prerequisites and blockers. It does not estimate effort, duration, or anyone's private capacity.`,
+      citations: unique([...ready.flatMap((item) => item.evidenceIds), ...waiting.flatMap((item) => item.evidenceIds)]).slice(0, 10),
+      recommendation: null
     };
   }
 

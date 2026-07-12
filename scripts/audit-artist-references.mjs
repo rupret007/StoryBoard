@@ -56,6 +56,58 @@ const checks = [
     `
   },
   {
+    relation: "TaskDependency → dependent and prerequisite Tasks",
+    query: `
+      SELECT d."id" AS "recordId", d."artistId" AS "recordArtistId",
+             CONCAT(d."taskId", ' -> ', d."prerequisiteTaskId") AS "relatedId",
+             CONCAT(t."artistId", ' -> ', p."artistId") AS "relatedArtistId"
+      FROM "TaskDependency" d
+      INNER JOIN "Task" t ON t."id" = d."taskId"
+      INNER JOIN "Task" p ON p."id" = d."prerequisiteTaskId"
+      WHERE d."artistId" <> t."artistId"
+         OR d."artistId" <> p."artistId"
+         OR t."artistId" <> p."artistId"
+      ORDER BY d."id";
+    `
+  },
+  {
+    relation: "TaskDependency graph cycles",
+    query: `
+      WITH RECURSIVE walk AS (
+        SELECT d."artistId", d."taskId" AS origin, d."prerequisiteTaskId" AS current,
+               ARRAY[d."taskId", d."prerequisiteTaskId"] AS path,
+               d."taskId" = d."prerequisiteTaskId" AS cycle
+        FROM "TaskDependency" d
+        UNION ALL
+        SELECT w."artistId", w.origin, d."prerequisiteTaskId",
+               w.path || d."prerequisiteTaskId",
+               d."prerequisiteTaskId" = ANY(w.path)
+        FROM walk w
+        INNER JOIN "TaskDependency" d
+          ON d."artistId" = w."artistId" AND d."taskId" = w.current
+        WHERE NOT w.cycle AND cardinality(w.path) < 100
+      )
+      SELECT DISTINCT origin AS "recordId", "artistId" AS "recordArtistId",
+             array_to_string(path, ' -> ') AS "relatedId", "artistId" AS "relatedArtistId"
+      FROM walk
+      WHERE cycle
+      ORDER BY origin;
+    `
+  },
+  {
+    relation: "TaskDependency completion and date order",
+    query: `
+      SELECT d."id" AS "recordId", d."artistId" AS "recordArtistId",
+             CONCAT(t."id", ' -> ', p."id") AS "relatedId", d."artistId" AS "relatedArtistId"
+      FROM "TaskDependency" d
+      INNER JOIN "Task" t ON t."id" = d."taskId"
+      INNER JOIN "Task" p ON p."id" = d."prerequisiteTaskId"
+      WHERE (t."status" = 'done' AND p."status" <> 'done')
+         OR (t."dueAt" IS NOT NULL AND p."dueAt" IS NOT NULL AND p."dueAt" > t."dueAt")
+      ORDER BY d."id";
+    `
+  },
+  {
     relation: "BandMemberCheckIn → BandMember",
     query: `
       SELECT c."id" AS "recordId", c."artistId" AS "recordArtistId",
@@ -413,25 +465,25 @@ const checks = [
 ];
 
 const client = new Client({ connectionString });
-let mismatchCount = 0;
+let issueCount = 0;
 
 try {
   await client.connect();
   for (const check of checks) {
     const result = await client.query(check.query);
     if (result.rows.length === 0) {
-      console.log(`${check.relation}: no cross-artist references`);
+      console.log(`${check.relation}: no integrity issues`);
       continue;
     }
-    mismatchCount += result.rows.length;
-    console.error(`${check.relation}: ${result.rows.length} mismatch(es)`);
+    issueCount += result.rows.length;
+    console.error(`${check.relation}: ${result.rows.length} integrity issue(s)`);
     console.table(result.rows);
   }
 } finally {
   await client.end().catch(() => undefined);
 }
 
-if (mismatchCount > 0) {
+if (issueCount > 0) {
   console.error(
     "No data was changed. Resolve these records deliberately before release."
   );

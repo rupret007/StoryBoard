@@ -228,6 +228,18 @@ metadata. Blocked tasks require
 next step. `deferralCount` and `lastDeferredAt` preserve repeated later-date
 changes. `ManagerCommitmentHealth` is a non-persistent ranked view over these
 facts; it does not create a second task state machine.
+
+`TaskDependency` is the artist-scoped directed edge from a dependent `Task` to
+one prerequisite `Task`. The pair is unique. Both endpoints must belong to the
+same artist, self-links and cycles are invalid, and a prerequisite may not be
+dated after its dependent. A task cannot complete while a prerequisite is open;
+an open prerequisite cannot be restored beneath completed downstream work.
+`ManagerWorkSequence` is the non-persistent `manager_work_sequence_v1` view over
+this graph. It reports `ready_now`, `in_progress`,
+`waiting_on_prerequisites`, `manually_blocked`, or `conflicted`, plus the
+downstream work each ready task unlocks. It does not estimate effort, duration,
+or unrecorded member capacity.
+
 `BandMemberCheckIn` is append-only artist-scoped history for a voluntary
 `available`, `limited`, or `unavailable` planning signal with optional expiry
 and bounded note. The latest unexpired row is current; missing and expired rows

@@ -330,29 +330,29 @@ enum SetlistStatus {
 }
 
 model Operator {
-  id                                String                      @id @default(cuid())
-  email                             String                      @unique
+  id                                String                       @id @default(cuid())
+  email                             String                       @unique
   name                              String?
-  googleSub                         String?                     @unique
-  workflowEmailEnabled              Boolean                     @default(true)
-  createdAt                         DateTime                    @default(now())
-  updatedAt                         DateTime                    @updatedAt
+  googleSub                         String?                      @unique
+  workflowEmailEnabled              Boolean                      @default(true)
+  createdAt                         DateTime                     @default(now())
+  updatedAt                         DateTime                     @updatedAt
   memberships                       ArtistMembership[]
   auditEvents                       AuditEvent[]
-  invitesCreated                    ArtistMembershipInvite[]    @relation("InviteCreator")
-  invitesAccepted                   ArtistMembershipInvite[]    @relation("InviteAcceptor")
+  invitesCreated                    ArtistMembershipInvite[]     @relation("InviteCreator")
+  invitesAccepted                   ArtistMembershipInvite[]     @relation("InviteAcceptor")
   workflowNotifications             WorkflowNotification[]
-  telegramRegistrationTokensCreated TelegramRegistrationToken[] @relation("TelegramRegistrationCreator")
+  telegramRegistrationTokensCreated TelegramRegistrationToken[]  @relation("TelegramRegistrationCreator")
   advisorFeedback                   BookingAdvisorFeedback[]
   bandMemberProfiles                BandMember[]
   managerMessages                   ManagerMessage[]
   managerMessageFeedback            ManagerMessageFeedback[]
-  managerEvalExamplesPromoted       ManagerEvalExample[]        @relation("ManagerEvalPromoter")
+  managerEvalExamplesPromoted       ManagerEvalExample[]         @relation("ManagerEvalPromoter")
   managerResponseEvalsPromoted      ManagerResponseEvalExample[] @relation("ManagerResponseEvalPromoter")
   managerResponseEvalsResolved      ManagerResponseEvalExample[] @relation("ManagerResponseEvalResolver")
-  managerGoalProgressRecorded       ManagerGoalProgressEvent[]  @relation("ManagerGoalProgressRecorder")
-  managerEvaluationRunsCreated      ManagerEvaluationRun[]      @relation("ManagerEvaluationRunner")
-  bandMemberCheckInsRecorded        BandMemberCheckIn[]         @relation("BandMemberCheckInRecorder")
+  managerGoalProgressRecorded       ManagerGoalProgressEvent[]   @relation("ManagerGoalProgressRecorder")
+  managerEvaluationRunsCreated      ManagerEvaluationRun[]       @relation("ManagerEvaluationRunner")
+  bandMemberCheckInsRecorded        BandMemberCheckIn[]          @relation("BandMemberCheckInRecorder")
 }
 
 model ArtistMembership {
@@ -370,21 +370,22 @@ model ArtistMembership {
 }
 
 model Artist {
-  id                          String                      @id @default(cuid())
+  id                          String                       @id @default(cuid())
   name                        String
-  slug                        String                      @unique
+  slug                        String                       @unique
   workflowOverdueGraceDays    Int?
   workflowStaleFollowupDays   Int?
   workflowPendingApprovalDays Int?
-  telegramUrgentEnabled       Boolean                     @default(false)
+  telegramUrgentEnabled       Boolean                      @default(false)
   telegramChatId              String?
   telegramNotifyCategories    Json?
-  createdAt                   DateTime                    @default(now())
-  updatedAt                   DateTime                    @updatedAt
+  createdAt                   DateTime                     @default(now())
+  updatedAt                   DateTime                     @updatedAt
   venues                      Venue[]
   contacts                    Contact[]
   opportunities               BookingOpportunity[]
   tasks                       Task[]
+  taskDependencies            TaskDependency[]
   approvals                   ApprovalRequest[]
   commandRuns                 CommandRun[]
   integrations                IntegrationConnection[]
@@ -459,40 +460,40 @@ model ArtistOperatingProfile {
 }
 
 model ManagerSettings {
-  id                  String   @id @default(cuid())
-  artistId            String   @unique
-  aiEnabled           Boolean  @default(false)
-  fullContextEnabled  Boolean  @default(false)
-  scheduleEnabled     Boolean  @default(false)
-  scheduledAiEnabled  Boolean  @default(false)
-  scheduleAudience    String   @default("owners")
+  id                  String    @id @default(cuid())
+  artistId            String    @unique
+  aiEnabled           Boolean   @default(false)
+  fullContextEnabled  Boolean   @default(false)
+  scheduleEnabled     Boolean   @default(false)
+  scheduledAiEnabled  Boolean   @default(false)
+  scheduleAudience    String    @default("owners")
   timezone            String?
-  dailyHour           Int      @default(9)
-  weeklyDay           Int      @default(1)
+  dailyHour           Int       @default(9)
+  weeklyDay           Int       @default(1)
   lastScheduledPeriod String?
   scheduleClaimedAt   DateTime?
   lastScheduledAt     DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  artist              Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  artist              Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
 }
 
 model BandMember {
-  id                      String             @id @default(cuid())
+  id                      String              @id @default(cuid())
   artistId                String
   linkedOperatorId        String?
   name                    String
   email                   String?
   phone                   String?
-  instruments             String[]           @default([])
-  roles                   String[]           @default([])
+  instruments             String[]            @default([])
+  roles                   String[]            @default([])
   defaultSplitBasisPoints Int?
   notes                   String?
-  active                  Boolean            @default(true)
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
-  artist                  Artist             @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  linkedOperator          Operator?          @relation(fields: [linkedOperatorId], references: [id], onDelete: SetNull)
+  active                  Boolean             @default(true)
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+  artist                  Artist              @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  linkedOperator          Operator?           @relation(fields: [linkedOperatorId], references: [id], onDelete: SetNull)
   eventResponses          EventParticipant[]
   memberSplits            MemberSplit[]
   assignedTasks           Task[]
@@ -586,7 +587,7 @@ model ManagerInitiative {
 }
 
 model ManagerDecision {
-  id              String                       @id @default(cuid())
+  id              String                        @id @default(cuid())
   artistId        String
   workstream      ManagerWorkstream
   title           String
@@ -595,37 +596,37 @@ model ManagerDecision {
   choice          String?
   rationale       String?
   expectedOutcome String?
-  needsFraming     Boolean                      @default(false)
-  evidence        Json                         @default("[]")
-  status          ManagerDecisionStatus        @default(open)
+  needsFraming    Boolean                       @default(false)
+  evidence        Json                          @default("[]")
+  status          ManagerDecisionStatus         @default(open)
   reviewAt        DateTime?
   decidedAt       DateTime?
   reviewOutcome   ManagerDecisionReviewOutcome?
   reviewNote      String?
-  reviewEvidence  Json                         @default("[]")
+  reviewEvidence  Json                          @default("[]")
   reviewedAt      DateTime?
-  createdAt       DateTime                     @default(now())
-  updatedAt       DateTime                     @updatedAt
-  artist          Artist                       @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
+  artist          Artist                        @relation(fields: [artistId], references: [id], onDelete: Cascade)
   recommendation  ManagerRecommendation?
 
   @@index([artistId, status, reviewAt])
 }
 
 model ManagerMemoryFact {
-  id          String                   @id @default(cuid())
-  artistId    String
-  key         String
-  value       Json
-  sourceType  String
-  sourceId    String?
-  confidence  Float                    @default(1)
-  sensitivity ManagerMemorySensitivity @default(normal)
-  confirmedAt DateTime?
-  archivedAt  DateTime?
-  createdAt   DateTime                 @default(now())
-  updatedAt   DateTime                 @updatedAt
-  artist      Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  id              String                   @id @default(cuid())
+  artistId        String
+  key             String
+  value           Json
+  sourceType      String
+  sourceId        String?
+  confidence      Float                    @default(1)
+  sensitivity     ManagerMemorySensitivity @default(normal)
+  confirmedAt     DateTime?
+  archivedAt      DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  artist          Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
   recommendations ManagerRecommendation[]
 
   @@unique([artistId, key])
@@ -679,7 +680,7 @@ model ManagerRecommendation {
   initiative     ManagerInitiative?           @relation(fields: [initiativeId], references: [id], onDelete: SetNull)
   task           Task?                        @relation(fields: [taskId], references: [id], onDelete: SetNull)
   decision       ManagerDecision?             @relation(fields: [decisionId], references: [id], onDelete: SetNull)
-  memoryFact     ManagerMemoryFact?            @relation(fields: [memoryFactId], references: [id], onDelete: SetNull)
+  memoryFact     ManagerMemoryFact?           @relation(fields: [memoryFactId], references: [id], onDelete: SetNull)
   evalExample    ManagerEvalExample?
 
   @@unique([managerRunId, stableKey])
@@ -735,18 +736,18 @@ model ManagerConversation {
 }
 
 model ManagerMessage {
-  id              String                   @id @default(cuid())
+  id              String                      @id @default(cuid())
   conversationId  String
-  managerRunId    String?                  @unique
+  managerRunId    String?                     @unique
   operatorId      String?
   role            String
   content         String
-  citations       Json                     @default("[]")
-  proposedActions Json                     @default("[]")
-  createdAt       DateTime                 @default(now())
-  conversation    ManagerConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  managerRun      ManagerRun?              @relation(fields: [managerRunId], references: [id], onDelete: SetNull)
-  operator        Operator?                @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  citations       Json                        @default("[]")
+  proposedActions Json                        @default("[]")
+  createdAt       DateTime                    @default(now())
+  conversation    ManagerConversation         @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  managerRun      ManagerRun?                 @relation(fields: [managerRunId], references: [id], onDelete: SetNull)
+  operator        Operator?                   @relation(fields: [operatorId], references: [id], onDelete: SetNull)
   feedback        ManagerMessageFeedback[]
   responseEval    ManagerResponseEvalExample?
 
@@ -1008,10 +1009,27 @@ model Task {
   initiative                 ManagerInitiative?        @relation(fields: [initiativeId], references: [id], onDelete: SetNull)
   managerRecommendations     ManagerRecommendation[]
   bookingCampaignFollowUpFor BookingCampaignRecipient? @relation("CampaignRecipientFollowUpTask")
+  prerequisites              TaskDependency[]          @relation("DependentTask")
+  dependents                 TaskDependency[]          @relation("PrerequisiteTask")
 
   @@unique([artistId, sourceKey])
   @@index([artistId, status, dueAt])
   @@index([artistId, bandMemberId])
+}
+
+model TaskDependency {
+  id                 String   @id @default(cuid())
+  artistId           String
+  taskId             String
+  prerequisiteTaskId String
+  createdAt          DateTime @default(now())
+  artist             Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  task               Task     @relation("DependentTask", fields: [taskId], references: [id], onDelete: Cascade)
+  prerequisiteTask   Task     @relation("PrerequisiteTask", fields: [prerequisiteTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, prerequisiteTaskId])
+  @@index([artistId, taskId])
+  @@index([artistId, prerequisiteTaskId])
 }
 
 model ArtistBookingProfile {

@@ -711,6 +711,55 @@ Implementation and validation notes:
   diagnostic, 3 Chromium journeys, `git diff --check`, and the 34/34 Manager
   safety/usefulness gate.
 
+### P0 — Dependency-aware work sequencing (completed 2026-07-12)
+
+- [x] Add first-class artist-scoped Task prerequisites. A dependency links one
+  existing task to one prerequisite task; self-links, duplicate links,
+  cross-artist IDs, and cycles must fail before write or audit.
+- [x] Preserve credible execution order. A task cannot be completed while a
+  prerequisite remains open, and reopening a prerequisite cannot silently make
+  already-completed downstream work inconsistent. Date conflicts must be
+  identified before the dependency is accepted.
+- [x] Add one deterministic, non-persistent `manager_work_sequence_v1`
+  projection over the canonical Tasks graph. Distinguish ready-now work from
+  manually blocked work and work waiting on unfinished prerequisites; identify
+  which ready task unlocks downstream commitments without inventing duration,
+  effort, or actual member capacity.
+- [x] Apply the projection to Manager briefs and conversation so downstream
+  work is not recommended as actionable while its prerequisites remain open.
+  Surface the same sequence in Manager and let members manage prerequisites in
+  Tasks; viewers remain read-only and all writes remain audited.
+- [x] Add a forward-only migration, relationship diagnostic, strict boundary
+  validation, and unit/database/Chromium/eval coverage for cross-artist links,
+  cycles, conflicting dates, idempotent links, completion/reopen guards, and
+  prerequisite-aware Manager guidance.
+
+Design evidence:
+
+- StoryBoard already has canonical Tasks, explicit manual blockers, ownership,
+  dates, and stale-write protection, but no structured relationship for “B
+  cannot start until A is done.” The clean-room design borrows only the
+  committed Andrea action-preflight principle that declared prerequisites and
+  contradictions are checked before action and the strictest failing signal
+  wins. Andrea's runtime code and its concurrently dirty working tree remain
+  untouched.
+
+Implementation and validation:
+
+- Added the forward-only `TaskDependency` migration and tenant-safe task APIs.
+  Serializable preflight and optimistic task updates enforce idempotency,
+  acyclic ordering, compatible due dates, prerequisite completion, downstream
+  reopen safety, and one audit event per actual relationship change.
+- Added `manager_work_sequence_v1` as a code-owned projection and exposed it in
+  Manager and Tasks. Brief and chat grounding reject downstream-as-actionable
+  model output unless its ready prerequisite is also cited; direct sequence
+  questions bypass the model. Traces retain only bounded policy/status counts.
+- Promoted `manager_os_v18` / `manager_evals_v20`. Validation passed:
+  `pnpm typecheck`, `pnpm lint`, 101 API + 2 shared tests, `pnpm build`, 3
+  disposable-Postgres workflows across all 34 migrations, the complete
+  relationship diagnostic including graph cycles/state/date order, 3 Chromium
+  journeys, `git diff --check`, and the 36/36 Manager safety/usefulness gate.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,

@@ -5,6 +5,7 @@ const taskStatusValues = ["todo", "in_progress", "blocked", "done"] as const;
 const relatedOpportunityId = z.string().trim().min(1);
 const relatedProjectId = z.string().trim().min(1).max(128);
 const relatedBandMemberId = z.string().trim().min(1).max(128);
+const relatedTaskId = z.string().trim().min(1).max(128);
 const dueAt = z.union([
   z.iso.date(),
   z.iso.datetime({ offset: true, local: true })
@@ -53,5 +54,10 @@ export const taskPatchSchema = z
     if (input.status === "done" && input.waitingOn) context.addIssue({ code: "custom", path: ["waitingOn"], message: "Completed work cannot remain waiting on someone" });
   });
 
+export const taskDependencyCreateSchema = z.object({
+  prerequisiteTaskId: relatedTaskId
+}).strict();
+
 export type TaskCreateInput = z.infer<typeof taskCreateSchema>;
 export type TaskPatchInput = z.infer<typeof taskPatchSchema>;
+export type TaskDependencyCreateInput = z.infer<typeof taskDependencyCreateSchema>;

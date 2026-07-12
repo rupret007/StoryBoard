@@ -110,7 +110,7 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v17`
+already performed an outside action. Prompt/policy version `manager_os_v18`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -120,7 +120,14 @@ conflicted. Both deterministic and optional-model answers receive the same
 post-generation calibration, so an empty area means “not recorded,” never proof
 that nothing exists outside StoryBoard. The Manager workspace shows the same
 bounded confidence and at most three targeted questions; it measures record
-coverage, not artistic quality or business success. Before applying the five-item Today limit, the
+coverage, not artistic quality or business success.
+`manager_work_sequence_v1` projection makes task order explicit. Members can
+record one Task as another Task's prerequisite; the API rejects cross-artist
+links, self-links, cycles, impossible date order, and completion that skips
+unfinished prerequisites. Manager separates ready-now work from downstream
+work and recorded blockers, and advances a ready prerequisite instead of
+presenting a waiting task as actionable. It never infers effort, duration, or
+private member capacity from the graph. Before applying the five-item Today limit, the
 code-owned `manager_priority_v1` policy compares every candidate across event
 timing/readiness, member conflicts, commitment state, reply freshness,
 approvals, overdue money, due reviews, follow-ups, and project health. The

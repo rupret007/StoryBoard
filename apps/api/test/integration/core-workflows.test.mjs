@@ -150,10 +150,29 @@ test("database integration: tenant links, roles, registration binding, and audit
     (error) => error?.getStatus?.() === 404
   );
   assert.equal(await client.task.count({ where: { artistId: artistA.id } }), 0);
-  await tasks.create(artistA.id, {
-    title: "Owned opportunity task",
-    opportunityId: opportunity.id
+  const prerequisiteTask = await tasks.create(artistA.id, {
+    title: "Confirm the performance date"
   });
+  const ownedTask = await tasks.create(artistA.id, {
+    title: "Owned opportunity task",
+    opportunityId: opportunity.id,
+    dueAt: "2026-07-15"
+  });
+  const foreignTask = await client.task.create({ data: { artistId: artistB.id, title: "Foreign prerequisite" } });
+  const lateTask = await client.task.create({ data: { artistId: artistA.id, title: "Late prerequisite", dueAt: new Date("2026-07-20T00:00:00.000Z") } });
+  await Promise.all([
+    tasks.addPrerequisite(artistA.id, ownedTask.id, prerequisiteTask.id, owner.email, owner.id),
+    tasks.addPrerequisite(artistA.id, ownedTask.id, prerequisiteTask.id, owner.email, owner.id)
+  ]);
+  assert.equal(await client.taskDependency.count({ where: { artistId: artistA.id } }), 1);
+  await assert.rejects(() => tasks.addPrerequisite(artistA.id, prerequisiteTask.id, ownedTask.id, owner.email, owner.id), /create a task cycle/);
+  await assert.rejects(() => tasks.addPrerequisite(artistA.id, ownedTask.id, lateTask.id, owner.email, owner.id), /due after the task/);
+  await assert.rejects(() => tasks.addPrerequisite(artistA.id, ownedTask.id, foreignTask.id, owner.email, owner.id), (error) => error?.getStatus?.() === 404);
+  await assert.rejects(() => tasks.patch(artistA.id, ownedTask.id, { status: "done" }, owner.email, owner.id), /Complete every prerequisite/);
+  await tasks.patch(artistA.id, prerequisiteTask.id, { status: "done" }, owner.email, owner.id);
+  await tasks.patch(artistA.id, ownedTask.id, { status: "done" }, owner.email, owner.id);
+  await assert.rejects(() => tasks.patch(artistA.id, prerequisiteTask.id, { status: "todo" }, owner.email, owner.id), /cannot be reopened/);
+  await tasks.removePrerequisite(artistA.id, ownedTask.id, prerequisiteTask.id, owner.email, owner.id);
 
   const registration = new telegramMod.TelegramRegistrationService(
     prisma,
@@ -192,6 +211,11 @@ test("database integration: tenant links, roles, registration binding, and audit
       "contact.created",
       "booking.created",
       "task.created",
+      "task.created",
+      "task.prerequisite_added",
+      "task.updated",
+      "task.updated",
+      "task.prerequisite_removed",
       "telegram.registration.token_created",
       "telegram.registration.bound",
       "telegram.registration.failed"
@@ -598,10 +622,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v17", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v18", operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v17", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v18", operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -647,8 +671,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(responseEval.label, "needs_revision");
   assert.equal(responseEval.snapshot.question, "What should we focus on this week?");
   assert.equal(Object.hasOwn(responseEval.snapshot, "inputFacts"), false);
-  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v17", operator.email, operator.id)).passed, false);
-  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v17", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
+  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v18", operator.email, operator.id)).passed, false);
+  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v18", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
   await assert.rejects(() => manager.promoteResponseEvalExample(foreignArtist.id, firstChat.message.id, { label: "needs_revision", expectedBehavior: "Keep the response inside the foreign workspace." }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const revisedFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id);
   assert.equal(revisedFeedback.id, negativeFeedback.id);
@@ -656,7 +680,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(usefulResponseEval.id, responseEval.id);
   assert.equal(usefulResponseEval.label, "useful");
   assert.equal(usefulResponseEval.resolvedAt, null);
-  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v17", operator.email, operator.id);
+  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v18", operator.email, operator.id);
   assert.equal(responseEvaluation.passed, true);
   assert.equal(responseEvaluation.metrics.ownerReviewedResponseCount, 1);
   assert.equal(await client.managerResponseEvalExample.count({ where: { artistId: artist.id } }), 1);
@@ -719,7 +743,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   await operations.participant(artist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id);
   await operations.participant(artist.id, event.id, { bandMemberId: productionMember.id, response: "available" }, operator.email, operator.id);
   await assert.rejects(() => operations.participant(foreignArtist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
-  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v17", inputFacts: {}, output: {}, trace: {} } });
+  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v18", inputFacts: {}, output: {}, trace: {} } });
   const advanceRecommendation = await client.managerRecommendation.create({ data: { managerRunId: actionRun.id, stableKey: `advance-${event.id}`, workstream: "live", title: "Build the show advance", reason: "No advance tasks are recorded", nextAction: "Generate the existing checklist", priority: "high", evidence: [event.id], proposedAction: { type: "generate_event_advance", eventId: event.id } } });
   await assert.rejects(() => manager.recommendation(foreignArtist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const advance = await manager.recommendation(artist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id);
@@ -795,6 +819,24 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(evidenceChat.recommendation, null);
   const evidenceRun = await client.managerRun.findUniqueOrThrow({ where: { id: evidenceChat.message.managerRunId } });
   assert.equal(evidenceRun.trace.evidenceHealth.policyVersion, "manager_evidence_v1");
+  const sequencePrerequisite = await taskService.create(artist.id, { title: "Confirm the release date" }, operator.email, operator.id);
+  const sequenceDownstream = await taskService.create(artist.id, { title: "Schedule the release announcement", dueAt: "2026-08-01" }, operator.email, operator.id);
+  await taskService.addPrerequisite(artist.id, sequenceDownstream.id, sequencePrerequisite.id, operator.email, operator.id);
+  const sequence = await manager.workSequence(artist.id);
+  assert.equal(sequence.policyVersion, "manager_work_sequence_v1");
+  assert.equal(sequence.items.find((item) => item.taskId === sequenceDownstream.id)?.state, "waiting_on_prerequisites");
+  assert.ok(sequence.readyNow.find((item) => item.taskId === sequencePrerequisite.id)?.unlocksTaskIds.includes(sequenceDownstream.id));
+  const foreignSequence = await manager.workSequence(foreignArtist.id);
+  assert.equal(foreignSequence.evidenceIds.includes(sequencePrerequisite.id), false);
+  assert.equal(foreignSequence.evidenceIds.includes(sequenceDownstream.id), false);
+  const sequenceChat = await manager.chat(artist.id, { message: "What can we do now, and what is waiting on another task?" }, operator.email, operator.id);
+  assert.match(sequenceChat.message.content, /Ready now:/i);
+  assert.match(sequenceChat.message.content, /Confirm the release date/);
+  assert.match(sequenceChat.message.content, /Schedule the release announcement/);
+  assert.equal(sequenceChat.recommendation, null);
+  const sequenceRun = await client.managerRun.findUniqueOrThrow({ where: { id: sequenceChat.message.managerRunId } });
+  assert.equal(sequenceRun.trace.workSequence.policyVersion, "manager_work_sequence_v1");
+  assert.equal(sequenceRun.trace.workSequence.providerBypassed, true);
   const actions = await client.auditEvent.findMany({ where: { artistId: artist.id }, select: { action: true } });
   for (const expected of ["manager.intake_completed", "manager.profile_updated", "manager.plan_ensured", "manager.settings_updated", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.schedule_item_created", "event.schedule_item_updated", "event.schedule_item_removed", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
 });
