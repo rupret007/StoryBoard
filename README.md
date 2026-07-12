@@ -110,15 +110,26 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v9`
+already performed an outside action. Prompt/policy version `manager_os_v10`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, and respectful
-missing-context guidance. When the same readiness evidence shows that an event
-has no advance or a dated project has no milestone plan, Manager may offer one
-additional explicit internal action: build the existing source-keyed show
-advance or project plan. Acceptance revalidates the artist and current date,
-uses the existing Task authority, and completes atomically; it does not grant
-arbitrary tool or provider access.
+missing-context guidance. Before applying the five-item Today limit, the
+code-owned `manager_priority_v1` policy compares every candidate across event
+timing/readiness, member conflicts, commitment state, reply freshness,
+approvals, overdue money, due reviews, follow-ups, and project health. The
+Manager shows why the first item won, and the redacted run trace records only
+the bounded rule factors—not hidden reasoning. Grounded model suggestions are
+merged with these deterministic must-not-miss signals and reranked, so model
+wording cannot hide a same-day show or other authoritative pressure. When the
+same readiness evidence shows that an event has no advance or a dated project
+has no milestone plan, Manager may offer one additional explicit internal
+action: build the existing source-keyed show advance or project plan.
+Acceptance revalidates the artist and current date, uses the existing Task
+authority, and completes atomically; it does not grant arbitrary tool or
+provider access.
+Brief cache reuse is also evidence-aware: a newer audited change to relevant
+band operations, booking, money, approvals, decisions, or Manager work forces a
+fresh brief instead of waiting for the daily/weekly age limit.
 The Manager also has one shared, deterministic 90-day outcome review. Completed
 shows, projects, tasks, campaign results, attendance, post-show notes,
 relationship outcomes, invoices, expenses, and finalized settlements are

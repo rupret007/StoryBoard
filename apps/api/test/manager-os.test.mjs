@@ -491,8 +491,9 @@ test("brief and plan conversation advance an existing linked step instead of inv
 test("a pre-intake cached brief is invalidated when setup completes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v10", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-12T11:00:00.000Z") });
+  service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
   const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
   assert.equal(result.id, "new-brief");
@@ -502,11 +503,37 @@ test("a pre-intake cached brief is invalidated when setup completes", async () =
 test("a cached brief is invalidated when commitment facts change", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => ({ updatedAt: new Date("2026-07-12T11:00:00.000Z") }) } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v10", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-01T00:00:00.000Z") });
+  service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
   const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
   assert.equal(result.id, "new-brief");
+  assert.equal(generations, 1);
+});
+
+test("a cached brief is invalidated when the Manager priority policy changes", async () => {
+  const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
+  let generations = 0;
+  service.latestBrief = async () => ({ id: "v9-brief", promptVersion: "manager_os_v9", createdAt: new Date() });
+  service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
+  service.latestManagerFactChange = async () => null;
+  service.generateBrief = async () => { generations += 1; return { id: "v10-brief" }; };
+  const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
+  assert.equal(result.id, "v10-brief");
+  assert.equal(generations, 1);
+});
+
+test("a cached brief is invalidated when an audited operating fact changes", async () => {
+  const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
+  let generations = 0;
+  const createdAt = new Date(Date.now() - 60_000);
+  service.latestBrief = async () => ({ id: "stale-brief", promptVersion: "manager_os_v10", createdAt });
+  service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
+  service.latestManagerFactChange = async () => ({ createdAt: new Date(createdAt.getTime() + 1_000) });
+  service.generateBrief = async () => { generations += 1; return { id: "fresh-brief" }; };
+  const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
+  assert.equal(result.id, "fresh-brief");
   assert.equal(generations, 1);
 });
 
@@ -531,22 +558,22 @@ test("goal progress is append-only, artist-scoped, and audited", async () => {
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v9", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v10", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v9", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v9", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v10", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v10", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v9", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v9", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v10", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v10", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v9", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v8", resolutionVersion: "manager_os_v9", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v9", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v10", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v9", resolutionVersion: "manager_os_v10", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v10", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 
@@ -586,15 +613,27 @@ test("deterministic manager brief ranks real workflow pressure and keeps evidenc
     approvals: [{ id: "approval-a", title: "Draft reply", status: "pending", actionType: "gmail_draft", updatedAt: now }],
     events: [{ id: "event-a", title: "Friday show", type: "gig", status: "confirmed", startsAt: new Date("2026-07-18T01:00:00.000Z"), participants: [{ response: "unavailable", bandMemberId: "member-b" }] }],
     invoices: [{ id: "invoice-a", number: "1042", status: "overdue", currency: "USD", totalMinor: 100000, paidMinor: 25000, dueAt: new Date("2026-07-01T00:00:00.000Z") }],
-    tasks: [{ id: "task-a", title: "Confirm backline", status: "todo", dueAt: new Date("2026-07-10T00:00:00.000Z") }]
+    tasks: [{ id: "task-a", title: "Confirm backline", status: "todo", dueAt: new Date("2026-07-10T00:00:00.000Z") }],
+    decisions: [{ id: "decision-a", workstream: "live", title: "Which market next?", context: null, options: [], choice: "Milwaukee", rationale: "Lower travel cost", expectedOutcome: "One return invitation", evidence: [], status: "decided", reviewAt: new Date("2026-07-01T00:00:00.000Z"), decidedAt: new Date("2026-06-01T00:00:00.000Z") }],
+    campaignRecipients: [{ id: "recipient-a", status: "sent", followUpDueAt: new Date("2026-07-01T00:00:00.000Z"), followUpTaskId: null }]
   });
   const brief = intelligence.deterministicManagerBrief(facts, now);
   assert.equal(brief.today.length, 5);
-  assert.match(brief.today[0].title, /booking repl/i);
+  assert.equal(brief.today[0].stableKey, "event-event-a");
   assert.ok(brief.today.some((item) => item.stableKey === "approval-approval-a"));
-  assert.ok(brief.today.some((item) => item.stableKey === "event-event-a"));
+  assert.ok(brief.today.some((item) => item.stableKey === "booking-reply-reply-a"));
   assert.ok(brief.today.some((item) => item.stableKey === "invoice-invoice-a"));
-  assert.ok(brief.today.flatMap((item) => item.evidenceIds).every((id) => ["reply-a", "approval-a", "event-a", "invoice-a", "task-a"].includes(id)));
+  assert.ok(brief.today.some((item) => item.stableKey === "campaign-follow-ups"));
+  assert.ok(brief.today.flatMap((item) => item.evidenceIds).every((id) => ["reply-a", "approval-a", "event-a", "invoice-a", "recipient-a"].includes(id)));
+  const candidates = intelligence.deterministicManagerBriefCandidates(facts, now);
+  assert.ok(candidates.today.length > 5);
+  const prioritized = intelligence.prioritizeManagerBrief(candidates, facts, now);
+  assert.ok(prioritized.trace.today[0].factors.some((factor) => factor.code === "member_unavailable"));
+  assert.ok(prioritized.trace.omittedToday.some((item) => item.stableKey === "overdue-work"));
+  const merged = intelligence.mergeManagerBriefCandidates(candidates, { ...candidates, today: [{ ...candidates.today.find((item) => item.stableKey === "event-event-a"), stableKey: "model-show-focus", title: "Handle the show first", priority: "low" }] });
+  assert.equal(merged.today.filter((item) => item.evidenceIds.includes("event-a")).length, 1);
+  assert.equal(merged.today.find((item) => item.evidenceIds.includes("event-a")).stableKey, "event-event-a");
+  assert.equal(merged.today.find((item) => item.evidenceIds.includes("event-a")).priority, "high");
   assert.ok(brief.risksAndOpportunities.some((item) => item.title === "Member availability conflict"));
 });
 

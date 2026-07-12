@@ -137,6 +137,15 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   linked run's redacted input facts for offline grounding checks. A negative
   answer blocks its producing candidate and can be resolved only for a later
   code-registered version; evaluation never rewrites or activates a version.
+- Manager focus is chosen by `manager_priority_v1` after all candidate pressure
+  has been gathered and repeated work suppressed. The deterministic comparison
+  weighs record-backed timing, readiness, people conflicts, commitments,
+  replies, approvals, receivables, reviews, follow-ups, and project health.
+  Grounded model candidates are merged and deduplicated before the same pass,
+  so a model cannot remove an authoritative signal by omission. Bounded factor
+  codes and omitted candidates live in the redacted trace; hidden reasoning is
+  never stored. Cache reuse additionally requires the current policy version
+  and no newer audit across the operating aggregates that feed the brief.
 - Show readiness is deterministic derived data, not a model assertion or an
   editable status. It uses the tenant-scoped event graph, active lineup, dated
   urgency, explicit evidence IDs, and premise-coverage confidence. Operations

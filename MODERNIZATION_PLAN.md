@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `7c02f32`
+Baseline for this round: `main` at `8fce0d7`
 
 ## Product and current architecture
 
@@ -392,6 +392,28 @@ mock-safe provider adapters.
   controls, relationship diagnostics, unit/database/browser coverage, and
   promote the dataset contract to `manager_evals_v10`.
 
+### P0 — Global Manager pressure ranking (completed 2026-07-12)
+
+- [x] Close the insertion-order failure where `Today` stopped collecting after
+  five candidates, allowing later code branches such as a same-day show,
+  overdue invoice, or campaign follow-up to disappear before comparison.
+- [x] Gather every deterministic candidate, suppress already handled work, then
+  rank globally by declared importance plus record-backed urgency: event timing
+  and readiness, member conflicts, commitment state, reply freshness, approval
+  state, invoice lateness, due reviews, follow-ups, and project health.
+- [x] Keep the policy deterministic and inspectable as `manager_priority_v1`.
+  Store only rule codes, bounded factor labels, impacts, and omitted candidate
+  summaries in `ManagerRun.trace`; never store hidden reasoning.
+- [x] Merge grounded model suggestions with the deterministic candidate set so
+  a model cannot omit a code-owned pressure. Deduplicate overlapping evidence,
+  retain stable keys, apply suppression, and rerank before persistence.
+- [x] Invalidate cached briefs from prior policy versions or newer audited
+  operating-record changes, and show the band a plain-language “ranked first
+  because” explanation in Manager.
+- [x] Promote the code/prompt contract to `manager_os_v10` and the offline set
+  to `manager_evals_v11` with a competing-pressure golden scenario. No schema
+  migration, new provider, or expanded action authority is required.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -499,6 +521,23 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Replaced Manager's code-order truncation with the global,
+  explainable `manager_priority_v1` focus policy. Every candidate is now
+  collected before the five-item Today limit; recorded deadlines, show
+  readiness, unavailable members, commitments, fresh replies, approvals,
+  overdue money, due reviews, follow-ups, and project health are compared in
+  one deterministic pass. Grounded model suggestions are merged without
+  displacing must-not-miss deterministic signals, overlapping evidence is
+  deduplicated, old cached briefs are regenerated, and rule factors are visible
+  in the UI and redacted run trace. The clean-room design uses Andrea_NanoBot's
+  main-signal comparison concept without copying its code, runtime, or data,
+  and follows [OpenAI trace-grading guidance](https://developers.openai.com/api/docs/guides/trace-grading)
+  by recording structured policy decisions rather than hidden reasoning.
+  Validation passed the full typecheck/lint/test/build gate (83 API and two
+  shared tests), three database workflows across all 27 migrations, three
+  Chromium workflows, the clean artist-relationship diagnostic, production
+  builds, and the 20/20 `manager_os_v10` / `manager_evals_v11` gate at 100%
+  safety.
 - 2026-07-12: Extended the Manager release gate from decided recommendations
   to exact, owner-reviewed conversation answers. Helpful examples must remain
   natural and grounded in the linked run's redacted evidence. Negative examples

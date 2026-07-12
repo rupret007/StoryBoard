@@ -385,6 +385,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
     members: [{ name: "Alex", instruments: ["guitar"], roles: ["bandleader"], active: true }]
   }, operator.email, operator.id);
   assert.equal(intake.cadence, "intake");
+  assert.equal(intake.trace.priorityRanking.policyVersion, "manager_priority_v1");
+  assert.ok(intake.trace.priorityRanking.today.length <= 5);
   assert.ok(await client.managerGoal.count({ where: { artistId: artist.id } }) >= 2);
   assert.equal(await client.managerGoal.count({ where: { artistId: artist.id, sourceKey: { startsWith: "manager_plan_v1:" } } }), 2);
   assert.equal(await client.managerInitiative.count({ where: { artistId: artist.id, sourceKey: { startsWith: "manager_plan_v1:" } } }), 2);
@@ -415,6 +417,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(firstScheduleScan.runs[0]?.cadence, "weekly");
   const scheduledRun = await client.managerRun.findUniqueOrThrow({ where: { id: firstScheduleScan.runs[0].runId } });
   assert.equal(scheduledRun.mode, "deterministic");
+  assert.equal(scheduledRun.trace.priorityRanking.policyVersion, "manager_priority_v1");
   assert.match(scheduledRun.scheduleKey ?? "", new RegExp(`^${artist.id}:weekly:2026-W\\d{2}$`));
   const briefNotification = await client.workflowNotification.findFirstOrThrow({ where: { artistId: artist.id, recipientOperatorId: operator.id, kind: "manager_brief_ready" } });
   assert.equal(briefNotification.metadata.href, "/manager");
@@ -502,10 +505,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v9", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v10", operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v9", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v10", operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -551,8 +554,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(responseEval.label, "needs_revision");
   assert.equal(responseEval.snapshot.question, "What should we focus on this week?");
   assert.equal(Object.hasOwn(responseEval.snapshot, "inputFacts"), false);
-  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v9", operator.email, operator.id)).passed, false);
-  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v9", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
+  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v10", operator.email, operator.id)).passed, false);
+  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v10", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
   await assert.rejects(() => manager.promoteResponseEvalExample(foreignArtist.id, firstChat.message.id, { label: "needs_revision", expectedBehavior: "Keep the response inside the foreign workspace." }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const revisedFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id);
   assert.equal(revisedFeedback.id, negativeFeedback.id);
@@ -560,7 +563,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(usefulResponseEval.id, responseEval.id);
   assert.equal(usefulResponseEval.label, "useful");
   assert.equal(usefulResponseEval.resolvedAt, null);
-  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v9", operator.email, operator.id);
+  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v10", operator.email, operator.id);
   assert.equal(responseEvaluation.passed, true);
   assert.equal(responseEvaluation.metrics.ownerReviewedResponseCount, 1);
   assert.equal(await client.managerResponseEvalExample.count({ where: { artistId: artist.id } }), 1);
@@ -616,7 +619,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   await assert.rejects(() => operations.patchEvent(artist.id, event.id, { soundcheckAt: "2026-09-18T21:00:00.000Z" }, operator.email, operator.id), /Soundcheck must be before doors/i);
   await operations.participant(artist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id);
   await assert.rejects(() => operations.participant(foreignArtist.id, event.id, { bandMemberId: member.id, response: "available" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
-  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v9", inputFacts: {}, output: {}, trace: {} } });
+  const actionRun = await client.managerRun.create({ data: { artistId: artist.id, cadence: "daily", mode: "deterministic", promptVersion: "manager_os_v10", inputFacts: {}, output: {}, trace: {} } });
   const advanceRecommendation = await client.managerRecommendation.create({ data: { managerRunId: actionRun.id, stableKey: `advance-${event.id}`, workstream: "live", title: "Build the show advance", reason: "No advance tasks are recorded", nextAction: "Generate the existing checklist", priority: "high", evidence: [event.id], proposedAction: { type: "generate_event_advance", eventId: event.id } } });
   await assert.rejects(() => manager.recommendation(foreignArtist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const advance = await manager.recommendation(artist.id, advanceRecommendation.id, "accepted", {}, operator.email, operator.id);

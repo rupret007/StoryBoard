@@ -72,6 +72,7 @@ test("novice manager intake produces grounded work and band operations records",
     await page.getByRole("button", { name: "Build my 90-day operating plan" }).click();
   }
   await expect(page.getByText("Today", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("manager-priority-explanation")).toContainText("Ranked first because");
   const cadenceCard = page.getByTestId("manager-cadence");
   await expect(cadenceCard.getByText("On request only", { exact: true })).toBeVisible();
   const providerPolicy = cadenceCard.getByTestId("manager-provider-context-policy");
@@ -170,7 +171,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v9", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v10", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 

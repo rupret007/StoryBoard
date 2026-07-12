@@ -1,5 +1,5 @@
 import type { ManagerWorkstream } from "../generated/prisma/enums";
-import { deterministicManagerChat, managerRecommendationIsSuppressed, type ManagerFacts, type ManagerRecommendationDraft } from "./manager-intelligence";
+import { deterministicManagerBrief, deterministicManagerChat, managerRecommendationIsSuppressed, type ManagerFacts, type ManagerRecommendationDraft } from "./manager-intelligence";
 import { evaluateManagerResponseQuality, managerResponseGuidance } from "./manager-response-quality";
 import { deterministicManagerOutcomeReview } from "./manager-outcome-review";
 import { deterministicManagerContextHealth } from "./manager-context-health";
@@ -8,8 +8,8 @@ import { deterministicShowReadiness } from "../operations/event-readiness";
 import { deterministicProjectReadiness } from "../operations/project-plan";
 import { projectManagerMemoryForProvider } from "./manager-provider-context";
 
-export const MANAGER_PROMPT_VERSION = "manager_os_v9";
-export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v10";
+export const MANAGER_PROMPT_VERSION = "manager_os_v10";
+export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v11";
 
 type ReviewedExample = { id: string; label: string; promptVersion: string; snapshot: unknown };
 type ReviewedResponseExample = { id: string; label: string; promptVersion: string; expectedBehavior: string | null; resolutionVersion: string | null; resolvedAt: Date | null; snapshot: unknown; inputFacts: unknown };
@@ -46,6 +46,16 @@ function goldenResults(candidateVersion: string): EvalResult[] {
   const contextFacts = facts({ contextHealth: deterministicManagerContextHealth({ profile: { id: "profile-a", bandMode: "original", careerStage: "Local", homeCity: "Chicago", genres: ["rock"], twelveMonthAmbition: "Build a regional audience", constraints: ["Weeknight jobs"], availabilityExpectations: null, revenueSources: [], currentAssets: [], budgetToleranceMinor: null, businessName: null, currency: "USD" }, members: [{ id: "member-a", name: "Alex", roles: [], instruments: [] }], goals: [{ id: "goal-a" }], events: [], projects: [], opportunities: [] }) });
   const commitmentTasks = [{ id: "task-blocked", title: "Confirm stage dimensions", status: "blocked", ownerLabel: "Alex", dueAt: new Date("2026-07-18T12:00:00.000Z"), initiativeId: null, blockedReason: "The promoter has not supplied the stage plot", waitingOn: "Promoter", deferralCount: 2, lastDeferredAt: new Date("2026-07-11T12:00:00.000Z") }];
   const commitmentFacts = facts({ tasks: commitmentTasks, commitmentHealth: deterministicManagerCommitmentHealth(commitmentTasks, NOW) });
+  const competingPressureBrief = deterministicManagerBrief(facts({
+    tasks: commitmentTasks,
+    commitmentHealth: deterministicManagerCommitmentHealth(commitmentTasks, NOW),
+    events: [{ ...advanceShow, startsAt: new Date("2026-07-12T18:00:00.000Z"), participants: [{ response: "available", bandMemberId: "member-a" }, { response: "unavailable", bandMemberId: "member-b" }] }],
+    approvals: [{ id: "approval-a", title: "Send buyer draft", status: "pending", actionType: "gmail_draft", updatedAt: NOW }],
+    bookingReplies: [{ id: "reply-a", subject: "Tonight's show", fromName: "Buyer", fromEmail: "buyer@example.test", processingStatus: "unread", receivedAt: NOW }],
+    invoices: [{ id: "invoice-a", number: "1002", status: "overdue", currency: "USD", totalMinor: 80000, paidMinor: 0, dueAt: new Date("2026-07-01T00:00:00.000Z") }],
+    decisions: [{ id: "decision-due", workstream: "live", title: "Which market next?", context: null, options: [], choice: "Milwaukee", rationale: "Lower travel cost", expectedOutcome: "One return invitation", evidence: [], status: "decided", reviewAt: new Date("2026-07-01T00:00:00.000Z"), decidedAt: new Date("2026-06-01T00:00:00.000Z") }],
+    campaignRecipients: [{ id: "recipient-a", status: "sent", followUpDueAt: new Date("2026-07-01T00:00:00.000Z"), followUpTaskId: null }]
+  }), NOW);
   const cases = [
     { name: "original-incomplete", run: () => deterministicManagerChat(intakeFacts, "What should we do next?", NOW), check: (result: ReturnType<typeof deterministicManagerChat>) => /finish the manager setup|complete the guided manager setup/i.test(result.answer), detail: "Incomplete intake is identified before strategic advice." },
     { name: "original-release-and-shows", run: () => deterministicManagerChat(facts(), "What should we focus on this week?", NOW), check: (result: ReturnType<typeof deterministicManagerChat>) => result.citations.length > 0 && /first move|simple|next/i.test(result.answer), detail: "Prioritized work is tied to recorded evidence." },
@@ -75,6 +85,7 @@ function goldenResults(candidateVersion: string): EvalResult[] {
   const fullMemory = projectManagerMemoryForProvider(memoryFacts, true);
   return [
     ...chatResults,
+    { name: "competing-pressure-global-ranking", source: "golden", passed: competingPressureBrief.today.length === 5 && competingPressureBrief.today[0]?.stableKey === "event-event-a" && competingPressureBrief.today.some((item) => item.stableKey === "booking-reply-reply-a"), detail: "The Manager ranks every recorded pressure before applying the five-item limit, keeping a same-day blocked show ahead of later code-order candidates." },
     { name: "natural-manager-voice", source: "golden", passed: natural.passed, detail: "A direct, specific manager answer passes the natural-response gate." },
     { name: "reject-assistant-meta-and-false-action", source: "golden", passed: !unsafe.passed && unsafe.violations.includes("assistant_meta_language") && unsafe.violations.includes("unverified_external_action_claim"), detail: "Canned assistant language and invented external actions are rejected." },
     { name: "reviewed-style-correction", source: "golden", passed: /exact question|specific next action/i.test(guidance), detail: "Explicit human feedback maps to bounded code-owned response guidance." },

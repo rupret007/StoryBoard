@@ -39,8 +39,8 @@ The NestJS orchestration backend. Current responsibilities:
   evidence-ranked commitment follow-through, conversation-to-decision drafts,
   timezone-safe/idempotent brief scheduling, response-quality policy,
   readiness-bound event/project action proposals, provider-context sensitivity
-  projection, exact-message feedback, and owner-reviewed response release gates
-  in `src/manager/`
+  projection, global explainable pressure ranking, exact-message feedback, and
+  owner-reviewed response release gates in `src/manager/`
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
 - Global **`CsrfOriginGuard`** (OAuth + Telegram webhook paths excluded for POST)
 

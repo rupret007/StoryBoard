@@ -139,6 +139,196 @@ export function suppressRepeatedManagerAdvice(brief: ManagerBrief, history: Mana
   };
 }
 
+export type ManagerPriorityFactor = {
+  code: string;
+  impact: number;
+  detail: string;
+};
+
+export type ManagerPriorityRank = {
+  stableKey: string;
+  title: string;
+  score: number;
+  factors: ManagerPriorityFactor[];
+};
+
+export type ManagerPriorityTrace = {
+  policyVersion: "manager_priority_v1";
+  today: ManagerPriorityRank[];
+  thisWeek: ManagerPriorityRank[];
+  omittedToday: ManagerPriorityRank[];
+  omittedThisWeek: ManagerPriorityRank[];
+};
+
+const PRIORITY_BASE = { high: 300, med: 200, low: 100 } as const;
+
+function recommendationRank(
+  item: ManagerRecommendationDraft,
+  facts: ManagerFacts,
+  now: Date,
+  originalIndex: number
+) {
+  const factors: ManagerPriorityFactor[] = [];
+  const add = (code: string, impact: number, detail: string) => factors.push({ code, impact, detail });
+  add(`declared_${item.priority}`, PRIORITY_BASE[item.priority], `${item.priority} declared priority`);
+  const evidence = new Set(item.evidenceIds);
+
+  const event = facts.events.find((row) => evidence.has(row.id));
+  if (event?.startsAt) {
+    const hoursUntil = (event.startsAt.getTime() - now.getTime()) / (60 * 60 * 1000);
+    if (hoursUntil >= 0) {
+      if (hoursUntil <= 24) add("show_within_24h", 140, "show starts within 24 hours");
+      else if (hoursUntil <= 72) add("show_within_3d", 105, "show starts within three days");
+      else if (hoursUntil <= 7 * 24) add("show_within_7d", 70, "show starts within seven days");
+      else if (hoursUntil <= 21 * 24) add("show_within_21d", 30, "show starts within three weeks");
+    }
+    const unavailable = event.participants.filter((participant) => participant.response === "unavailable").length;
+    if (unavailable) add("member_unavailable", 75, `${unavailable} unavailable member${unavailable === 1 ? "" : "s"}`);
+    if (event.readiness?.status === "blocked") add("show_blocked", 80, "show readiness is blocked");
+    else if (event.readiness?.status === "not_ready") add("show_not_ready", 55, "show is not ready");
+    else if (event.readiness?.status === "attention") add("show_attention", 20, "show still needs attention");
+    if ((event.dayOf?.overdueTaskCount ?? 0) > 0) add("day_of_overdue", 65, "day-of work is overdue");
+  }
+
+  const approval = facts.approvals.find((row) => evidence.has(row.id));
+  if (approval?.status === "approved") add("approved_action_waiting", 100, "approved work is waiting to execute");
+  else if (approval?.status === "pending") add("human_decision_waiting", 70, "a human decision is waiting");
+
+  const reply = facts.bookingReplies.find((row) => evidence.has(row.id));
+  if (reply) {
+    const ageHours = Math.max(0, (now.getTime() - reply.receivedAt.getTime()) / (60 * 60 * 1000));
+    if (ageHours <= 24) add("fresh_booking_reply", 90, "booking reply arrived within 24 hours");
+    else if (ageHours <= 72) add("recent_booking_reply", 70, "booking reply arrived within three days");
+    else add("unread_booking_reply", 45, "booking reply is unread");
+  }
+
+  const commitment = facts.commitmentHealth?.items.find((row) => evidence.has(row.taskId));
+  if (commitment) {
+    const weights = { blocked: 85, overdue: 75, repeatedly_deferred: 55, waiting: 45, unassigned: 35, due_soon: 25, unscheduled: 10, active: 0 } as const;
+    const impact = weights[commitment.state];
+    if (impact) add(`commitment_${commitment.state}`, impact, commitment.state.replaceAll("_", " "));
+  }
+
+  const invoice = facts.invoices.find((row) => evidence.has(row.id));
+  if (invoice) {
+    const balance = Math.max(0, invoice.totalMinor - invoice.paidMinor);
+    if (invoice.dueAt && invoice.dueAt < now) {
+      const overdueDays = Math.max(1, Math.floor((now.getTime() - invoice.dueAt.getTime()) / DAY_MS));
+      add("invoice_overdue", 70 + Math.min(30, overdueDays), `invoice is ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue`);
+    } else if (balance > 0) add("invoice_open_balance", 25, "invoice has an open balance");
+  }
+
+  const decision = facts.decisions.find((row) => evidence.has(row.id));
+  if (decision?.status === "decided" && decision.reviewAt && decision.reviewAt <= now) add("decision_review_due", 50, "decision review is due");
+
+  const recipient = facts.campaignRecipients.find((row) => evidence.has(row.id));
+  if (recipient?.followUpDueAt && recipient.followUpDueAt < now) add("campaign_followup_overdue", 60, "booking follow-up is overdue");
+
+  const project = facts.projects.find((row) => evidence.has(row.id));
+  if (project) {
+    if (project.dueAt && project.dueAt < now) add("project_overdue", 75, "project target date has passed");
+    if (project.readiness?.status === "blocked") add("project_blocked", 70, "project is blocked");
+    else if (project.readiness?.status === "off_track") add("project_off_track", 55, "project is off track");
+    else if (project.readiness?.status === "at_risk") add("project_at_risk", 30, "project is at risk");
+    else if (project.readiness?.status === "needs_plan") add("project_needs_plan", 25, "project has no milestone plan");
+  }
+
+  if (item.stableKey === "complete-intake") add("manager_setup_missing", 35, "manager setup is incomplete");
+  if (item.stableKey.startsWith("context-")) add("context_can_wait", -60, "context improvement can wait behind active delivery pressure");
+  if (item.stableKey === "weekly-focus") add("fallback_focus", -25, "fallback focus has no recorded urgency");
+  if (item.evidenceIds.length) add("recorded_evidence", 5, "supported by StoryBoard records");
+
+  const score = factors.reduce((total, factor) => total + factor.impact, 0);
+  return { item, score, originalIndex, factors };
+}
+
+export function rankManagerRecommendations(
+  items: ManagerRecommendationDraft[],
+  facts: ManagerFacts,
+  now = new Date()
+) {
+  return items
+    .map((item, index) => recommendationRank(item, facts, now, index))
+    .sort((left, right) => right.score - left.score || left.originalIndex - right.originalIndex || left.item.stableKey.localeCompare(right.item.stableKey));
+}
+
+function mergeByKey<T>(base: T[], proposed: T[], key: (value: T) => string) {
+  const merged = new Map(base.map((value) => [key(value), value]));
+  for (const value of proposed) merged.set(key(value), value);
+  return [...merged.values()];
+}
+
+function sameRecommendation(left: ManagerRecommendationDraft, right: ManagerRecommendationDraft) {
+  if (left.stableKey === right.stableKey) return true;
+  if (left.workstream !== right.workstream || !left.evidenceIds.length || !right.evidenceIds.length) return false;
+  const rightEvidence = new Set(right.evidenceIds);
+  return left.evidenceIds.some((id) => rightEvidence.has(id));
+}
+
+function mergeRecommendations(base: ManagerRecommendationDraft[], proposed: ManagerRecommendationDraft[]) {
+  const merged = [...base];
+  const priorityLevel = { low: 0, med: 1, high: 2 } as const;
+  for (const value of proposed) {
+    const existingIndex = merged.findIndex((candidate) => sameRecommendation(candidate, value));
+    if (existingIndex === -1) merged.push(value);
+    else {
+      const existing = merged[existingIndex]!;
+      merged[existingIndex] = {
+        ...value,
+        stableKey: existing.stableKey,
+        workstream: existing.workstream,
+        priority: priorityLevel[existing.priority] >= priorityLevel[value.priority] ? existing.priority : value.priority,
+        evidenceIds: unique([...existing.evidenceIds, ...value.evidenceIds]).slice(0, 8),
+        proposedAction: existing.proposedAction ?? value.proposedAction
+      };
+    }
+  }
+  return merged;
+}
+
+export function mergeManagerBriefCandidates(base: ManagerBrief, proposed: ManagerBrief): ManagerBrief {
+  const today = mergeRecommendations(base.today, proposed.today);
+  const thisWeek = mergeRecommendations(base.thisWeek, proposed.thisWeek).filter((item) => !today.some((todayItem) => sameRecommendation(todayItem, item)));
+  const evidenceKey = (item: { title: string; evidenceIds: string[] }) => `${item.title.toLocaleLowerCase()}|${[...item.evidenceIds].sort().join(",")}`;
+  return {
+    summary: proposed.summary,
+    today,
+    thisWeek,
+    decisionsNeeded: mergeByKey(base.decisionsNeeded, proposed.decisionsNeeded, evidenceKey),
+    waitingOn: mergeByKey(base.waitingOn, proposed.waitingOn, evidenceKey),
+    risksAndOpportunities: mergeByKey(base.risksAndOpportunities, proposed.risksAndOpportunities, evidenceKey)
+  };
+}
+
+export function prioritizeManagerBrief(
+  brief: ManagerBrief,
+  facts: ManagerFacts,
+  now = new Date()
+): { brief: ManagerBrief; trace: ManagerPriorityTrace } {
+  const todayRanks = rankManagerRecommendations(brief.today, facts, now);
+  const weekRanks = rankManagerRecommendations(brief.thisWeek, facts, now);
+  const today = todayRanks.slice(0, 5).map((rank) => rank.item);
+  const thisWeek = weekRanks.slice(0, 10).map((rank) => rank.item);
+  const asTrace = (rank: ReturnType<typeof recommendationRank>): ManagerPriorityRank => ({ stableKey: rank.item.stableKey, title: rank.item.title, score: rank.score, factors: rank.factors });
+  return {
+    brief: {
+      ...brief,
+      summary: today[0]
+        ? `${facts.artist.name}'s first move is ${today[0].title.toLowerCase()}. ${today.length > 1 ? `${today.length - 1} other item${today.length === 2 ? "" : "s"} also need attention.` : "The rest of the board is currently stable."}`
+        : `${facts.artist.name} has no urgent recorded work.`,
+      today,
+      thisWeek
+    },
+    trace: {
+      policyVersion: "manager_priority_v1",
+      today: todayRanks.slice(0, 5).map(asTrace),
+      thisWeek: weekRanks.slice(0, 10).map(asTrace),
+      omittedToday: todayRanks.slice(5).map(asTrace),
+      omittedThisWeek: weekRanks.slice(10).map(asTrace)
+    }
+  };
+}
+
 function dueAt(daysFromNow: number, now: Date) {
   return new Date(now.getTime() + daysFromNow * DAY_MS).toISOString();
 }
@@ -282,14 +472,14 @@ export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Da
   return { score, status, summary, goals, gaps };
 }
 
-export function deterministicManagerBrief(facts: ManagerFacts, now = new Date()): ManagerBrief {
+export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = new Date()): ManagerBrief {
   const today: ManagerRecommendationDraft[] = [];
   const thisWeek: ManagerRecommendationDraft[] = [];
   const addToday = (item: ManagerRecommendationDraft) => {
-    if (today.length < 5 && !today.some((candidate) => candidate.stableKey === item.stableKey)) today.push(item);
+    if (!today.some((candidate) => candidate.stableKey === item.stableKey)) today.push(item);
   };
   const addWeek = (item: ManagerRecommendationDraft) => {
-    if (thisWeek.length < 10 && !thisWeek.some((candidate) => candidate.stableKey === item.stableKey)) thisWeek.push(item);
+    if (!thisWeek.some((candidate) => candidate.stableKey === item.stableKey)) thisWeek.push(item);
   };
 
   if (!facts.profile?.intakeCompletedAt) {
@@ -575,6 +765,12 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
       ...(activeOpportunities.length ? [{ title: "Active live pipeline", detail: `${activeOpportunities.length} booking opportunit${activeOpportunities.length === 1 ? "y can" : "ies can"} be advanced deliberately.`, confidence: 1, evidenceIds: activeOpportunities.slice(0, 8).map((opportunity) => opportunity.id) }] : [])
     ]
   };
+}
+
+export function deterministicManagerBrief(facts: ManagerFacts, now = new Date()): ManagerBrief {
+  const candidates = deterministicManagerBriefCandidates(facts, now);
+  const unsuppressed = suppressRepeatedManagerAdvice(candidates, facts.recommendationHistory, now);
+  return prioritizeManagerBrief(unsuppressed, facts, now).brief;
 }
 
 function matchingRecommendation(brief: ManagerBrief, workstreams?: ManagerWorkstream[]) {

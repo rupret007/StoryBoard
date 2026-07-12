@@ -314,7 +314,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v9`)
+  (owner-only; currently accepts only the code-registered `manager_os_v10`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -364,10 +364,24 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v9` retains the current operator question and at most 12
+version `manager_os_v10` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
+Brief generation first collects all deterministic candidates rather than
+stopping at the response limit. After repeat suppression,
+`manager_priority_v1` ranks the full set using bounded record-derived factors
+for event timing/readiness, unavailable members, commitment state, reply age,
+approval state, overdue invoices, due reviews/follow-ups, and project health.
+Grounded model candidates are merged into that set, evidence-overlap duplicates
+retain the deterministic stable key, and the same ranking is applied before the
+five-item Today limit. `ManagerRun.trace.priorityRanking` records factor codes,
+plain-language labels, integer impacts, and omitted candidates; it contains no
+hidden reasoning. The Manager UI surfaces the first item's non-baseline factors.
+Cached briefs with an older prompt/policy version or a newer audited change to
+the relevant operating aggregate set regenerate on read. Manager-run and eval
+bookkeeping is not in that aggregate set, preventing a brief from invalidating
+itself immediately after persistence.
 Conversation may propose one `create_decision` draft only for an explicit
 two-option choice. Acceptance creates an open, linked, tenant-owned decision;
 the band must save real framing in a separate write before it can choose.

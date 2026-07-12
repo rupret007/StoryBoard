@@ -57,6 +57,13 @@ run input facts. Useful examples replay quality and evidence rules; negative
 examples retain expected behavior and resolution metadata for a later
 code-registered Manager version. The unique message link makes promotion
 idempotent, and audit history records promotion and resolution.
+`manager_priority_v1` is derived rather than stored as another authority. It
+collects every brief candidate, suppresses handled work, ranks candidates from
+authoritative record timing/state, and only then applies Today/This week limits.
+Model and deterministic candidates with the same stable key or overlapping
+workstream evidence are merged before ranking. `ManagerRun.trace` stores the
+bounded factor codes, impacts, and omitted candidate summaries that explain the
+result; the recommendation rows remain the executable review boundary.
 Conversation-created decisions have `needsFraming=true`, cannot be chosen until
 a member saves real options/tradeoffs, and complete the linked recommendation
 only after an outcome review. Task completion is attributed automatically.

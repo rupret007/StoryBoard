@@ -9,10 +9,12 @@ import type { Prisma } from "../generated/prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import {
-  deterministicManagerBrief,
+  deterministicManagerBriefCandidates,
   deterministicManagerChat,
   deterministicManagerPlanHealth,
+  mergeManagerBriefCandidates,
   managerRecommendationIsSuppressed,
+  prioritizeManagerBrief,
   suppressRepeatedManagerAdvice,
   type ManagerRecommendationDraft
 } from "./manager-intelligence";
@@ -31,6 +33,13 @@ import { managerScheduleKey, managerScheduleSlot } from "./manager-schedule";
 import { managerProviderContextPolicy, projectManagerMemoryForProvider } from "./manager-provider-context";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
+const MANAGER_FACT_AGGREGATES = [
+  "ArtistOperatingProfile", "BandMember", "ManagerGoal", "ManagerInitiative",
+  "Task", "BookingOpportunity", "BandEvent", "ArtistProject", "DealOffer",
+  "Invoice", "ManagerDecision", "ManagerMemoryFact", "ApprovalRequest",
+  "BookingReply", "BookingCampaign", "BookingCampaignRecipient",
+  "BookingProspect", "Settlement", "ManagerRecommendation"
+] as const;
 const taskActionSchema = z.object({ type: z.literal("create_task"), title: z.string().min(1).max(240), dueAt: z.string().datetime({ offset: true }).nullable(), initiativeId: z.string().nullable() }).strict();
 const decisionActionSchema = z.object({ type: z.literal("create_decision"), workstream: z.nativeEnum(ManagerWorkstream), title: z.string().min(1).max(200), context: z.string().max(3000).nullable(), options: z.array(z.object({ label: z.string().min(1).max(200), tradeoff: z.string().min(1).max(1000) }).strict()).min(2).max(6) }).strict().superRefine((input, context) => { const labels = input.options.map((option) => option.label.toLocaleLowerCase()); if (new Set(labels).size !== labels.length) context.addIssue({ code: "custom", path: ["options"], message: "Decision options must have unique labels" }); });
 const eventAdvanceActionSchema = z.object({ type: z.literal("generate_event_advance"), eventId: z.string().min(1) }).strict();
@@ -612,10 +621,6 @@ export class ManagerService {
     };
   }
 
-  private deterministicBrief(facts: Awaited<ReturnType<ManagerService["facts"]>>): Brief {
-    return deterministicManagerBrief(facts);
-  }
-
   private safeFacts(facts: Awaited<ReturnType<ManagerService["facts"]>>) {
     return {
       artist: facts.artist,
@@ -668,7 +673,8 @@ export class ManagerService {
     const started = Date.now();
     const facts = await this.facts(artistId);
     const safeFacts = this.safeFacts(facts);
-    let brief = this.deterministicBrief(facts);
+    const deterministicCandidates = deterministicManagerBriefCandidates(facts);
+    let brief = deterministicCandidates;
     let mode = "deterministic";
     let model: string | null = null;
     let inputTokens: number | null = null;
@@ -686,7 +692,7 @@ export class ManagerService {
           model,
           store: false,
           max_output_tokens: 2500,
-          instructions: `${this.chatInstructions(facts.profile?.decisionStyle ?? "guided")} Return no more than five items for today. A brief recommendation may propose create_task, generate_event_advance only for a cited event whose advance is missing, or generate_project_plan only for a cited project whose plan is missing. A brief may not propose create_decision.`,
+          instructions: `${this.chatInstructions(facts.profile?.decisionStyle ?? "guided")} Consider all recorded pressures before choosing today items; deadlines, show-day readiness, blocked commitments, fresh booking replies, approvals, and overdue money outrank general setup or planning. Return no more than five items for today. A brief recommendation may propose create_task, generate_event_advance only for a cited event whose advance is missing, or generate_project_plan only for a cited project whose plan is missing. A brief may not propose create_decision.`,
           input: context.input,
           text: { format: { type: "json_schema", name: "manager_brief", strict: true, schema: this.briefJsonSchema() } }
         });
@@ -694,7 +700,7 @@ export class ManagerService {
         outputTokens = context.outputTokens + (response.usage?.output_tokens ?? 0);
         const parsed = briefSchema.safeParse(JSON.parse(response.output_text));
         if (parsed.success && this.briefIsGrounded(parsed.data, facts, this.providerKnownIds(facts, settings.fullContextEnabled))) {
-          brief = parsed.data;
+          brief = mergeManagerBriefCandidates(deterministicCandidates, parsed.data);
           mode = "openai";
         } else {
           mode = "deterministic_fallback";
@@ -706,6 +712,8 @@ export class ManagerService {
     const candidateCount = brief.today.length + brief.thisWeek.length;
     brief = suppressRepeatedManagerAdvice(brief, facts.recommendationHistory);
     const suppressedCount = candidateCount - brief.today.length - brief.thisWeek.length;
+    const prioritized = prioritizeManagerBrief(brief, facts);
+    brief = prioritized.brief;
     const recommendations = [...brief.today, ...brief.thisWeek].filter((item, index, all) => all.findIndex((other) => other.stableKey === item.stableKey) === index);
     const createData = {
       artistId,
@@ -720,6 +728,7 @@ export class ManagerService {
         toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
         guardrails: ["known-evidence", "repeat-suppression", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", ...(options.scheduled ? ["explicit-schedule-opt-in", "local-period-idempotency"] : [])],
         providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
+        priorityRanking: prioritized.trace,
         suppressedCount
       },
       ...(options.scheduled ? { scheduleKey: options.scheduled.scheduleKey } : {}),
@@ -758,16 +767,26 @@ export class ManagerService {
   }
 
   latestBrief(artistId: string, cadence?: "daily" | "weekly") { return this.prisma.client.managerRun.findFirst({ where: { artistId, ...(cadence ? { cadence } : {}) }, include: { recommendations: true }, orderBy: { createdAt: "desc" } }); }
+  private latestManagerFactChange(artistId: string) {
+    return this.prisma.client.auditEvent.findFirst({
+      where: { artistId, aggregateType: { in: [...MANAGER_FACT_AGGREGATES] } },
+      select: { createdAt: true },
+      orderBy: { createdAt: "desc" }
+    });
+  }
   async currentBrief(artistId: string, cadence: "daily" | "weekly", actorLabel: string, actorOperatorId: string) {
-    const [latest, profile, latestTask] = await Promise.all([
+    const [latest, profile, latestTask, latestFactChange] = await Promise.all([
       this.latestBrief(artistId, cadence),
       this.profile(artistId),
-      this.prisma.client.task.findFirst({ where: { artistId }, select: { updatedAt: true }, orderBy: { updatedAt: "desc" } })
+      this.prisma.client.task.findFirst({ where: { artistId }, select: { updatedAt: true }, orderBy: { updatedAt: "desc" } }),
+      this.latestManagerFactChange(artistId)
     ]);
     const maxAge = cadence === "daily" ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
     const predatesCompletedIntake = Boolean(latest && profile?.intakeCompletedAt && latest.createdAt < profile.intakeCompletedAt);
     const predatesTaskChange = Boolean(latest && latestTask && latest.createdAt < latestTask.updatedAt);
-    if (latest && !predatesCompletedIntake && !predatesTaskChange && latest.createdAt.getTime() >= Date.now() - maxAge) return latest;
+    const predatesFactChange = Boolean(latest && latestFactChange && latest.createdAt < latestFactChange.createdAt);
+    const usesCurrentPolicy = latest?.promptVersion === PROMPT_VERSION;
+    if (latest && usesCurrentPolicy && !predatesCompletedIntake && !predatesTaskChange && !predatesFactChange && latest.createdAt.getTime() >= Date.now() - maxAge) return latest;
     return this.generateBrief(artistId, cadence, actorLabel, actorOperatorId);
   }
   async runScheduledBriefScan(now = new Date()) {
@@ -1142,7 +1161,7 @@ export class ManagerService {
     ];
     if (!evidenceGroups.flat().every((id) => known.has(id))) return false;
     const highCommitment = facts.commitmentHealth?.items.find((item) => item.severity === "high");
-    if (highCommitment && brief.today[0]?.evidenceIds.includes(highCommitment.taskId) !== true) return false;
+    if (highCommitment && !brief.today.some((item) => item.evidenceIds.includes(highCommitment.taskId))) return false;
     return [...brief.today, ...brief.thisWeek].every((item) => {
       const action = item.proposedAction;
       return !action || this.proposedActionIsGrounded(action, facts, false);
