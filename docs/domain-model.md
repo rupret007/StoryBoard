@@ -35,6 +35,19 @@ reads return at most 50. Every delivered assistant message may link its exact
 helpful/correction verdict per response and operator. Free-text corrections are
 retained for human review but are not sent back through model instructions;
 only bounded reason aggregates affect code-owned response presentation.
+`manager_natural_feedback_v1` is a non-persistent resolver over those same
+records: an explicit verdict may target only the immediately preceding
+assistant message. Its explanation stays in `ManagerMessageFeedback.note` and
+never becomes `ManagerMemoryFact`, an operational outcome, or provider input.
+The deterministic acknowledgement has a `ManagerRun` for traceability but is
+excluded from response-review selection.
+`manager_context_capture_v1` is another non-persistent resolver. It can stage a
+typed `update_profile_context` recommendation only when the directly preceding
+assistant message contains one exact current context-health question. The
+recommendation carries the profile ID/version and a human-readable preview;
+acceptance re-parses the originating answer and compare-and-sets
+`ArtistOperatingProfile`. Profile-owned compatibility memory is synchronized
+in the same transaction. No separate conversation-memory row is created.
 Conversation list reads are a non-persistent summary projection: newest first,
 at most 20, with the latest message and `_count.messages` mapped to
 `messageCount`. Conversation detail remains the message source of truth, reads

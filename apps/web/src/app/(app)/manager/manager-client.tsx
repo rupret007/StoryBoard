@@ -64,8 +64,8 @@ export function ManagerClient({ initialProfile, initialMembers, initialMemberChe
     setQuestion("");
     setBusy(true); setError("");
     try {
-      const result = await apiFetch<{ conversationId: string; message: ManagerMessage }>("/manager/chat", { method: "POST", json: { message: asked, ...(conversationId ? { conversationId } : {}) } });
-      setMessages((current) => [...current, result.message]);
+      const result = await apiFetch<{ conversationId: string; message: ManagerMessage; feedbackApplied?: { messageId: string; feedback: ManagerMessageFeedback } | null }>("/manager/chat", { method: "POST", json: { message: asked, ...(conversationId ? { conversationId } : {}) } });
+      setMessages((current) => [...current.map((message) => result.feedbackApplied?.messageId === message.id ? { ...message, feedback: result.feedbackApplied.feedback } : message), result.message]);
       setConversationId(result.conversationId);
       setConversations((current) => {
         const existing = current.find((item) => item.id === result.conversationId);
@@ -78,6 +78,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialMemberChe
         };
         return [summary, ...current.filter((item) => item.id !== result.conversationId)].slice(0, 10);
       });
+      if (result.feedbackApplied) router.refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function acceptChatRecommendation(recommendationId: string) {
@@ -92,7 +93,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialMemberChe
     setBusy(true); setError(""); setNotice("");
     try {
       await apiFetch<ManagerRecommendation>(`/manager/recommendations/${recommendation.id}/accept`, { method: "POST" });
-      setNotice(recommendation.proposedAction?.type === "generate_event_advance" ? "Show advance created." : recommendation.proposedAction?.type === "generate_project_plan" ? "Milestone plan created." : recommendation.proposedAction?.type === "remember_fact" ? "Band memory saved." : recommendation.proposedAction?.type === "create_task" ? "Task added." : recommendation.proposedAction?.type === "create_decision" ? "Decision draft added." : "Recommendation accepted.");
+      setNotice(recommendation.proposedAction?.type === "generate_event_advance" ? "Show advance created." : recommendation.proposedAction?.type === "generate_project_plan" ? "Milestone plan created." : recommendation.proposedAction?.type === "remember_fact" ? "Band memory saved." : recommendation.proposedAction?.type === "update_profile_context" ? "Band context saved." : recommendation.proposedAction?.type === "create_task" ? "Task added." : recommendation.proposedAction?.type === "create_decision" ? "Decision draft added." : "Recommendation accepted.");
       router.refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
@@ -182,7 +183,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialMemberChe
   }
   async function runEvaluation() {
     setBusy(true); setError("");
-    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v22" } })); }
+    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v24" } })); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function submitMessageFeedback(messageId: string, payload: { helpful: boolean; reason?: string | null; note?: string | null }) {
@@ -586,6 +587,7 @@ function friendlyReason(reason: string) {
 
 function managerActionLabel(actionType?: string | null) {
   if (actionType === "remember_fact") return "Suggested band memory";
+  if (actionType === "update_profile_context") return "Suggested band context";
   if (actionType === "create_decision") return "Suggested open decision";
   if (actionType === "generate_event_advance") return "Suggested show setup";
   if (actionType === "generate_project_plan") return "Suggested project setup";
@@ -595,6 +597,7 @@ function managerActionLabel(actionType?: string | null) {
 
 function managerActionButton(actionType?: string | null) {
   if (actionType === "remember_fact") return "Remember this";
+  if (actionType === "update_profile_context") return "Save context";
   if (actionType === "create_decision") return "Add decision draft";
   if (actionType === "generate_event_advance") return "Build advance";
   if (actionType === "generate_project_plan") return "Build milestone plan";

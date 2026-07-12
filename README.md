@@ -124,7 +124,13 @@ Every delivered conversational answer is linked to its exact Manager run and
 can be rated helpful or corrected with a bounded reason. Recent explicit
 feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
-authority. The Learning panel also offers a read-only queue of recent unrated
+authority. A standalone reply such as “that answer was helpful,” “that missed
+my question,” or “that was too vague because…” now applies the same audited
+feedback to the immediately preceding answer and updates it inline. This
+`manager_natural_feedback_v1` route is deliberately narrower than sentiment:
+questions, mixed verdicts, action/approval language, and claims that work was
+completed stay ordinary conversation. Explanations remain review notes and
+never become band memory or provider context. The Learning panel also offers a read-only queue of recent unrated
 answers, one per conversation, so real feedback does not depend on keeping the
 original thread open. Merely viewing the queue records nothing; only an
 explicit rating becomes evidence. Owners receive a second read-only queue for
@@ -134,7 +140,7 @@ Feedback, promotion, resolution, and version activation remain separate; no
 rating or queue read activates a new version. A
 deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v22`
+already performed an outside action. Prompt/policy version `manager_os_v24`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -145,6 +151,14 @@ post-generation calibration, so an empty area means “not recorded,” never pr
 that nothing exists outside StoryBoard. The Manager workspace shows the same
 bounded confidence and at most three targeted questions; it measures record
 coverage, not artistic quality or business success.
+When the band asks what context is missing, Manager now asks one highest-value
+question at a time. A direct answer to a supported profile question becomes an
+exact `manager_context_capture_v1` proposal with a visible preview; nothing is
+saved until a member accepts it. Acceptance rechecks the original answer,
+artist, profile version, current gap, and typed field/value before updating the
+authoritative profile and its compatibility memory atomically. Lineup, goals,
+active commitments, sensitive details, and ambiguous replies stay in their
+structured workflows rather than being guessed from chat.
 `manager_work_sequence_v1` projection makes task order explicit. Members can
 record one Task as another Task's prerequisite; the API rejects cross-artist
 links, self-links, cycles, impossible date order, and completion that skips

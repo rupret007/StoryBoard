@@ -333,7 +333,18 @@ Manager routes:
   `POST /manager/decisions/:id/review` records one immutable outcome lesson
 - `GET /manager/brief?cadence=daily|weekly` and
   `POST /manager/brief/generate`
-- `POST /manager/chat`
+- `POST /manager/chat`; standalone, unambiguous feedback about the directly
+  preceding answer is classified by `manager_natural_feedback_v1`, stored
+  through the same audited per-operator feedback record, and acknowledged
+  without a provider call. Mixed/action/completion language is not a verdict.
+  The response includes `feedbackApplied` only when an exact answer was rated,
+  so clients can update that message immediately.
+  The same route uses `manager_context_capture_v1` after a code-owned context
+  answer asks one exact question. Supported profile answers produce a previewed
+  `update_profile_context` recommendation; the reply itself does not write.
+  Accepting revalidates the original user answer and optimistic profile version
+  before an audited atomic update. Sensitive, ambiguous, lineup, goal, and
+  commitment answers are never coerced into profile fields.
 - `POST /manager/messages/:id/feedback` with `{ "helpful": true }` or
   `{ "helpful": false, "reason": "too_vague", "note": "..." }`
 - `GET /manager/conversations?limit=1..20` — newest-first summaries with the
@@ -350,6 +361,7 @@ Manager routes:
   of the current operator's unrated answers from the last 90 days. `limit`
   accepts 1–5. Candidates are tenant-scoped, require a persisted Manager run
   and exact preceding question, and return at most one answer per conversation.
+  Deterministic feedback acknowledgements are excluded so review cannot recurse.
   Reading never records a verdict; submit the existing
   `POST /manager/messages/:id/feedback` action explicitly.
 - `GET /manager/response-eval-review?limit=3` — owner-only, read-only queue of
@@ -379,7 +391,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v22`)
+  (owner-only; currently accepts only the code-registered `manager_os_v24`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -454,7 +466,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v22` retains the current operator question and at most 12
+version `manager_os_v24` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.

@@ -59,7 +59,7 @@ export function deterministicManagerContextHealth(input: {
   if (profile?.twelveMonthAmbition) identity += 6;
   else addGap({ code: "ambition", section: "identity", importance: "high", question: "What would make the next twelve months feel meaningfully successful?", reason: "Priorities cannot be weighed without a direction the band actually chose.", evidenceIds: profileEvidence });
   if (profile?.constraints?.length) identity += 4;
-  else addGap({ code: "constraints", section: "identity", importance: "med", question: "What limits should the Manager respect—work, family, travel, health, money, or something else?", reason: "A plan that ignores real constraints is not a usable plan.", evidenceIds: profileEvidence });
+  else addGap({ code: "constraints", section: "identity", importance: "med", question: "What planning limits should the Manager respect—work schedules, caregiving, travel, money, or another boundary? Share only the operational impact, not private details.", reason: "A plan that ignores real constraints is not a usable plan.", evidenceIds: profileEvidence });
 
   let people = 0;
   if (members.length) people += 8;

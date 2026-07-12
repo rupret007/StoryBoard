@@ -94,6 +94,17 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   User corrections update sourced memory. Delivered answers link to the exact
   run, and explicit response feedback changes only a small code-owned mapping
   of presentation rules; correction notes are never treated as instructions.
+  `manager_natural_feedback_v1` may bind a narrow, standalone verdict only to
+  the directly preceding answer in the same tenant conversation. It reuses the
+  audited feedback upsert, bypasses the provider, excludes its acknowledgement
+  from review queues, and cannot approve actions, complete outcomes, or create
+  memory from the review note.
+  `manager_context_capture_v1` separately binds one direct answer to one exact
+  current context-health question. It stages a typed profile proposal; only a
+  later accepted recommendation may perform an optimistic tenant-scoped write.
+  The acceptance path re-parses the originating answer, rechecks the current
+  gap/profile version, synchronizes profile-owned memory transactionally, and
+  audits no raw value. Provider output cannot emit this action.
   A deterministic response-quality gate rejects canned/meta prose, excessive
   presentation, and unverified claims of completed outside actions before a
   model answer can replace the safe fallback. Feedback may shape reviewed evals,

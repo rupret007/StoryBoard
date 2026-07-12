@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, contextCapture, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, naturalFeedback, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -19,12 +19,14 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-response-quality.js"),
   loadApi("manager/manager-outcome-review.js"),
   loadApi("manager/manager-context-health.js"),
+  loadApi("manager/manager-context-capture.js"),
   loadApi("manager/manager-knowledge-health.js"),
   loadApi("manager/manager-evidence-health.js"),
   loadApi("manager/manager-work-sequence.js"),
   loadApi("manager/manager-goal-path.js"),
   loadApi("manager/manager-goal-target.js"),
   loadApi("manager/manager-conversation-continuity.js"),
+  loadApi("manager/manager-natural-feedback.js"),
   loadApi("manager/manager-subject-reference.js"),
   loadApi("manager/manager-recommendation-review.js"),
   loadApi("manager/manager-response-review.js"),
@@ -203,6 +205,106 @@ test("manager conversation continuity clarifies missing or multiple references i
   assert.equal(multiple.status, "needs_clarification");
   assert.equal(multiple.reasonCode, "multiple_prior_recommendations");
   assert.match(multiple.clarification, /“First”.*“Second”/);
+});
+
+test("natural Manager feedback recognizes explicit answer verdicts and preserves only bounded review notes", () => {
+  const helpful = naturalFeedback.parseManagerNaturalFeedback("Manager, that answer was helpful.");
+  assert.deepEqual(helpful, {
+    policyVersion: "manager_natural_feedback_v1",
+    signal: "helpful",
+    input: { helpful: true, reason: null, note: null }
+  });
+  const incorrect = naturalFeedback.parseManagerNaturalFeedback("That was wrong because the date in the answer was stale.");
+  assert.equal(incorrect.signal, "incorrect");
+  assert.deepEqual(incorrect.input, { helpful: false, reason: "incorrect", note: "the date in the answer was stale." });
+  const domainCorrection = naturalFeedback.parseManagerNaturalFeedback("That was wrong because you said we should book Friday, but the hold is Saturday.");
+  assert.equal(domainCorrection.input.reason, "incorrect");
+  assert.equal(domainCorrection.input.note, "you said we should book Friday, but the hold is Saturday.");
+  for (const [message, reason] of [
+    ["That didn't answer my question", "missed_question"],
+    ["That was too vague", "too_vague"],
+    ["Your answer was too wordy", "too_long"],
+    ["The tone felt off", "wrong_tone"],
+    ["You missed key context", "missing_context"],
+    ["That was not helpful", "other"]
+  ]) assert.equal(naturalFeedback.parseManagerNaturalFeedback(message)?.input.reason, reason);
+});
+
+test("natural Manager feedback rejects sentiment, completion, mixed intent, questions, and action approval", () => {
+  for (const message of [
+    "Thanks",
+    "Great",
+    "That worked",
+    "That's done",
+    "That was helpful but too long",
+    "Was that answer right?",
+    "Good answer, send the email",
+    "That was wrong; create a new task",
+    `That was wrong because ${"x".repeat(1001)}`
+  ]) assert.equal(naturalFeedback.parseManagerNaturalFeedback(message), null, message);
+});
+
+test("natural Manager feedback binds only to the directly preceding answer and returns a bounded acknowledgement", () => {
+  const ready = naturalFeedback.resolveManagerNaturalFeedback("That was too vague because I need the exact date", [
+    { id: "user-a", role: "user" },
+    { id: "answer-a", role: "assistant" }
+  ]);
+  assert.equal(ready.status, "ready");
+  assert.equal(ready.targetMessageId, "answer-a");
+  assert.match(naturalFeedback.managerNaturalFeedbackAcknowledgement(ready), /needing work because it was too vague/i);
+  assert.match(naturalFeedback.managerNaturalFeedbackAcknowledgement(ready), /did not save it as a band fact/i);
+
+  const noTarget = naturalFeedback.resolveManagerNaturalFeedback("That answer was helpful", [{ id: "user-a", role: "user" }]);
+  assert.equal(noTarget.status, "no_target");
+  assert.match(naturalFeedback.managerNaturalFeedbackAcknowledgement(noTarget), /no immediately preceding Manager answer/i);
+  assert.equal(naturalFeedback.resolveManagerNaturalFeedback("What should we do next?", [{ id: "answer-a", role: "assistant" }]).status, "not_feedback");
+});
+
+test("Manager context capture stages one exact profile answer for review instead of saving chat", () => {
+  const gap = { code: "availability_expectations", section: "people", importance: "high", question: "How far ahead should members respond to shows, rehearsals, and travel?", reason: "A shared response expectation prevents drift.", evidenceIds: ["profile-a"] };
+  const health = { score: 75, status: "usable", summary: "Usable context", dimensions: [], gaps: [gap], nextQuestion: gap.question, evidenceIds: ["profile-a"] };
+  const profile = { id: "profile-a", updatedAt: new Date("2026-07-12T10:00:00.000Z"), currency: "USD", availabilityExpectations: null };
+  const resolved = contextCapture.resolveManagerContextCapture(
+    "Members should respond within 48 hours.",
+    [{ id: "answer-a", role: "assistant", content: `The next useful question is: ${gap.question}` }],
+    health,
+    profile
+  );
+  assert.equal(resolved.policyVersion, "manager_context_capture_v1");
+  assert.equal(resolved.status, "ready");
+  assert.equal(resolved.action.field, "availabilityExpectations");
+  assert.equal(resolved.action.value, "Members should respond within 48 hours.");
+  assert.equal(resolved.action.profileUpdatedAt, "2026-07-12T10:00:00.000Z");
+  assert.match(resolved.preview, /availability expectations: Members should respond within 48 hours/i);
+  assert.equal(contextCapture.managerContextActionStillNeeded(profile, resolved.action), true);
+  assert.equal(contextCapture.managerContextActionStillNeeded({ ...profile, availabilityExpectations: "Already saved" }, resolved.action), false);
+  assert.equal(contextCapture.managerContextActionMatchesAnswer(resolved.action, "Members should respond within 48 hours.", gap, profile), true);
+  assert.equal(contextCapture.managerContextActionMatchesAnswer(resolved.action, "Members should respond next week.", gap, profile), false);
+  const recommendation = contextCapture.managerContextCaptureRecommendation(resolved);
+  assert.equal(recommendation.proposedAction.type, "update_profile_context");
+  assert.deepEqual(recommendation.evidenceIds, ["profile-a"]);
+});
+
+test("Manager context capture parses canonical lists, markets, and exact budget ceilings", () => {
+  const profile = { id: "profile-a", updatedAt: now, currency: "USD" };
+  const action = (code, question, answer) => contextCapture.parseManagerContextAnswer({ code, section: "business", importance: "med", question, reason: "Needed", evidenceIds: ["profile-a"] }, answer, profile);
+  assert.deepEqual(action("home_market", "Home?", "Chicago, IL, US")?.value, { homeCity: "Chicago", homeRegion: "IL", homeCountry: "US" });
+  assert.deepEqual(action("genres", "Genres?", "rock, soul; americana")?.value, ["rock", "soul", "americana"]);
+  assert.deepEqual(action("revenue_sources", "Revenue?", "Private events, ticketed shows")?.value, ["Private events", "ticketed shows"]);
+  assert.deepEqual(action("budget_tolerance", "Budget?", "$1,250.50 USD")?.value, { amountMinor: 125050, currency: "USD" });
+  assert.equal(action("budget_tolerance", "Budget?", "about $1,250"), null);
+});
+
+test("Manager context capture refuses ambiguity, sensitive details, and structured-record guesses", () => {
+  const supported = { code: "constraints", section: "identity", importance: "med", question: "What planning limits should the Manager respect?", reason: "Needed", evidenceIds: ["profile-a"] };
+  const unsupported = { code: "current_commitments", section: "execution", importance: "med", question: "What work is active?", reason: "Needed", evidenceIds: [] };
+  const profile = { id: "profile-a", updatedAt: now, currency: "USD", constraints: [] };
+  const health = { score: 50, status: "thin", summary: "Thin", dimensions: [], gaps: [supported, unsupported], nextQuestion: supported.question, evidenceIds: ["profile-a"] };
+  assert.equal(contextCapture.resolveManagerContextCapture("Weeknight work", [{ id: "answer-a", role: "assistant", content: `${supported.question} ${unsupported.question}` }], health, profile).status, "needs_clarification");
+  assert.equal(contextCapture.resolveManagerContextCapture("A diagnosed health condition", [{ id: "answer-a", role: "assistant", content: supported.question }], health, profile).status, "blocked_sensitive");
+  assert.equal(contextCapture.resolveManagerContextCapture("What do you mean?", [{ id: "answer-a", role: "assistant", content: supported.question }], health, profile).status, "needs_clarification");
+  assert.equal(contextCapture.resolveManagerContextCapture("The EP is active", [{ id: "answer-a", role: "assistant", content: unsupported.question }], health, profile).status, "structured_required");
+  assert.equal(contextCapture.resolveManagerContextCapture("Weeknight work", [{ id: "user-a", role: "user", content: supported.question }], health, profile).status, "not_answer");
 });
 
 test("manager follow-ups explain and recheck prior advice without duplicating or silently accepting it", () => {
@@ -446,6 +548,7 @@ test("manager action authorization is code-owned and defaults to forbidden", () 
   assert.equal(policy.classifyManagerAction("generate_project_plan"), "internal");
   assert.equal(policy.classifyManagerAction("remember_fact"), "internal");
   assert.equal(policy.classifyManagerAction("assign_task"), "internal");
+  assert.equal(policy.classifyManagerAction("update_profile_context"), "internal");
   assert.equal(policy.classifyManagerAction("create_draft_record"), "forbidden");
   assert.equal(policy.classifyManagerAction("send_email"), "approval_required");
   assert.equal(policy.classifyManagerAction("financial_action"), "owner_approval_required");
@@ -537,6 +640,55 @@ test("accepted conversational memory is exact, normal-sensitivity, idempotent, l
   await assert.rejects(() => service.recommendation("artist-a", "rec-memory", "accepted", {}, "member@test", "operator-a"), /already been decided/);
   await assert.rejects(() => service.recommendation("artist-b", "rec-memory", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
   assert.equal(upserts, 1);
+});
+
+test("accepted conversational context updates the exact current profile once and audits no raw value", async () => {
+  const updatedAt = new Date("2026-07-12T10:00:00.000Z");
+  const gap = { code: "availability_expectations", section: "people", importance: "high", question: "How far ahead should members respond to shows, rehearsals, and travel?", reason: "A shared response expectation prevents drift.", evidenceIds: ["profile-a"] };
+  const action = {
+    type: "update_profile_context",
+    profileId: "profile-a",
+    profileUpdatedAt: updatedAt.toISOString(),
+    gapCode: gap.code,
+    field: "availabilityExpectations",
+    value: "Members should respond within 48 hours."
+  };
+  let outcome = "suggested"; let profileUpdates = 0; let memorySyncs = 0; const audits = [];
+  let profile = { id: "profile-a", artistId: "artist-a", updatedAt, bandMode: "hybrid", homeCity: "Chicago", homeRegion: "IL", homeCountry: "US", twelveMonthAmbition: "Release an EP", constraints: ["Weeknight work"], availabilityExpectations: null, currency: "USD" };
+  const client = {
+    managerRecommendation: {
+      findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-context", stableKey: "context-save-availability", outcome, taskId: null, decisionId: null, memoryFactId: null, task: null, decision: null, memoryFact: null, proposedAction: action, evidence: ["profile-a"], managerRun: { message: { conversationId: "conversation-a", createdAt: new Date("2026-07-12T10:02:00.000Z") } } } : null,
+      updateMany: async ({ data }) => { if (outcome !== "suggested") return { count: 0 }; outcome = data.outcome; return { count: 1 }; },
+      update: async () => ({ id: "rec-context", outcome, taskId: null, decisionId: null, memoryFactId: null })
+    },
+    artistOperatingProfile: {
+      findFirst: async ({ where }) => where.id === profile.id && where.artistId === profile.artistId ? profile : null,
+      updateMany: async ({ where, data }) => { assert.equal(where.id, "profile-a"); assert.equal(where.updatedAt, updatedAt); profileUpdates += 1; profile = { ...profile, ...data, updatedAt: new Date("2026-07-12T10:03:00.000Z") }; return { count: 1 }; },
+      findUniqueOrThrow: async () => profile
+    },
+    managerMessage: { findFirst: async () => ({ content: "Members should respond within 48 hours." }) },
+    managerMemoryFact: { upsert: async () => { memorySyncs += 1; return {}; } }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+  service.contextHealth = async () => ({ score: 75, status: "usable", summary: "Usable", dimensions: [], gaps: [gap], nextQuestion: gap.question, evidenceIds: ["profile-a"] });
+  profile = { ...profile, updatedAt: new Date("2026-07-12T10:01:00.000Z") };
+  await assert.rejects(() => service.recommendation("artist-a", "rec-context", "accepted", {}, "member@test", "operator-a"), /Band context changed/);
+  assert.equal(profileUpdates, 0);
+  assert.equal(outcome, "suggested");
+  profile = { ...profile, updatedAt };
+  const accepted = await service.recommendation("artist-a", "rec-context", "accepted", {}, "member@test", "operator-a");
+  assert.equal(accepted.outcome, "completed");
+  assert.equal(profile.availabilityExpectations, "Members should respond within 48 hours.");
+  assert.equal(profileUpdates, 1);
+  assert.equal(memorySyncs, 4);
+  const profileAudit = audits.find((entry) => entry.action === "manager.profile_context_updated");
+  assert.equal(profileAudit.aggregateId, "profile-a");
+  assert.deepEqual(profileAudit.metadata, { recommendationId: "rec-context", gapCode: "availability_expectations", field: "availabilityExpectations" });
+  assert.equal(JSON.stringify(audits).includes("Members should respond"), false);
+  await assert.rejects(() => service.recommendation("artist-a", "rec-context", "accepted", {}, "member@test", "operator-a"), /already been decided/);
+  await assert.rejects(() => service.recommendation("artist-b", "rec-context", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+  assert.equal(profileUpdates, 1);
 });
 
 test("manager recommendations execute existing event and project generators atomically and once", async () => {
@@ -698,7 +850,7 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v22", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v24", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "available", effectiveUntil: "2026-07-20T12:00:00.000Z" }).success, true);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "busy" }).success, false);
@@ -783,7 +935,7 @@ test("manager recommendation outcome review keeps finished results bounded witho
     outcomeNote: null,
     outcomeAt,
     createdAt: outcomeAt,
-    promptVersion: "manager_os_v22",
+    promptVersion: "manager_os_v24",
     cadence: "daily",
     task: { id: "task-a", title: "Finish the work", status: "done" },
     decision: null,
@@ -827,7 +979,7 @@ test("manager recommendation outcome review reads only finished, unpromoted advi
           outcomeNote: null,
           outcomeAt: new Date("2026-07-12T11:00:00.000Z"),
           createdAt: new Date("2026-07-10T11:00:00.000Z"),
-          managerRun: { promptVersion: "manager_os_v22", cadence: "daily" },
+          managerRun: { promptVersion: "manager_os_v24", cadence: "daily" },
           task: { id: "task-a", title: "Finish the real task", status: "done" },
           decision: null
         }];
@@ -857,7 +1009,7 @@ test("manager response review selects recent unrated answers across conversation
     answer: `Answer ${messageId}`,
     citations: [],
     actionTypes: [],
-    promptVersion: "manager_os_v22",
+    promptVersion: "manager_os_v24",
     mode: "deterministic",
     createdAt,
     ...overrides
@@ -898,7 +1050,7 @@ test("manager response review reads only the active artist and current operator'
           proposedActions: [],
           createdAt: new Date("2026-07-12T11:00:00.000Z"),
           conversation: { title: "What needs attention?" },
-          managerRun: { promptVersion: "manager_os_v22", mode: "deterministic" },
+          managerRun: { promptVersion: "manager_os_v24", mode: "deterministic" },
           feedback: where.feedback.some ? [{ helpful: true, reason: null, note: null, updatedAt: new Date("2026-07-12T11:05:00.000Z") }] : [],
           responseEval: null
         }];
@@ -911,6 +1063,7 @@ test("manager response review reads only the active artist and current operator'
   assert.equal(queue.items[0].messageId, "message-a");
   assert.equal(queue.items[0].question, "What needs attention?");
   assert.equal(calls[0].feedback.none.operatorId, "operator-a");
+  assert.equal(calls[0].managerRun.is.mode.not, "deterministic_feedback");
   const evalQueue = await service.responseEvalReview("artist-a", "operator-a", 3, now);
   assert.equal(evalQueue.items[0].messageId, "message-a");
   assert.equal(evalQueue.items[0].feedback.helpful, true);
@@ -1203,22 +1356,22 @@ test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v22", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v24", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v22", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v22", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v24", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v24", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v22", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v22", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v24", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v24", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v22", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v22", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v22", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v24", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v24", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v24", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 

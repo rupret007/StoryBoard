@@ -46,6 +46,8 @@ The NestJS orchestration backend. Current responsibilities:
   proposals, structured `manager_conversation_continuity_v1` follow-ups,
   tenant-bounded `manager_subject_reference_v1` named-record resolution,
   bounded tenant-scoped conversation summaries and recoverable thread history,
+  explicit `manager_natural_feedback_v1` immediate-answer verdicts,
+  reviewed `manager_context_capture_v1` profile-answer proposals,
   owner-only `manager_recommendation_eval_review_v1` finished-advice triage,
   per-operator `manager_response_review_v1` answer-review queues,
   owner-only `manager_response_eval_review_v1` release-example triage,

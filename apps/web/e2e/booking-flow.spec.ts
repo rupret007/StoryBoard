@@ -121,7 +121,6 @@ test("novice manager intake produces grounded work and band operations records",
   await Promise.all([morganSaved, morganContextRefreshed]);
   await expect(context.getByLabel("Responsibilities for Morgan")).toHaveValue("production, finances");
   await expect(context.getByLabel("Instruments for Morgan")).toHaveValue("drums");
-  await context.getByLabel("Availability expectations").fill("Respond to holds within 48 hours and protect two weekends each month.");
   await context.getByLabel("Current revenue sources (one per line)").fill("Private events\nTicketed shows");
   await context.getByLabel("Usable assets (one per line)").fill("Finished EP masters\nLive performance video");
   await context.getByRole("spinbutton").fill("500");
@@ -130,7 +129,7 @@ test("novice manager intake produces grounded work and band operations records",
   const profileContextRefreshed = page.waitForResponse((response) => response.request().method() === "GET" && response.url().includes("/manager/context-health") && response.ok());
   await context.getByRole("button", { name: "Save operating profile" }).click();
   await Promise.all([profileSaved, profileContextRefreshed]);
-  await expect(context.getByText(/82\/100 · Strong/i)).toBeVisible();
+  await expect(context.getByText(/75\/100 · Usable/i)).toBeVisible();
   await page.getByRole("button", { name: "Fill missing steps" }).click();
   await expect(planCard.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
   const newConversation = page.getByRole("button", { name: "New", exact: true });
@@ -198,7 +197,18 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "A settlement is the post-show money check" })).toContainText(/In StoryBoard:/);
   await managerMessage.fill("What do you still need to know about our band?");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "Context coverage is 82/100" })).toContainText(/not the band's quality or potential/i);
+  const contextQuestionReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "Context coverage is 75/100" }).last();
+  await expect(contextQuestionReply).toContainText(/not the band's quality or potential/i);
+  await expect(contextQuestionReply).toContainText(/How far ahead should members respond to shows, rehearsals, and travel/i);
+  await managerMessage.fill("Members should respond within 48 hours and protect two weekends each month.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const contextProposal = page.getByText("Suggested band context", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await expect(contextProposal).toContainText(/availability expectations: Members should respond within 48 hours/i);
+  const contextSaved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/accept") && response.ok());
+  await contextProposal.getByRole("button", { name: "Save context" }).click();
+  await contextSaved;
+  await expect(contextProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expect(context.getByText(/82\/100 · Strong/i)).toBeVisible();
   await managerMessage.fill("Explain our next priority in plain language.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("Explain our next priority in plain language.", { exact: true })).toBeVisible();
@@ -206,7 +216,11 @@ test("novice manager intake produces grounded work and band operations records",
     .getByText("Explain our next priority in plain language.", { exact: true })
     .locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]/following-sibling::div[1]");
   await expect(plainLanguageReply).toBeVisible();
-  await plainLanguageReply.getByRole("button", { name: "Helpful", exact: true }).click();
+  await managerMessage.fill("That answer was helpful because it explained the next step.");
+  const naturalFeedbackSaved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/manager/chat") && response.ok());
+  await page.getByRole("button", { name: "Send message" }).click();
+  await naturalFeedbackSaved;
+  await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "I marked that answer as helpful" }).last()).toContainText(/does not mark any task or real-world result complete/i);
   await expect(plainLanguageReply.getByText("Saved", { exact: true })).toBeVisible();
   await plainLanguageReply.getByRole("button", { name: "Add answer to evals", exact: true }).click();
   await expect(plainLanguageReply.getByText("answer in eval set", { exact: true })).toBeVisible();
@@ -227,7 +241,7 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(responseEvalReview).toContainText("No rated answers are waiting for evaluation review.");
   const recommendationEvalReview = page.getByTestId("manager-recommendation-eval-review");
   await expect(recommendationEvalReview.getByText("Review a Manager outcome", { exact: true })).toBeVisible();
-  await expect(recommendationEvalReview).toContainText(/Assign .* to Alex/i);
+  await expect(recommendationEvalReview).toContainText(/Save availability expectations|Assign .* to Alex/i);
   const reviewedRecommendationTitle = await recommendationEvalReview.locator("p.font-semibold").textContent();
   const recommendationPromoted = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/promote-eval") && response.ok());
   await recommendationEvalReview.getByRole("button", { name: "Keep as useful" }).click();
@@ -297,7 +311,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v22", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v24", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 

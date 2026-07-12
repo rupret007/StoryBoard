@@ -16,6 +16,7 @@ import { managerQuestionAsksAboutGoalPath, type ManagerGoalPath } from "./manage
 import { deterministicManagerGoalTarget, type ManagerGoalTargetAssessment } from "./manager-goal-target";
 import { managerConversationRecommendationMatchesCurrent, type ManagerConversationContinuity } from "./manager-conversation-continuity";
 import type { ManagerSubjectReference } from "./manager-subject-reference";
+import type { ManagerProfileContextAction } from "./manager-context-capture";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -47,7 +48,7 @@ export type ManagerProposedAction = {
   bandMemberId: string;
   checkInId: string | null;
   availability: "available" | "limited" | "unknown";
-};
+} | ManagerProfileContextAction;
 
 export type ManagerRecommendationDraft = {
   stableKey: string;
@@ -1042,9 +1043,9 @@ function deterministicManagerChatBase(
 
   if (contextQuestion && facts.contextHealth) {
     const health = facts.contextHealth;
-    const questions = health.gaps.slice(0, 3).map((gap, index) => `${index + 1}. ${gap.question} ${gap.reason}`);
+    const question = health.gaps[0]?.question ?? null;
     return {
-      answer: `${health.summary} Context coverage is ${health.score}/100; that measures recorded facts, not the band's quality or potential.${questions.length ? `\n\nThe next useful answers are:\n${questions.join("\n")}` : "\n\nNothing essential is missing for the current plan. Keep show, project, and business results current as they change."}`,
+      answer: `${health.summary} Context coverage is ${health.score}/100; that measures recorded facts, not the band's quality or potential.${question ? `\n\nThe next useful question is: ${question}` : "\n\nNothing essential is missing for the current plan. Keep show, project, and business results current as they change."}`,
       citations: health.evidenceIds.slice(0, 10),
       recommendation: null
     };

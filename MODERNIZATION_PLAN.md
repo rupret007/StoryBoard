@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `2881dac`
+Baseline for this round: `main` at `fd16d07`
 
 ## Product and current architecture
 
@@ -1156,6 +1156,117 @@ Implementation and validation:
   unchanged 48/48 `manager_os_v22` / `manager_evals_v24` gate at 100% safety,
   typecheck, lint, production builds, container readiness, and
   `git diff --check`.
+
+### P0 — Explicit conversational response feedback (completed 2026-07-12)
+
+- [x] Recognize only a small code-owned set of unambiguous feedback replies
+  about the immediately preceding Manager answer, such as “that was helpful,”
+  “that missed my question,” or “that was too vague.” Generic sentiment,
+  action requests, questions, mixed praise/correction, and claims that work was
+  completed must remain ordinary conversation.
+- [x] Resolve feedback only inside the active artist conversation and only to
+  the directly preceding assistant message. If no exact target exists, explain
+  how to rate the intended answer instead of guessing across threads or older
+  messages.
+- [x] Reuse the existing per-operator, audited `ManagerMessageFeedback` upsert.
+  Preserve an optional explicit explanation as a review note, but never convert
+  that note into Manager memory, profile data, task state, recommendation
+  outcome, or provider context.
+- [x] Bypass model reasoning for the feedback route and return a short,
+  deterministic acknowledgement that distinguishes answer usefulness from
+  real-world completion. Return the applied verdict to the web client so the
+  exact prior answer updates immediately.
+- [x] Add parser, ambiguity, service/database, audit, tenant, browser, and
+  evaluation coverage. Promote the code-registered Manager routing contract
+  only after the full release gate passes.
+
+Root cause and design evidence:
+
+- StoryBoard already supports exact-answer feedback, owner triage, evaluation
+  promotion, and aggregate presentation guidance. In practice those controls
+  sit outside the conversational turn: a natural “that helped” currently runs
+  through ordinary Manager reasoning and does not update the answer the member
+  just reviewed. This makes the learning loop less discoverable and makes the
+  conversation feel disconnected from the rest of Manager.
+- Andrea_NanoBot's committed response-feedback work validates the clean-room
+  principle that natural verdicts must be narrower than sentiment, must bind to
+  one fresh conversational target, and must never double as approval for an
+  action. StoryBoard will copy no implementation, schema, runtime, or routing
+  code. It will reuse its own conversations, exact-message feedback, role,
+  audit, provider, and release-evaluation boundaries.
+
+Implementation and validation:
+
+- Added a pure `manager_natural_feedback_v1` parser/resolver with explicit phrase
+  families, bounded notes, direct-message targeting, and rejection of action,
+  question, mixed-verdict, outcome-completion, or ambiguous language. Review
+  explanations may mention real booking/email concepts without being mistaken
+  for imperatives, but an actual action request remains ordinary conversation.
+- Integrated the route before provider selection in `ManagerService.chat`, kept
+  a redacted trace of only the classification and target ID, and exposed the
+  saved verdict in the existing chat response without a migration. The web
+  client updates the exact prior message immediately, and deterministic
+  acknowledgements are excluded from answer-review queues to prevent recursive
+  review noise.
+- Extended unit, disposable-Postgres, and Chromium coverage through ordinary
+  answer → natural correction → immediate inline state → owner eval triage.
+  Promoted the reviewed routing contract to `manager_os_v23` /
+  `manager_evals_v25`; 50/50 golden checks pass at 100% safety. Validation also
+  passed 118 API + 2 shared tests, all 35 migrations and all 3 database
+  workflows, all 3 production-mode Chromium journeys, the complete
+  relationship diagnostic with zero mismatches, typecheck, lint, production
+  builds, and `git diff --check`. The first browser run caught a stale `v22`
+  UI request; the version wiring was corrected before the clean rerun.
+
+### P0 — Reviewed conversational band-context capture (completed 2026-07-12)
+
+- [x] Make the code-owned context-health answer ask one highest-value question
+  at a time instead of presenting several unrelated questions that cannot be
+  resolved safely from one reply.
+- [x] Recognize a reply only when the directly preceding Manager message
+  contains that exact current context question. Support canonical operating-
+  profile gaps with bounded parsing: career stage, home market, genres,
+  twelve-month ambition, constraints, availability expectations, revenue
+  sources, current assets, and a precise ninety-day budget ceiling.
+- [x] Turn a supported reply into a typed `update_profile_context` proposal
+  with an exact human-readable preview. Do not save on reply, invoke the model,
+  or infer lineup, responsibilities, goals, commitments, legal identity, health
+  details, credentials, or financial identifiers from prose.
+- [x] On explicit acceptance, revalidate the artist, profile ID, profile
+  version, missing gap, field/value pairing, and answer-derived proposal before
+  an optimistic serializable update. Synchronize canonical profile memory in
+  the same transaction and audit field/gap metadata without raw values.
+- [x] Refresh the Manager UI immediately after acceptance and cover parsing,
+  ambiguity, stale writes, tenant isolation, audit history, browser use, and
+  the versioned Manager release gate.
+
+Root cause and design evidence:
+
+- `manager_context_v1` already identifies the most valuable missing fact, but
+  conversational answers are not connected to the authoritative profile. A
+  novice who answers normally must then find Band context and type the same
+  information again. Conversely, silently treating arbitrary chat as memory
+  would violate StoryBoard's reviewed, provenance-aware source-of-truth model.
+- Andrea_NanoBot's committed guided-setup and reviewed-memory work supports the
+  clean-room product principle of asking one bounded question and staging its
+  answer for review. StoryBoard will copy no code, schema, runtime, or broad
+  memory behavior. It will use its existing context-health, recommendation,
+  profile-memory synchronization, role, audit, and evaluation boundaries.
+
+Implementation and validation:
+
+- Added `manager_context_capture_v1` as a pure resolver and parser. Unsupported
+  structured gaps redirect to the relevant workspace instead of
+  inventing a weak profile value.
+- Added a code-owned recommendation action unavailable to provider output. Its
+  preview and Accept control reuse the current Manager recommendation UI; the
+  acceptance transaction performs the only write.
+- Promoted the reviewed routing/action contract to `manager_os_v24` /
+  `manager_evals_v26`; 52/52 golden checks pass at 100% safety. Validation also
+  passed 122 API + 2 shared tests, all 35 migrations and all 3 disposable-
+  Postgres workflows, all 3 production-mode Chromium journeys, the complete
+  relationship diagnostic with zero mismatches, typecheck, lint, production
+  builds, and `git diff --check`. No schema migration was required.
 
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 

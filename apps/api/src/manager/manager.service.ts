@@ -45,6 +45,8 @@ import { MANAGER_CONVERSATION_CONTINUITY_POLICY_VERSION, resolveManagerConversat
 import { MANAGER_SUBJECT_REFERENCE_POLICY_VERSION, managerSubjectCandidates, resolveManagerSubjectReference } from "./manager-subject-reference";
 import { selectManagerResponseEvalReviewQueue, selectManagerResponseReviewQueue } from "./manager-response-review";
 import { selectManagerRecommendationEvalReviewQueue, summarizeManagerRecommendationReviews } from "./manager-recommendation-review";
+import { managerNaturalFeedbackAcknowledgement, MANAGER_NATURAL_FEEDBACK_POLICY_VERSION, resolveManagerNaturalFeedback } from "./manager-natural-feedback";
+import { managerContextActionIsValid, managerContextActionMatchesAnswer, managerContextActionStillNeeded, managerContextCaptureRecommendation, managerContextProfileUpdateData, MANAGER_CONTEXT_CAPTURE_POLICY_VERSION, resolveManagerContextCapture, type ManagerContextCaptureProfile, type ManagerProfileContextAction } from "./manager-context-capture";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const MANAGER_FACT_AGGREGATES = [
@@ -60,7 +62,19 @@ const eventAdvanceActionSchema = z.object({ type: z.literal("generate_event_adva
 const projectPlanActionSchema = z.object({ type: z.literal("generate_project_plan"), projectId: z.string().min(1) }).strict();
 const rememberFactActionSchema = z.object({ type: z.literal("remember_fact"), key: z.string().regex(/^operator_note_[a-z0-9_]{1,66}$/), label: z.string().min(1).max(120), value: z.string().min(3).max(1000) }).strict();
 const assignTaskActionSchema = z.object({ type: z.literal("assign_task"), taskId: z.string().min(1), bandMemberId: z.string().min(1), checkInId: z.string().min(1).nullable(), availability: z.enum(["available", "limited", "unknown"]) }).strict();
-const proposedActionSchema = z.union([taskActionSchema, decisionActionSchema, eventAdvanceActionSchema, projectPlanActionSchema, rememberFactActionSchema, assignTaskActionSchema]);
+const profileContextActionBase = { type: z.literal("update_profile_context"), profileId: z.string().min(1), profileUpdatedAt: z.string().datetime({ offset: true }), gapCode: z.string().min(1).max(80) } as const;
+const profileContextActionSchema = z.discriminatedUnion("field", [
+  z.object({ ...profileContextActionBase, field: z.literal("careerStage"), value: z.string().min(1).max(120) }).strict(),
+  z.object({ ...profileContextActionBase, field: z.literal("homeMarket"), value: z.object({ homeCity: z.string().min(1).max(120), homeRegion: z.string().min(1).max(120).optional(), homeCountry: z.string().min(1).max(120).optional() }).strict() }).strict(),
+  z.object({ ...profileContextActionBase, field: z.literal("genres"), value: z.array(z.string().min(1).max(80)).min(1).max(20) }).strict(),
+  z.object({ ...profileContextActionBase, field: z.literal("twelveMonthAmbition"), value: z.string().min(1).max(2000) }).strict(),
+  z.object({ ...profileContextActionBase, field: z.literal("constraints"), value: z.array(z.string().min(1).max(300)).min(1).max(30) }).strict(),
+  z.object({ ...profileContextActionBase, field: z.literal("availabilityExpectations"), value: z.string().min(1).max(1000) }).strict(),
+  z.object({ ...profileContextActionBase, field: z.literal("revenueSources"), value: z.array(z.string().min(1).max(100)).min(1).max(20) }).strict(),
+  z.object({ ...profileContextActionBase, field: z.literal("currentAssets"), value: z.array(z.string().min(1).max(200)).min(1).max(30) }).strict(),
+  z.object({ ...profileContextActionBase, field: z.literal("budgetTolerance"), value: z.object({ amountMinor: z.number().int().min(0).max(2_147_483_647), currency: z.string().length(3) }).strict() }).strict()
+]).refine(managerContextActionIsValid, { message: "Context gap does not match the profile field" });
+const proposedActionSchema = z.union([taskActionSchema, decisionActionSchema, eventAdvanceActionSchema, projectPlanActionSchema, rememberFactActionSchema, assignTaskActionSchema, profileContextActionSchema]);
 const itemSchema = z.object({ stableKey: z.string().regex(/^[a-z0-9_-]{1,80}$/), title: z.string().min(1).max(200), reason: z.string().min(1).max(800), nextAction: z.string().min(1).max(500), workstream: z.nativeEnum(ManagerWorkstream), priority: z.enum(["low","med","high"]), evidenceIds: z.array(z.string()).max(8), proposedAction: proposedActionSchema.nullable() }).strict();
 const briefSchema = z.object({ summary: z.string().min(1).max(1200), today: z.array(itemSchema).max(5), thisWeek: z.array(itemSchema).max(10), decisionsNeeded: z.array(z.object({ title: z.string(), explanation: z.string(), evidenceIds: z.array(z.string()).max(8) }).strict()).max(8), waitingOn: z.array(z.object({ title: z.string(), dueAt: z.string().nullable(), evidenceIds: z.array(z.string()).max(8) }).strict()).max(10), risksAndOpportunities: z.array(z.object({ title: z.string(), detail: z.string(), confidence: z.number().min(0).max(1), evidenceIds: z.array(z.string()).max(8) }).strict()).max(10) }).strict();
 const chatOutputSchema = z.object({
@@ -468,7 +482,7 @@ export class ManagerService {
         role: "assistant",
         createdAt: { gte: since, lte: now },
         conversation: { artistId },
-        managerRun: { isNot: null },
+        managerRun: { is: { mode: { not: "deterministic_feedback" } } },
         feedback: feedbackState === "unrated" ? { none: { operatorId } } : { some: { operatorId } },
         ...(feedbackState === "rated" ? { responseEval: { is: null } } : {})
       },
@@ -1179,7 +1193,7 @@ export class ManagerService {
     return { ok: failed === 0, scanned: rows.length, generated: results.length, failed, notDue, runs: results };
   }
   async recommendation(artistId: string, id: string, outcome: "accepted" | "dismissed" | "completed", feedback: ManagerRecommendationFeedbackInput, actorLabel: string, actorOperatorId: string) {
-    const rec = await this.prisma.client.managerRecommendation.findFirst({ where: { id, managerRun: { artistId } }, include: { task: true, decision: true, memoryFact: true } });
+    const rec = await this.prisma.client.managerRecommendation.findFirst({ where: { id, managerRun: { artistId } }, include: { task: true, decision: true, memoryFact: true, managerRun: { select: { message: { select: { conversationId: true, createdAt: true } } } } } });
     if (!rec) throw new NotFoundException("Manager recommendation not found");
     const allowed: ManagerRecommendationOutcome[] = outcome === "completed"
       ? [ManagerRecommendationOutcome.suggested, ManagerRecommendationOutcome.accepted]
@@ -1197,6 +1211,8 @@ export class ManagerService {
     let projectPlanAction: z.infer<typeof projectPlanActionSchema> | null = null;
     let rememberFactAction: z.infer<typeof rememberFactActionSchema> | null = null;
     let assignTaskAction: z.infer<typeof assignTaskActionSchema> | null = null;
+    let profileContextAction: ManagerProfileContextAction | null = null;
+    let profileContextTarget: ManagerContextCaptureProfile | null = null;
     let eventTarget: { id: string; startsAt: Date | null; opportunityId: string | null } | null = null;
     let projectTarget: { id: string; type: string; dueAt: Date | null } | null = null;
     let assignmentTarget: { task: { id: string; title: string; status: string; dueAt: Date | null; ownerLabel: string | null; bandMemberId: string | null }; member: { id: string; name: string }; checkInId: string | null; availability: "available" | "limited" | "unknown" } | null = null;
@@ -1235,8 +1251,22 @@ export class ManagerService {
         if (availability.status === "unavailable") throw new BadRequestException("This member is currently unavailable; refresh before assigning work");
         if (availability.status !== assignTaskAction.availability || availability.checkInId !== assignTaskAction.checkInId) throw new BadRequestException("This member's capacity check-in changed; refresh before assigning work");
         assignmentTarget = { task, member, checkInId: availability.checkInId, availability: availability.status };
-      } else {
+      } else if (parsed.data.type === "remember_fact") {
         rememberFactAction = parsed.data;
+      } else {
+        profileContextAction = parsed.data as ManagerProfileContextAction;
+        const [profile, health] = await Promise.all([
+          this.prisma.client.artistOperatingProfile.findFirst({ where: { id: profileContextAction.profileId, artistId } }),
+          this.contextHealth(artistId)
+        ]);
+        if (!profile) throw new NotFoundException("Record not found");
+        if (!managerContextActionStillNeeded(profile, profileContextAction)) throw new BadRequestException("Band context changed; refresh before saving this answer");
+        const gap = health.gaps.find((candidate) => candidate.code === profileContextAction!.gapCode);
+        const responseMessage = rec.managerRun.message;
+        if (!gap || !responseMessage) throw new BadRequestException("This context question is no longer current; refresh before saving the answer");
+        const answerMessage = await this.prisma.client.managerMessage.findFirst({ where: { conversationId: responseMessage.conversationId, role: "user", createdAt: { lte: responseMessage.createdAt } }, orderBy: { createdAt: "desc" }, select: { content: true } });
+        if (!answerMessage || !managerContextActionMatchesAnswer(profileContextAction, answerMessage.content, gap, profile)) throw new BadRequestException("The proposed context change no longer matches the reviewed answer");
+        profileContextTarget = profile;
       }
       if (taskAction?.dueAt) {
         dueAt = new Date(taskAction.dueAt);
@@ -1249,7 +1279,7 @@ export class ManagerService {
       if (!currentPath || currentPath.status !== "missing_task") throw new BadRequestException("This goal path changed; refresh before creating more work");
     }
 
-    const immediateAction = eventAdvanceAction ?? projectPlanAction ?? rememberFactAction ?? assignTaskAction;
+    const immediateAction = eventAdvanceAction ?? projectPlanAction ?? rememberFactAction ?? assignTaskAction ?? profileContextAction;
     const finalOutcome = immediateAction ? ManagerRecommendationOutcome.completed : outcome as ManagerRecommendationOutcome;
     const reason = immediateAction ? "action_executed" : feedback.reason ?? (outcome === "accepted" ? "accepted" : outcome === "completed" ? (rec.task ? "task_completed" : rec.decision ? "decision_reviewed" : "already_handled") : "not_relevant");
     let createdCount = 0;
@@ -1305,6 +1335,23 @@ export class ManagerService {
         });
         memoryFactId = memory.id;
       }
+      if (profileContextAction && profileContextTarget) {
+        const updated = await tx.artistOperatingProfile.updateMany({
+          where: { id: profileContextTarget.id, artistId, updatedAt: profileContextTarget.updatedAt },
+          data: managerContextProfileUpdateData(profileContextAction)
+        });
+        if (updated.count !== 1) throw new BadRequestException("Band context changed; refresh before saving this answer");
+        const profile = await tx.artistOperatingProfile.findUniqueOrThrow({ where: { id: profileContextTarget.id } });
+        const confirmedAt = new Date();
+        for (const [key, value] of Object.entries(managerProfileMemoryValues(profile))) {
+          const memoryValue = value === null ? Prisma.JsonNull : value as Prisma.InputJsonValue;
+          await tx.managerMemoryFact.upsert({
+            where: { artistId_key: { artistId, key } },
+            create: { artistId, key, value: memoryValue, sourceType: "operating_profile", sourceId: profile.id, confidence: 1, confirmedAt },
+            update: { value: memoryValue, sourceType: "operating_profile", sourceId: profile.id, confidence: 1, confirmedAt, archivedAt: null }
+          });
+        }
+      }
       if (assignTaskAction && assignmentTarget) {
         const latestCheckIn = await tx.bandMemberCheckIn.findFirst({ where: { artistId, bandMemberId: assignmentTarget.member.id }, orderBy: { createdAt: "desc" }, select: { id: true, status: true, note: true, effectiveUntil: true, createdAt: true } });
         const availability = currentManagerMemberCheckIn({ ...assignmentTarget.member, checkIn: latestCheckIn });
@@ -1318,14 +1365,15 @@ export class ManagerService {
       }
       return tx.managerRecommendation.update({ where: { id }, data: { taskId, decisionId, memoryFactId } });
     }, { isolationLevel: "Serializable" });
-    const actionType = eventAdvanceAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
-    const targetId = eventTarget?.id ?? projectTarget?.id ?? assignmentTarget?.task.id ?? row.memoryFactId ?? null;
+    const actionType = eventAdvanceAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? profileContextAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
+    const targetId = eventTarget?.id ?? projectTarget?.id ?? assignmentTarget?.task.id ?? profileContextTarget?.id ?? row.memoryFactId ?? null;
     await this.audit.log({ artistId, aggregateType: "ManagerRecommendation", aggregateId: id, action: `manager.recommendation_${finalOutcome}`, actorLabel, actorOperatorId, metadata: { taskId: row.taskId ?? null, decisionId: row.decisionId ?? null, memoryFactId: row.memoryFactId ?? null, bandMemberId: assignmentTarget?.member.id ?? null, reason, actionType, targetId, createdCount } });
     if (outcome === "accepted" && row.decisionId) await this.audit.log({ artistId, aggregateType: "ManagerDecision", aggregateId: row.decisionId, action: "manager.decision_draft_created", actorLabel, actorOperatorId, metadata: { recommendationId: id } });
     if (eventTarget) await this.audit.log({ artistId, aggregateType: "BandEvent", aggregateId: eventTarget.id, action: "event.advance_generated", actorLabel, actorOperatorId, metadata: { version: SHOW_ADVANCE_VERSION, createdCount, recommendationId: id } });
     if (projectTarget) await this.audit.log({ artistId, aggregateType: "ArtistProject", aggregateId: projectTarget.id, action: "project.plan_generated", actorLabel, actorOperatorId, metadata: { version: PROJECT_PLAN_VERSION, createdCount, recommendationId: id } });
     if (rememberFactAction && row.memoryFactId) await this.audit.log({ artistId, aggregateType: "ManagerMemoryFact", aggregateId: row.memoryFactId, action: "manager.memory_confirmed", actorLabel, actorOperatorId, metadata: { key: rememberFactAction.key, recommendationId: id, sourceType: "operator_confirmation" } });
     if (assignmentTarget) await this.audit.log({ artistId, aggregateType: "Task", aggregateId: assignmentTarget.task.id, action: "task.assigned", actorLabel, actorOperatorId, metadata: { recommendationId: id, previousOwnerLabel: assignmentTarget.task.ownerLabel, bandMemberId: assignmentTarget.member.id, ownerLabel: assignmentTarget.member.name, checkInId: assignmentTarget.checkInId, availability: assignmentTarget.availability } });
+    if (profileContextAction && profileContextTarget) await this.audit.log({ artistId, aggregateType: "ArtistOperatingProfile", aggregateId: profileContextTarget.id, action: "manager.profile_context_updated", actorLabel, actorOperatorId, metadata: { recommendationId: id, gapCode: profileContextAction.gapCode, field: profileContextAction.field } });
     return row;
   }
 
@@ -1361,11 +1409,22 @@ export class ManagerService {
       })
     ]);
     history.reverse();
+    const naturalFeedback = resolveManagerNaturalFeedback(input.message, history.slice(0, -1));
+    const appliedFeedback = naturalFeedback.status === "ready"
+      ? await this.messageFeedback(artistId, naturalFeedback.targetMessageId, naturalFeedback.parsed.input, actorLabel, actorOperatorId)
+      : null;
+    const contextCapture = resolveManagerContextCapture(input.message, history.slice(0, -1), facts.contextHealth, facts.profile);
+    const contextCaptureRoute = naturalFeedback.status === "not_feedback" && contextCapture.status !== "not_answer";
     const safeFacts = this.safeFacts(facts);
     const now = new Date();
     const continuity = resolveManagerConversationContinuity(input.message, history);
     const subjectReference = resolveManagerSubjectReference(input.message, managerSubjectCandidates(facts));
-    const fallback = deterministicManagerChat(facts, input.message, now, continuity, subjectReference);
+    const naturalFeedbackAnswer = managerNaturalFeedbackAcknowledgement(naturalFeedback);
+    const fallback = naturalFeedbackAnswer
+      ? { answer: naturalFeedbackAnswer, citations: [], recommendation: null }
+      : contextCaptureRoute
+        ? { answer: contextCapture.message, citations: [], recommendation: managerContextCaptureRecommendation(contextCapture) }
+      : deterministicManagerChat(facts, input.message, now, continuity, subjectReference);
     const coachingTopics = managerCoachingTopics(input.message).map((topic) => topic.id);
     const unknownCoachingTopic = managerUnrecognizedCoachingTopic(input.message);
     const coachingRoute = coachingTopics.length > 0 || Boolean(unknownCoachingTopic);
@@ -1374,10 +1433,11 @@ export class ManagerService {
     const planHealthRoute = managerQuestionAsksAboutPlanHealth(input.message);
     const continuityRoute = continuity.status !== "not_follow_up";
     const subjectRoute = subjectReference.status !== "not_requested";
+    const naturalFeedbackRoute = naturalFeedback.status !== "not_feedback";
     let content = fallback.answer;
     let citations = fallback.citations;
     let recommendation: ManagerRecommendationDraft | null = fallback.recommendation;
-    let mode = "deterministic";
+    let mode = naturalFeedbackRoute ? "deterministic_feedback" : contextCaptureRoute ? "deterministic_context_capture" : "deterministic";
     let model: string | null = null;
     let inputTokens: number | null = null;
     let outputTokens: number | null = null;
@@ -1386,7 +1446,7 @@ export class ManagerService {
     const settings = await this.settings(artistId);
     const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, settings);
     let providerAttempted = false;
-    if (!continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
+    if (!naturalFeedbackRoute && !contextCaptureRoute && !continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       try {
         model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
@@ -1422,7 +1482,9 @@ export class ManagerService {
         }
       } catch { mode = "deterministic_fallback"; }
     }
-    const calibrated = calibrateManagerChatResult({ answer: content, citations, recommendation }, facts, input.message);
+    const calibrated = naturalFeedbackRoute || contextCaptureRoute
+      ? { answer: content, citations, recommendation }
+      : calibrateManagerChatResult({ answer: content, citations, recommendation }, facts, input.message);
     content = calibrated.answer;
     citations = calibrated.citations;
     recommendation = calibrated.recommendation;
@@ -1440,7 +1502,7 @@ export class ManagerService {
           factsRead: [...this.knownIds(facts)],
           conversationMessageIds: history.map((message) => message.id),
           toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
-          guardrails: ["known-evidence", "bounded-history", "structured-conversation-continuity", "tenant-subject-resolution", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", "code-owned-manager-coaching", "team-load-premise-check"],
+          guardrails: ["known-evidence", "bounded-history", "structured-conversation-continuity", "tenant-subject-resolution", "explicit-natural-feedback", "reviewed-context-capture", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", "code-owned-manager-coaching", "team-load-premise-check"],
           providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
           coaching: { policyVersion: MANAGER_COACHING_POLICY_VERSION, topicIds: coachingTopics, unrecognized: Boolean(unknownCoachingTopic), providerBypassed: coachingRoute },
           teamLoad: { policyVersion: facts.teamLoad.policyVersion, status: facts.teamLoad.status, confidence: facts.teamLoad.confidence, suggestionCount: facts.teamLoad.suggestions.length },
@@ -1450,6 +1512,8 @@ export class ManagerService {
           goalTarget: { policyVersion: MANAGER_GOAL_TARGET_POLICY_VERSION, providerBypassed: planHealthRoute, directions: Object.fromEntries(["at_least", "at_most", "exact"].map((direction) => [direction, facts.goals.filter((goal) => goal.targetDirection === direction).length])) },
           conversationContinuity: { policyVersion: MANAGER_CONVERSATION_CONTINUITY_POLICY_VERSION, status: continuity.status, intent: continuity.intent, confidence: continuity.confidence, reasonCode: continuity.reasonCode, recommendationId: continuity.recommendation?.id ?? null, stableKey: continuity.recommendation?.stableKey ?? null, providerBypassed: continuityRoute },
           subjectReference: { policyVersion: MANAGER_SUBJECT_REFERENCE_POLICY_VERSION, status: subjectReference.status, matchType: subjectReference.matchType, confidence: subjectReference.confidence, kindHints: subjectReference.kindHints, subjectId: subjectReference.subject?.id ?? null, subjectKind: subjectReference.subject?.kind ?? null, candidateIds: subjectReference.candidates.map((candidate) => candidate.id), providerBypassed: subjectRoute },
+          naturalFeedback: { policyVersion: MANAGER_NATURAL_FEEDBACK_POLICY_VERSION, status: naturalFeedback.status, signal: naturalFeedback.parsed?.signal ?? null, reason: naturalFeedback.parsed?.input.reason ?? null, targetMessageId: naturalFeedback.targetMessageId, notePresent: Boolean(naturalFeedback.parsed?.input.note), providerBypassed: naturalFeedbackRoute },
+          contextCapture: { policyVersion: MANAGER_CONTEXT_CAPTURE_POLICY_VERSION, status: contextCapture.status, gapCode: contextCapture.gap?.code ?? null, field: contextCapture.action?.field ?? null, profileId: contextCapture.action?.profileId ?? null, providerBypassed: contextCaptureRoute },
           responseQuality,
           responseFeedbackSignals: summarizeManagerResponseFeedback(responseFeedback)
         },
@@ -1476,7 +1540,11 @@ export class ManagerService {
     const recommendationRecord = run.recommendations[0] ?? null;
     const recommendationAction = recommendationRecord?.proposedAction && typeof recommendationRecord.proposedAction === "object" && !Array.isArray(recommendationRecord.proposedAction) ? recommendationRecord.proposedAction : null;
     const recommendationActionType = recommendationAction && "type" in recommendationAction && typeof recommendationAction.type === "string" ? recommendationAction.type : null;
-    const recommendationPreview = recommendationActionType === "remember_fact" && recommendationAction && "value" in recommendationAction && typeof recommendationAction.value === "string" ? recommendationAction.value : null;
+    const recommendationPreview = recommendationActionType === "remember_fact" && recommendationAction && "value" in recommendationAction && typeof recommendationAction.value === "string"
+      ? recommendationAction.value
+      : recommendationActionType === "update_profile_context" && contextCapture.status === "ready"
+        ? contextCapture.preview
+        : null;
     const message = await this.prisma.client.managerMessage.create({
       data: {
         conversationId: conversation.id,
@@ -1488,8 +1556,23 @@ export class ManagerService {
       }
     });
     await this.prisma.client.managerConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
-    await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, tool: providerAttempted ? "read_manager_snapshot" : null, providerOutputUsed: mode === "openai" } });
-    return { conversationId: conversation.id, message: { ...message, feedback: null }, recommendation: recommendationRecord };
+    await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, feedbackTargetMessageId: naturalFeedback.targetMessageId, naturalFeedbackApplied: Boolean(appliedFeedback), contextGapCode: contextCapture.gap?.code ?? null, contextCaptureProposed: contextCapture.status === "ready", tool: providerAttempted ? "read_manager_snapshot" : null, providerOutputUsed: mode === "openai" } });
+    return {
+      conversationId: conversation.id,
+      message: { ...message, feedback: null },
+      recommendation: recommendationRecord,
+      feedbackApplied: appliedFeedback ? {
+        messageId: naturalFeedback.targetMessageId,
+        feedback: {
+          id: appliedFeedback.id,
+          helpful: appliedFeedback.helpful,
+          reason: appliedFeedback.reason,
+          note: appliedFeedback.note,
+          createdAt: appliedFeedback.createdAt,
+          updatedAt: appliedFeedback.updatedAt
+        }
+      } : null
+    };
   }
 
   async conversations(artistId: string, limit = 10) {
@@ -1532,6 +1615,7 @@ export class ManagerService {
     }
     if (parsed.data.type === "create_decision") return allowDecision;
     if (parsed.data.type === "remember_fact") return Boolean(question) && managerMemoryCaptureMatches(question, parsed.data);
+    if (parsed.data.type === "update_profile_context") return false;
     if (parsed.data.type === "assign_task") {
       const { taskId, bandMemberId, checkInId, availability } = parsed.data;
       const task = facts.tasks.find((candidate) => candidate.id === taskId);
