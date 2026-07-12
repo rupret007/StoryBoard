@@ -336,10 +336,22 @@ Manager routes:
 - `POST /manager/chat`
 - `POST /manager/messages/:id/feedback` with `{ "helpful": true }` or
   `{ "helpful": false, "reason": "too_vague", "note": "..." }`
-- `GET /manager/conversations?limit=1..20` and
-  `GET /manager/conversations/:id` (bounded to 50 messages)
+- `GET /manager/conversations?limit=1..20` — newest-first summaries with the
+  latest message and total message count — and `GET /manager/conversations/:id`
+  (bounded to 50 messages and the requesting operator's feedback)
 - `GET /manager/memory`, `PATCH /manager/memory/:id`, and
   `GET /manager/learning`
+- `GET /manager/response-review?limit=3` — member/owner-only, read-only queue
+  of the current operator's unrated answers from the last 90 days. `limit`
+  accepts 1–5. Candidates are tenant-scoped, require a persisted Manager run
+  and exact preceding question, and return at most one answer per conversation.
+  Reading never records a verdict; submit the existing
+  `POST /manager/messages/:id/feedback` action explicitly.
+- `GET /manager/response-eval-review?limit=3` — owner-only, read-only queue of
+  the current owner's rated answers that do not yet have a response-eval row.
+  It uses the same 1–5 limit, 90-day window, exact question/run requirement,
+  tenant boundary, and one-answer-per-conversation selection. Reading never
+  promotes or activates anything.
 - `GET /manager/outcome-review?days=90` — read-only, tenant-scoped derived
   outcomes; `days` accepts 7–365 and defaults to 90
 - `GET /manager/team-load` — read-only `manager_team_load_v2` projection over
@@ -571,6 +583,29 @@ record was meant when names collide and returns an explicit missing-record
 question for an unmatched quoted name. Resolved and ambiguous routes bypass
 the optional model so OpenAI-on and deterministic operation enforce the same
 tenant and evidence boundary.
+
+The Learning from your choices panel uses `manager_response_review_v1` to
+recover recent answers that the current operator has not rated. It displays one
+at a time with the original question, answer, and a plain selection reason.
+Opening or refreshing the inbox is side-effect free. Helpful or Needs work uses
+the existing tenant-scoped audited feedback write, immediately refills the
+queue, and still requires a separate owner action to enter the evaluation set.
+No feedback automatically edits or activates prompts, policy, schema, or code.
+
+Owners also see `manager_response_eval_review_v1` beside the ordinary review
+inbox. A helpful answer can be added explicitly as `useful`; a Needs work
+answer requires a 10–3000 character expected behavior before it can be added as
+`needs_revision`. Both reuse the audited promotion route and disappear from
+the triage queue only after that write succeeds. Promotion merely adds a local
+regression example: it does not resolve a failure, pass the offline gate, or
+activate a Manager version.
+
+The Manager page loads ten recent conversation summaries and opens the newest
+thread initially. New conversation preserves that history; choosing another
+thread replaces the visible message set through the tenant-scoped detail route
+and clears any unsent draft. New replies update the local title, latest-message
+preview, count, and ordering. Follow-up continuity and named-record resolution
+therefore stay within the selected conversation rather than merging context.
 
 The evaluation runner is offline and makes no provider request. It executes
 the code-registered golden scenarios and checks owner-reviewed examples. An

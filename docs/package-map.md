@@ -45,6 +45,9 @@ The NestJS orchestration backend. Current responsibilities:
   member capacity check-ins, and bounded `manager_team_load_v2` assignment
   proposals, structured `manager_conversation_continuity_v1` follow-ups,
   tenant-bounded `manager_subject_reference_v1` named-record resolution,
+  bounded tenant-scoped conversation summaries and recoverable thread history,
+  per-operator `manager_response_review_v1` answer-review queues,
+  owner-only `manager_response_eval_review_v1` release-example triage,
   conversation-to-decision drafts,
   timezone-safe/idempotent brief scheduling, response-quality policy,
   readiness-bound event/project action proposals, provider-context sensitivity

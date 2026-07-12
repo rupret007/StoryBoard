@@ -85,9 +85,11 @@ records band mode, market, lineup, constraints, and ambition; creates an
 editable 90-day plan with two measurable goals, linked initiatives, and six
 dated first actions tailored to original, cover/event, or hybrid work; and
 produces a daily/weekly brief grounded in
-artist-owned records. Manager conversations retain a bounded recent thread,
-resume after reload, and answer common questions about priorities, shows,
-booking, availability, approvals, and money from the corresponding records.
+artist-owned records. Manager conversations retain bounded recent threads,
+resume after reload, and can be revisited from the conversation-history picker
+without mixing context between threads. They answer common questions about
+priorities, shows, booking, availability, approvals, and money from the
+corresponding records.
 Short follow-ups such as “why that?”, “is that still right?”, and “do that”
 resolve only to the immediately preceding structured recommendation. The
 Manager rechecks current source projections, asks which item was meant when the
@@ -117,7 +119,15 @@ Every delivered conversational answer is linked to its exact Manager run and
 can be rated helpful or corrected with a bounded reason. Recent explicit
 feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
-authority. A deterministic response gate rejects canned assistant phrasing,
+authority. The Learning panel also offers a read-only queue of recent unrated
+answers, one per conversation, so real feedback does not depend on keeping the
+original thread open. Merely viewing the queue records nothing; only an
+explicit rating becomes evidence. Owners receive a second read-only queue for
+rated answers that are not yet in the regression set: helpful answers can be
+added explicitly, while corrected answers require the expected behavior.
+Feedback, promotion, resolution, and version activation remain separate; no
+rating or queue read activates a new version. A
+deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
 already performed an outside action. Prompt/policy version `manager_os_v22`
 and its offline eval suite cover response quality, conversation-created

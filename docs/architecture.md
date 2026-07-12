@@ -126,6 +126,27 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   subject bypasses provider prose and binds the answer, citations, and any
   eligible recommendation to that exact current projection. Traces store only
   resolution metadata and record IDs.
+  `manager_response_review_v1` makes real answer review recoverable without
+  changing that authority. It derives a bounded, per-operator queue from recent
+  assistant messages that have a persisted run, an exact preceding question,
+  and no verdict from that operator. Selection stays inside the active artist
+  and keeps one answer per conversation. Reading the queue does not audit,
+  write feedback, promote an eval, or change a prompt; the existing explicit
+  feedback POST remains the only mutation.
+  The owner-only `manager_response_eval_review_v1` projection then selects
+  rated answers from that owner that do not yet have a response-eval row. It
+  uses the same active-artist, persisted-run, exact-question, 90-day, and
+  one-per-conversation bounds. Queue reads remain side-effect free; helpful and
+  corrected cases reuse the existing explicit promotion write, and corrected
+  cases still require reviewed expected behavior. Promotion does not resolve a
+  failure or activate a candidate version.
+  Conversation recovery uses the existing tenant-scoped records rather than a
+  second memory store. The list projection returns at most 20 newest-first
+  summaries with the latest message and total message count; detail returns at
+  most 50 messages and only the requesting operator's feedback. The client
+  replaces its visible message set on a switch and clears unsent input, so
+  continuity, recommendations, and named-record resolution never cross thread
+  boundaries.
   Owner-promoted `ManagerEvalExample` rows are bounded local fixtures, not an
   online training or self-deployment mechanism. Code-owned plan health derives
   explainable status from authoritative goals/initiatives/tasks, while numeric

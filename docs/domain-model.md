@@ -35,6 +35,22 @@ reads return at most 50. Every delivered assistant message may link its exact
 helpful/correction verdict per response and operator. Free-text corrections are
 retained for human review but are not sent back through model instructions;
 only bounded reason aggregates affect code-owned response presentation.
+Conversation list reads are a non-persistent summary projection: newest first,
+at most 20, with the latest message and `_count.messages` mapped to
+`messageCount`. Conversation detail remains the message source of truth, reads
+at most 50 records, and projects only the requesting operator's feedback. A UI
+switch replaces rather than merges message arrays, preserving each thread's
+continuity and named-subject boundary.
+The non-persistent `manager_response_review_v1` projection selects up to five
+recent unrated assistant messages for the current operator from the active
+artist. Every item retains its exact preceding question and persisted
+`ManagerRun`; one recent item per conversation prevents a long thread from
+crowding out other real use. Queue reads create no feedback or evaluation row.
+The companion owner-only `manager_response_eval_review_v1` projection selects
+that owner's rated messages whose one-to-one `ManagerResponseEvalExample` is
+still absent. Helpful and corrected verdicts retain the exact feedback;
+promotion remains a separate audited upsert, corrected cases require expected
+behavior, and version resolution/activation remain later explicit processes.
 The non-persistent `manager_conversation_continuity_v1` projection reads only
 the immediately preceding assistant message's structured recommendation. It
 classifies bounded explain, recheck, blocking, details, and action follow-ups,

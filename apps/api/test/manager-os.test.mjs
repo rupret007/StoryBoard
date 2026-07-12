@@ -7,13 +7,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, subjectReference, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, subjectReference, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
   loadShared("schemas/operations.js"),
   loadApi("operations/operations.service.js"),
   loadApi("manager/manager.service.js"),
+  loadApi("manager/manager.controller.js"),
   loadApi("manager/manager-intelligence.js"),
   loadApi("manager/manager-response-quality.js"),
   loadApi("manager/manager-outcome-review.js"),
@@ -25,6 +26,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-goal-target.js"),
   loadApi("manager/manager-conversation-continuity.js"),
   loadApi("manager/manager-subject-reference.js"),
+  loadApi("manager/manager-response-review.js"),
   loadApi("manager/manager-memory-capture.js"),
   loadApi("manager/manager-goal-measurement.js"),
   loadApi("manager/manager-coaching.js"),
@@ -760,6 +762,119 @@ test("manager response feedback is exact-message, tenant-safe, idempotent, and a
   assert.equal(audits, 2);
   await assert.rejects(() => service.messageFeedback("artist-b", "message-a", { helpful: true }, "member@test", "operator-a"), (error) => error?.getStatus?.() === 404);
   assert.equal(upserts, 2);
+});
+
+test("manager response review selects recent unrated answers across conversations without recording a verdict", () => {
+  const candidate = (messageId, conversationId, createdAt, overrides = {}) => ({
+    messageId,
+    conversationId,
+    conversationTitle: `Conversation ${conversationId}`,
+    question: `Question ${messageId}`,
+    answer: `Answer ${messageId}`,
+    citations: [],
+    actionTypes: [],
+    promptVersion: "manager_os_v22",
+    mode: "deterministic",
+    createdAt,
+    ...overrides
+  });
+  const queue = responseReview.selectManagerResponseReviewQueue([
+    candidate("message-a-new", "conversation-a", new Date("2026-07-12T11:00:00.000Z"), { actionTypes: ["create_task"] }),
+    candidate("message-a-old", "conversation-a", new Date("2026-07-11T11:00:00.000Z")),
+    candidate("message-b", "conversation-b", new Date("2026-07-12T10:00:00.000Z"), { citations: ["task-a"] }),
+    candidate("message-stale", "conversation-c", new Date("2026-03-01T10:00:00.000Z")),
+    candidate("message-future", "conversation-d", new Date("2026-07-13T10:00:00.000Z"))
+  ], 5, now);
+  assert.equal(queue.policyVersion, "manager_response_review_v1");
+  assert.equal(queue.eligibleCount, 3);
+  assert.equal(queue.conversationCount, 2);
+  assert.deepEqual(queue.items.map((item) => item.messageId), ["message-a-new", "message-b"]);
+  assert.deepEqual(queue.items.map((item) => item.selectionReason), ["action_proposal", "grounded_answer"]);
+  const evalQueue = responseReview.selectManagerResponseEvalReviewQueue([
+    { ...candidate("message-a-new", "conversation-a", new Date("2026-07-12T11:00:00.000Z")), feedback: { helpful: false, reason: "too_vague", note: "Name the first step", updatedAt: new Date("2026-07-12T11:05:00.000Z") } },
+    { ...candidate("message-a-old", "conversation-a", new Date("2026-07-11T11:00:00.000Z")), feedback: { helpful: true, reason: null, note: null, updatedAt: new Date("2026-07-11T11:05:00.000Z") } }
+  ], 3, now);
+  assert.equal(evalQueue.policyVersion, "manager_response_eval_review_v1");
+  assert.deepEqual(evalQueue.items.map((item) => item.messageId), ["message-a-new"]);
+  assert.equal(evalQueue.items[0].feedback.reason, "too_vague");
+});
+
+test("manager response review reads only the active artist and current operator's unrated messages", async () => {
+  const calls = [];
+  const client = {
+    managerMessage: {
+      findMany: async ({ where }) => {
+        calls.push(where);
+        if (where.conversation.artistId !== "artist-a") return [];
+        if (where.role === "assistant") return [{
+          id: "message-a",
+          conversationId: "conversation-a",
+          content: "Start with the overdue venue follow-up.",
+          citations: ["task-a"],
+          proposedActions: [],
+          createdAt: new Date("2026-07-12T11:00:00.000Z"),
+          conversation: { title: "What needs attention?" },
+          managerRun: { promptVersion: "manager_os_v22", mode: "deterministic" },
+          feedback: where.feedback.some ? [{ helpful: true, reason: null, note: null, updatedAt: new Date("2026-07-12T11:05:00.000Z") }] : [],
+          responseEval: null
+        }];
+        return [{ conversationId: "conversation-a", content: "What needs attention?", createdAt: new Date("2026-07-12T10:59:00.000Z") }];
+      }
+    }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => assert.fail("Review reads must not audit or write") }, { get: () => false });
+  const queue = await service.responseReview("artist-a", "operator-a", 3, now);
+  assert.equal(queue.items[0].messageId, "message-a");
+  assert.equal(queue.items[0].question, "What needs attention?");
+  assert.equal(calls[0].feedback.none.operatorId, "operator-a");
+  const evalQueue = await service.responseEvalReview("artist-a", "operator-a", 3, now);
+  assert.equal(evalQueue.items[0].messageId, "message-a");
+  assert.equal(evalQueue.items[0].feedback.helpful, true);
+  assert.equal(calls[2].feedback.some.operatorId, "operator-a");
+  assert.equal((await service.responseReview("artist-b", "operator-a", 3, now)).items.length, 0);
+  assert.equal((await service.responseEvalReview("artist-b", "operator-a", 3, now)).items.length, 0);
+});
+
+test("manager response review route requires workflow mutation permission and bounds the queue", async () => {
+  const calls = [];
+  const controller = new managerControllerMod.ManagerController(
+    {
+      responseReview: async (artistId, operatorId, limit) => { calls.push({ route: "feedback", artistId, operatorId, limit }); return { items: [] }; },
+      responseEvalReview: async (artistId, operatorId, limit) => { calls.push({ route: "eval", artistId, operatorId, limit }); return { items: [] }; }
+    },
+    { resolveArtistId: async () => "artist-a" },
+    {
+      assertCanMutateWorkflow: async (operatorId) => { if (operatorId === "viewer-a") throw new Error("viewer cannot mutate workflow"); },
+      assertOwner: async (operatorId) => { if (operatorId !== "owner-a") throw new Error("owner required"); }
+    }
+  );
+  await controller.responseReview("2", { id: "member-a" }, {}, "artist-a");
+  await controller.responseEvalReview("3", { id: "owner-a" }, {}, "artist-a");
+  assert.deepEqual(calls, [{ route: "feedback", artistId: "artist-a", operatorId: "member-a", limit: 2 }, { route: "eval", artistId: "artist-a", operatorId: "owner-a", limit: 3 }]);
+  await assert.rejects(() => controller.responseReview("2", { id: "viewer-a" }, {}, "artist-a"), /viewer cannot mutate workflow/);
+  await assert.rejects(() => controller.responseEvalReview("2", { id: "member-a" }, {}, "artist-a"), /owner required/);
+  await assert.rejects(() => controller.responseReview("6", { id: "member-a" }, {}, "artist-a"), (error) => error?.getStatus?.() === 400);
+  await assert.rejects(() => controller.responseEvalReview("6", { id: "owner-a" }, {}, "artist-a"), (error) => error?.getStatus?.() === 400);
+});
+
+test("manager conversation summaries stay bounded, ordered, and useful for history navigation", async () => {
+  let query = null;
+  const client = {
+    managerConversation: {
+      findMany: async (input) => {
+        query = input;
+        return [{ id: "conversation-a", artistId: "artist-a", title: "Booking plan", createdAt: now, updatedAt: now, messages: [{ id: "message-a", role: "assistant", content: "Start with the venue follow-up.", createdAt: now }], _count: { messages: 6 } }];
+      }
+    }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => assert.fail("Conversation reads must not audit or write") }, { get: () => false });
+  const rows = await service.conversations("artist-a", 100);
+  assert.equal(query.where.artistId, "artist-a");
+  assert.equal(query.take, 20);
+  assert.deepEqual(query.orderBy, { updatedAt: "desc" });
+  assert.equal(rows[0].messageCount, 6);
+  assert.equal(rows[0].messages[0].content, "Start with the venue follow-up.");
+  assert.equal(Object.hasOwn(rows[0], "_count"), false);
 });
 
 test("goal targets distinguish growth, caps, exact values, provisional state, and missing evidence", () => {

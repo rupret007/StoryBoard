@@ -950,6 +950,156 @@ Implementation and validation:
   `manager_os_v22` / `manager_evals_v24` gate at 100% safety, typecheck, lint,
   production builds, container readiness, and `git diff --check`.
 
+### P0 — Human-reviewed Manager answer inbox (completed 2026-07-12)
+
+- [x] Add a code-owned `manager_response_review_v1` projection that selects a
+  bounded queue of recent Manager answers the current operator has not rated.
+  Candidates must come only from the active artist, retain the exact preceding
+  operator question, and never include an answer without its persisted run.
+- [x] Keep review read-only until the operator explicitly submits the existing
+  Helpful or Needs work feedback form. Opening the queue must not create a
+  verdict, promote an eval example, alter a prompt, or change Manager authority.
+- [x] Prefer one recent answer per conversation so a long thread cannot crowd
+  out other real use. Expose the bounded eligible count and selection reason,
+  not a synthetic quality score or hidden reasoning.
+- [x] Surface one answer at a time in the existing Learning from your choices
+  panel, including the original question, full answer, correction reason, and
+  optional note. Refresh the learning summary and queue immediately after a
+  review.
+- [x] Add unit, tenant-database, role, and Chromium coverage; document the
+  human-reviewed learning boundary and run the complete release gate.
+
+Root cause and design evidence:
+
+- `ManagerMessageFeedback` and owner-promoted response evals are already
+  tenant-scoped, audited, and safe, but the web only exposes their controls on
+  messages loaded in the current conversation. A useful or flawed answer from
+  an older thread becomes difficult to review, so the learning loop collects
+  too little genuine operator evidence and is biased toward the latest visible
+  exchange.
+- The clean-room design adopts only the principle visible in Andrea_NanoBot's
+  committed outcome-review routing: a local, human review capability should
+  stay directly reachable without being preempted by broader intelligence
+  machinery. No Andrea implementation, schema, runtime, or dirty worktree
+  content is copied.
+
+Implementation and validation:
+
+- `GET /manager/response-review?limit=3` derives a 90-day queue only from
+  persisted assistant runs in the active artist whose exact preceding question
+  exists and whose current operator has not submitted feedback. It examines a
+  bounded candidate set, returns no more than five items, and selects the most
+  recent answer from each conversation before another answer in that thread.
+- Members and owners can review; viewers remain read-only and do not receive a
+  queue they cannot decide. The Learning panel displays one answer at a time,
+  records nothing on read, reuses the audited exact-message feedback write, and
+  refreshes both the summary and next candidate without treating refresh
+  failure as a failed verdict. Eval promotion remains a separate owner action.
+- No schema migration or Manager prompt/dataset version change was needed.
+  Validation passed 112 API + 2 shared tests, all 35 migrations and 3
+  disposable-Postgres workflows, the complete relationship diagnostic, 3
+  Chromium journeys including review selection/rating/refill, the unchanged
+  48/48 `manager_os_v22` / `manager_evals_v24` gate at 100% safety, typecheck,
+  lint, production builds, container readiness, and `git diff --check`.
+
+### P0 — Owner-triaged response evaluation inbox (completed 2026-07-12)
+
+- [x] Add a code-owned `manager_response_eval_review_v1` projection for recent
+  Manager answers the current owner explicitly rated but has not promoted to a
+  `ManagerResponseEvalExample`. Keep the active artist, exact question,
+  persisted run, owner verdict, and one-answer-per-conversation bounds.
+- [x] Expose an owner-only, read-only queue. Reading it must not promote,
+  resolve, relabel, or activate anything; members may provide ordinary
+  feedback but cannot manage the release-gating dataset.
+- [x] Let the owner explicitly add a helpful answer as `useful`, or add a
+  corrected answer as `needs_revision` only after writing the expected
+  behavior. Reuse the existing audited promotion API and immediately remove a
+  promoted item from the queue.
+- [x] Surface the triage directly beside Learning from your choices so older
+  feedback remains actionable after its conversation is no longer open.
+- [x] Add unit, role, tenant-database, and Chromium coverage; document the
+  distinction between ordinary feedback, eval promotion, eval resolution, and
+  code-reviewed version activation.
+
+Root cause and design evidence:
+
+- The answer-review inbox now makes ordinary feedback recoverable, but
+  `POST /manager/messages/:id/promote-eval` is exposed only on messages in the
+  currently loaded conversation. Once a reviewed answer leaves that view, the
+  owner cannot practically add it to the versioned regression set even though
+  the tenant-safe feedback and promotion primitives already exist.
+- The clean-room design extends Andrea_NanoBot's committed human outcome-review
+  principle without copying implementation: reviewed evidence should remain
+  reachable through a dedicated local queue, while promotion and release stay
+  separate explicit decisions. No Andrea code, schema, runtime, or dirty
+  worktree content is copied.
+
+Implementation and validation:
+
+- `GET /manager/response-eval-review?limit=3` selects only current-owner
+  feedback from the active artist whose assistant message has an exact prior
+  question, persisted run, and no response-eval relation. Database filtering
+  excludes already promoted rows before the bounded candidate limit; the
+  projection then keeps the latest eligible answer per conversation.
+- The owner UI presents one reviewed answer at a time. Helpful answers use the
+  existing `useful` promotion; corrected answers cannot submit until expected
+  behavior is at least ten characters. A successful audited promotion removes
+  the row and refills the queue. Members and viewers cannot read or manage this
+  release dataset, and no queue read changes state.
+- No schema migration or Manager prompt/dataset version change was needed.
+  Validation passed 112 API + 2 shared tests, all 35 migrations and 3
+  disposable-Postgres workflows, the complete relationship diagnostic, 3
+  Chromium journeys through feedback → owner triage → explicit promotion, the
+  unchanged 48/48 `manager_os_v22` / `manager_evals_v24` gate at 100% safety,
+  typecheck, lint, production builds, container readiness, and
+  `git diff --check`.
+
+### P0 — Recoverable Manager conversation history (completed 2026-07-12)
+
+- [x] Return bounded conversation summaries with the latest message and message
+  count from `GET /manager/conversations`; preserve the existing tenant and
+  maximum-limit guard.
+- [x] Let operators switch among recent Manager threads, start a new thread,
+  and return to prior work without a reload. Clear the unsent draft on a switch
+  so a question cannot silently enter the wrong conversation.
+- [x] Load each selected thread through the existing tenant-scoped detail API,
+  including only that operator's feedback. Never merge message history,
+  recommendation continuity, or subject context across conversations.
+- [x] Update the local history summary after every new answer so current titles,
+  last-message previews, and ordering stay useful during the session.
+- [x] Add service, tenant-database, and Chromium coverage for bounded ordering,
+  new-thread creation, round-trip switching, and cross-artist rejection; update
+  docs and run the complete release gate.
+
+Root cause and design evidence:
+
+- `ManagerConversation` and the bounded list/detail endpoints already persist
+  safe threads, but the server page fetches only `limit=1` and the client holds
+  no conversation list. “New” discards the visible thread with no navigation
+  back, which makes long-running band decisions and reviewed explanations feel
+  ephemeral even though the records exist.
+- This package needs no external code or generalized memory system. It exposes
+  StoryBoard's existing source of truth and preserves the structured continuity
+  boundary: a follow-up resolves only inside the selected conversation.
+
+Implementation and validation:
+
+- `GET /manager/conversations?limit=10` now returns newest-first summaries with
+  the latest message and total message count while retaining the existing
+  active-artist filter and hard maximum of 20. Thread detail remains bounded to
+  50 messages and includes only the requesting operator's feedback.
+- Manager loads ten recent summaries, opens the newest thread on first render,
+  and supports New plus round-trip thread switching. A switch clears the
+  unsent draft before fetching the selected tenant-scoped detail. Sending an
+  answer updates its summary and ordering locally without mixing thread state.
+- No schema migration or Manager prompt/dataset version change was needed.
+  Validation passed 113 API + 2 shared tests, all 35 migrations and 3
+  disposable-Postgres workflows, the complete relationship diagnostic, 3
+  Chromium journeys including new-thread creation and round-trip history
+  switching, the unchanged 48/48 `manager_os_v22` / `manager_evals_v24` gate
+  at 100% safety, typecheck, lint, production builds, container readiness, and
+  `git diff --check`.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,

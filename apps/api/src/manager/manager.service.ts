@@ -43,6 +43,7 @@ import { deterministicManagerGoalPath, managerQuestionAsksAboutGoalPath } from "
 import { deterministicManagerGoalTarget, MANAGER_GOAL_TARGET_POLICY_VERSION } from "./manager-goal-target";
 import { MANAGER_CONVERSATION_CONTINUITY_POLICY_VERSION, resolveManagerConversationContinuity } from "./manager-conversation-continuity";
 import { MANAGER_SUBJECT_REFERENCE_POLICY_VERSION, managerSubjectCandidates, resolveManagerSubjectReference } from "./manager-subject-reference";
+import { selectManagerResponseEvalReviewQueue, selectManagerResponseReviewQueue } from "./manager-response-review";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const MANAGER_FACT_AGGREGATES = [
@@ -380,6 +381,86 @@ export class ManagerService {
       dismissalReasons: Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({ reason, count })),
       responseFeedback: summarizeManagerResponseFeedback(responseRows)
     };
+  }
+
+  private async responseReviewCandidates(artistId: string, operatorId: string, feedbackState: "unrated" | "rated", now: Date) {
+    const since = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const responses = await this.prisma.client.managerMessage.findMany({
+      where: {
+        role: "assistant",
+        createdAt: { gte: since, lte: now },
+        conversation: { artistId },
+        managerRun: { isNot: null },
+        feedback: feedbackState === "unrated" ? { none: { operatorId } } : { some: { operatorId } },
+        ...(feedbackState === "rated" ? { responseEval: { is: null } } : {})
+      },
+      select: {
+        id: true,
+        conversationId: true,
+        content: true,
+        citations: true,
+        proposedActions: true,
+        createdAt: true,
+        conversation: { select: { title: true } },
+        managerRun: { select: { promptVersion: true, mode: true } },
+        feedback: { where: { operatorId }, select: { helpful: true, reason: true, note: true, updatedAt: true }, take: 1 },
+        responseEval: { select: { id: true } }
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      take: 100
+    });
+    const conversationIds = [...new Set(responses.map((response) => response.conversationId))];
+    const questions = conversationIds.length ? await this.prisma.client.managerMessage.findMany({
+      where: { role: "user", conversationId: { in: conversationIds }, conversation: { artistId }, createdAt: { lte: now } },
+      select: { conversationId: true, content: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: 500
+    }) : [];
+    return responses.flatMap((response) => {
+      if (!response.managerRun) return [];
+      const question = questions.find((candidate) => candidate.conversationId === response.conversationId && candidate.createdAt <= response.createdAt);
+      if (!question) return [];
+      const citations = Array.isArray(response.citations) ? response.citations.filter((value): value is string => typeof value === "string").slice(0, 10) : [];
+      const actionTypes = Array.isArray(response.proposedActions) ? response.proposedActions.flatMap((value) => {
+        const action = objectRecord(value);
+        return typeof action.actionType === "string" ? [action.actionType] : [];
+      }).slice(0, 5) : [];
+      return [{
+        messageId: response.id,
+        conversationId: response.conversationId,
+        conversationTitle: response.conversation.title,
+        question: question.content,
+        answer: response.content,
+        citations,
+        actionTypes,
+        promptVersion: response.managerRun.promptVersion,
+        mode: response.managerRun.mode,
+        createdAt: response.createdAt,
+        feedback: response.feedback[0] ?? null,
+        responseEvalId: response.responseEval?.id ?? null
+      }];
+    });
+  }
+
+  async responseReview(artistId: string, operatorId: string, limit = 3, now = new Date()) {
+    const rows = await this.responseReviewCandidates(artistId, operatorId, "unrated", now);
+    return selectManagerResponseReviewQueue(rows.map((row) => ({
+      messageId: row.messageId,
+      conversationId: row.conversationId,
+      conversationTitle: row.conversationTitle,
+      question: row.question,
+      answer: row.answer,
+      citations: row.citations,
+      actionTypes: row.actionTypes,
+      promptVersion: row.promptVersion,
+      mode: row.mode,
+      createdAt: row.createdAt
+    })), limit, now);
+  }
+
+  async responseEvalReview(artistId: string, operatorId: string, limit = 3, now = new Date()) {
+    const rows = await this.responseReviewCandidates(artistId, operatorId, "rated", now);
+    return selectManagerResponseEvalReviewQueue(rows.flatMap(({ feedback, responseEvalId, ...candidate }) => feedback && !responseEvalId ? [{ ...candidate, feedback }] : []), limit, now);
   }
 
   async outcomeReview(artistId: string, days = 90, through = new Date()) {
@@ -1333,13 +1414,14 @@ export class ManagerService {
     return { conversationId: conversation.id, message: { ...message, feedback: null }, recommendation: recommendationRecord };
   }
 
-  conversations(artistId: string, limit = 10) {
-    return this.prisma.client.managerConversation.findMany({
+  async conversations(artistId: string, limit = 10) {
+    const rows = await this.prisma.client.managerConversation.findMany({
       where: { artistId },
-      include: { messages: { orderBy: { createdAt: "desc" }, take: 1 } },
+      include: { messages: { orderBy: { createdAt: "desc" }, take: 1 }, _count: { select: { messages: true } } },
       orderBy: { updatedAt: "desc" },
       take: Math.min(Math.max(limit, 1), 20)
     });
+    return rows.map(({ _count, ...row }) => ({ ...row, messageCount: _count.messages }));
   }
 
   async conversation(artistId: string, id: string, operatorId: string) {
