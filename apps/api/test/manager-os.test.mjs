@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, memoryCapture, goalMeasurement, commitmentHealth, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, memoryCapture, goalMeasurement, coaching, commitmentHealth, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -21,6 +21,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-knowledge-health.js"),
   loadApi("manager/manager-memory-capture.js"),
   loadApi("manager/manager-goal-measurement.js"),
+  loadApi("manager/manager-coaching.js"),
   loadApi("manager/manager-commitment-health.js"),
   loadApi("manager/manager-schedule.js"),
   loadApi("manager/manager-provider-context.js"),
@@ -415,7 +416,7 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v13", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v14", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
 });
 
@@ -570,7 +571,7 @@ test("brief and plan conversation advance an existing linked step instead of inv
 test("a pre-intake cached brief is invalidated when setup completes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v13", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v14", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-12T11:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
@@ -582,7 +583,7 @@ test("a pre-intake cached brief is invalidated when setup completes", async () =
 test("a cached brief is invalidated when commitment facts change", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => ({ updatedAt: new Date("2026-07-12T11:00:00.000Z") }) } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v13", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v14", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
@@ -594,12 +595,12 @@ test("a cached brief is invalidated when commitment facts change", async () => {
 test("a cached brief is invalidated when the Manager priority policy changes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "v12-brief", promptVersion: "manager_os_v12", createdAt: new Date() });
+  service.latestBrief = async () => ({ id: "v13-brief", promptVersion: "manager_os_v13", createdAt: new Date() });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
-  service.generateBrief = async () => { generations += 1; return { id: "v13-brief" }; };
+  service.generateBrief = async () => { generations += 1; return { id: "v14-brief" }; };
   const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
-  assert.equal(result.id, "v13-brief");
+  assert.equal(result.id, "v14-brief");
   assert.equal(generations, 1);
 });
 
@@ -607,7 +608,7 @@ test("a cached brief is invalidated when an audited operating fact changes", asy
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   const createdAt = new Date(Date.now() - 60_000);
-  service.latestBrief = async () => ({ id: "stale-brief", promptVersion: "manager_os_v13", createdAt });
+  service.latestBrief = async () => ({ id: "stale-brief", promptVersion: "manager_os_v14", createdAt });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => ({ createdAt: new Date(createdAt.getTime() + 1_000) });
   service.generateBrief = async () => { generations += 1; return { id: "fresh-brief" }; };
@@ -668,22 +669,22 @@ test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v13", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v14", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v13", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v13", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v14", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v14", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v13", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v13", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v14", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v14", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v13", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v12", resolutionVersion: "manager_os_v13", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v13", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v14", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v13", resolutionVersion: "manager_os_v14", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v14", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 
@@ -902,6 +903,37 @@ test("conversational memory requires an explicit safe request and exact reviewab
   const profile = intelligence.deterministicManagerChat(managerFacts(), "Remember that our home market is Chicago", now);
   assert.equal(profile.recommendation, null);
   assert.match(profile.answer, /Band context/i);
+});
+
+test("manager coaching explains vetted band-business concepts in context without adding authority", () => {
+  assert.ok(coaching.managerCoachingConceptIds().length >= 20);
+  const facts = managerFacts({ settlements: [{ id: "settlement-a", status: "draft", currency: "USD", grossMinor: 100000, expenseMinor: 20000, netMinor: 80000, event: { title: "Saturday show" } }] });
+  const settlement = intelligence.deterministicManagerChat(facts, "How does a show settlement work?", now);
+  assert.match(settlement.answer, /post-show money check/i);
+  assert.match(settlement.answer, /Why it matters:/);
+  assert.match(settlement.answer, /In StoryBoard:/);
+  assert.match(settlement.answer, /1 draft settlement/i);
+  assert.deepEqual(settlement.citations, ["settlement-a"]);
+  assert.equal(settlement.recommendation, null);
+
+  const comparison = intelligence.deterministicManagerChat(managerFacts(), "Guarantee vs. door deal: what is the difference?", now);
+  assert.match(comparison.answer, /guarantee sets a minimum fee/i);
+  assert.match(comparison.answer, /door deal makes pay depend on ticket results/i);
+  assert.equal(comparison.recommendation, null);
+
+  const publishing = intelligence.deterministicManagerChat(managerFacts(), "Explain music publishing in plain language", now);
+  assert.match(publishing.answer, /composition/i);
+  assert.match(publishing.answer, /does not determine legal ownership/i);
+  const unknown = intelligence.deterministicManagerChat(managerFacts(), "Explain neighboring rights in plain language", now);
+  assert.match(unknown.answer, /do not have a reviewed StoryBoard explainer/i);
+  assert.match(unknown.answer, /Where did the term come up/i);
+  assert.equal(unknown.recommendation, null);
+  assert.equal(coaching.managerUnrecognizedCoachingTopic("Explain our next priority in plain language"), null);
+  assert.equal(coaching.managerCoachingTopics("What is blocked or slipping?").length, 0);
+
+  const external = intelligence.deterministicManagerChat(facts, "Explain settlement and pay it now", now);
+  assert.match(external.answer, /won't send, sign, pay, publish, or execute/i);
+  assert.doesNotMatch(external.answer, /post-show money check/i);
 });
 
 test("manager briefs and conversation expose context gaps without judging the band", () => {

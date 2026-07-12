@@ -79,8 +79,10 @@ jobs:
         run: docker compose -f docker-compose.app.yml up --build --wait
       - name: Verify API readiness and local development login
         run: |
-          curl --fail --retry 12 --retry-connrefused http://127.0.0.1:4000/ready
-          curl --fail --location --cookie-jar cookies.txt http://127.0.0.1:4000/auth/dev/login
+          curl --fail --retry 12 --retry-all-errors --retry-delay 1 http://127.0.0.1:4000/ready
+          curl --fail --retry 30 --retry-all-errors --retry-delay 1 --output /dev/null http://127.0.0.1:3000/
+          curl --fail --cookie-jar cookies.txt --output /dev/null http://127.0.0.1:4000/auth/dev/login
+          grep -q 'sb_session' cookies.txt
       - name: Show service logs on failure
         if: failure()
         run: docker compose -f docker-compose.app.yml logs --no-color

@@ -119,6 +119,13 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   work. Tasks are deliberately unassigned until a person chooses an owner.
   Owner-triggered offline evaluation
   runs are version-allowlisted and recorded; there is no self-activation path.
+- Manager education is a bounded read path, not free-form authority. Explicit
+  learning questions are matched only to a reviewed band-management concept;
+  the deterministic answer supplies a definition, practical significance,
+  StoryBoard next step, and uncertainty boundary. Matching current-artist
+  records may be cited, but coaching never creates a recommendation or provider
+  call. Existing external-action refusal is evaluated first, so “explain and
+  pay/send/sign it” cannot turn education into execution.
 - Manager commitment health is deterministic derived data over tenant-owned
   tasks. Blocked work requires an explicit reason, later dates accumulate
   deferral evidence, and stale writes use compare-and-set protection. The same

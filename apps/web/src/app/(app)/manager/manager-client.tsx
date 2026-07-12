@@ -139,7 +139,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialGoals, in
   }
   async function runEvaluation() {
     setBusy(true); setError("");
-    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v13" } })); }
+    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v14" } })); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function submitMessageFeedback(messageId: string, payload: { helpful: boolean; reason?: string | null; note?: string | null }) {
@@ -195,6 +195,9 @@ export function ManagerClient({ initialProfile, initialMembers, initialGoals, in
   const firstPriorityFactors = initialBrief?.trace?.priorityRanking?.today[0]?.factors
     .filter((factor) => factor.impact > 0 && !factor.code.startsWith("declared_") && factor.code !== "recorded_evidence")
     .slice(0, 3) ?? [];
+  const coachingPrompts = profile.educationTopics.length
+    ? profile.educationTopics.slice(0, 3).map((topic) => `Explain ${topic} in plain language.`)
+    : ["How does a show settlement work?", "What is a show advance?", "Guarantee vs. door deal: what is the difference?"];
   const knowledgeByFactId = new Map(knowledgeHealth?.items.map((item) => [item.factId, item]) ?? []);
   return <div className="space-y-8">
     {error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200" role="alert">{error}</div> : null}
@@ -208,6 +211,7 @@ export function ManagerClient({ initialProfile, initialMembers, initialGoals, in
     <DecisionBoard decisions={decisions} busy={busy} onCreate={createDecision} onDecide={patchDecision} onReview={reviewDecision} />
     <div className="grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"><SurfaceCard><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Target className="h-4 w-4 text-[var(--accent)]" /><h2 className="font-semibold">90-day plan</h2></div><div className="flex items-center gap-2">{planHealth ? <Badge variant={planHealth.status === "on_track" ? "success" : planHealth.status === "off_track" ? "danger" : "neutral"}>{planHealth.score}/100 · {friendlyReason(planHealth.status)}</Badge> : null}<button className="sb-btn-ghost" disabled={busy} onClick={() => void ensurePlan()}><RefreshCw className="h-4 w-4" /> Fill missing steps</button></div></div>{planHealth ? <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3"><div className="flex gap-2"><Activity className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" /><p className="text-sm text-[var(--text-secondary)]">{planHealth.summary}</p></div>{planHealth.gaps[0] ? <p className="mt-2 text-xs text-[var(--text-muted)]">First gap: {planHealth.gaps[0].detail}</p> : null}</div> : null}<div className="mt-4 space-y-3">{goals.map((goal) => <GoalProgressCard key={goal.id} goal={goal} measurement={goalMeasurements.find((measurement) => measurement.goalId === goal.id) ?? null} health={planHealth?.goals.find((item) => item.goalId === goal.id) ?? null} busy={busy} onRecord={recordGoalProgress} onMeasurementKind={setGoalMeasurementKind} onSync={syncGoalProgress} />)}</div></SurfaceCard>
       <SurfaceCard><div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2"><MessageSquareText className="h-4 w-4 text-[var(--accent)]" /><h2 className="font-semibold">Talk it through</h2></div><p className="mt-2 text-sm text-[var(--text-muted)]">The conversation remembers recent context, uses your StoryBoard records, and says when something is unknown.</p></div>{messages.length ? <button className="sb-btn-ghost shrink-0" onClick={newConversation} disabled={busy}><Plus className="h-4 w-4" /> New</button> : null}</div>
+        <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="manager-coaching-prompts"><span className="text-xs font-medium text-[var(--text-muted)]">Learn as you go</span>{coachingPrompts.map((prompt) => <button key={prompt} type="button" className="rounded-full border border-[var(--border)] px-3 py-1.5 text-left text-xs text-[var(--text-secondary)] transition hover:border-[var(--accent)] hover:text-[var(--text-primary)]" onClick={() => setQuestion(prompt)}>{prompt}</button>)}</div>
         <div className="mt-4 max-h-[34rem] space-y-3 overflow-y-auto pr-1" aria-live="polite">
           {messages.map((message) => <ManagerMessageBubble key={message.id} message={message} busy={busy} evalExamples={evalExamples} responseEvalExamples={responseEvalExamples} onAcceptRecommendation={acceptChatRecommendation} onDismissRecommendation={dismissRecommendation} onPromoteEval={promoteEval} onPromoteResponseEval={promoteResponseEval} onFeedback={submitMessageFeedback} />)}
           {!messages.length ? <div className="rounded-xl border border-dashed border-[var(--border)] p-4"><p className="text-sm font-medium">Start with the question that is actually on your mind.</p><div className="mt-3 flex flex-wrap gap-2">{["What needs my attention today?", "What is blocked or slipping?", "Are we ready for our next show?", "What did we learn from recent shows?", "Where does our money stand?"].map((prompt) => <button key={prompt} className="rounded-full border border-[var(--border)] px-3 py-2 text-left text-xs text-[var(--text-secondary)] transition hover:border-[var(--accent)] hover:text-[var(--text-primary)]" onClick={() => setQuestion(prompt)}>{prompt}</button>)}</div></div> : null}
@@ -281,8 +285,9 @@ function BandMemberContext({ members, busy, onAdd, onUpdate }: { members: BandMe
 }
 
 function BandMemberContextRow({ member, busy, onSave }: { member: BandMember; busy: boolean; onSave: (id: string, payload: unknown) => Promise<void> }) {
-  const [roles, setRoles] = useState(member.roles.join(", ")); const [instruments, setInstruments] = useState(member.instruments.join(", "));
-  useEffect(() => { setRoles(member.roles.join(", ")); setInstruments(member.instruments.join(", ")); }, [member]);
+  const savedRoles = member.roles.join(", "); const savedInstruments = member.instruments.join(", ");
+  const [roles, setRoles] = useState(savedRoles); const [instruments, setInstruments] = useState(savedInstruments);
+  useEffect(() => { setRoles(savedRoles); setInstruments(savedInstruments); }, [savedRoles, savedInstruments]);
   return <div className="grid gap-2 rounded-lg border border-[var(--border)] p-3 md:grid-cols-[minmax(8rem,0.5fr)_1fr_1fr_auto] md:items-end"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[var(--text-muted)]">Active working member</p></div><label><span className="sb-label">Responsibilities for {member.name}</span><input className="sb-input mt-1" value={roles} onChange={(event) => setRoles(event.target.value)} /></label><label><span className="sb-label">Instruments for {member.name}</span><input className="sb-input mt-1" value={instruments} onChange={(event) => setInstruments(event.target.value)} /></label><button type="button" className="sb-btn-ghost" disabled={busy} onClick={() => void onSave(member.id, { roles: splitComma(roles), instruments: splitComma(instruments) })}><Save className="h-4 w-4" /> Save</button></div>;
 }
 

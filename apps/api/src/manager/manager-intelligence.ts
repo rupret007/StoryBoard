@@ -8,6 +8,7 @@ import type { ManagerKnowledgeHealth } from "./manager-knowledge-health";
 import type { ManagerGoalMeasurement } from "./manager-goal-measurement";
 import { managerQuestionAsksAboutCommitments, type ManagerCommitmentHealth } from "./manager-commitment-health";
 import { assessManagerMemoryCapture } from "./manager-memory-capture";
+import { deterministicManagerCoaching } from "./manager-coaching";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -61,6 +62,7 @@ export type ManagerFacts = {
     intakeCompletedAt: Date | null;
     decisionStyle: string;
     twelveMonthAmbition: string | null;
+    educationTopics?: string[];
   } | null;
   members: { id: string; name: string }[];
   goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; createdAt?: Date }[];
@@ -877,6 +879,9 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
       recommendation: recommendation?.proposedAction ? recommendation : null
     };
   }
+
+  const coaching = deterministicManagerCoaching(facts, question, now);
+  if (coaching) return { answer: coaching.answer, citations: coaching.citations, recommendation: null };
 
   if (knowledgeQuestion && facts.knowledgeHealth) {
     const health = facts.knowledgeHealth;

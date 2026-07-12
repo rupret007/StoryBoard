@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `a1e85a9`
+Baseline for this round: `main` at `028e578`
 
 ## Product and current architecture
 
@@ -487,6 +487,28 @@ mock-safe provider adapters.
   disposable-database, evaluation, relationship-diagnostic, and Chromium
   coverage; promote the contract to `manager_os_v13` / `manager_evals_v14`.
 
+### P0 — Novice-safe Manager coaching (completed 2026-07-12)
+
+- [x] Close the gap where a novice asking “What is a settlement?” received
+  generic priority advice whenever OpenAI was disabled. Add a bounded,
+  code-owned coaching catalog for common booking, deal, show-production,
+  settlement, and release-rights concepts.
+- [x] Answer explicit learning questions in plain language with four practical
+  parts: definition, why it matters, what to do in StoryBoard, and the specific
+  ambiguity or legal/financial boundary to watch. Compare common pairs such as
+  guarantee versus door deal and stage plot versus input list directly.
+- [x] Make coaching workspace-aware without inventing facts. Relevant draft
+  settlements, unpaid invoices, active deals, upcoming shows, and qualified
+  prospects are cited only from the current artist; absent records remain
+  absent rather than becoming hypothetical claims.
+- [x] Keep education read-only. Recognized coaching questions bypass provider
+  generation, never propose an action, and remain subordinate to the existing
+  refusal for send/pay/sign/publish requests.
+- [x] Surface “Learn as you go” prompts in Manager, personalized from the
+  operating profile's saved topics with practical defaults for new bands.
+- [x] Promote the reviewed contract to `manager_os_v14` /
+  `manager_evals_v15` with unit, database, golden-eval, and Chromium coverage.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -594,6 +616,25 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Added novice-safe Manager coaching so the no-provider path can
+  explain the business instead of falling back to unrelated priorities. The
+  code-owned catalog covers booking/deal structures, show production,
+  settlement, and original-release rights; answers explain the term, why it
+  matters, the matching StoryBoard workflow, and important uncertainty. Known
+  concepts bypass model generation, create no recommendation, and cite only
+  current-artist records. The UI turns saved education topics into quick
+  questions. The design clean-rooms Andrea_NanoBot's conservative
+  classify-directly-or-clarify principle without copying its code, runtime, or
+  data. The release contract is `manager_os_v14` / `manager_evals_v15`.
+  Validation passed 90 API tests, two shared tests, three database workflows
+  across all 31 migrations, three production Chromium workflows, production
+  builds, the relationship diagnostic with zero mismatches, the 27/27 Manager
+  gate at 100% safety, and a rebuilt healthy container bundle. CI hardening now
+  waits for API and web cold-start readiness independently, verifies the actual
+  session cookie without following a redirect, and treats the browser cases as
+  one non-retriable database journey with failure traces retained. The CI-mode
+  browser run also exposed and fixed a real form-state race where a background
+  server refresh could clear unsaved band-member responsibilities before save.
 - 2026-07-12: Added explicit conversational memory capture. “Remember…” now
   creates a visible proposal rather than a silent write; acceptance saves the
   exact normal-sensitivity value with operator-confirmation provenance and an

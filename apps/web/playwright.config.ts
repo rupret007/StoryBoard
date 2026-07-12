@@ -8,11 +8,15 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   preserveOutput: "always",
-  retries: process.env.CI ? 1 : 0,
+  // These three tests are one serial booking-to-operations journey over the
+  // same explicit database. Retrying only the final test would reuse partially
+  // mutated state rather than replaying the journey, so fail the real attempt.
+  retries: 0,
+  expect: { timeout: process.env.CI ? 10_000 : 5_000 },
   use: {
     baseURL: "http://127.0.0.1:3000",
     screenshot: "only-on-failure",
-    trace: "on-first-retry"
+    trace: "retain-on-failure"
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [

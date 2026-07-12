@@ -34,6 +34,7 @@ import { managerProviderContextPolicy, projectManagerMemoryForProvider } from ".
 import { deterministicManagerKnowledgeHealth, isProfileBackedMemoryKey, managerProfileMemoryValues, projectManagerMemoryForReasoning } from "./manager-knowledge-health";
 import { deterministicManagerGoalMeasurement, deterministicManagerGoalMeasurements } from "./manager-goal-measurement";
 import { managerMemoryCaptureMatches } from "./manager-memory-capture";
+import { MANAGER_COACHING_POLICY_VERSION, managerCoachingTopics, managerUnrecognizedCoachingTopic } from "./manager-coaching";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const MANAGER_FACT_AGGREGATES = [
@@ -1072,6 +1073,9 @@ export class ManagerService {
     history.reverse();
     const safeFacts = this.safeFacts(facts);
     const fallback = deterministicManagerChat(facts, input.message);
+    const coachingTopics = managerCoachingTopics(input.message).map((topic) => topic.id);
+    const unknownCoachingTopic = managerUnrecognizedCoachingTopic(input.message);
+    const coachingRoute = coachingTopics.length > 0 || Boolean(unknownCoachingTopic);
     let content = fallback.answer;
     let citations = fallback.citations;
     let recommendation: ManagerRecommendationDraft | null = fallback.recommendation;
@@ -1084,7 +1088,7 @@ export class ManagerService {
     const settings = await this.settings(artistId);
     const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, settings);
     let providerAttempted = false;
-    if (settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
+    if (!coachingRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       try {
         model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
@@ -1133,8 +1137,9 @@ export class ManagerService {
           factsRead: [...this.knownIds(facts)],
           conversationMessageIds: history.map((message) => message.id),
           toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
-          guardrails: ["known-evidence", "bounded-history", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness"],
+          guardrails: ["known-evidence", "bounded-history", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "code-owned-manager-coaching"],
           providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
+          coaching: { policyVersion: MANAGER_COACHING_POLICY_VERSION, topicIds: coachingTopics, unrecognized: Boolean(unknownCoachingTopic), providerBypassed: coachingRoute },
           responseQuality,
           responseFeedbackSignals: summarizeManagerResponseFeedback(responseFeedback)
         },

@@ -110,7 +110,7 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v13`
+already performed an outside action. Prompt/policy version `manager_os_v14`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, and respectful
 missing-context guidance. Before applying the five-item Today limit, the
@@ -127,6 +127,14 @@ action: build the existing source-keyed show advance or project plan.
 Acceptance revalidates the artist and current date, uses the existing Task
 authority, and completes atomically; it does not grant arbitrary tool or
 provider access.
+The same conversation teaches common band-business concepts without requiring
+a model. Explicit questions about holds, guarantees, door deals, advancing,
+production documents, deposits, agreements, invoices, settlements, member
+splits, publishing, masters, distribution, and related terms receive a plain
+definition, why it matters, the matching StoryBoard workflow, and a specific
+caution. Relevant artist records are cited when they exist. These code-owned
+answers are read-only and cannot send, pay, sign, publish, or create work.
+“Learn as you go” prompts use the band's saved **Topics to explain**.
 Brief cache reuse is also evidence-aware: a newer audited change to relevant
 band operations, booking, money, approvals, decisions, or Manager work forces a
 fresh brief instead of waiting for the daily/weekly age limit.

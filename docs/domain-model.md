@@ -111,6 +111,13 @@ recorded identity/strategy, people/responsibilities, business facts, and active
 execution on four transparent 25-point dimensions. It orders unanswered
 questions by operational importance and carries evidence IDs; it never scores
 talent, artistic quality, likelihood of success, or facts that were not saved.
+`manager_coaching_v1` is also derived and non-persistent. It maps an explicit
+learning question to a reviewed music-business concept, optionally projects
+same-artist evidence such as a draft settlement or open invoice, and returns no
+action. The catalog is intentionally separate from `ManagerMemoryFact`: a
+generic definition is not a claim about the band, while workspace context must
+still come from authoritative records. Saved `educationTopics` personalize UI
+prompts but cannot add new catalog entries or instructions at runtime.
 
 ### Events, music, projects, and deals
 

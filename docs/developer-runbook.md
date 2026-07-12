@@ -326,7 +326,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v13`)
+  (owner-only; currently accepts only the code-registered `manager_os_v14`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -382,7 +382,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v13` retains the current operator question and at most 12
+version `manager_os_v14` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -409,6 +409,15 @@ is displayed before acceptance and saved with operator-confirmation provenance
 only after **Remember this**. Ordinary conversation and scheduled briefs cannot
 write memory; operating-profile facts redirect to Band context, and credentials,
 financial identifiers, and health information are refused.
+Explicit education questions use `manager_coaching_v1` before provider
+reasoning. The reviewed catalog covers common booking/deal structures, show
+production, settlement, and release-rights concepts. Each response explains
+the concept, why it matters, where it belongs in StoryBoard, and a bounded
+caution; it may cite only current-artist records. Coaching is read-only,
+records its topic IDs/provider bypass in the redacted run trace, and never
+creates a recommendation. The external-action refusal runs first. The Manager
+UI builds its **Learn as you go** prompts from `educationTopics`, with safe
+defaults when no topics are saved.
 Generated briefs remain limited to `create_task` proposals.
 Each assistant message links to the exact `ManagerRun` that produced it.
 Members can record one idempotent feedback row per response/operator; feedback
@@ -490,6 +499,13 @@ the result.
 `pnpm test:e2e` resets only the explicitly named test database after validating
 that its name contains `test`, then seeds it. Browser coverage therefore
 exercises first-time intake on every run instead of inheriting old test data.
+The three browser cases form one serial booking-to-operations journey over that
+database. Per-test retries are intentionally disabled because retrying only a
+downstream case would reuse partial state instead of replaying the journey;
+failed runs retain a Playwright trace and must restart from the database reset.
+The CI container smoke waits for API and web readiness independently, then
+verifies that dev login writes an `sb_session` cookie without following the
+browser redirect.
 
 Operations routes:
 

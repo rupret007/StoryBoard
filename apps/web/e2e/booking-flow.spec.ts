@@ -103,28 +103,41 @@ test("novice manager intake produces grounded work and band operations records",
   await context.getByLabel("Responsibilities for Alex").fill("bandleader, booking");
   await context.getByLabel("Instruments for Alex").fill("vocals, guitar");
   const alexSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/manager/members/") && response.ok());
+  const alexContextRefreshed = page.waitForResponse((response) => response.request().method() === "GET" && response.url().includes("/manager/context-health") && response.ok());
   await alexContext.getByRole("button", { name: "Save" }).click();
-  await alexSaved;
+  await Promise.all([alexSaved, alexContextRefreshed]);
+  await expect(context.getByLabel("Responsibilities for Alex")).toHaveValue("bandleader, booking");
+  await expect(context.getByLabel("Instruments for Alex")).toHaveValue("vocals, guitar");
   const morganContext = context.getByLabel("Responsibilities for Morgan").locator("xpath=ancestor::div[contains(@class,'grid')][1]");
   await context.getByLabel("Responsibilities for Morgan").fill("production, finances");
   await context.getByLabel("Instruments for Morgan").fill("drums");
   const morganSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/manager/members/") && response.ok());
+  const morganContextRefreshed = page.waitForResponse((response) => response.request().method() === "GET" && response.url().includes("/manager/context-health") && response.ok());
   await morganContext.getByRole("button", { name: "Save" }).click();
-  await morganSaved;
+  await Promise.all([morganSaved, morganContextRefreshed]);
+  await expect(context.getByLabel("Responsibilities for Morgan")).toHaveValue("production, finances");
+  await expect(context.getByLabel("Instruments for Morgan")).toHaveValue("drums");
   await context.getByLabel("Availability expectations").fill("Respond to holds within 48 hours and protect two weekends each month.");
   await context.getByLabel("Current revenue sources (one per line)").fill("Private events\nTicketed shows");
   await context.getByLabel("Usable assets (one per line)").fill("Finished EP masters\nLive performance video");
   await context.getByRole("spinbutton").fill("500");
   await context.getByLabel("Business or payment name").fill("E2E Band LLC");
   const profileSaved = page.waitForResponse((response) => response.request().method() === "PUT" && response.url().includes("/manager/profile") && response.ok());
+  const profileContextRefreshed = page.waitForResponse((response) => response.request().method() === "GET" && response.url().includes("/manager/context-health") && response.ok());
   await context.getByRole("button", { name: "Save operating profile" }).click();
-  await profileSaved;
+  await Promise.all([profileSaved, profileContextRefreshed]);
   await expect(context.getByText(/82\/100 · Strong/i)).toBeVisible();
   await page.getByRole("button", { name: "Fill missing steps" }).click();
   await expect(page.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
   const newConversation = page.getByRole("button", { name: "New", exact: true });
   if (await newConversation.isVisible().catch(() => false)) await newConversation.click();
   const managerMessage = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
+  const coachingPrompts = page.getByTestId("manager-coaching-prompts");
+  await expect(coachingPrompts.getByRole("button", { name: "How does a show settlement work?" })).toBeVisible();
+  await coachingPrompts.getByRole("button", { name: "How does a show settlement work?" }).click();
+  await expect(managerMessage).toHaveValue("How does a show settlement work?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "A settlement is the post-show money check" })).toContainText(/In StoryBoard:/);
   await managerMessage.fill("What do you still need to know about our band?");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "Context coverage is 82/100" })).toContainText(/not the band's quality or potential/i);
@@ -189,7 +202,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v13", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v14", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
