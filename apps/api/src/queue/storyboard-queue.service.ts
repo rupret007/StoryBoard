@@ -12,6 +12,7 @@ import { WorkflowJobProcessorService } from "../workflow-automation/workflow-job
 export const STORYBOARD_ENRICHMENT_QUEUE = "storyboard-enrichment";
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 const ONE_DAY_MS = 86400000;
 const SEVEN_DAYS_MS = 7 * ONE_DAY_MS;
 
@@ -42,6 +43,7 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
     const digestWeeklyMs =
       this.config.get<number>("WORKFLOW_DIGEST_WEEKLY_MS") ?? SEVEN_DAYS_MS;
     const replySyncMs = this.config.get<number>("GMAIL_REPLY_SYNC_REPEAT_MS") ?? 15 * 60 * 1000;
+    const managerScheduleScanMs = this.config.get<number>("MANAGER_SCHEDULE_SCAN_MS") ?? FIFTEEN_MINUTES_MS;
 
     if (this.config.get<string>("ENABLE_QUEUE_WORKER") !== "false") {
       void this.queue
@@ -104,6 +106,18 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
         )
         .catch((e) =>
           this.log.warn(`schedule digest.generate.weekly failed: ${String(e)}`)
+        );
+      void this.queue
+        .add(
+          "manager.schedule.scan",
+          {},
+          {
+            repeat: { every: managerScheduleScanMs },
+            jobId: "repeat-manager-schedule-scan"
+          }
+        )
+        .catch((e) =>
+          this.log.warn(`schedule manager.schedule.scan failed: ${String(e)}`)
         );
     }
 

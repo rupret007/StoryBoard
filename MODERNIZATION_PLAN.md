@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `22f7555`
+Baseline for this round: `main` at `62a71ea`
 
 ## Product and current architecture
 
@@ -115,8 +115,9 @@ mock-safe provider adapters.
   tenant isolation, and acceptance behavior.
 - [x] Ship the Manager workspace and preserve the booking-advisor API for
   compatibility.
-- [ ] Production scheduling of briefs remains deployment-dependent; the API
-  stores owner settings but no new scheduler is enabled in this round.
+- [x] Owner-enabled Manager brief schedules run through the existing BullMQ
+  worker. Scheduled briefs are deterministic unless the owner separately opts
+  into model usage; external actions remain approval-gated.
 
 ### P0 — Coherent, grounded Manager conversation (completed 2026-07-12)
 
@@ -307,6 +308,27 @@ mock-safe provider adapters.
   browser path. Keep provider, legal, financial, and external authority
   unchanged.
 
+### P0 — Opt-in Manager operating cadence (completed 2026-07-12)
+
+- [x] Complete the dormant Manager schedule boundary rather than adding a
+  second planner. The operating profile's daily/weekly cadence, owner-selected
+  IANA timezone, hour, and weekly day determine when the existing brief runs.
+- [x] Keep scheduling off by default. Owners choose owners-only or team in-app
+  delivery; no email, Telegram, calendar, provider write, or record mutation is
+  implied by a scheduled brief.
+- [x] Keep scheduled briefs deterministic by default. Optional model reasoning
+  has a separate owner consent because it may use provider tokens; full-context
+  consent remains distinct and the same evidence/action guardrails apply.
+- [x] Scan through BullMQ rather than an ad hoc timer. Compare-and-set local
+  period claims, stale-claim recovery, and a unique `ManagerRun.scheduleKey`
+  prevent duplicate runs across restarts or multiple workers.
+- [x] Persist the run, claim completion, and `manager_brief_ready` notifications
+  atomically. Notifications carry only a safe internal `/manager` link and
+  bounded brief text.
+- [x] Add forward migration `20260713190000_manager_operating_cadence`, strict
+  settings/timezone validation, queue dispatch, database idempotency, owner UI,
+  notification navigation, and production-browser coverage.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -414,6 +436,23 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Completed the dormant Manager operating cadence with forward
+  migration `20260713190000_manager_operating_cadence`. Owner controls now
+  expose the existing AI/data policy and an explicit daily/weekly local-time
+  schedule; scheduled model use requires a second opt-in and deterministic
+  briefs remain the default. BullMQ claims each local period with stale-claim
+  recovery, persists the run and owner/team in-app notifications atomically,
+  and deep-links the notification to Manager without sending anything outside
+  StoryBoard. The design clean-rooms Andrea_NanoBot's opt-in ritual and
+  canonical-source principles; no code or runtime dependency was imported.
+  Validation passed 77 API tests, two shared tests, concurrent/idempotent
+  scheduling in all three 26-migration database workflows, three production
+  Chromium workflows, and the existing 16/16 `manager_os_v8` safety gate. A
+  worker-enabled API smoke reported database/Redis/worker ready and BullMQ
+  registered `manager.schedule.scan` at the documented 15-minute interval. A
+  fresh isolated container bundle also applied all 26 migrations, seeded,
+  reached API/worker readiness, served the production web build, and registered
+  the same repeatable job before its temporary stack and volumes were removed.
 - 2026-07-12: Closed the Manager follow-through gap with an evidence-ranked
   commitment projection and forward migration
   `20260713180000_task_commitment_followthrough`. Blocked tasks now require a

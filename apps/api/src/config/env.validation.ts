@@ -24,6 +24,7 @@ const envSchema = z
     BOOKING_ADVISOR_AUTOMATION_ENABLED: z.string().optional().transform((value) => value === "true"),
     GMAIL_REPLY_SYNC_ENABLED: z.string().optional().transform((value) => value === "true"),
     GMAIL_REPLY_SYNC_REPEAT_MS: z.coerce.number().int().positive().optional(),
+    MANAGER_SCHEDULE_SCAN_MS: z.coerce.number().int().min(60000).optional(),
     GOOGLE_CLIENT_ID: z.string().optional(),
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     GOOGLE_OAUTH_REFRESH_TOKEN: z.string().optional(),

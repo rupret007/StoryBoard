@@ -15,6 +15,7 @@ import { AdapterRegistryResolver } from "../integrations/adapter-registry.resolv
 import { PrismaService } from "../prisma/prisma.service";
 import { TasksService } from "../tasks/tasks.service";
 import { OperationalIntelligenceService } from "../operational-intelligence/operational-intelligence.service";
+import { ManagerService } from "../manager/manager.service";
 import { BOOKING_REPLIES_SYNC, type BookingRepliesSyncPort } from "../booking/booking-replies.tokens";
 import { MembershipNotifyTargetsService } from "./membership-notify-targets.service";
 import { WorkflowEmailService } from "./workflow-email.service";
@@ -90,10 +91,17 @@ export class WorkflowJobProcessorService {
         return this.urgentTelegramScan(job);
       case "booking-replies.sync":
         return this.bookingRepliesSync();
+      case "manager.schedule.scan":
+        return this.managerScheduleScan();
       default:
         this.log.warn(`unknown job: ${job.name}`);
         return { ok: false, unknown: job.name };
     }
+  }
+
+  private managerScheduleScan() {
+    const service = this.moduleRef.get(ManagerService, { strict: false });
+    return service.runScheduledBriefScan();
   }
 
   private async bookingRepliesSync() {

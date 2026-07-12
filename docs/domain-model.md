@@ -29,6 +29,13 @@ reads return at most 50. Every delivered assistant message may link its exact
 helpful/correction verdict per response and operator. Free-text corrections are
 retained for human review but are not sent back through model instructions;
 only bounded reason aggregates affect code-owned response presentation.
+`ManagerSettings` holds owner-controlled AI/data choices and an optional
+operating cadence. The schedule uses the profile's daily/weekly cadence plus a
+validated timezone, local hour, weekly day, and owner/team audience. Claim and
+completion timestamps make worker state inspectable. Scheduled model use is a
+separate opt-in from normal Manager AI. A nullable unique
+`ManagerRun.scheduleKey` identifies one artist/local period; the corresponding
+brief and `manager_brief_ready` notification are persisted atomically.
 Assistant messages can reference a reviewable
 `ManagerRecommendation`, but cannot directly perform provider, legal, or
 financial actions. Recommendation outcome reason/note/time support reviewed

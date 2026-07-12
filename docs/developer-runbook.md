@@ -247,7 +247,7 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 
 `GET /integrations/status?artistId=` — requires a signed-in operator and membership; returns `providers` modes plus `googleConnection` summary. Artist context is resolved like other modules (`artistId` query, `x-artist-id`, session current artist, or first membership).
 
-**BullMQ:** Queue `storyboard-enrichment`; worker runs inside the API unless `ENABLE_QUEUE_WORKER=false`. Jobs include `venue.enrich`, `research.refresh` (stubs), phase **4A** workflow jobs, phase **4B** **`digest.generate.daily`** / **`digest.generate.weekly`**, and phase **5A** **`urgent.telegram.scan`** (same repeat interval as overdue/stale) — see `docs/workflow-automation.md`. Optional env: **`WORKFLOW_STALE_FOLLOWUP_DAYS`** (default `7`), **`WORKFLOW_AUTOMATION_REPEAT_MS`** (overdue/stale/telegram repeat, default 6 hours), **`WORKFLOW_DIGEST_DAILY_MS`**, **`WORKFLOW_DIGEST_WEEKLY_MS`** (digest intervals; defaults 1 day and 7 days). **Telegram:** optional **`TELEGRAM_BOT_TOKEN`** — without it, urgent Telegram sends use the **mock** path (audited, no network). **Phase 5B:** **`TELEGRAM_BOT_USERNAME`** (deep links), **`TELEGRAM_REGISTRATION_TTL_MINUTES`**, **`TELEGRAM_WEBHOOK_SECRET`** (optional; Telegram `secret_token` must match **`X-Telegram-Bot-Api-Secret-Token`**). Public webhook: **`POST /integrations/telegram/webhook`** — configure via Bot API **`setWebhook`**. See `docs/telegram-alerts.md`.
+**BullMQ:** Queue `storyboard-enrichment`; worker runs inside the API unless `ENABLE_QUEUE_WORKER=false`. Jobs include `venue.enrich`, `research.refresh` (stubs), phase **4A** workflow jobs, phase **4B** **`digest.generate.daily`** / **`digest.generate.weekly`**, Manager **`manager.schedule.scan`**, and phase **5A** **`urgent.telegram.scan`** (same repeat interval as overdue/stale) — see `docs/workflow-automation.md`. Optional env: **`WORKFLOW_STALE_FOLLOWUP_DAYS`** (default `7`), **`WORKFLOW_AUTOMATION_REPEAT_MS`** (overdue/stale/telegram repeat, default 6 hours), **`WORKFLOW_DIGEST_DAILY_MS`**, **`WORKFLOW_DIGEST_WEEKLY_MS`** (digest intervals; defaults 1 day and 7 days), and **`MANAGER_SCHEDULE_SCAN_MS`** (default 15 minutes, minimum one minute). **Telegram:** optional **`TELEGRAM_BOT_TOKEN`** — without it, urgent Telegram sends use the **mock** path (audited, no network). **Phase 5B:** **`TELEGRAM_BOT_USERNAME`** (deep links), **`TELEGRAM_REGISTRATION_TTL_MINUTES`**, **`TELEGRAM_WEBHOOK_SECRET`** (optional; Telegram `secret_token` must match **`X-Telegram-Bot-Api-Secret-Token`**). Public webhook: **`POST /integrations/telegram/webhook`** — configure via Bot API **`setWebhook`**. See `docs/telegram-alerts.md`.
 
 **Workflow notifications API** (session + artist context via `x-artist-id` / session):
 
@@ -313,6 +313,26 @@ Manager routes:
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
+
+Manager cadence is off by default. The owner-facing Manager card controls
+`scheduleEnabled`, IANA `timezone`, local `dailyHour`, ISO-style `weeklyDay`
+(Monday `1` through Sunday `7`), and `scheduleAudience` (`owners` or `team`).
+The cadence itself comes from `ArtistOperatingProfile.communicationCadence`.
+The repeatable `manager.schedule.scan` BullMQ job checks enabled rows every 15
+minutes by default (`MANAGER_SCHEDULE_SCAN_MS`) and catches up after the chosen
+hour within the same local day/week. A compare-and-set claim plus unique
+`ManagerRun.scheduleKey` makes the local period idempotent; a stale claim may be
+retried after 30 minutes. The run, completed claim, and in-app
+`manager_brief_ready` rows are one database transaction.
+
+Scheduled output remains deterministic unless the owner separately enables
+both Manager AI and `scheduledAiEnabled`. This separation prevents normal chat
+AI consent from silently creating recurring provider calls. `fullContextEnabled`
+is still a separate owner data-policy choice. Disabling the schedule clears
+`scheduledAiEnabled`, so recurring model use cannot reactivate silently.
+Scheduled briefs create no email,
+Telegram, calendar, Drive, legal, financial, or other provider action and never
+accept their own recommendations.
 
 `OPENAI_ENABLED=false` is fully supported. With OpenAI enabled, set
 `OPENAI_MANAGER_MODEL` (default `gpt-5.6-terra`). Manager inputs are

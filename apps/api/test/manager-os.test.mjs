@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, commitmentHealth, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, commitmentHealth, managerSchedule, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -19,12 +19,14 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-outcome-review.js"),
   loadApi("manager/manager-context-health.js"),
   loadApi("manager/manager-commitment-health.js"),
+  loadApi("manager/manager-schedule.js"),
   loadApi("tasks/tasks.service.js"),
   loadApi("manager/manager-evaluation.js"),
   loadApi("manager/manager-plan.js"),
   loadApi("operations/event-readiness.js"),
   loadApi("operations/event-day-of.js"),
-  loadApi("operations/project-plan.js")
+  loadApi("operations/project-plan.js"),
+  loadApi("workflow-automation/workflow-job-processor.service.js")
 ]);
 
 const now = new Date("2026-07-12T12:00:00.000Z");
@@ -64,6 +66,71 @@ test("manager intake is strict, supports every band mode, and preserves unknowns
   assert.equal(managerSchemas.managerDecisionPatchSchema.safeParse({}).success, false);
   assert.equal(managerSchemas.managerDecisionReviewSchema.safeParse({ outcome: "mixed", note: "Worth repeating with a smaller room", evidence: [] }).success, true);
   assert.equal(managerSchemas.managerDecisionReviewSchema.safeParse({ outcome: "successful", note: "Invented status", evidence: [] }).success, false);
+});
+
+test("manager cadence validation and local periods fail closed", () => {
+  assert.equal(managerSchemas.managerSettingsSchema.safeParse({ scheduleEnabled: true, timezone: "America/Chicago", dailyHour: 9, weeklyDay: 1, scheduleAudience: "team", scheduledAiEnabled: false }).success, true);
+  assert.equal(managerSchemas.managerSettingsSchema.safeParse({ timezone: "Central-ish" }).success, false);
+  assert.equal(managerSchemas.managerSettingsSchema.safeParse({ weeklyDay: 0 }).success, false);
+  assert.equal(managerSchemas.managerSettingsSchema.safeParse({ scheduleAudience: "everyone" }).success, false);
+
+  const chicago = managerSchedule.managerScheduleSlot({ now: new Date("2026-07-13T14:05:00.000Z"), timezone: "America/Chicago", cadence: "daily", dailyHour: 9, weeklyDay: 1 });
+  assert.equal(chicago.localDate, "2026-07-13");
+  assert.equal(chicago.localHour, 9);
+  assert.equal(chicago.localWeekday, 1);
+  assert.equal(chicago.due, true);
+  assert.equal(chicago.periodKey, "daily:2026-07-13");
+  assert.equal(managerSchedule.managerScheduleKey("artist-a", chicago), "artist-a:daily:2026-07-13");
+
+  const losAngeles = managerSchedule.managerScheduleSlot({ now: new Date("2026-07-13T14:05:00.000Z"), timezone: "America/Los_Angeles", cadence: "daily", dailyHour: 9, weeklyDay: 1 });
+  assert.equal(losAngeles.localHour, 7);
+  assert.equal(losAngeles.due, false);
+
+  const weeklyCatchup = managerSchedule.managerScheduleSlot({ now: new Date("2026-07-14T15:00:00.000Z"), timezone: "America/Chicago", cadence: "weekly", dailyHour: 9, weeklyDay: 1 });
+  assert.equal(weeklyCatchup.localWeekday, 2);
+  assert.equal(weeklyCatchup.due, true);
+  assert.match(weeklyCatchup.periodKey, /^weekly:2026-W\d{2}$/);
+  const friday = managerSchedule.managerScheduleSlot({ now: new Date("2026-07-14T15:00:00.000Z"), timezone: "America/Chicago", cadence: "weekly", dailyHour: 9, weeklyDay: 5 });
+  assert.equal(friday.due, false);
+});
+
+test("manager settings require explicit, compatible schedule and model consent", async () => {
+  let current = { id: "settings-a", artistId: "artist-a", aiEnabled: false, fullContextEnabled: false, scheduleEnabled: false, scheduledAiEnabled: false, scheduleAudience: "owners", timezone: null, dailyHour: 9, weeklyDay: 1 };
+  let intakeComplete = true;
+  let audits = 0;
+  const client = {
+    managerSettings: {
+      upsert: async ({ create, update }) => { current = { ...current, ...(Object.keys(update).length ? update : create) }; return { ...current }; }
+    },
+    artistOperatingProfile: { findUnique: async () => intakeComplete ? { intakeCompletedAt: new Date() } : null }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
+  await assert.rejects(() => service.updateSettings("artist-a", { scheduleEnabled: true }, "owner@test", "operator-a"), /Timezone/);
+  await assert.rejects(() => service.updateSettings("artist-a", { scheduledAiEnabled: true }, "owner@test", "operator-a"), /Enable Manager AI/);
+  await assert.rejects(() => service.updateSettings("artist-a", { aiEnabled: true }, "owner@test", "operator-a"), /disabled by deployment/);
+  intakeComplete = false;
+  await assert.rejects(() => service.updateSettings("artist-a", { scheduleEnabled: true, timezone: "America/Chicago" }, "owner@test", "operator-a"), /Complete Manager setup/);
+  intakeComplete = true;
+  const saved = await service.updateSettings("artist-a", { scheduleEnabled: true, timezone: "America/Chicago", weeklyDay: 1, scheduleAudience: "owners" }, "owner@test", "operator-a");
+  assert.equal(saved.scheduleEnabled, true);
+  assert.equal(saved.timezone, "America/Chicago");
+  current.scheduledAiEnabled = true;
+  const disabled = await service.updateSettings("artist-a", { scheduleEnabled: false }, "owner@test", "operator-a");
+  assert.equal(disabled.scheduledAiEnabled, false);
+  assert.equal(audits, 2);
+});
+
+test("the queue dispatches the Manager schedule scan through the registered service", async () => {
+  let scans = 0;
+  const moduleRef = { get: (token) => {
+    assert.equal(token.name, "ManagerService");
+    return { runScheduledBriefScan: async () => { scans += 1; return { ok: true, generated: 1 }; } };
+  } };
+  const unused = {};
+  const processor = new workflowProcessorMod.WorkflowJobProcessorService(unused, unused, unused, unused, unused, unused, unused, unused, unused, unused, unused, moduleRef);
+  const result = await processor.process({ name: "manager.schedule.scan" });
+  assert.equal(scans, 1);
+  assert.deepEqual(result, { ok: true, generated: 1 });
 });
 
 test("manager decisions preserve the choice, require a review checkpoint, and record one immutable lesson", async () => {

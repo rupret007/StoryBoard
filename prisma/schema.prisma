@@ -440,16 +440,22 @@ model ArtistOperatingProfile {
 }
 
 model ManagerSettings {
-  id                 String   @id @default(cuid())
-  artistId           String   @unique
-  aiEnabled          Boolean  @default(false)
-  fullContextEnabled Boolean  @default(false)
-  scheduleEnabled    Boolean  @default(false)
-  timezone           String?
-  dailyHour          Int      @default(9)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  artist             Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  id                  String   @id @default(cuid())
+  artistId            String   @unique
+  aiEnabled           Boolean  @default(false)
+  fullContextEnabled  Boolean  @default(false)
+  scheduleEnabled     Boolean  @default(false)
+  scheduledAiEnabled  Boolean  @default(false)
+  scheduleAudience    String   @default("owners")
+  timezone            String?
+  dailyHour           Int      @default(9)
+  weeklyDay           Int      @default(1)
+  lastScheduledPeriod String?
+  scheduleClaimedAt   DateTime?
+  lastScheduledAt     DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  artist              Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
 }
 
 model BandMember {
@@ -596,6 +602,7 @@ model ManagerRun {
   inputFacts      Json
   output          Json
   trace           Json
+  scheduleKey     String?                 @unique
   latencyMs       Int?
   inputTokens     Int?
   outputTokens    Int?

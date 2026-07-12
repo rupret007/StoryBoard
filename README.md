@@ -140,6 +140,18 @@ blocked, overdue, repeatedly deferred, waiting, ownerless, and due-soon work
 for Manager Today, Waiting on, risks, and conversation. When OpenAI is enabled,
 code still requires the highest-severity commitment to remain first and rejects
 a duplicate task proposal for a blocker question.
+The **Manager cadence** completes the proactive loop without creating another
+planner. It is off by default and owner-controlled. A BullMQ scan uses the
+band's daily or weekly preference plus an IANA timezone, local hour, and weekly
+day to prepare at most one brief per local period. Runs and in-app
+`manager_brief_ready` notifications are persisted atomically and open the
+Manager workspace directly. Scheduled briefs are deterministic unless the
+owner separately opts into model use; enabling normal Manager AI does not
+silently create recurring provider cost. Owners also choose whether only owners
+or owners and members receive the in-app update. Turning the schedule off also
+clears its model-use consent. Scheduling never sends email,
+posts to Telegram, writes a calendar, accepts recommendations, or performs an
+outside action.
 The **Band context** panel makes the Manager's information quality inspectable.
 It derives four 25-point dimensions—identity, people, business, and current
 execution—from artist-owned structured records, then asks the highest-value

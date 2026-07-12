@@ -58,6 +58,7 @@ On **`Artist`**:
 | `followup.check-stale` | `{}` | **Repeatable** (same cadence). Uses **`workflowStaleFollowupDays`** or `WORKFLOW_STALE_FOLLOWUP_DAYS`. |
 | `digest.generate.daily` | `{}` | **Repeatable** — default interval **24h** (`WORKFLOW_DIGEST_DAILY_MS`). |
 | `digest.generate.weekly` | `{}` | **Repeatable** — default interval **7d** (`WORKFLOW_DIGEST_WEEKLY_MS`). |
+| `manager.schedule.scan` | `{}` | **Repeatable** — default interval **15m** (`MANAGER_SCHEDULE_SCAN_MS`, minimum 1m). Reads only owner-enabled Manager schedules, creates one local-period brief and in-app notification, and performs no provider write. |
 | `urgent.telegram.scan` | `{}` | **Repeatable** — same interval as overdue/stale (`WORKFLOW_AUTOMATION_REPEAT_MS`, default 6h). Sends **Telegram** urgent messages for artists with owner-configured routing; see phase 5A below. |
 | `venue.enrich`, `research.refresh` | (existing) | Unchanged stubs. |
 

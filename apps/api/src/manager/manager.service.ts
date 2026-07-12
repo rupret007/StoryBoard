@@ -3,8 +3,8 @@ import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCall, ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
-import type { BandMemberCreateInput, ManagerDecisionCreateInput, ManagerDecisionPatchInput, ManagerDecisionReviewInput, ManagerEvalPromotionInput, ManagerGoalCreateInput, ManagerGoalProgressInput, ManagerInitiativeCreateInput, ManagerMemoryPatchInput, ManagerMessageFeedbackInput, ManagerProfileInput, ManagerRecommendationFeedbackInput } from "@storyboard/shared";
-import { ManagerGoalStatus, ManagerInitiativeStatus, ManagerRecommendationOutcome, ManagerRunCadence, ManagerWorkstream } from "../generated/prisma/enums";
+import type { BandMemberCreateInput, ManagerDecisionCreateInput, ManagerDecisionPatchInput, ManagerDecisionReviewInput, ManagerEvalPromotionInput, ManagerGoalCreateInput, ManagerGoalProgressInput, ManagerInitiativeCreateInput, ManagerMemoryPatchInput, ManagerMessageFeedbackInput, ManagerProfileInput, ManagerRecommendationFeedbackInput, ManagerSettingsInput } from "@storyboard/shared";
+import { ArtistMembershipRole, ManagerGoalStatus, ManagerInitiativeStatus, ManagerRecommendationOutcome, ManagerRunCadence, ManagerWorkstream, WorkflowNotificationKind } from "../generated/prisma/enums";
 import type { Prisma } from "../generated/prisma/client";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -26,6 +26,7 @@ import { evaluateManagerResponseQuality, managerResponseGuidance, summarizeManag
 import { deterministicManagerOutcomeReview } from "./manager-outcome-review";
 import { deterministicManagerContextHealth } from "./manager-context-health";
 import { deterministicManagerCommitmentHealth, managerQuestionAsksAboutCommitments } from "./manager-commitment-health";
+import { managerScheduleKey, managerScheduleSlot } from "./manager-schedule";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const taskActionSchema = z.object({ type: z.literal("create_task"), title: z.string().min(1).max(240), dueAt: z.string().datetime({ offset: true }).nullable(), initiativeId: z.string().nullable() }).strict();
@@ -39,6 +40,18 @@ const chatOutputSchema = z.object({
   recommendation: itemSchema.nullable()
 }).strict();
 type Brief = z.infer<typeof briefSchema>;
+type ScheduledBriefPersistence = {
+  settingsId: string;
+  periodKey: string;
+  claimAt: Date;
+  scheduleKey: string;
+  artistName: string;
+  recipientOperatorIds: string[];
+};
+type GenerateBriefOptions = {
+  allowModel?: boolean;
+  scheduled?: ScheduledBriefPersistence;
+};
 type OptionalFields<T> = { [K in keyof T]?: T[K] | undefined };
 function clean<T extends Record<string, unknown>>(value: T): Record<string, unknown> { return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)); }
 
@@ -150,7 +163,33 @@ export class ManagerService {
   }
 
   async settings(artistId: string) { return this.prisma.client.managerSettings.upsert({ where: { artistId }, create: { artistId }, update: {} }); }
-  async updateSettings(artistId: string, input: { aiEnabled?: boolean | undefined; fullContextEnabled?: boolean | undefined; scheduleEnabled?: boolean | undefined; timezone?: string | null | undefined; dailyHour?: number | undefined }, actorLabel: string, actorOperatorId: string) { if (input.aiEnabled && !this.config.get<boolean>("OPENAI_ENABLED")) throw new BadRequestException("OpenAI is disabled by deployment configuration"); if (input.scheduleEnabled && !input.timezone && !(await this.settings(artistId)).timezone) throw new BadRequestException("Timezone is required for scheduled briefs"); const data = clean(input); const row = await this.prisma.client.managerSettings.upsert({ where: { artistId }, create: { artistId, ...data } as Prisma.ManagerSettingsUncheckedCreateInput, update: data }); await this.audit.log({ artistId, aggregateType: "ManagerSettings", aggregateId: row.id, action: "manager.settings_updated", actorLabel, actorOperatorId, metadata: data }); return row; }
+  async updateSettings(artistId: string, input: ManagerSettingsInput, actorLabel: string, actorOperatorId: string) {
+    const current = await this.settings(artistId);
+    const normalized = input.aiEnabled === false
+      ? { ...input, fullContextEnabled: false, scheduledAiEnabled: false }
+      : input.scheduleEnabled === false
+        ? { ...input, scheduledAiEnabled: false }
+        : input;
+    const aiEnabled = normalized.aiEnabled ?? current.aiEnabled;
+    const scheduledAiEnabled = normalized.scheduledAiEnabled ?? current.scheduledAiEnabled;
+    const scheduleEnabled = normalized.scheduleEnabled ?? current.scheduleEnabled;
+    const timezone = normalized.timezone === undefined ? current.timezone : normalized.timezone;
+    if (aiEnabled && !this.config.get<boolean>("OPENAI_ENABLED")) throw new BadRequestException("OpenAI is disabled by deployment configuration");
+    if (scheduledAiEnabled && !aiEnabled) throw new BadRequestException("Enable Manager AI before using it for scheduled briefs");
+    if (scheduleEnabled && !timezone) throw new BadRequestException("Timezone is required for scheduled briefs");
+    if (scheduleEnabled && !(await this.profile(artistId))?.intakeCompletedAt) throw new BadRequestException("Complete Manager setup before scheduling briefs");
+    const scheduleConfigChanged =
+      (normalized.scheduleEnabled !== undefined && normalized.scheduleEnabled !== current.scheduleEnabled) ||
+      (normalized.scheduledAiEnabled !== undefined && normalized.scheduledAiEnabled !== current.scheduledAiEnabled) ||
+      (normalized.scheduleAudience !== undefined && normalized.scheduleAudience !== current.scheduleAudience) ||
+      (normalized.timezone !== undefined && normalized.timezone !== current.timezone) ||
+      (normalized.dailyHour !== undefined && normalized.dailyHour !== current.dailyHour) ||
+      (normalized.weeklyDay !== undefined && normalized.weeklyDay !== current.weeklyDay);
+    const data = clean({ ...normalized, ...(scheduleConfigChanged ? { lastScheduledPeriod: null, scheduleClaimedAt: null } : {}) });
+    const row = await this.prisma.client.managerSettings.upsert({ where: { artistId }, create: { artistId, ...data } as Prisma.ManagerSettingsUncheckedCreateInput, update: data });
+    await this.audit.log({ artistId, aggregateType: "ManagerSettings", aggregateId: row.id, action: "manager.settings_updated", actorLabel, actorOperatorId, metadata: { aiEnabled: row.aiEnabled, fullContextEnabled: row.fullContextEnabled, scheduleEnabled: row.scheduleEnabled, scheduledAiEnabled: row.scheduledAiEnabled, scheduleAudience: row.scheduleAudience, timezone: row.timezone, dailyHour: row.dailyHour, weeklyDay: row.weeklyDay } });
+    return row;
+  }
 
   memory(artistId: string, includeSensitive = false) {
     return this.prisma.client.managerMemoryFact.findMany({
@@ -534,7 +573,7 @@ export class ManagerService {
     return { input, inputTokens: first.usage?.input_tokens ?? 0, outputTokens: first.usage?.output_tokens ?? 0 };
   }
 
-  async generateBrief(artistId: string, cadence: "intake" | "daily" | "weekly", actorLabel: string, actorOperatorId: string | null) {
+  async generateBrief(artistId: string, cadence: "intake" | "daily" | "weekly", actorLabel: string, actorOperatorId: string | null, options: GenerateBriefOptions = {}) {
     const started = Date.now();
     const facts = await this.facts(artistId);
     const safeFacts = this.safeFacts(facts);
@@ -544,7 +583,7 @@ export class ManagerService {
     let inputTokens: number | null = null;
     let outputTokens: number | null = null;
     const settings = await this.settings(artistId);
-    if (settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
+    if ((options.allowModel ?? true) && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
       try {
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
@@ -574,8 +613,53 @@ export class ManagerService {
     brief = suppressRepeatedManagerAdvice(brief, facts.recommendationHistory);
     const suppressedCount = candidateCount - brief.today.length - brief.thisWeek.length;
     const recommendations = [...brief.today, ...brief.thisWeek].filter((item, index, all) => all.findIndex((other) => other.stableKey === item.stableKey) === index);
-    const run = await this.prisma.client.managerRun.create({ data: { artistId, cadence: cadence as ManagerRunCadence, mode, model, promptVersion: PROMPT_VERSION, inputFacts: safeFacts, output: brief, trace: { factsRead: [...this.knownIds(facts)], toolsSelected: mode === "openai" ? ["read_manager_snapshot"] : [], guardrails: ["known-evidence", "repeat-suppression", "internal-action-allowlist", "approval-boundary", "untrusted-record-text"], suppressedCount }, latencyMs: Date.now() - started, inputTokens, outputTokens, recommendations: { create: recommendations.map((item) => ({ stableKey: item.stableKey, workstream: item.workstream, title: item.title, reason: item.reason, nextAction: item.nextAction, priority: item.priority, evidence: item.evidenceIds, ...(item.proposedAction ? { proposedAction: item.proposedAction } : {}) })) } }, include: { recommendations: true } });
-    await this.audit.log({ artistId, aggregateType: "ManagerRun", aggregateId: run.id, action: "manager.brief_generated", actorLabel, actorOperatorId, metadata: { cadence, mode, promptVersion: PROMPT_VERSION, recommendationCount: run.recommendations.length, suppressedCount } }); return run;
+    const createData = {
+      artistId,
+      cadence: cadence as ManagerRunCadence,
+      mode,
+      model,
+      promptVersion: PROMPT_VERSION,
+      inputFacts: safeFacts,
+      output: brief,
+      trace: {
+        factsRead: [...this.knownIds(facts)],
+        toolsSelected: mode === "openai" ? ["read_manager_snapshot"] : [],
+        guardrails: ["known-evidence", "repeat-suppression", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", ...(options.scheduled ? ["explicit-schedule-opt-in", "local-period-idempotency"] : [])],
+        suppressedCount
+      },
+      ...(options.scheduled ? { scheduleKey: options.scheduled.scheduleKey } : {}),
+      latencyMs: Date.now() - started,
+      inputTokens,
+      outputTokens,
+      recommendations: { create: recommendations.map((item) => ({ stableKey: item.stableKey, workstream: item.workstream, title: item.title, reason: item.reason, nextAction: item.nextAction, priority: item.priority, evidence: item.evidenceIds, ...(item.proposedAction ? { proposedAction: item.proposedAction } : {}) })) }
+    };
+    const run = options.scheduled
+      ? await this.prisma.client.$transaction(async (tx) => {
+          const completedAt = new Date();
+          const finalized = await tx.managerSettings.updateMany({
+            where: { id: options.scheduled!.settingsId, artistId, scheduleEnabled: true, lastScheduledPeriod: options.scheduled!.periodKey, scheduleClaimedAt: options.scheduled!.claimAt },
+            data: { scheduleClaimedAt: null, lastScheduledAt: completedAt }
+          });
+          if (finalized.count !== 1) throw new Error("Manager schedule claim is no longer active");
+          const created = await tx.managerRun.create({ data: createData, include: { recommendations: true } });
+          if (options.scheduled!.recipientOperatorIds.length) {
+            const first = brief.today[0];
+            await tx.workflowNotification.createMany({
+              data: options.scheduled!.recipientOperatorIds.map((recipientOperatorId) => ({
+                artistId,
+                recipientOperatorId,
+                kind: WorkflowNotificationKind.manager_brief_ready,
+                title: `Manager brief ready — ${options.scheduled!.artistName}`,
+                body: first ? `${brief.summary}\n\nNext: ${first.nextAction}` : brief.summary,
+                metadata: { href: "/manager", managerRunId: created.id, cadence, schedulePeriod: options.scheduled!.periodKey }
+              }))
+            });
+          }
+          return created;
+        })
+      : await this.prisma.client.managerRun.create({ data: createData, include: { recommendations: true } });
+    await this.audit.log({ artistId, aggregateType: "ManagerRun", aggregateId: run.id, action: "manager.brief_generated", actorLabel, actorOperatorId, metadata: { cadence, mode, promptVersion: PROMPT_VERSION, recommendationCount: run.recommendations.length, suppressedCount, scheduled: Boolean(options.scheduled), schedulePeriod: options.scheduled?.periodKey ?? null } });
+    return run;
   }
 
   latestBrief(artistId: string, cadence?: "daily" | "weekly") { return this.prisma.client.managerRun.findFirst({ where: { artistId, ...(cadence ? { cadence } : {}) }, include: { recommendations: true }, orderBy: { createdAt: "desc" } }); }
@@ -590,6 +674,88 @@ export class ManagerService {
     const predatesTaskChange = Boolean(latest && latestTask && latest.createdAt < latestTask.updatedAt);
     if (latest && !predatesCompletedIntake && !predatesTaskChange && latest.createdAt.getTime() >= Date.now() - maxAge) return latest;
     return this.generateBrief(artistId, cadence, actorLabel, actorOperatorId);
+  }
+  async runScheduledBriefScan(now = new Date()) {
+    const rows = await this.prisma.client.managerSettings.findMany({
+      where: { scheduleEnabled: true, timezone: { not: null } },
+      include: {
+        artist: {
+          select: {
+            name: true,
+            operatingProfile: { select: { communicationCadence: true, intakeCompletedAt: true } },
+            memberships: { where: { role: { in: [ArtistMembershipRole.owner, ArtistMembershipRole.member] } }, select: { operatorId: true, role: true } }
+          }
+        }
+      },
+      orderBy: { id: "asc" }
+    });
+    const results: { artistId: string; runId: string; cadence: "daily" | "weekly"; periodKey: string }[] = [];
+    let failed = 0;
+    let notDue = 0;
+    const staleClaimBefore = new Date(now.getTime() - 30 * 60 * 1000);
+    for (const setting of rows) {
+      const profile = setting.artist.operatingProfile;
+      if (!profile?.intakeCompletedAt || !setting.timezone) {
+        notDue += 1;
+        continue;
+      }
+      const cadence = profile.communicationCadence === "weekly" ? "weekly" : "daily";
+      let slot;
+      try {
+        slot = managerScheduleSlot({ now, timezone: setting.timezone, cadence, dailyHour: setting.dailyHour, weeklyDay: setting.weeklyDay });
+      } catch {
+        failed += 1;
+        await this.audit.log({ artistId: setting.artistId, aggregateType: "ManagerSettings", aggregateId: setting.id, action: "manager.schedule_failed", actorLabel: "StoryBoard scheduler", metadata: { reason: "invalid_timezone" } });
+        continue;
+      }
+      if (!slot.due) {
+        notDue += 1;
+        continue;
+      }
+      const claimAt = now;
+      const claimed = await this.prisma.client.managerSettings.updateMany({
+        where: {
+          id: setting.id,
+          artistId: setting.artistId,
+          scheduleEnabled: true,
+          OR: [
+            { lastScheduledPeriod: null },
+            { lastScheduledPeriod: { not: slot.periodKey } },
+            { lastScheduledPeriod: slot.periodKey, scheduleClaimedAt: { lt: staleClaimBefore } }
+          ]
+        },
+        data: { lastScheduledPeriod: slot.periodKey, scheduleClaimedAt: claimAt }
+      });
+      if (claimed.count !== 1) {
+        notDue += 1;
+        continue;
+      }
+      const scheduleKey = managerScheduleKey(setting.artistId, slot);
+      const recipientOperatorIds = setting.artist.memberships
+        .filter((membership) => setting.scheduleAudience === "team" || membership.role === ArtistMembershipRole.owner)
+        .map((membership) => membership.operatorId);
+      try {
+        const run = await this.generateBrief(setting.artistId, cadence, "StoryBoard scheduled manager", null, {
+          allowModel: setting.scheduledAiEnabled,
+          scheduled: { settingsId: setting.id, periodKey: slot.periodKey, claimAt, scheduleKey, artistName: setting.artist.name, recipientOperatorIds }
+        });
+        results.push({ artistId: setting.artistId, runId: run.id, cadence, periodKey: slot.periodKey });
+      } catch (error) {
+        const existing = await this.prisma.client.managerRun.findUnique({ where: { scheduleKey }, select: { id: true, createdAt: true } });
+        if (existing) {
+          await this.prisma.client.managerSettings.updateMany({ where: { id: setting.id, artistId: setting.artistId, lastScheduledPeriod: slot.periodKey }, data: { scheduleClaimedAt: null, lastScheduledAt: existing.createdAt } });
+          notDue += 1;
+          continue;
+        }
+        failed += 1;
+        await this.prisma.client.managerSettings.updateMany({
+          where: { id: setting.id, artistId: setting.artistId, lastScheduledPeriod: slot.periodKey, scheduleClaimedAt: claimAt },
+          data: { lastScheduledPeriod: setting.lastScheduledPeriod === slot.periodKey ? null : setting.lastScheduledPeriod, scheduleClaimedAt: null }
+        });
+        await this.audit.log({ artistId: setting.artistId, aggregateType: "ManagerSettings", aggregateId: setting.id, action: "manager.schedule_failed", actorLabel: "StoryBoard scheduler", metadata: { reason: error instanceof Error ? error.name : "unknown", periodKey: slot.periodKey } });
+      }
+    }
+    return { ok: failed === 0, scanned: rows.length, generated: results.length, failed, notDue, runs: results };
   }
   async recommendation(artistId: string, id: string, outcome: "accepted" | "dismissed" | "completed", feedback: ManagerRecommendationFeedbackInput, actorLabel: string, actorOperatorId: string) {
     const rec = await this.prisma.client.managerRecommendation.findFirst({ where: { id, managerRun: { artistId } }, include: { task: true, decision: true } });

@@ -33,11 +33,12 @@ The NestJS orchestration backend. Current responsibilities:
 - Prisma via **`PrismaService`** (`apps/api/src/prisma/`)
 - **`AuditService`** on important actions; approval execution paths
 - **Integrations:** adapter registry, Google OAuth, **Telegram** real/mock adapters
-- **Workflow automation:** BullMQ jobs (`workflow-automation/`, `queue/`), in-app notifications, email drafts, digests, **Telegram urgent scan**
+- **Workflow automation:** BullMQ jobs (`workflow-automation/`, `queue/`), in-app notifications, email drafts, digests, opt-in **Manager cadence**, **Telegram urgent scan**
 - **Manager OS:** tenant snapshots, deterministic briefs/chat, post-show outcome
   review, structured context health, scheduled decision/outcome learning,
   evidence-ranked commitment follow-through, conversation-to-decision drafts,
-  response-quality policy, and exact-message feedback in `src/manager/`
+  timezone-safe/idempotent brief scheduling, response-quality policy, and
+  exact-message feedback in `src/manager/`
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
 - Global **`CsrfOriginGuard`** (OAuth + Telegram webhook paths excluded for POST)
 

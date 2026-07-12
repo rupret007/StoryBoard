@@ -112,6 +112,15 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   ranking drives Manager Today, Waiting on, risks, chat, and UI. Model briefs
   cannot displace a high-severity commitment, and blocker questions cannot
   propose duplicate work.
+- Manager scheduling completes the existing brief boundary rather than adding
+  another planner. It is owner-opted, uses the profile cadence plus a validated
+  IANA timezone/hour/weekday, and runs through BullMQ. Local-period claims use
+  compare-and-set state with stale-claim recovery; `ManagerRun.scheduleKey` is
+  a second uniqueness boundary. The run, claim completion, and tenant-member
+  notification rows commit atomically. Scheduled reasoning is deterministic by
+  default and requires separate owner consent before it may spend model tokens.
+  A scheduled run can suggest reviewable internal work but cannot accept it or
+  perform any provider, legal, financial, or irreversible action.
 - Show readiness is deterministic derived data, not a model assertion or an
   editable status. It uses the tenant-scoped event graph, active lineup, dated
   urgency, explicit evidence IDs, and premise-coverage confidence. Operations
@@ -205,6 +214,14 @@ attempt a one-shot Telegram alert (category **approvals**, dedupe
 `approval_failed:<id>`). Audit actions include `telegram.urgent.skipped`,
 `telegram.urgent.sent`, `telegram.urgent.failed`, `automation.telegram.scan`,
 `workflow.telegram.settings.updated`.
+
+**Manager cadence:** `manager.schedule.scan` runs every 15 minutes by default
+and reads only explicitly enabled `ManagerSettings` rows. It evaluates the
+artist's local daily/weekly period, claims one period, generates the existing
+grounded brief, and creates `manager_brief_ready` in-app notifications for the
+owner-selected owner/team audience. No scheduled email or Telegram delivery is
+performed. `MANAGER_SCHEDULE_SCAN_MS` may tune the scan interval but cannot be
+set below one minute.
 
 **Phase 5B — inbound registration (narrow):** Owners create **short-lived** **`TelegramRegistrationToken`** rows (hashed at rest) via authenticated **`POST /workflow/telegram/registration-token`**. Telegram posts **`Update`** JSON to **`/integrations/telegram/webhook`**; StoryBoard parses **`/start <payload>`** only, consumes the token **once** in a transaction with **`Artist.telegramChatId`**, and writes **`telegram.registration.bound`** / **`telegram.registration.failed`** audits. Optional **`TELEGRAM_WEBHOOK_SECRET`** validates **`X-Telegram-Bot-Api-Secret-Token`**. This path does **not** alter memberships, invites, or approvals.
 

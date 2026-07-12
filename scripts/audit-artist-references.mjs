@@ -323,6 +323,24 @@ const checks = [
     `
   },
   {
+    relation: "Manager brief notification → run and active team recipient",
+    query: `
+      SELECT n."id" AS "recordId", n."artistId" AS "recordArtistId",
+             COALESCE(n."metadata"->>'managerRunId', n."recipientOperatorId") AS "relatedId",
+             COALESCE(r."artistId", m."artistId") AS "relatedArtistId"
+      FROM "WorkflowNotification" n
+      LEFT JOIN "ManagerRun" r ON r."id" = n."metadata"->>'managerRunId'
+      LEFT JOIN "ArtistMembership" m
+        ON m."operatorId" = n."recipientOperatorId" AND m."artistId" = n."artistId"
+      WHERE n."kind" = 'manager_brief_ready'
+        AND (r."id" IS NULL
+          OR n."artistId" <> r."artistId"
+          OR m."id" IS NULL
+          OR m."role" = 'viewer')
+      ORDER BY n."id";
+    `
+  },
+  {
     relation: "Agreement → deal and template",
     query: `
       SELECT a."id" AS "recordId", a."artistId" AS "recordArtistId",

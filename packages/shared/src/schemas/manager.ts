@@ -39,7 +39,24 @@ export const managerDecisionPatchSchema = z.object(managerDecisionFields).partia
   validateDecisionChoice(input, context);
 });
 export const managerDecisionReviewSchema = z.object({ outcome: z.enum(["worked", "mixed", "did_not_work", "inconclusive"]), note: z.string().trim().min(1).max(3000), evidence: z.array(z.string().trim().min(1).max(200)).max(20).default([]) }).strict();
-export const managerSettingsSchema = z.object({ aiEnabled: z.boolean().optional(), fullContextEnabled: z.boolean().optional(), scheduleEnabled: z.boolean().optional(), timezone: z.string().trim().max(80).nullable().optional(), dailyHour: z.number().int().min(6).max(20).optional() }).strict();
+const managerTimezoneSchema = z.string().trim().min(1).max(80).refine((value) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}, "Use a valid IANA timezone such as America/Chicago");
+export const managerSettingsSchema = z.object({
+  aiEnabled: z.boolean().optional(),
+  fullContextEnabled: z.boolean().optional(),
+  scheduleEnabled: z.boolean().optional(),
+  scheduledAiEnabled: z.boolean().optional(),
+  scheduleAudience: z.enum(["owners", "team"]).optional(),
+  timezone: managerTimezoneSchema.nullable().optional(),
+  dailyHour: z.number().int().min(6).max(20).optional(),
+  weeklyDay: z.number().int().min(1).max(7).optional()
+}).strict();
 export const managerChatSchema = z.object({ conversationId: z.string().trim().min(1).nullable().optional(), message: z.string().trim().min(1).max(10000) }).strict();
 export const managerMessageFeedbackReasons = ["incorrect", "missed_question", "too_vague", "too_long", "wrong_tone", "missing_context", "other"] as const;
 export const managerMessageFeedbackSchema = z.object({
@@ -73,3 +90,4 @@ export type ManagerRecommendationFeedbackInput = z.infer<typeof managerRecommend
 export type ManagerMessageFeedbackInput = z.infer<typeof managerMessageFeedbackSchema>;
 export type ManagerEvalPromotionInput = z.infer<typeof managerEvalPromotionSchema>;
 export type ManagerMemoryPatchInput = z.infer<typeof managerMemoryPatchSchema>;
+export type ManagerSettingsInput = z.infer<typeof managerSettingsSchema>;

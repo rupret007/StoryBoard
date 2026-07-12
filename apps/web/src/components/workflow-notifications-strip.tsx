@@ -1,6 +1,7 @@
 "use client";
 
 import { Bell, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 
@@ -11,6 +12,7 @@ type NotificationItem = {
   kind: string;
   readAt: string | null;
   createdAt: string;
+  metadata?: Record<string, unknown> | null;
 };
 
 type ListResponse = {
@@ -19,6 +21,7 @@ type ListResponse = {
 };
 
 export function WorkflowNotificationsStrip({ artistId }: { artistId: string }) {
+  const router = useRouter();
   const [data, setData] = useState<ListResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -59,6 +62,12 @@ export function WorkflowNotificationsStrip({ artistId }: { artistId: string }) {
     }
   }
 
+  async function openNotification(item: NotificationItem) {
+    await markRead(item.id);
+    const href = typeof item.metadata?.href === "string" ? item.metadata.href : null;
+    if (href?.startsWith("/") && !href.startsWith("//")) router.push(href);
+  }
+
   if (err) {
     return null;
   }
@@ -93,7 +102,7 @@ export function WorkflowNotificationsStrip({ artistId }: { artistId: string }) {
             <li key={n.id}>
               <button
                 type="button"
-                onClick={() => void markRead(n.id)}
+                onClick={() => void openNotification(n)}
                 className="w-full rounded-md border border-transparent px-2 py-1 text-left transition hover:border-[var(--border)] hover:bg-[var(--surface-0)]"
               >
                 <span className="block font-medium text-[var(--text-primary)]">

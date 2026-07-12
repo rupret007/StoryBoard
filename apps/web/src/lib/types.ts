@@ -245,6 +245,22 @@ export type ManagerProfile = {
   currency: string;
   intakeCompletedAt?: string | null;
 };
+export type ManagerSettings = {
+  id: string;
+  artistId: string;
+  aiEnabled: boolean;
+  fullContextEnabled: boolean;
+  scheduleEnabled: boolean;
+  scheduledAiEnabled: boolean;
+  scheduleAudience: "owners" | "team";
+  timezone?: string | null;
+  dailyHour: number;
+  weeklyDay: number;
+  lastScheduledPeriod?: string | null;
+  scheduleClaimedAt?: string | null;
+  lastScheduledAt?: string | null;
+  updatedAt: string;
+};
 export type BandMember = { id: string; name: string; email?: string | null; roles: string[]; instruments: string[]; active: boolean };
 export type ManagerContextHealth = { score: number; status: "thin" | "usable" | "strong"; summary: string; dimensions: { section: "identity" | "people" | "business" | "execution"; score: number; maxScore: 25; detail: string }[]; gaps: { code: string; section: "identity" | "people" | "business" | "execution"; importance: "high" | "med" | "low"; question: string; reason: string; evidenceIds: string[] }[]; nextQuestion?: string | null; evidenceIds: string[] };
 export type ManagerCommitmentHealth = { observedAt: string; summary: string; counts: { open: number; blocked: number; overdue: number; waiting: number; unassigned: number; repeatedlyDeferred: number; dueSoon: number; unscheduled: number }; items: { taskId: string; title: string; state: "blocked" | "overdue" | "repeatedly_deferred" | "waiting" | "unassigned" | "due_soon" | "unscheduled" | "active"; severity: "high" | "med" | "low"; status: string; ownerLabel: string | null; dueAt: string | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number; lastDeferredAt: string | null; reasons: string[]; evidenceIds: string[] }[]; nextAction: string; evidenceIds: string[] };

@@ -72,6 +72,15 @@ test("novice manager intake produces grounded work and band operations records",
     await page.getByRole("button", { name: "Build my 90-day operating plan" }).click();
   }
   await expect(page.getByText("Today", { exact: true })).toBeVisible();
+  const cadenceCard = page.getByTestId("manager-cadence");
+  await expect(cadenceCard.getByText("On request only", { exact: true })).toBeVisible();
+  await cadenceCard.getByLabel("Prepare Manager briefs on schedule").check();
+  await cadenceCard.getByLabel("Manager schedule timezone").fill("America/Chicago");
+  await cadenceCard.getByLabel("Manager schedule hour").selectOption("9");
+  await cadenceCard.getByLabel("Manager schedule audience").selectOption("owners");
+  await cadenceCard.getByRole("button", { name: "Save cadence" }).click();
+  await expect(cadenceCard.getByText("Manager cadence saved.", { exact: true })).toBeVisible();
+  await expect(cadenceCard.getByText(/Mondays after 9:00 AM in America\/Chicago/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "90-day plan" })).toBeVisible();
   await expect(page.getByText(/65\/100 · At risk/i)).toBeVisible();
   await expect(page.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
