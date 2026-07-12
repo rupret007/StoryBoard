@@ -5,16 +5,18 @@ import { CheckCircle2, CircleAlert, ListTodo } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import type { BookingOpportunity, Task } from "@/lib/types";
+import type { BandMember, BookingOpportunity, Task } from "@/lib/types";
 
 const STATUSES = ["todo", "in_progress", "blocked", "done"] as const;
 
 export function TasksClient({
   initialTasks,
-  opportunities
+  opportunities,
+  members
 }: {
   initialTasks: Task[];
   opportunities: BookingOpportunity[];
+  members: BandMember[];
 }) {
   const router = useRouter();
   const now = useMemo(() => new Date(), []);
@@ -39,6 +41,7 @@ export function TasksClient({
   const [title, setTitle] = useState("");
   const [opportunityId, setOpportunityId] = useState("");
   const [dueAt, setDueAt] = useState("");
+  const [ownerLabel, setOwnerLabel] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function createTask(e: React.FormEvent) {
@@ -50,12 +53,14 @@ export function TasksClient({
         json: {
           title: title.trim(),
           opportunityId: opportunityId || undefined,
-          dueAt: dueAt || undefined
+          dueAt: dueAt || undefined,
+          ownerLabel: ownerLabel || undefined
         }
       });
       setTitle("");
       setOpportunityId("");
       setDueAt("");
+      setOwnerLabel("");
       router.refresh();
     } finally {
       setBusy(false);
@@ -73,10 +78,10 @@ export function TasksClient({
           use last update (see weekly summary).
         </p>
         <form
-          className="mt-4 grid gap-4 sm:grid-cols-3"
+          className="mt-4 grid gap-4 sm:grid-cols-4"
           onSubmit={(ev) => void createTask(ev)}
         >
-          <label className="sm:col-span-3">
+          <label className="sm:col-span-4">
             <span className="sb-label">Title</span>
             <input
               required
@@ -84,6 +89,13 @@ export function TasksClient({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
+          </label>
+          <label>
+            <span className="sb-label">Owner</span>
+            <select className="sb-select mt-1.5" value={ownerLabel} onChange={(e) => setOwnerLabel(e.target.value)}>
+              <option value="">Unassigned</option>
+              {members.filter((member) => member.active).map((member) => <option key={member.id} value={member.name}>{member.name}</option>)}
+            </select>
           </label>
           <label>
             <span className="sb-label">Opportunity</span>
@@ -131,6 +143,7 @@ export function TasksClient({
             tasks={grouped.overdue}
             tone="danger"
             onSaved={() => router.refresh()}
+            ownerOptions={members.filter((member) => member.active).map((member) => member.name)}
           />
           <TaskSection
             title="Open"
@@ -138,6 +151,7 @@ export function TasksClient({
             tasks={grouped.open}
             tone="neutral"
             onSaved={() => router.refresh()}
+            ownerOptions={members.filter((member) => member.active).map((member) => member.name)}
           />
           <TaskSection
             title="Done"
@@ -145,6 +159,7 @@ export function TasksClient({
             tasks={grouped.done}
             tone="success"
             onSaved={() => router.refresh()}
+            ownerOptions={members.filter((member) => member.active).map((member) => member.name)}
           />
         </div>
       )}
@@ -157,13 +172,15 @@ function TaskSection({
   subtitle,
   tasks,
   tone,
-  onSaved
+  onSaved,
+  ownerOptions
 }: {
   title: string;
   subtitle: string;
   tasks: Task[];
   tone: "danger" | "neutral" | "success";
   onSaved: () => void;
+  ownerOptions: string[];
 }) {
   if (tasks.length === 0) {
     return null;
@@ -196,11 +213,12 @@ function TaskSection({
         </Badge>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-sm">
+        <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             <tr>
               <th className="pb-2 pr-4">Task</th>
               <th className="pb-2 pr-4">Status</th>
+              <th className="pb-2 pr-4">Owner</th>
               <th className="pb-2 pr-4">Due</th>
               <th className="pb-2 pr-4">Opportunity</th>
               <th className="pb-2 w-24" />
@@ -208,7 +226,7 @@ function TaskSection({
           </thead>
           <tbody>
             {tasks.map((t) => (
-              <TaskRow key={t.id} task={t} onSaved={onSaved} />
+              <TaskRow key={t.id} task={t} onSaved={onSaved} ownerOptions={ownerOptions} />
             ))}
           </tbody>
         </table>
@@ -219,27 +237,31 @@ function TaskSection({
 
 function TaskRow({
   task: t,
-  onSaved
+  onSaved,
+  ownerOptions
 }: {
   task: Task;
   onSaved: () => void;
+  ownerOptions: string[];
 }) {
   const [status, setStatus] = useState(t.status);
+  const [ownerLabel, setOwnerLabel] = useState(t.ownerLabel ?? "");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setStatus(t.status);
-  }, [t.status]);
+    setOwnerLabel(t.ownerLabel ?? "");
+  }, [t.status, t.ownerLabel]);
 
   async function save() {
-    if (status === t.status) {
+    if (status === t.status && ownerLabel === (t.ownerLabel ?? "")) {
       return;
     }
     setBusy(true);
     try {
       await apiFetch(`/tasks/${t.id}`, {
         method: "PATCH",
-        json: { status }
+        json: { status, ownerLabel: ownerLabel.trim() || null }
       });
       onSaved();
     } finally {
@@ -263,6 +285,12 @@ function TaskRow({
           ))}
         </select>
       </td>
+      <td className="py-3 pr-4">
+        <select className="sb-select py-1.5 text-xs" aria-label={`Owner for ${t.title}`} value={ownerLabel} onChange={(e) => setOwnerLabel(e.target.value)}>
+          <option value="">Unassigned</option>
+          {[...new Set([...(t.ownerLabel ? [t.ownerLabel] : []), ...ownerOptions])].map((owner) => <option key={owner} value={owner}>{owner}</option>)}
+        </select>
+      </td>
       <td className="py-3 pr-4 tabular-nums text-[var(--text-secondary)]">
         {t.dueAt ? new Date(t.dueAt).toLocaleDateString() : "—"}
       </td>
@@ -272,7 +300,7 @@ function TaskRow({
       <td className="py-3">
         <button
           type="button"
-          disabled={busy || status === t.status}
+          disabled={busy || (status === t.status && ownerLabel === (t.ownerLabel ?? ""))}
           onClick={() => void save()}
           className="sb-btn-secondary py-1.5 text-xs disabled:opacity-40"
         >

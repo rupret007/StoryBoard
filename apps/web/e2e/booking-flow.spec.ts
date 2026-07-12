@@ -4,8 +4,8 @@ test("manual prospect can gain a buyer and enter an approval-ready campaign", as
   const suffix = Date.now().toString(36);
   const prospectName = `E2E Buyer Lead ${suffix}`;
 
-  // The opt-in test database is deliberately migration-only, not reset on
-  // every run. Dev login therefore enters its seeded owner workspace directly.
+  // The runner resets only the explicit test database, then seeds this owner
+  // workspace so first-use flows remain deterministic across iterations.
   await page.goto("http://127.0.0.1:4000/auth/dev/login");
   await expect(page.getByText("Your operational home base")).toBeVisible();
 
@@ -72,14 +72,80 @@ test("novice manager intake produces grounded work and band operations records",
     await page.getByRole("button", { name: "Build my 90-day operating plan" }).click();
   }
   await expect(page.getByText("Today", { exact: true })).toBeVisible();
-  await page.getByPlaceholder("What should we focus on this week, and why?").fill("Explain our next priority in plain language.");
-  await page.getByRole("button", { name: "Ask", exact: true }).click();
-  await expect(page.getByText(/Manager brief for|recommended next step/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "90-day plan" })).toBeVisible();
+  await expect(page.getByText(/65\/100 · At risk/i)).toBeVisible();
+  await expect(page.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("Complete the next release cycle", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("Finish the booking profile and define what a good-fit show means", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Fill missing steps" }).click();
+  await expect(page.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
+  const newConversation = page.getByRole("button", { name: "New", exact: true });
+  if (await newConversation.isVisible().catch(() => false)) await newConversation.click();
+  const managerMessage = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
+  await managerMessage.fill("Explain our next priority in plain language.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("Explain our next priority in plain language.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/I would keep this simple|first move is/i)).toBeVisible();
+  const notUseful = page.getByRole("button", { name: "Not useful" });
+  if (await notUseful.isVisible().catch(() => false)) {
+    await notUseful.click();
+    await expect(page.getByText("dismissed", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Add to eval set" }).click();
+    await expect(page.getByText("in eval set", { exact: true })).toBeVisible();
+  }
+  await managerMessage.fill("Where does our money stand?");
+  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("Where does our money stand?", { exact: true })).toBeVisible();
+  await expect(page.getByText(/books currently show/i)).toBeVisible();
+  await managerMessage.fill("Are we on track with the 90-day plan?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const planReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "plan-health score is" });
+  await expect(planReply).toBeVisible();
+  await expect(planReply).toContainText(/real owner/i);
+  await page.reload();
+  await expect(page.getByText(/plan-health score is/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What your manager remembers" })).toBeVisible();
+  const correctAmbition = page.getByRole("button", { name: "Correct Twelve month ambition" });
+  if (await correctAmbition.isVisible().catch(() => false)) {
+    const correctedAmbition = `Release an EP before the regional run ${suffix}`;
+    await correctAmbition.click();
+    await page.getByLabel("Correct Twelve month ambition").fill(correctedAmbition);
+    await page.getByRole("button", { name: "Save Twelve month ambition" }).click();
+    await expect(page.getByText(correctedAmbition, { exact: true })).toBeVisible();
+  }
+  const updateProgress = page.getByRole("button", { name: "Update progress" }).first();
+  if (await updateProgress.isVisible().catch(() => false)) {
+    await updateProgress.click();
+    await page.getByLabel("Current value").fill("1");
+    await page.getByLabel("What changed? (optional)").fill(`E2E progress ${suffix}`);
+    await page.getByRole("button", { name: "Record", exact: true }).click();
+    await expect(page.getByText(/plan-health score|active goal|needs attention|on track/i).first()).toBeVisible();
+  }
+  const runChecks = page.getByRole("button", { name: "Run checks" });
+  if (await runChecks.isVisible().catch(() => false)) {
+    await runChecks.click();
+    await expect(page.getByText("manager_os_v3", { exact: true })).toBeVisible();
+    await expect(page.getByText("passed", { exact: true })).toBeVisible();
+  }
+
+  await page.goto("/tasks");
+  const firstPlanOwner = page.getByLabel("Owner for Finish the booking profile and define what a good-fit show means");
+  await firstPlanOwner.selectOption("Alex");
+  await firstPlanOwner.locator("xpath=ancestor::tr").getByRole("button", { name: "Save" }).click();
+  await expect(page.getByLabel("Owner for Finish the booking profile and define what a good-fit show means")).toHaveValue("Alex");
 
   await page.goto("/operations");
   await page.getByLabel("Title").fill(`E2E rehearsal ${suffix}`);
+  const eventStart = new Date(Date.now() + 90 * 86400000);
+  const localEventStart = new Date(eventStart.getTime() - eventStart.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  await page.getByLabel("Starts").fill(localEventStart);
   await page.getByRole("button", { name: "Add event" }).click();
-  await expect(page.getByText(`E2E rehearsal ${suffix}`)).toBeVisible();
+  await expect(page.getByText(`E2E rehearsal ${suffix}`, { exact: true })).toBeVisible();
+  await expect(page.getByText(/not show-ready yet/i)).toBeVisible();
+  await expect(page.getByText(/confidence/i).first()).toBeVisible();
+  await page.getByRole("button", { name: "Generate advance checklist" }).click();
+  await expect(page.getByRole("button", { name: "Generate advance checklist" })).toHaveCount(0);
   await page.getByRole("tab", { name: "Music & setlists" }).click();
   await page.getByPlaceholder("Song title").fill(`E2E song ${suffix}`);
   await page.getByRole("button", { name: "Add", exact: true }).click();

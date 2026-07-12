@@ -21,10 +21,10 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Market sprints + approval-gated immediate campaign delivery | Done |
 | Bounded adaptive booking advisor (optional OpenAI; review-only) | Done |
 | Tracked Gmail campaign replies + approval-gated negotiation drafts | Done; deployment-gated pending restricted-scope compliance |
-| Cross-functional Manager intake, goals, memory, briefs, chat, recommendations | Done; optional OpenAI, deterministic fallback, code-owned action policy |
-| Events, availability, show advance, songs/setlists, projects | Done; structured operations workspace shipped |
+| Cross-functional Manager intake, goals, memory, briefs, chat, recommendations | Done; executable idempotent 90-day starter plans, persistent multi-turn conversation, intent-aware fallback, strict evidence rejection, reviewed outcome learning/cooldowns, correctable memory, append-only goal progress, owner/timeline-aware plan health, and owner-run offline eval gate |
+| Events, availability, show advance, songs/setlists, projects | Done; structured operations workspace plus shared evidence-backed show-readiness scoring shipped |
 | Offers, reviewed templates, PDF snapshots, invoices/manual payments, settlements | Internal workflow done; binary Drive/Gmail attachment and provider payment/signature adapters deferred |
-| One-command local container bundle | Done (Docker Compose v2; allocate 2 GB) |
+| One-command local container bundle | Done (Docker Compose v2; internal web→API service URL verified; allocate 2 GB) |
 | Approvals + execution (Gmail drafts, calendar holds, drive folder) | Done |
 | Command bar + `POST /commands/execute` (NL + structured intents) | Done |
 | Operator auth (Google OIDC), session cookie, memberships (`owner` / `member` / `viewer`) | Done |
@@ -34,7 +34,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | Compiled `node:test` plus opt-in Postgres integration coverage for tenant links, Manager intake/memory, confirmed-event idempotency, availability/advance, prospect/campaign delivery, payment replay, settlement math/PDF snapshots, roles, Telegram binding, and audits. Chromium e2e covers booking acquisition and Manager intake/chat → event/song/project/offer → agreement PDF → invoice/deposit → expense/settlement. |
+| Tests | Compiled `node:test` (50 API cases) plus opt-in Postgres integration coverage for tenant links, idempotent Manager intake/90-day plans, memory correction, goal progress/health, feedback/cooldowns/eval promotion and pass/fail runs, multi-turn isolation, confirmed-event idempotency, availability/advance, prospect/campaign delivery, payment replay, settlement math/PDF snapshots, roles, Telegram binding, and audits. Chromium e2e resets the explicit test database and covers booking acquisition plus first-use Manager intake → visible plan → natural plan explanation → progress/eval → task ownership → event/song/project/offer → agreement PDF → invoice/deposit → expense/settlement. Unit coverage also verifies date-aware, evidence-backed show readiness and unavailable-performer blocking. |
 
 ## Non-goals to preserve (unless product changes)
 
@@ -73,15 +73,17 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
+pnpm manager:eval
 ```
 
 With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:generate` when `schema.prisma` changes.
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Product:** Validate Manager briefs, show advance, and manual deal/settlement workflows with real original and cover bands. Add binary Drive/Gmail document delivery only after real provider acceptance testing. Keep external work approval-gated; do not add scraping, general inbox access, or autonomous sends.
-2. **Runtime:** Define queue-worker deployment, cursor pagination/query limits, and metrics before horizontally scaling the API. `/ready` is a dependency probe, not a monitoring system.
-3. **Tests:** Add browser depth for confirmed booking → participant availability → generated advance and original release milestone linkage; continue using the explicit test database and mock providers.
+1. **Product validation:** Run Manager briefs, plan health, conversation, show advance, and manual deal/settlement workflows with real original and cover bands. Capture reviewed examples when recommendations are useful, wrong, or missing context; do not tune from synthetic scores alone.
+2. **Release workflow:** Add a human-reviewed candidate registration/promotion workflow only when a real `manager_os_v4` exists. Preserve the invariant that evaluation never activates a version itself.
+3. **Connected delivery:** Add binary Drive/Gmail document delivery only after real provider acceptance testing. Keep external work approval-gated; do not add scraping, general inbox access, or autonomous sends.
+4. **Runtime/tests:** Define queue-worker deployment, cursor pagination/query limits, and metrics before horizontal scale. Add browser depth for confirmed booking → availability → advance and original release milestones.
 
 ## Cursor-only artifacts
 

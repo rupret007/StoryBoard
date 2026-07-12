@@ -82,16 +82,45 @@ Google OAuth, real secrets, and public `WEB_URL`/API URLs.
 **Manager OS:** The Manager workspace is the cross-functional successor to the
 booking-only advisor (the old advisor API remains compatible). A guided intake
 records band mode, market, lineup, constraints, and ambition; creates an
-editable initial goal set; and produces a daily/weekly brief grounded in
-artist-owned records. Optional OpenAI reasoning uses `OPENAI_MANAGER_MODEL`
+editable 90-day plan with two measurable goals, linked initiatives, and six
+dated first actions tailored to original, cover/event, or hybrid work; and
+produces a daily/weekly brief grounded in
+artist-owned records. Manager conversations retain a bounded recent thread,
+resume after reload, and answer common questions about priorities, shows,
+booking, availability, approvals, and money from the corresponding records.
+The deterministic path is question-aware rather than a generic canned reply,
+so local/mock operation remains useful. Optional OpenAI reasoning uses `OPENAI_MANAGER_MODEL`
 (`gpt-5.6-terra` by default); disabled or failed requests use a deterministic
 fallback. Manager traces retain facts/record IDs, policy results, prompt/model
 version, latency, and structured recommendations—not hidden reasoning or raw
 provider inbox data. The OpenAI path must first call the single explicit,
 read-only `read_manager_snapshot` function; code supplies the tenant snapshot
-and records token usage. Model output cannot invent tools: code permits direct
+and records token usage. Any unknown evidence ID rejects the whole model result
+and uses deterministic fallback. Model output cannot invent tools: code permits direct
 acceptance only for low-risk internal task creation; email, calendar, Drive,
 legal, and financial work remains human-reviewed and approval-gated.
+Accepted recommendations are single-use and linked to their task; completing
+that task records the outcome automatically. Dismissal reasons and bounded
+cooldowns keep the Manager from repeating recently rejected or finished work.
+The **What your manager remembers** panel lets the band correct or archive
+confirmed memory, while sensitive memory remains owner-controlled. This
+reviewed feedback influences future ranking and evaluation only—it never lets
+the model rewrite prompts, policy, schemas, or application code. Owners can
+explicitly promote decided recommendations into a bounded local eval set for
+offline candidate-version testing. Goal progress updates create append-only,
+audited events instead of silently replacing history. A code-owned plan-health
+score explains which goals are on track, at risk, overdue, or missing
+measurement, linked work, or real task owners. Starter-plan source keys make
+“Fill missing steps” idempotent without overwriting renamed, completed, paused,
+or abandoned work. Owners can run the current offline release gate over golden
+safety/usefulness scenarios plus their reviewed examples without calling a
+model; a failed run blocks confidence but never changes the active version
+automatically. Upcoming gigs
+also receive deterministic show-readiness signals across lineup, schedule,
+contacts, terms/payment, advance work, and performance preparation. Every
+score includes confidence, evidence IDs, and concrete gaps; the Operations
+workspace can generate a missing advance checklist, and Manager briefs/chat
+use the same signal instead of inventing a second readiness opinion.
 
 **Band operations:** Confirming a booking opportunity idempotently creates a
 gig event. Events hold availability, logistics, show advance tasks, setlists,

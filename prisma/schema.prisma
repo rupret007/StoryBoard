@@ -324,6 +324,9 @@ model Operator {
   advisorFeedback                   BookingAdvisorFeedback[]
   bandMemberProfiles                BandMember[]
   managerMessages                   ManagerMessage[]
+  managerEvalExamplesPromoted       ManagerEvalExample[]        @relation("ManagerEvalPromoter")
+  managerGoalProgressRecorded       ManagerGoalProgressEvent[]  @relation("ManagerGoalProgressRecorder")
+  managerEvaluationRunsCreated      ManagerEvaluationRun[]      @relation("ManagerEvaluationRunner")
 }
 
 model ArtistMembership {
@@ -382,6 +385,9 @@ model Artist {
   managerMemoryFacts          ManagerMemoryFact[]
   managerRuns                 ManagerRun[]
   managerConversations        ManagerConversation[]
+  managerEvalExamples         ManagerEvalExample[]
+  managerGoalProgressEvents   ManagerGoalProgressEvent[]
+  managerEvaluationRuns       ManagerEvaluationRun[]
   events                      BandEvent[]
   songs                       Song[]
   setlists                    Setlist[]
@@ -460,23 +466,45 @@ model BandMember {
 }
 
 model ManagerGoal {
-  id           String              @id @default(cuid())
-  artistId     String
-  workstream   ManagerWorkstream
-  title        String
-  description  String?
-  targetValue  Float?
-  targetUnit   String?
-  currentValue Float?
-  deadline     DateTime?
-  status       ManagerGoalStatus   @default(draft)
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  artist       Artist              @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  initiatives  ManagerInitiative[]
-  projects     ArtistProject[]
+  id             String                     @id @default(cuid())
+  artistId       String
+  workstream     ManagerWorkstream
+  title          String
+  description    String?
+  targetValue    Float?
+  targetUnit     String?
+  currentValue   Float?
+  deadline       DateTime?
+  status         ManagerGoalStatus          @default(draft)
+  sourceKey      String?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+  artist         Artist                     @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  initiatives    ManagerInitiative[]
+  projects       ArtistProject[]
+  progressEvents ManagerGoalProgressEvent[]
 
+  @@unique([artistId, sourceKey])
   @@index([artistId, status, deadline])
+}
+
+model ManagerGoalProgressEvent {
+  id                   String      @id @default(cuid())
+  artistId             String
+  goalId               String
+  recordedByOperatorId String?
+  previousValue        Float?
+  value                Float
+  delta                Float?
+  note                 String?
+  sourceType           String      @default("manual")
+  sourceId             String?
+  createdAt            DateTime    @default(now())
+  artist               Artist      @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  goal                 ManagerGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  recordedBy           Operator?   @relation("ManagerGoalProgressRecorder", fields: [recordedByOperatorId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, goalId, createdAt])
 }
 
 model ManagerInitiative {
@@ -490,6 +518,7 @@ model ManagerInitiative {
   startsAt        DateTime?
   dueAt           DateTime?
   successMetric   String?
+  sourceKey       String?
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
   artist          Artist                  @relation(fields: [artistId], references: [id], onDelete: Cascade)
@@ -497,6 +526,7 @@ model ManagerInitiative {
   tasks           Task[]
   recommendations ManagerRecommendation[]
 
+  @@unique([artistId, sourceKey])
   @@index([artistId, status, dueAt])
 }
 
@@ -530,11 +560,13 @@ model ManagerMemoryFact {
   confidence  Float                    @default(1)
   sensitivity ManagerMemorySensitivity @default(normal)
   confirmedAt DateTime?
+  archivedAt  DateTime?
   createdAt   DateTime                 @default(now())
   updatedAt   DateTime                 @updatedAt
   artist      Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
 
   @@unique([artistId, key])
+  @@index([artistId, archivedAt, updatedAt])
 }
 
 model ManagerRun {
@@ -570,15 +602,54 @@ model ManagerRecommendation {
   evidence       Json
   proposedAction Json?
   outcome        ManagerRecommendationOutcome @default(suggested)
+  outcomeReason  String?
+  outcomeNote    String?
+  outcomeAt      DateTime?
   taskId         String?
   createdAt      DateTime                     @default(now())
   updatedAt      DateTime                     @updatedAt
   managerRun     ManagerRun                   @relation(fields: [managerRunId], references: [id], onDelete: Cascade)
   initiative     ManagerInitiative?           @relation(fields: [initiativeId], references: [id], onDelete: SetNull)
   task           Task?                        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  evalExample    ManagerEvalExample?
 
   @@unique([managerRunId, stableKey])
   @@index([managerRunId, outcome])
+  @@index([stableKey, outcome, updatedAt])
+}
+
+model ManagerEvalExample {
+  id                   String                @id @default(cuid())
+  artistId             String
+  recommendationId     String                @unique
+  promotedByOperatorId String?
+  label                String
+  notes                String?
+  promptVersion        String
+  snapshot             Json
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  artist               Artist                @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  recommendation       ManagerRecommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  promotedBy           Operator?             @relation("ManagerEvalPromoter", fields: [promotedByOperatorId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, createdAt])
+}
+
+model ManagerEvaluationRun {
+  id                  String    @id @default(cuid())
+  artistId            String
+  createdByOperatorId String?
+  candidateVersion    String
+  datasetVersion      String
+  passed              Boolean
+  metrics             Json
+  results             Json
+  createdAt           DateTime  @default(now())
+  artist              Artist    @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdBy           Operator? @relation("ManagerEvaluationRunner", fields: [createdByOperatorId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, createdAt])
 }
 
 model ManagerConversation {
@@ -804,6 +875,7 @@ model Task {
   ownerLabel                 String?
   dueAt                      DateTime?
   checklist                  Json?
+  sourceKey                  String?
   createdAt                  DateTime                  @default(now())
   updatedAt                  DateTime                  @updatedAt
   artist                     Artist                    @relation(fields: [artistId], references: [id], onDelete: Cascade)
@@ -813,6 +885,9 @@ model Task {
   initiative                 ManagerInitiative?        @relation(fields: [initiativeId], references: [id], onDelete: SetNull)
   managerRecommendations     ManagerRecommendation[]
   bookingCampaignFollowUpFor BookingCampaignRecipient? @relation("CampaignRecipientFollowUpTask")
+
+  @@unique([artistId, sourceKey])
+  @@index([artistId, status, dueAt])
 }
 
 model ArtistBookingProfile {

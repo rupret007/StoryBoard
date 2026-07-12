@@ -28,7 +28,8 @@ adapter layer rather than leaking into domain modules.
 
 Feature modules live under `apps/api/src/` as Nest modules: `venues`, `contacts`,
 `booking` (profiles, prospects, campaigns, replies, and opportunities),
-`manager` (intake, operating state, brief/chat/recommendations), `operations`
+`manager` (intake, operating state, evidence-grounded briefs, persistent
+bounded conversation, and reviewable recommendations), `operations`
 (events, songs/setlists, projects, deals, documents, invoices, settlements),
 `tasks`, `approvals`, `audit-events`, `commands`, `summary` (weekly aggregation),
 and `dashboard` (stats/intelligence). Global
@@ -83,8 +84,27 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
 - Shared validation should live in `packages/shared`.
 - Manager model output is advisory data, never authority. Read context is
   assembled by tenant-scoped code; known evidence IDs are enforced after model
-  output; action risk is classified by code; only allowlisted internal writes
+  output; one unknown evidence ID rejects the full model response rather than
+  silently weakening its support. Conversation context is tenant-scoped and
+  bounded. Action risk is classified by code; only allowlisted internal writes
   can run directly.
+- Manager adaptation is outcome-controlled: accepted recommendations are
+  transactionally single-use, task completion is attributed, and recent
+  accepted/completed/dismissed stable keys are suppressed for fixed cooldowns.
+  User corrections update sourced memory. Feedback may shape reviewed evals,
+  but runtime models cannot rewrite prompts, policy, schemas, or code.
+  Owner-promoted `ManagerEvalExample` rows are bounded local fixtures, not an
+  online training or self-deployment mechanism. Code-owned plan health derives
+  explainable status from authoritative goals/initiatives/tasks, while numeric
+  changes use append-only progress events. Starter-plan records use nullable
+  tenant-unique source keys, so regeneration fills gaps instead of overwriting
+  work. Tasks are deliberately unassigned until a person chooses an owner.
+  Owner-triggered offline evaluation
+  runs are version-allowlisted and recorded; there is no self-activation path.
+- Show readiness is deterministic derived data, not a model assertion or an
+  editable status. It uses the tenant-scoped event graph, active lineup, dated
+  urgency, explicit evidence IDs, and premise-coverage confidence. Operations
+  and Manager consume the same function to prevent conflicting advice.
 - Agreement templates require owner activation. Payment replay keys and
   immutable deal/document/settlement history take precedence over destructive
   replacement.

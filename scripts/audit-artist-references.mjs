@@ -271,6 +271,41 @@ const checks = [
     `
   },
   {
+    relation: "ManagerRecommendation → task, initiative, and eval example",
+    query: `
+      SELECT r."id" AS "recordId", run."artistId" AS "recordArtistId",
+             COALESCE(r."taskId", r."initiativeId", x."id") AS "relatedId",
+             COALESCE(t."artistId", i."artistId", x."artistId") AS "relatedArtistId"
+      FROM "ManagerRecommendation" r
+      INNER JOIN "ManagerRun" run ON run."id" = r."managerRunId"
+      LEFT JOIN "Task" t ON t."id" = r."taskId"
+      LEFT JOIN "ManagerInitiative" i ON i."id" = r."initiativeId"
+      LEFT JOIN "ManagerEvalExample" x ON x."recommendationId" = r."id"
+      WHERE (t."id" IS NOT NULL AND run."artistId" <> t."artistId")
+         OR (i."id" IS NOT NULL AND run."artistId" <> i."artistId")
+         OR (x."id" IS NOT NULL AND run."artistId" <> x."artistId")
+      ORDER BY r."id";
+    `
+  },
+  {
+    relation: "Manager goal progress and evaluation runs → artist-owned manager records",
+    query: `
+      SELECT p."id" AS "recordId", p."artistId" AS "recordArtistId",
+             p."goalId" AS "relatedId", g."artistId" AS "relatedArtistId"
+      FROM "ManagerGoalProgressEvent" p
+      INNER JOIN "ManagerGoal" g ON g."id" = p."goalId"
+      WHERE p."artistId" <> g."artistId"
+      UNION ALL
+      SELECT e."id" AS "recordId", e."artistId" AS "recordArtistId",
+             e."createdByOperatorId" AS "relatedId", m."artistId" AS "relatedArtistId"
+      FROM "ManagerEvaluationRun" e
+      LEFT JOIN "ArtistMembership" m
+        ON m."operatorId" = e."createdByOperatorId" AND m."artistId" = e."artistId"
+      WHERE e."createdByOperatorId" IS NOT NULL AND m."id" IS NULL
+      ORDER BY "recordId";
+    `
+  },
+  {
     relation: "Agreement → deal and template",
     query: `
       SELECT a."id" AS "recordId", a."artistId" AS "recordArtistId",

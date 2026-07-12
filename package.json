@@ -26,6 +26,7 @@
     "db:seed": "node prisma/seed.mjs",
     "db:studio": "prisma studio",
     "db:audit-relationships": "node scripts/audit-artist-references.mjs",
+    "manager:eval": "pnpm --filter @storyboard/api build && node scripts/run-manager-evals.mjs",
     "dev:web": "pnpm --filter @storyboard/web dev",
     "dev:api": "pnpm --filter @storyboard/api dev",
     "preflight": "node scripts/preflight.mjs",

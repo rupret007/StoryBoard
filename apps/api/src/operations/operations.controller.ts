@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, Param, Patch, Post, Put, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Headers, Param, Patch, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { dealCreateSchema, dealPatchSchema, eventCreateSchema, eventParticipantSchema, eventPatchSchema, expenseCreateSchema, expensePatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, projectCreateSchema, projectPatchSchema, setlistCreateSchema, setlistPatchSchema, settlementCreateSchema, settlementPatchSchema, songCreateSchema, songPatchSchema } from "@storyboard/shared";
@@ -20,6 +20,8 @@ abstract class ArtistController {
 export class EventsController extends ArtistController {
   constructor(operations: OperationsService, membership: MembershipService, roles: RolePolicyService) { super(operations, membership, roles); }
   @Get() async list(@CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { return this.operations.events(await this.artistId(op.id, req, h)); }
+  @Get("readiness") async readiness(@Query("days") value: string | undefined, @CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { const parsed = z.coerce.number().int().min(1).max(365).default(90).safeParse(value); if (!parsed.success) throw new BadRequestException("Invalid readiness horizon"); return this.operations.eventReadinessList(await this.artistId(op.id, req, h), parsed.data); }
+  @Get(":id/readiness") async eventReadiness(@Param("id") id: string, @CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { return this.operations.eventReadiness(await this.artistId(op.id, req, h), id); }
   @Get(":id") async get(@Param("id") id: string, @CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { return this.operations.event(await this.artistId(op.id, req, h), id); }
   @Post() async create(@Body() body: unknown, @CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { const artistId = await this.mutable(op, req, h); return this.operations.createEvent(artistId, this.parse(eventCreateSchema, body), op.email, op.id); }
   @Patch(":id") async patch(@Param("id") id: string, @Body() body: unknown, @CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { const artistId = await this.mutable(op, req, h); return this.operations.patchEvent(artistId, id, this.parse(eventPatchSchema, body), op.email, op.id); }

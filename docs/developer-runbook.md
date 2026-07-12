@@ -100,6 +100,9 @@ it, `WEB_URL`, and `API_URL` to public HTTPS URLs and rebuild the web image for
 any public deployment. Production must set `NODE_ENV=production`, disable
 `AUTH_DEV_BYPASS`, supply a strong `SESSION_SECRET`, and configure Google OAuth;
 the local demo profile is not appropriate for an internet-facing deployment.
+Server-rendered requests prefer `INTERNAL_API_URL`; the local container bundle
+sets it to `http://api:4000` so web-to-API traffic stays on the Compose network
+while browsers continue using `NEXT_PUBLIC_API_URL`.
 Use `docker-compose.production.yml` as the production override template:
 
 ```bash
@@ -273,26 +276,84 @@ Manager routes:
 - `GET` / `PUT /manager/profile`; `POST /manager/intake/complete`
 - `GET` / `POST` / `PATCH /manager/members`, `/manager/goals`, and
   `/manager/initiatives`
+- `GET /manager/plan-health`; `GET` / `POST /manager/goals/:id/progress`
+- `GET /manager/plan`; `POST /manager/plan/ensure` fills only missing
+  `manager_plan_v1` records and never replaces user edits
 - `GET` / `POST /manager/decisions`
 - `GET /manager/brief?cadence=daily|weekly` and
   `POST /manager/brief/generate`
 - `POST /manager/chat`
-- `POST /manager/recommendations/:id/accept|dismiss|complete`
+- `GET /manager/conversations?limit=1..20` and
+  `GET /manager/conversations/:id` (bounded to 50 messages)
+- `GET /manager/memory`, `PATCH /manager/memory/:id`, and
+  `GET /manager/learning`
+- `GET /manager/eval-examples` and
+  `POST /manager/recommendations/:id/promote-eval` (owner-only)
+- `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
+  (owner-only; currently accepts only the code-registered `manager_os_v3`)
+- `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
+  body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
 
 `OPENAI_ENABLED=false` is fully supported. With OpenAI enabled, set
 `OPENAI_MANAGER_MODEL` (default `gpt-5.6-terra`). Manager inputs are
-tenant-scoped snapshots; CRM text is treated as untrusted data; evidence IDs
-are filtered to known records. Stored traces contain facts read, policy checks,
+tenant-scoped snapshots covering operating goals/tasks plus current events,
+booking replies and follow-ups, prospects, approvals, deals, invoices, and
+settlements. CRM/provider text is treated as untrusted data. Prompt/policy
+version `manager_os_v3` retains the current operator question and at most 12
+recent messages; it rejects the entire model result when any cited or
+recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
-Recommendation acceptance currently permits only `create_task`. The model does
-not receive provider-write, SQL, or arbitrary tool execution.
+Chat may return one reviewable recommendation through the same recommendation
+API. Acceptance currently permits only `create_task`. The model does not
+receive provider-write, SQL, or arbitrary tool execution. Sending, signing,
+publishing, payments, legal conclusions, and provider writes stay in Approvals.
+Recommendation acceptance uses a transaction so concurrent clicks cannot
+create duplicate tasks. Finishing a linked task attributes completion back to
+the recommendation. Accepted work stays suppressed while its task is open;
+completed work has a 14-day cooldown and dismissed work a 7-day cooldown.
+Dismissal reasons and 90-day acceptance/completion metrics are visible in the
+Manager workspace. Normal confirmed memory can be corrected by members;
+sensitive/restricted memory and sensitivity changes remain owner-controlled.
+Archiving a memory removes it from reasoning without deleting audit history.
+An owner may promote a decided recommendation to the local eval set with
+`{ "label": "useful|not_useful|needs_revision", "notes": "..." }`.
+The snapshot contains the bounded recommendation/outcome shape, not full input
+facts, conversation history, or provider data. Promotion is idempotent per
+recommendation and never activates a prompt/policy version.
+
+Goal progress accepts exactly one of `value` or `delta`; a delta requires an
+existing current value. Each update transactionally changes the goal and adds
+an immutable `ManagerGoalProgressEvent` with the prior value, actor, and note.
+`GET /manager/plan-health` is deterministic: it scores active goals from
+deadlines, recorded measurements, linked initiatives, blocked work, and linked
+task state, and returns the reasons/evidence for every classification.
+Plan health also flags unassigned open tasks and timeline progress that trails
+the elapsed share of a measurable goal. Intake creates two band-mode-specific
+goals, one initiative per goal, and three dated starter tasks per initiative.
+Tasks start unassigned intentionally; use the Tasks workspace to choose a real
+band member or other owner. Re-running plan ensure is idempotent.
+
+The evaluation runner is offline and makes no provider request. It executes
+the code-registered golden scenarios and checks owner-reviewed examples. An
+unresolved `needs_revision` example for the candidate version fails the run.
+Results are stored in `ManagerEvaluationRun` for review; there is deliberately
+no activation endpoint. `pnpm manager:eval` runs the golden gate without a
+database; the owner-only UI/API adds the artist's promoted examples and stores
+the result.
+
+`pnpm test:e2e` resets only the explicitly named test database after validating
+that its name contains `test`, then seeds it. Browser coverage therefore
+exercises first-time intake on every run instead of inheriting old test data.
 
 Operations routes:
 
 - `GET` / `POST` / `PATCH /events`, `GET /events/:id`,
   `POST /events/from-opportunity/:opportunityId`, participant upsert,
   advance generation, and logistics approval preparation
+- `GET /events/readiness?days=90` and `GET /events/:id/readiness` — bounded,
+  tenant-scoped, read-only readiness signals with category scores, confidence,
+  evidence IDs, and prioritized gaps; `days` accepts 1–365
 - `GET` / `POST` / `PATCH /songs`, `/setlists`, and `/projects`
 - `GET` / `POST` / `PATCH /deals`, document generation, and approval-gated
   delivery preparation
@@ -312,6 +373,13 @@ templates include a not-legal-advice disclaimer and must be activated by an
 owner. Current Gmail delivery prepares a reviewed draft referencing the
 StoryBoard PDF snapshot; attach the PDF manually until binary Drive/Gmail
 adapters are implemented and provider-tested.
+
+Show readiness is derived from current StoryBoard records and is not stored as
+an editable truth. The 100-point score covers people (25), schedule (20),
+contacts (10), deal/payment (20), advance (15), and performance preparation
+(10). A missing date or unavailable active performer blocks readiness. Missing
+premises lower confidence, and proximity raises unresolved gaps to higher
+urgency. Manager briefs and chat consume this same result.
 
 ## Booking acquisition
 

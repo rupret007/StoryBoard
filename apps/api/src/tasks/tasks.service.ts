@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "../generated/prisma/client";
-import { TaskStatus } from "../generated/prisma/enums";
+import { ManagerRecommendationOutcome, TaskStatus } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import type { TaskCreateInput, TaskPatchInput } from "./task.schema";
@@ -145,10 +145,16 @@ export class TasksService {
     if (data.dueAt !== undefined) {
       patchData.dueAt = data.dueAt ? new Date(data.dueAt) : null;
     }
-    const row = await this.prisma.client.task.update({
-      where: { id },
-      data: patchData
-    });
+    const { row, attributed } = data.status === TaskStatus.done
+      ? await this.prisma.client.$transaction(async (tx) => {
+          const updated = await tx.task.update({ where: { id }, data: patchData });
+          const completed = await tx.managerRecommendation.updateMany({
+            where: { taskId: id, outcome: ManagerRecommendationOutcome.accepted },
+            data: { outcome: ManagerRecommendationOutcome.completed, outcomeReason: "task_completed", outcomeAt: new Date() }
+          });
+          return { row: updated, attributed: completed };
+        })
+      : { row: await this.prisma.client.task.update({ where: { id }, data: patchData }), attributed: { count: 0 } };
     await this.audit.log({
       artistId,
       aggregateType: "Task",
@@ -156,7 +162,7 @@ export class TasksService {
       action: "task.updated",
       actorLabel,
       actorOperatorId: actorOperatorId ?? null,
-      metadata: data as Record<string, unknown>
+      metadata: { ...data, managerRecommendationsCompleted: attributed.count } as Record<string, unknown>
     });
     return row;
   }

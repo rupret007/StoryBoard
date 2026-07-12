@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
-Last reviewed: 2026-07-11
-Baseline for this round: `main` at `90f7834`
+Last reviewed: 2026-07-12
+Baseline for this round: `main` at `49b4734`
 
 ## Product and current architecture
 
@@ -118,6 +118,73 @@ mock-safe provider adapters.
 - [ ] Production scheduling of briefs remains deployment-dependent; the API
   stores owner settings but no new scheduler is enabled in this round.
 
+### P0 — Coherent, grounded Manager conversation (completed 2026-07-12)
+
+- [x] Replace the generic deterministic chat reply with intent-aware answers for
+  priorities, live readiness, booking, lineup/availability, and money. Keep the
+  result useful when OpenAI is disabled or unavailable.
+- [x] Expand the bounded manager snapshot to pending approvals, unread tracked
+  booking replies, campaign follow-ups, qualified prospects, and draft
+  settlements without expanding Gmail access beyond StoryBoard-owned threads.
+- [x] Persist and resume a tenant-scoped conversation, supply the current
+  question plus at most 12 recent messages to the reasoning path, and expose
+  bounded read endpoints for the workspace.
+- [x] Fix Responses API continuation so the final response retains the actual
+  operator request as well as the function result. Reject the entire generated
+  brief/chat result when any evidence ID is unknown or an action is outside the
+  code allowlist; use deterministic fallback instead.
+- [x] Let chat prepare at most one reviewable internal-task recommendation via
+  the existing recommendation acceptance path. Keep email, calendar, Drive,
+  legal, financial, publishing, and irreversible actions in Approvals.
+- [x] Replace the single-answer chat card with a persistent thread, quick
+  starting questions, natural message flow, reload recovery, and inline task
+  acceptance. Correct the fast-follow-up input race found by Playwright.
+- [x] Collect structured usefulness/dismissal reasons, suppress stale/repeated
+  recommendations with bounded cooldowns, and attribute completed tasks back to
+  their accepted recommendation.
+- [x] Add a confirm/correct/archive memory UI with normal memory available to
+  members and sensitive/restricted memory remaining owner-controlled.
+- [x] Add owner-reviewed, tenant-scoped eval promotion. Stored examples contain
+  the recommendation and outcome snapshot, not raw provider data, conversation
+  history, or the full manager input. Promotion never activates a prompt or
+  policy version automatically.
+- [x] Add deterministic goal/initiative plan health with an explainable score,
+  per-goal evidence, measurement/deadline gaps, blockers, and linked task state.
+- [x] Add append-only, tenant-safe, audited goal progress events. Numeric
+  progress stays explicit; completed recommendation tasks contribute through
+  their linked initiative without inventing a numeric goal increment.
+- [x] Add an owner-triggered offline evaluation runner over eight golden
+  scenarios plus owner-reviewed examples. Candidate versions are code-allowlisted,
+  unresolved same-version revision labels fail the run, results are persisted,
+  and there is no automatic activation endpoint.
+- [x] Make guided intake deliver the promised executable 90-day plan: two
+  editable band-mode goals, linked initiatives, and six dated first actions.
+  Stable nullable source keys make fill-missing generation idempotent without
+  replacing user edits or intentional status changes.
+- [x] Prefer the next existing linked plan task in briefs instead of proposing
+  duplicate generic work. Flag unassigned owners and progress behind elapsed
+  timeline in plan health, and support task-owner editing in the Tasks UI.
+- [x] Invalidate briefs created before completed intake and synchronize Manager
+  client state after server refresh. Reset only the explicit E2E database so
+  first-use intake remains a real regression path.
+
+### P0 — Shared show-readiness intelligence (completed 2026-07-12)
+
+- [x] Replace disconnected show-status heuristics with one deterministic,
+  tenant-scoped policy over active lineup, schedule, contacts, deal/payment,
+  advance, setlist, and production records.
+- [x] Make every result explainable with category scores, premise-coverage
+  confidence, source record IDs, date-aware severity, and a concrete first
+  action. A missing date or unavailable performer blocks readiness.
+- [x] Expose bounded read APIs for one show or the next 1–365 days and render
+  the same signal in Band operations, including direct generation of a missing
+  advance checklist.
+- [x] Feed the shared signal into Manager briefs and conversation so the model
+  and deterministic fallback cannot create competing readiness opinions.
+- [x] Add deterministic regressions for incomplete records, urgency,
+  unavailable-performer blocking, confidence, evidence, and a fully recorded
+  ready show. No migration or provider access is required.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,
@@ -177,6 +244,70 @@ Before release, run a read-only diagnostic for historical relationships whose
 artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
+
+- 2026-07-12: Added shared, deterministic show-readiness intelligence across
+  lineup, schedule, contacts, deal/payment, advance, and performance records.
+  The new tenant-scoped APIs, Band operations card, Manager brief/chat signal,
+  confidence/evidence model, and direct advance-checklist action use one
+  code-owned policy. Validation passed 50 API tests, all three 21-migration
+  database workflows, three production Chromium workflows including readiness
+  and advance generation, the full quality gate, 8/8 offline Manager evals,
+  Compose configuration, and the relationship audit with zero mismatches.
+- 2026-07-12: Added migration `20260712223000_manager_executable_plan` and
+  `manager_plan_v1`. Guided setup now creates an executable, editable 90-day
+  plan with two mode-specific goals, two initiatives, and six dated tasks.
+  Nullable tenant-unique source keys make fill-missing generation idempotent;
+  plan health flags owner and timeline risk, Tasks supports real owner
+  assignment, and briefs advance existing linked work instead of duplicating
+  it. Production Chromium testing exposed and fixed stale post-intake client
+  state and a pre-intake brief cache. The E2E runner now resets only its
+  explicit test database and covers clean intake, immediate plan visibility,
+  idempotent refill, natural plan explanation, and owner assignment. Validation
+  passed 48 API tests, all three 21-migration database workflows, all three
+  clean production Chromium workflows, the 8/8 offline Manager gate, the full
+  type/lint/build gate, and the relationship audit with zero mismatches. A
+  fresh isolated Compose stack also passed migration, seed, API/worker
+  readiness, dev login, intake, exact 2/2/6 plan creation, and Manager SSR;
+  its temporary volumes were removed.
+
+- 2026-07-12: Added migration `20260712210000_manager_plan_health_evals`.
+  Goal progress is now a serializable, append-only, audited event with
+  tenant-bound ownership; plan health deterministically explains scores from
+  measurements, deadlines, linked initiatives, blocked/overdue work, and task
+  state. Added the owner-only persisted evaluation gate plus database-free
+  `pnpm manager:eval`; the current eight golden scenarios pass with 100% safety
+  checks, while unresolved same-version `needs_revision` examples block a run.
+  Validation passed 45 API tests, all three 20-migration database workflows,
+  three production Chromium workflows, the full quality gate, and the expanded
+  relationship audit with zero mismatches. A fresh isolated Compose stack also
+  passed migration, seed, API/worker readiness, web rendering, dev login, and
+  `/manager` on alternate ports; its volumes were removed afterward.
+
+- 2026-07-12: Added forward migrations
+  `20260712183000_manager_learning_loop` and
+  `20260712193000_manager_reviewed_evals`. Manager prompt/policy version
+  `manager_os_v3` now records structured outcomes, makes acceptance
+  transactionally single-use, attributes completed tasks, suppresses repeated
+  stable keys for fixed cooldowns, exposes 90-day learning metrics, and lets
+  bands correct/archive confirmed memory. Owners can promote a decided
+  recommendation into a bounded local eval set; runtime code never changes the
+  active prompt or policy. Validation passed 42 API tests, all three
+  19-migration database workflows, and all three production Chromium workflows.
+  The isolated container smoke exposed and fixed server-rendered web requests
+  incorrectly preferring the browser's localhost API URL; Compose now supplies
+  `INTERNAL_API_URL=http://api:4000`. Fresh migrations, seed, API/worker
+  readiness, web rendering, dev login, and `/manager` all passed on alternate
+  ports before the isolated volumes were removed.
+
+- 2026-07-12: Shipped Manager prompt/policy version `manager_os_v2` with
+  persistent bounded conversation, intent-aware deterministic reasoning,
+  broader workflow signals, strict whole-output evidence rejection, and
+  reviewable chat task proposals. Added eight golden scenarios, deterministic
+  behavior tests, Responses continuation regression coverage, database checks
+  for multi-turn persistence/tenant isolation, and production-mode Playwright
+  coverage for two turns plus reload. Validation passed 37 API tests, all three
+  database workflows, and all three Chromium workflows. No schema migration was
+  required.
 
 - 2026-07-11: Added migration `20260711203445_manager_os_rounds`, the guided
   cross-functional Manager workspace, code-owned AI action policy, memory

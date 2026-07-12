@@ -7,6 +7,7 @@ import { ApprovalsService } from "../approvals/approvals.service";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { renderTextPdf } from "./simple-pdf";
+import { deterministicShowReadiness } from "./event-readiness";
 
 type EventCreate = z.infer<typeof eventCreateSchema>;
 type EventPatch = z.infer<typeof eventPatchSchema>;
@@ -28,6 +29,20 @@ type SettlementCreate = z.infer<typeof settlementCreateSchema>;
 type SettlementPatch = z.infer<typeof settlementPatchSchema>;
 
 const dateFields = new Set(["startsAt","endsAt","loadInAt","soundcheckAt","doorsAt","setAt","curfewAt","depositDueAt","balanceDueAt","dueAt","performanceDate","expiresAt"]);
+const eventDetailInclude = {
+  venue: true,
+  contact: true,
+  opportunity: true,
+  project: true,
+  setlist: { include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" as const } } } },
+  participants: { include: { bandMember: true } },
+  schedule: { orderBy: { sortOrder: "asc" as const } },
+  tasks: true,
+  deals: { include: { agreements: { orderBy: { version: "desc" as const } }, invoices: { include: { payments: true } } } },
+  invoices: { include: { payments: true } },
+  expenses: true,
+  settlement: { include: { splits: { include: { bandMember: true } } } }
+} as const;
 function cleanDates(input: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined).map(([key, value]) => [key, dateFields.has(key) && typeof value === "string" ? new Date(value) : value]));
 }
@@ -63,7 +78,23 @@ export class OperationsService {
   }
 
   events(artistId: string) { return this.prisma.client.bandEvent.findMany({ where: { artistId }, include: { venue: true, contact: true, participants: { include: { bandMember: true } }, settlement: true }, orderBy: [{ startsAt: "asc" }, { createdAt: "desc" }] }); }
-  async event(artistId: string, id: string) { const row = await this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, include: { venue: true, contact: true, opportunity: true, project: true, setlist: { include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } } }, participants: { include: { bandMember: true } }, schedule: { orderBy: { sortOrder: "asc" } }, tasks: true, deals: true, invoices: { include: { payments: true } }, expenses: true, settlement: { include: { splits: { include: { bandMember: true } } } } } }); if (!row) throw new NotFoundException("Event not found"); return row; }
+  async event(artistId: string, id: string) { const row = await this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, include: eventDetailInclude }); if (!row) throw new NotFoundException("Event not found"); return row; }
+  async eventReadiness(artistId: string, id: string, now = new Date()) {
+    const [event, members] = await Promise.all([
+      this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, include: eventDetailInclude }),
+      this.prisma.client.bandMember.findMany({ where: { artistId, active: true }, select: { id: true, name: true } })
+    ]);
+    if (!event) throw new NotFoundException("Event not found");
+    return deterministicShowReadiness(event, members, now);
+  }
+  async eventReadinessList(artistId: string, days = 90, now = new Date()) {
+    const through = new Date(now.getTime() + days * 86400000);
+    const [events, members] = await Promise.all([
+      this.prisma.client.bandEvent.findMany({ where: { artistId, type: "gig", status: { in: ["draft", "hold", "confirmed"] }, OR: [{ startsAt: { gte: now, lte: through } }, { status: "confirmed", startsAt: null }] }, include: eventDetailInclude, orderBy: [{ startsAt: "asc" }, { createdAt: "asc" }], take: 50 }),
+      this.prisma.client.bandMember.findMany({ where: { artistId, active: true }, select: { id: true, name: true } })
+    ]);
+    return events.map((event) => deterministicShowReadiness(event, members, now));
+  }
   async createEvent(artistId: string, input: EventCreate, actorLabel: string, actorOperatorId: string) { await this.validateEventRelations(artistId, input); const row = await this.prisma.client.bandEvent.create({ data: { artistId, ...cleanDates(input) } as Prisma.BandEventUncheckedCreateInput }); await this.auditWrite(artistId, "BandEvent", row.id, "event.created", actorLabel, actorOperatorId, { type: row.type, status: row.status }); return this.event(artistId, row.id); }
   async patchEvent(artistId: string, id: string, input: EventPatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("event", artistId, id); await this.validateEventRelations(artistId, input); const row = await this.prisma.client.bandEvent.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "BandEvent", id, "event.updated", actorLabel, actorOperatorId, { fields: Object.keys(input), status: row.status }); return this.event(artistId, id); }
   async eventFromOpportunity(artistId: string, opportunityId: string, actorLabel: string, actorOperatorId: string) { const opportunity = await this.prisma.client.bookingOpportunity.findFirst({ where: { id: opportunityId, artistId }, include: { venue: true } }); if (!opportunity) throw new NotFoundException("Booking opportunity not found"); const existing = await this.prisma.client.bandEvent.findUnique({ where: { opportunityId } }); const row = await this.prisma.client.bandEvent.upsert({ where: { opportunityId }, create: { artistId, opportunityId, venueId: opportunity.venueId, type: "gig", status: "confirmed", title: opportunity.title, startsAt: opportunity.targetDate, locationName: opportunity.venue?.name ?? null }, update: {} }); if (!existing) await this.auditWrite(artistId, "BandEvent", row.id, "event.created_from_opportunity", actorLabel, actorOperatorId, { opportunityId }); return this.event(artistId, row.id); }

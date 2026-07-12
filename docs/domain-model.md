@@ -17,7 +17,26 @@ into measurable, reviewable work. `ManagerMemoryFact` stores only explicit
 facts with source, confidence, sensitivity, and confirmation time.
 `ManagerRun` and `ManagerRecommendation` preserve the prompt/model version,
 facts read, structured output, safe proposed actions, outcome, and runtime
-metadata. They never store hidden reasoning.
+metadata. `ManagerConversation` and `ManagerMessage` retain a shared,
+artist-scoped conversation; reasoning uses only the latest 12 messages and API
+reads return at most 50. Assistant messages can reference a reviewable
+`ManagerRecommendation`, but cannot directly perform provider, legal, or
+financial actions. Recommendation outcome reason/note/time support reviewed
+learning; accepted recommendations link to a task and task completion is
+attributed automatically. `ManagerGoalProgressEvent` is the append-only source
+for manual numeric progress updates and retains prior/current values and actor.
+Plan health is derived—not stored—from goal measurement, deadlines, linked
+initiatives, blockers, task ownership/state, and elapsed timeline. Nullable,
+artist-unique `sourceKey` values on goals, initiatives, and tasks identify
+`manager_plan_v1` starter records without constraining normal user-created
+work. They make fill-missing generation idempotent while leaving user edits
+authoritative. `ManagerMemoryFact.archivedAt` removes incorrect or
+obsolete memory from reasoning without destructive deletion. These records
+never store hidden reasoning. `ManagerEvalExample` is an owner-reviewed,
+tenant-scoped recommendation/outcome snapshot used for offline evaluation; its
+existence never changes the active runtime version. Owner-triggered
+`ManagerEvaluationRun` rows retain candidate, dataset, pass metrics, and
+scenario results; they cannot activate a version.
 
 ### Events, music, projects, and deals
 
@@ -25,6 +44,9 @@ metadata. They never store hidden reasoning.
 promotion, travel, and meetings. It links participants/availability, schedule,
 venue/contact, opportunity, project, setlist, advance tasks, offers, invoices,
 expenses, and one settlement. Confirmed opportunities have at most one event.
+`ShowReadiness` is a derived, non-persistent view over those artist-owned
+records. It exposes category scores, confidence, evidence IDs, and prioritized
+gaps so the event workspace and Manager use one explainable readiness policy.
 
 `Song` and `Setlist` provide a practical artist-owned library with duration,
 key, BPM, lead vocalist, ordered songs/breaks/notes, and event linkage.

@@ -24,6 +24,11 @@ execFileSync("node", ["scripts/prepare-test-database.mjs"], {
   env,
   stdio: "inherit"
 });
+execFileSync("node", ["scripts/reset-test-database.mjs"], {
+  cwd: root,
+  env,
+  stdio: "inherit"
+});
 execFileSync("node", ["prisma/seed.mjs"], {
   cwd: root,
   env,
