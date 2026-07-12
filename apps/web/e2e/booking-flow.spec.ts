@@ -144,7 +144,7 @@ test("novice manager intake produces grounded work and band operations records",
   await managerMessage.fill("Explain our next priority in plain language.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("Explain our next priority in plain language.", { exact: true })).toBeVisible();
-  await expect(page.getByText(/I would keep this simple|first move is/i)).toBeVisible();
+  await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: /I would keep this simple|first move is/i }).last()).toBeVisible();
   await page.getByRole("button", { name: "Helpful", exact: true }).last().click();
   await expect(page.getByText("Saved", { exact: true }).last()).toBeVisible();
   await page.getByRole("button", { name: "Add answer to evals", exact: true }).last().click();
