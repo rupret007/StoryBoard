@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { runManagerEvaluation } = require("../apps/api/dist/manager/manager-evaluation.js");
 
-const candidateVersion = process.argv[2] ?? "manager_os_v11";
+const candidateVersion = process.argv[2] ?? "manager_os_v13";
 const result = runManagerEvaluation(candidateVersion, []);
 console.log(`Manager evaluation ${result.datasetVersion} · ${result.candidateVersion}`);
 for (const item of result.results) console.log(`${item.passed ? "PASS" : "FAIL"} ${item.name}: ${item.detail}`);

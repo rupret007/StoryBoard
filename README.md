@@ -110,7 +110,7 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v11`
+already performed an outside action. Prompt/policy version `manager_os_v13`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, and respectful
 missing-context guidance. Before applying the five-item Today limit, the
@@ -186,7 +186,12 @@ Members can confirm, correct, or archive non-profile memory, while sensitive
 memory remains owner-controlled. Provider context follows the same boundary:
 normal memory may enter the standard redacted snapshot, sensitive memory
 requires the owner's separate full-context consent, and restricted memory
-never enters a model snapshot. Owners can see the current mode and
+never enters a model snapshot. An explicit conversational request such as
+“Remember that Morgan handles production advances” creates a review card with
+the exact proposed value; it is saved only after a member chooses **Remember
+this**. Ordinary conversation never writes memory, canonical profile facts are
+redirected to Band context, and credentials, financial identifiers, and health
+information are refused without echoing the submitted value. Owners can see the current mode and
 included/withheld counts without exposing the withheld values. Reviewed
 feedback influences future ranking and evaluation only—it never lets
 the model rewrite prompts, policy, schemas, or application code. Owners can
@@ -195,10 +200,17 @@ offline candidate-version testing. They can also promote an exact rated answer:
 helpful examples must stay natural and grounded, while answers needing work
 must include the expected behavior and block the current candidate until a
 later code-registered version is explicitly reviewed as fixed. The examples
-stay local and do not activate or rewrite any version. Goal progress updates create append-only,
-audited events instead of silently replacing history. A code-owned plan-health
-score explains which goals are on track, at risk, overdue, or missing
-measurement, linked work, or real task owners. Starter-plan source keys make
+stay local and do not activate or rewrite any version. Goal progress updates
+create append-only, audited events instead of silently replacing history. Each
+goal also declares its progress source. `manager_goal_measurement_v1` can count
+current qualified/converted prospects, confirmed or completed gigs in the
+goal window, or completed projects explicitly linked to the goal; every other
+metric stays manual. StoryBoard shows when the selected records and saved
+number disagree, but a member must explicitly reconcile the exact freshly
+recomputed value. Stale requests fail closed and replay creates no duplicate
+event. A code-owned plan-health score explains which goals are on track, at
+risk, overdue, or missing measurement, linked work, or real task owners.
+Starter-plan source keys make
 “Fill missing steps” idempotent without overwriting renamed, completed, paused,
 or abandoned work. Owners can run the current offline release gate over golden
 safety/usefulness scenarios plus their reviewed examples without calling a

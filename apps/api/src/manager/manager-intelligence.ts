@@ -5,7 +5,9 @@ import type { ProjectReadiness } from "../operations/project-plan";
 import type { ManagerOutcomeReview } from "./manager-outcome-review";
 import type { ManagerContextHealth } from "./manager-context-health";
 import type { ManagerKnowledgeHealth } from "./manager-knowledge-health";
+import type { ManagerGoalMeasurement } from "./manager-goal-measurement";
 import { managerQuestionAsksAboutCommitments, type ManagerCommitmentHealth } from "./manager-commitment-health";
+import { assessManagerMemoryCapture } from "./manager-memory-capture";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -26,6 +28,11 @@ export type ManagerProposedAction = {
 } | {
   type: "generate_project_plan";
   projectId: string;
+} | {
+  type: "remember_fact";
+  key: string;
+  label: string;
+  value: string;
 };
 
 export type ManagerRecommendationDraft = {
@@ -57,6 +64,7 @@ export type ManagerFacts = {
   } | null;
   members: { id: string; name: string }[];
   goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; createdAt?: Date }[];
+  goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
   tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null }[];
   opportunities: { id: string; title: string; stage: string; updatedAt: Date; targetDate: Date | null }[];
@@ -238,6 +246,7 @@ function recommendationRank(
   if (item.stableKey === "complete-intake") add("manager_setup_missing", 35, "manager setup is incomplete");
   if (item.stableKey.startsWith("context-")) add("context_can_wait", -60, "context improvement can wait behind active delivery pressure");
   if (item.stableKey === "knowledge-refresh") add(facts.knowledgeHealth?.status === "conflicted" ? "knowledge_conflict" : "knowledge_refresh_can_wait", facts.knowledgeHealth?.status === "conflicted" ? 45 : -45, facts.knowledgeHealth?.status === "conflicted" ? "authoritative band facts conflict" : "knowledge refresh can wait behind active delivery pressure");
+  if (item.stableKey.startsWith("goal-measurement-")) add("goal_measurement_review", item.priority === "med" ? 10 : -35, item.priority === "med" ? "recorded progress is not fully supported by the selected source" : "progress reconciliation can wait behind active delivery pressure");
   if (item.stableKey === "weekly-focus") add("fallback_focus", -25, "fallback focus has no recorded urgency");
   if (item.evidenceIds.length) add("recorded_evidence", 5, "supported by StoryBoard records");
 
@@ -412,6 +421,7 @@ export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Da
 
   const gaps: ManagerPlanHealth["gaps"] = [];
   const goals = activeGoals.map((goal) => {
+    const measurement = facts.goalMeasurements.find((item) => item.goalId === goal.id);
     const initiatives = facts.initiatives.filter((initiative) => initiative.goalId === goal.id && !["completed", "abandoned"].includes(initiative.status));
     const initiativeIds = new Set(initiatives.map((initiative) => initiative.id));
     const tasks = facts.tasks.filter((task) => task.initiativeId && initiativeIds.has(task.initiativeId));
@@ -461,8 +471,13 @@ export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Da
     if (unassigned.length) gaps.push({ code: "task_without_owner", detail: `“${goal.title}” has ${unassigned.length} open task${unassigned.length === 1 ? "" : "s"} without an owner.`, evidenceIds: [goal.id, ...unassigned.map((task) => task.id)] });
     if (progressRatio === null) gaps.push({ code: "goal_without_measurement", detail: `“${goal.title}” needs a target and current value.`, evidenceIds: [goal.id] });
     if (!goal.deadline) gaps.push({ code: "goal_without_deadline", detail: `“${goal.title}” has no deadline.`, evidenceIds: [goal.id] });
+    if (measurement && !["manual", "in_sync"].includes(measurement.status)) {
+      reasons.unshift(measurement.summary);
+      gaps.push({ code: "goal_measurement_drift", detail: `“${goal.title}” needs its recorded progress reconciled with ${measurement.label.toLowerCase()}.`, evidenceIds: measurement.evidenceIds.slice(0, 8) });
+      if (status === "on_track") status = "needs_measurement";
+    }
     if (!reasons.length) reasons.push(progressRatio !== null ? `Recorded progress is ${Math.round(progressRatio * 100)}% with no linked overdue or blocked work.` : "No blocking condition is recorded.");
-    return { goalId: goal.id, title: goal.title, status, progressRatio, completedTasks, openTasks, reasons, evidenceIds: unique([goal.id, ...initiatives.map((initiative) => initiative.id), ...overdue.map((task) => task.id)]) };
+    return { goalId: goal.id, title: goal.title, status, progressRatio, completedTasks, openTasks, reasons, evidenceIds: unique([goal.id, ...initiatives.map((initiative) => initiative.id), ...overdue.map((task) => task.id), ...(measurement?.evidenceIds ?? [])]) };
   });
   const weights = { on_track: 100, needs_measurement: 55, at_risk: 65, off_track: 15 } as const;
   const score = Math.round(goals.reduce((sum, goal) => sum + weights[goal.status], 0) / goals.length);
@@ -707,6 +722,20 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
     });
   }
 
+  const measurementDrift = facts.goalMeasurements.find((measurement) => !["manual", "in_sync"].includes(measurement.status));
+  if (measurementDrift) {
+    addWeek({
+      stableKey: `goal-measurement-${measurementDrift.goalId}`,
+      title: `Reconcile progress for ${measurementDrift.goalTitle}`,
+      reason: measurementDrift.summary,
+      nextAction: measurementDrift.nextAction,
+      workstream: facts.goals.find((goal) => goal.id === measurementDrift.goalId)?.workstream ?? "band_operations",
+      priority: measurementDrift.status === "recorded_ahead" ? "med" : "low",
+      evidenceIds: measurementDrift.evidenceIds.slice(0, 8),
+      proposedAction: null
+    });
+  }
+
   const goal = facts.goals.find((candidate) => candidate.status === "active");
   if (goal) {
     const progress = goal.targetValue && goal.currentValue !== null
@@ -820,6 +849,25 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
   const decisionQuestion = Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
   const contextQuestion = questionHas(question, /\b(what do you (?:still )?(?:need|know)|what are you missing|missing context|band context|about (?:us|the band)|know about (?:us|the band)|setup|profile completeness)\b/);
   const knowledgeQuestion = questionHas(question, /\b(what do you remember|manager memory|saved memory|is (?:that|this) current|stale|out of date|trust your memory|confirm(?:ed|ation)? facts?)\b/);
+  const memoryCapture = assessManagerMemoryCapture(question);
+
+  if (memoryCapture.status === "ready") return {
+    answer: `I can keep that as normal band memory after you review it. It will be treated as a confirmed operator note, not as a command or a fact inferred from somewhere else.`,
+    citations: [],
+    recommendation: {
+      stableKey: memoryCapture.key.replace(/^operator_note_/, "remember_").slice(0, 80),
+      title: `Remember: ${memoryCapture.label}`,
+      reason: "You explicitly asked StoryBoard to remember this durable band fact.",
+      nextAction: `Review and save: “${memoryCapture.value.slice(0, 400)}”`,
+      workstream: "band_operations",
+      priority: "low",
+      evidenceIds: [],
+      proposedAction: { type: "remember_fact", key: memoryCapture.key, label: memoryCapture.label, value: memoryCapture.value }
+    }
+  };
+
+  if (memoryCapture.status === "blocked_sensitive") return { answer: `${memoryCapture.reason} Put that information in the appropriate secured system instead of Manager conversation.`, citations: [], recommendation: null };
+  if (memoryCapture.status === "profile_owned") return { answer: `${memoryCapture.reason} Update Band context so every Manager view uses one source of truth.`, citations: [], recommendation: null };
 
   if (externalRequest) {
     const recommendation = matchingRecommendation(brief);
@@ -948,8 +996,9 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
     const nextPlannedTask = facts.tasks
       .filter((task) => task.status !== "done" && task.initiativeId)
       .sort((a, b) => (a.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER))[0];
+    const drift = facts.goalMeasurements.find((measurement) => !["manual", "in_sync"].includes(measurement.status));
     return {
-      answer: `${unrealistic ? "The ambition is useful as a direction, but the recorded timeframe or constraints do not support treating it as a forecast. " : ""}${health.summary} The plan-health score is ${health.score}/100; that is an operating signal from deadlines, measurements, linked work, and blockers—not a prediction.${attention ? `\n\nStart with “${attention.title}”: ${attention.reasons[0]}` : nextPlannedTask ? `\n\nThe next recorded step is “${nextPlannedTask.title}”. Assign a real owner if it still says the band generally.` : "\n\nSet one measurable goal with a deadline, then link an initiative and a next task."}`,
+      answer: `${unrealistic ? "The ambition is useful as a direction, but the recorded timeframe or constraints do not support treating it as a forecast. " : ""}${health.summary} The plan-health score is ${health.score}/100; that is an operating signal from deadlines, measurements, linked work, and blockers—not a prediction.${drift ? `\n\nBefore trusting the percentage for “${drift.goalTitle},” reconcile it: ${drift.summary} ${drift.nextAction}` : attention ? `\n\nStart with “${attention.title}”: ${attention.reasons[0]}` : nextPlannedTask ? `\n\nThe next recorded step is “${nextPlannedTask.title}”. Assign a real owner if it still says the band generally.` : "\n\nSet one measurable goal with a deadline, then link an initiative and a next task."}`,
       citations: unique([...health.goals.flatMap((goal) => goal.evidenceIds), ...(nextPlannedTask ? [nextPlannedTask.id] : [])]).slice(0, 10),
       recommendation: actionableRecommendation(matchingRecommendation(brief))
     };

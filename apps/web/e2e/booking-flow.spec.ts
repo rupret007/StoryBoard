@@ -89,6 +89,12 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByText(/65\/100 · At risk/i)).toBeVisible();
   await expect(page.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
   await expect(page.getByText("Complete the next release cycle", { exact: true })).toHaveCount(1);
+  const liveGoalCard = page.getByText("Grow dependable show revenue", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-lg') and contains(@class,'border')][1]");
+  await expect(liveGoalCard.getByLabel("Progress source")).toHaveValue("qualified_prospects");
+  const liveGoalMeasurement = liveGoalCard.getByLabel("Progress source").locator("xpath=ancestor::div[@data-testid][1]");
+  await expect(liveGoalMeasurement.getByText(/StoryBoard can verify 1/i)).toBeVisible();
+  await liveGoalMeasurement.getByRole("button", { name: "Reconcile to 1" }).click();
+  await expect(liveGoalMeasurement.getByText(/Recorded progress matches 1 current qualified or converted prospect/i)).toBeVisible();
   await expect(page.getByText("Finish the booking profile and define what a good-fit show means", { exact: true }).first()).toBeVisible();
   const context = page.getByTestId("manager-context");
   await expect(context.getByText(/45\/100 · Thin/i)).toBeVisible();
@@ -110,7 +116,9 @@ test("novice manager intake produces grounded work and band operations records",
   await context.getByLabel("Usable assets (one per line)").fill("Finished EP masters\nLive performance video");
   await context.getByRole("spinbutton").fill("500");
   await context.getByLabel("Business or payment name").fill("E2E Band LLC");
+  const profileSaved = page.waitForResponse((response) => response.request().method() === "PUT" && response.url().includes("/manager/profile") && response.ok());
   await context.getByRole("button", { name: "Save operating profile" }).click();
+  await profileSaved;
   await expect(context.getByText(/82\/100 · Strong/i)).toBeVisible();
   await page.getByRole("button", { name: "Fill missing steps" }).click();
   await expect(page.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
@@ -150,9 +158,16 @@ test("novice manager intake produces grounded work and band operations records",
   const planReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "plan-health score is" });
   await expect(planReply).toBeVisible();
   await expect(planReply).toContainText(/real owner/i);
+  await managerMessage.fill("Remember that Morgan handles production advances");
+  await page.getByRole("button", { name: "Send message" }).click();
+  const memoryProposal = page.getByText("Suggested band memory", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await expect(memoryProposal.getByTestId("manager-memory-preview")).toHaveText("Morgan handles production advances");
+  await memoryProposal.getByRole("button", { name: "Remember this" }).click();
+  await expect(memoryProposal.getByText("completed", { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByText(/plan-health score is/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: "What your manager remembers" })).toBeVisible();
+  await expect(page.getByText("Morgan handles production advances", { exact: true }).last()).toBeVisible();
   await expect(page.getByTestId("manager-knowledge-health")).toContainText(/healthy/i);
   await expect(page.getByText("Profile source", { exact: true }).first()).toBeVisible();
   const correctAmbition = page.getByRole("button", { name: "Correct Twelve month ambition" });
@@ -174,7 +189,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v11", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v13", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 

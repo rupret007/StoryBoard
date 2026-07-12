@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const bandModes = ["original", "cover_event", "hybrid"] as const;
 export const managerWorkstreams = ["live", "releases", "audience", "content", "business", "relationships", "band_operations"] as const;
+export const managerGoalMeasurementKinds = ["manual", "qualified_prospects", "confirmed_gigs", "completed_gigs", "completed_projects"] as const;
 export const managerProfileSchema = z.object({
   bandMode: z.enum(bandModes), careerStage: z.string().trim().max(120).nullable().optional(),
   homeCity: z.string().trim().max(120).nullable().optional(), homeRegion: z.string().trim().max(120).nullable().optional(), homeCountry: z.string().trim().max(120).nullable().optional(),
@@ -11,13 +12,14 @@ export const managerProfileSchema = z.object({
 }).strict();
 export const bandMemberCreateSchema = z.object({ name: z.string().trim().min(1).max(160), linkedOperatorId: z.string().trim().min(1).nullable().optional(), email: z.string().email().nullable().optional(), phone: z.string().trim().max(40).nullable().optional(), instruments: z.array(z.string().trim().min(1).max(80)).max(20).default([]), roles: z.array(z.string().trim().min(1).max(80)).max(20).default([]), defaultSplitBasisPoints: z.number().int().min(0).max(10000).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional(), active: z.boolean().default(true) }).strict();
 export const bandMemberPatchSchema = bandMemberCreateSchema.partial().strict();
-export const managerGoalCreateSchema = z.object({ workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), description: z.string().trim().max(2000).nullable().optional(), targetValue: z.number().nullable().optional(), targetUnit: z.string().trim().max(80).nullable().optional(), currentValue: z.number().nullable().optional(), deadline: z.string().datetime({ offset: true }).nullable().optional(), status: z.enum(["draft","active","achieved","paused","abandoned"]).default("draft") }).strict();
+export const managerGoalCreateSchema = z.object({ workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), description: z.string().trim().max(2000).nullable().optional(), targetValue: z.number().nullable().optional(), targetUnit: z.string().trim().max(80).nullable().optional(), currentValue: z.number().nullable().optional(), measurementKind: z.enum(managerGoalMeasurementKinds).default("manual"), deadline: z.string().datetime({ offset: true }).nullable().optional(), status: z.enum(["draft","active","achieved","paused","abandoned"]).default("draft") }).strict();
 export const managerGoalPatchSchema = managerGoalCreateSchema.partial().strict();
 export const managerGoalProgressSchema = z.object({
   value: z.number().finite().optional(),
   delta: z.number().finite().refine((value) => value !== 0, { message: "Delta must not be zero" }).optional(),
   note: z.string().trim().min(1).max(1000).nullable().optional()
 }).strict().refine((input) => (input.value === undefined) !== (input.delta === undefined), { message: "Provide exactly one of value or delta" });
+export const managerGoalProgressSyncSchema = z.object({ observedValue: z.number().int().nonnegative() }).strict();
 export const managerInitiativeCreateSchema = z.object({ goalId: z.string().trim().min(1).nullable().optional(), workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), description: z.string().trim().max(2000).nullable().optional(), status: z.enum(["proposed","active","completed","blocked","abandoned"]).default("proposed"), startsAt: z.string().datetime({ offset: true }).nullable().optional(), dueAt: z.string().datetime({ offset: true }).nullable().optional(), successMetric: z.string().trim().max(500).nullable().optional() }).strict();
 export const managerInitiativePatchSchema = managerInitiativeCreateSchema.partial().strict();
 const managerDecisionOptionSchema = z.object({ label: z.string().trim().min(1).max(200), tradeoff: z.string().trim().min(1).max(1000) }).strict();
@@ -81,7 +83,7 @@ export const managerResponseEvalResolutionSchema = z.object({
   candidateVersion: z.string().regex(/^manager_os_v[1-9][0-9]*$/),
   note: z.string().trim().min(10).max(2000)
 }).strict();
-export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v11").default("manager_os_v11") }).strict();
+export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v13").default("manager_os_v13") }).strict();
 export const managerMemoryPatchSchema = z.object({
   value: z.json().optional(),
   confirmed: z.boolean().optional(),
@@ -93,6 +95,7 @@ export type ManagerProfileInput = z.infer<typeof managerProfileSchema>;
 export type BandMemberCreateInput = z.infer<typeof bandMemberCreateSchema>;
 export type ManagerGoalCreateInput = z.infer<typeof managerGoalCreateSchema>;
 export type ManagerGoalProgressInput = z.infer<typeof managerGoalProgressSchema>;
+export type ManagerGoalProgressSyncInput = z.infer<typeof managerGoalProgressSyncSchema>;
 export type ManagerInitiativeCreateInput = z.infer<typeof managerInitiativeCreateSchema>;
 export type ManagerDecisionCreateInput = z.infer<typeof managerDecisionCreateSchema>;
 export type ManagerDecisionPatchInput = z.infer<typeof managerDecisionPatchSchema>;

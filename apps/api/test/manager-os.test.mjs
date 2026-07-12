@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, commitmentHealth, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, memoryCapture, goalMeasurement, commitmentHealth, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -19,6 +19,8 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-outcome-review.js"),
   loadApi("manager/manager-context-health.js"),
   loadApi("manager/manager-knowledge-health.js"),
+  loadApi("manager/manager-memory-capture.js"),
+  loadApi("manager/manager-goal-measurement.js"),
   loadApi("manager/manager-commitment-health.js"),
   loadApi("manager/manager-schedule.js"),
   loadApi("manager/manager-provider-context.js"),
@@ -38,6 +40,7 @@ function managerFacts(overrides = {}) {
     profile: { id: "profile-a", intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z"), decisionStyle: "guided", twelveMonthAmbition: "Play better regional shows" },
     members: [{ id: "member-a", name: "Alex" }, { id: "member-b", name: "Jordan" }],
     goals: [{ id: "goal-a", title: "Book six regional shows", workstream: "live", status: "active", deadline: new Date("2026-12-01T00:00:00.000Z"), currentValue: 1, targetValue: 6 }],
+    goalMeasurements: [],
     initiatives: [],
     tasks: [],
     opportunities: [{ id: "opp-a", title: "The Room", stage: "target", updatedAt: now, targetDate: null }],
@@ -68,6 +71,10 @@ test("manager intake is strict, supports every band mode, and preserves unknowns
   assert.equal(managerSchemas.managerDecisionPatchSchema.safeParse({}).success, false);
   assert.equal(managerSchemas.managerDecisionReviewSchema.safeParse({ outcome: "mixed", note: "Worth repeating with a smaller room", evidence: [] }).success, true);
   assert.equal(managerSchemas.managerDecisionReviewSchema.safeParse({ outcome: "successful", note: "Invented status", evidence: [] }).success, false);
+  assert.equal(managerSchemas.managerGoalCreateSchema.safeParse({ workstream: "live", title: "Book shows", measurementKind: "confirmed_gigs" }).success, true);
+  assert.equal(managerSchemas.managerGoalCreateSchema.safeParse({ workstream: "live", title: "Book shows", measurementKind: "social_vibes" }).success, false);
+  assert.equal(managerSchemas.managerGoalProgressSyncSchema.safeParse({ observedValue: 2 }).success, true);
+  assert.equal(managerSchemas.managerGoalProgressSyncSchema.safeParse({ observedValue: 1.5 }).success, false);
 });
 
 test("manager cadence validation and local periods fail closed", () => {
@@ -226,6 +233,7 @@ test("manager action authorization is code-owned and defaults to forbidden", () 
   assert.equal(policy.classifyManagerAction("create_decision"), "internal");
   assert.equal(policy.classifyManagerAction("generate_event_advance"), "internal");
   assert.equal(policy.classifyManagerAction("generate_project_plan"), "internal");
+  assert.equal(policy.classifyManagerAction("remember_fact"), "internal");
   assert.equal(policy.classifyManagerAction("create_draft_record"), "forbidden");
   assert.equal(policy.classifyManagerAction("send_email"), "approval_required");
   assert.equal(policy.classifyManagerAction("financial_action"), "owner_approval_required");
@@ -293,6 +301,30 @@ test("recommendation acceptance can create a tenant task but cannot execute prov
   await assert.rejects(() => service.recommendation("artist-a", "rec-a", "accepted", {}, "member@test", "operator-a"), /Unsupported manager action/);
   assert.equal(taskCreates, 1);
   await assert.rejects(() => service.recommendation("artist-b", "rec-a", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+});
+
+test("accepted conversational memory is exact, normal-sensitivity, idempotent, linked, and audited", async () => {
+  const capture = memoryCapture.assessManagerMemoryCapture("Remember that Morgan handles production advances");
+  assert.equal(capture.status, "ready");
+  let outcome = "suggested"; let upserts = 0; const audits = [];
+  const client = {
+    managerRecommendation: {
+      findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-memory", outcome, taskId: null, decisionId: null, memoryFactId: null, task: null, decision: null, memoryFact: null, proposedAction: { type: "remember_fact", key: capture.key, label: capture.label, value: capture.value }, evidence: [] } : null,
+      updateMany: async ({ data }) => { if (outcome !== "suggested") return { count: 0 }; outcome = data.outcome; return { count: 1 }; },
+      update: async ({ data }) => ({ id: "rec-memory", outcome, taskId: null, decisionId: null, ...data })
+    },
+    managerMemoryFact: { upsert: async ({ create, update }) => { upserts += 1; assert.equal(create.sensitivity, "normal"); assert.equal(create.sourceType, "operator_confirmation"); assert.equal(create.value, capture.value); assert.equal(update.archivedAt, null); return { id: "memory-a", ...create }; } }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+  const accepted = await service.recommendation("artist-a", "rec-memory", "accepted", {}, "member@test", "operator-a");
+  assert.equal(accepted.outcome, "completed");
+  assert.equal(accepted.memoryFactId, "memory-a");
+  assert.equal(upserts, 1);
+  assert.equal(audits.some((entry) => entry.action === "manager.memory_confirmed" && entry.aggregateId === "memory-a"), true);
+  await assert.rejects(() => service.recommendation("artist-a", "rec-memory", "accepted", {}, "member@test", "operator-a"), /already been decided/);
+  await assert.rejects(() => service.recommendation("artist-b", "rec-memory", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+  assert.equal(upserts, 1);
 });
 
 test("manager recommendations execute existing event and project generators atomically and once", async () => {
@@ -383,7 +415,7 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v11", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v13", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
 });
 
@@ -460,6 +492,49 @@ test("plan health is transparent about measurement, deadlines, blockers, and lin
   assert.equal(noPlan.status, "needs_plan");
 });
 
+test("goal measurements reconcile only explicit StoryBoard outcomes and explain drift", () => {
+  const baseGoal = { id: "goal-a", title: "Book regional shows", measurementKind: "confirmed_gigs", currentValue: 0, createdAt: new Date("2026-07-01T00:00:00.000Z"), deadline: new Date("2026-09-30T23:59:59.000Z") };
+  const measurement = goalMeasurement.deterministicManagerGoalMeasurement({
+    goal: baseGoal,
+    prospects: [],
+    events: [
+      { id: "event-counted", type: "gig", status: "confirmed", startsAt: new Date("2026-08-01T01:00:00.000Z") },
+      { id: "event-completed", type: "gig", status: "completed", startsAt: new Date("2026-09-01T01:00:00.000Z") },
+      { id: "event-too-late", type: "gig", status: "confirmed", startsAt: new Date("2026-10-01T01:00:00.000Z") },
+      { id: "rehearsal", type: "rehearsal", status: "confirmed", startsAt: new Date("2026-08-02T01:00:00.000Z") }
+    ],
+    projects: []
+  }, now);
+  assert.equal(measurement.policyVersion, "manager_goal_measurement_v1");
+  assert.equal(measurement.observedValue, 2);
+  assert.equal(measurement.status, "records_ahead");
+  assert.deepEqual(measurement.evidenceIds, ["goal-a", "event-counted", "event-completed"]);
+
+  const prospects = goalMeasurement.deterministicManagerGoalMeasurement({ goal: { ...baseGoal, measurementKind: "qualified_prospects", currentValue: 2 }, prospects: [{ id: "prospect-a", status: "qualified" }, { id: "prospect-b", status: "converted" }, { id: "prospect-c", status: "disqualified" }], events: [], projects: [] }, now);
+  assert.equal(prospects.status, "in_sync");
+  const projects = goalMeasurement.deterministicManagerGoalMeasurement({ goal: { ...baseGoal, measurementKind: "completed_projects", currentValue: 2 }, prospects: [], events: [], projects: [{ id: "project-a", goalId: "goal-a", status: "completed" }, { id: "project-b", goalId: "goal-b", status: "completed" }] }, now);
+  assert.equal(projects.status, "recorded_ahead");
+  assert.match(projects.nextAction, /outside StoryBoard/i);
+  const manual = goalMeasurement.deterministicManagerGoalMeasurement({ goal: { ...baseGoal, measurementKind: "manual", currentValue: 4 }, prospects: [], events: [], projects: [] }, now);
+  assert.equal(manual.observedValue, null);
+  assert.equal(manual.status, "manual");
+
+  const driftFacts = managerFacts({
+    goals: [{ id: "goal-a", title: "Book regional shows", workstream: "live", status: "active", createdAt: baseGoal.createdAt, deadline: baseGoal.deadline, currentValue: 0, targetValue: 6 }],
+    goalMeasurements: [measurement],
+    initiatives: [{ id: "initiative-a", goalId: "goal-a", title: "Regional sprint", status: "active", dueAt: new Date("2026-09-01T00:00:00.000Z") }],
+    tasks: [{ id: "task-a", title: "Pitch rooms", status: "in_progress", ownerLabel: "Alex", dueAt: new Date("2026-07-20T00:00:00.000Z"), initiativeId: "initiative-a" }]
+  });
+  const health = intelligence.deterministicManagerPlanHealth(driftFacts, now);
+  assert.equal(health.goals[0].status, "needs_measurement");
+  assert.ok(health.gaps.some((gap) => gap.code === "goal_measurement_drift"));
+  const brief = intelligence.deterministicManagerBrief(driftFacts, now);
+  assert.ok(brief.thisWeek.some((item) => item.stableKey === "goal-measurement-goal-a"));
+  const answer = intelligence.deterministicManagerChat(driftFacts, "Are we on track with the plan?", now);
+  assert.match(answer.answer, /reconcile it/i);
+  assert.match(answer.answer, /verify 2/i);
+});
+
 test("90-day starter plans are concrete, bounded, and tailored to every band mode", () => {
   for (const bandMode of ["original", "cover_event", "hybrid"]) {
     const plan = managerPlan.managerPlanTemplate(bandMode, now);
@@ -470,6 +545,7 @@ test("90-day starter plans are concrete, bounded, and tailored to every band mod
     for (const goal of plan.goals) {
       assert.equal(goal.currentValue, 0);
       assert.ok(goal.targetValue > 0);
+      assert.ok(["manual", "qualified_prospects", "completed_projects"].includes(goal.measurementKind));
       assert.equal(goal.initiative.tasks.length, 3);
       assert.ok(goal.initiative.tasks.every((task) => task.dueAt > now && task.dueAt <= plan.endsAt));
       assert.ok(goal.initiative.tasks.every((task) => task.ownerLabel === null));
@@ -494,7 +570,7 @@ test("brief and plan conversation advance an existing linked step instead of inv
 test("a pre-intake cached brief is invalidated when setup completes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v11", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v13", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-12T11:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
@@ -506,7 +582,7 @@ test("a pre-intake cached brief is invalidated when setup completes", async () =
 test("a cached brief is invalidated when commitment facts change", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => ({ updatedAt: new Date("2026-07-12T11:00:00.000Z") }) } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v11", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v13", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
@@ -518,12 +594,12 @@ test("a cached brief is invalidated when commitment facts change", async () => {
 test("a cached brief is invalidated when the Manager priority policy changes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
-  service.latestBrief = async () => ({ id: "v10-brief", promptVersion: "manager_os_v10", createdAt: new Date() });
+  service.latestBrief = async () => ({ id: "v12-brief", promptVersion: "manager_os_v12", createdAt: new Date() });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
-  service.generateBrief = async () => { generations += 1; return { id: "v11-brief" }; };
+  service.generateBrief = async () => { generations += 1; return { id: "v13-brief" }; };
   const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
-  assert.equal(result.id, "v11-brief");
+  assert.equal(result.id, "v13-brief");
   assert.equal(generations, 1);
 });
 
@@ -531,7 +607,7 @@ test("a cached brief is invalidated when an audited operating fact changes", asy
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   const createdAt = new Date(Date.now() - 60_000);
-  service.latestBrief = async () => ({ id: "stale-brief", promptVersion: "manager_os_v11", createdAt });
+  service.latestBrief = async () => ({ id: "stale-brief", promptVersion: "manager_os_v13", createdAt });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => ({ createdAt: new Date(createdAt.getTime() + 1_000) });
   service.generateBrief = async () => { generations += 1; return { id: "fresh-brief" }; };
@@ -560,23 +636,54 @@ test("goal progress is append-only, artist-scoped, and audited", async () => {
   assert.equal(progressCreates, 1);
 });
 
+test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped, and audited", async () => {
+  let currentValue = 0; let progressCreates = 0; let audits = 0;
+  const goal = { id: "goal-a", artistId: "artist-a", title: "Qualify buyers", measurementKind: "qualified_prospects", currentValue, createdAt: new Date("2026-07-01T00:00:00.000Z"), deadline: new Date("2026-10-01T00:00:00.000Z") };
+  const client = {
+    managerGoal: {
+      findFirst: async ({ where }) => where.artistId === "artist-a" ? { ...goal, currentValue } : null,
+      update: async ({ data }) => { currentValue = data.currentValue; return { ...goal, currentValue }; }
+    },
+    bookingProspect: { findMany: async () => [{ id: "prospect-a", status: "qualified" }, { id: "prospect-b", status: "converted" }] },
+    bandEvent: { findMany: async () => [] },
+    artistProject: { findMany: async () => [] },
+    managerGoalProgressEvent: { create: async ({ data }) => { progressCreates += 1; return { id: `progress-${progressCreates}`, createdAt: now, ...data }; } }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
+  const synced = await service.syncGoalProgress("artist-a", "goal-a", { observedValue: 2 }, "member@test", "operator-a");
+  assert.equal(synced.measurement.status, "in_sync");
+  assert.equal(synced.progressEvent.previousValue, 0);
+  assert.equal(synced.progressEvent.value, 2);
+  assert.equal(synced.progressEvent.sourceType, "manager_goal_measurement_v1");
+  assert.equal(progressCreates, 1);
+  assert.equal(audits, 1);
+  const replay = await service.syncGoalProgress("artist-a", "goal-a", { observedValue: 2 }, "member@test", "operator-a");
+  assert.equal(replay.progressEvent, null);
+  assert.equal(progressCreates, 1);
+  assert.equal(audits, 1);
+  await assert.rejects(() => service.syncGoalProgress("artist-a", "goal-a", { observedValue: 1 }, "member@test", "operator-a"), (error) => error?.getStatus?.() === 409);
+  await assert.rejects(() => service.syncGoalProgress("artist-b", "goal-a", { observedValue: 2 }, "member@test", "operator-a"), (error) => error?.getStatus?.() === 404);
+  assert.equal(progressCreates, 1);
+});
+
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v11", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v13", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v11", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v11", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v13", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v13", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v11", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v11", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v13", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v13", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v11", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v10", resolutionVersion: "manager_os_v11", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v11", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v13", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v12", resolutionVersion: "manager_os_v13", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v13", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 
@@ -617,6 +724,13 @@ test("operating-profile facts are synchronized atomically and cannot drift throu
   await assert.rejects(() => service.patchMemory("artist-a", "memory-market", { value: { city: "Detroit" } }, true, "owner@test", "operator-owner"), /operating profile/);
   const migration = await readFile(join(dir, "..", "..", "..", "prisma", "migrations", "20260713210000_manager_profile_memory_source", "migration.sql"), "utf8");
   assert.match(migration, /memory\."sourceType" = 'manager_intake'/);
+  const measurementMigration = await readFile(join(dir, "..", "..", "..", "prisma", "migrations", "20260713220000_manager_goal_measurements", "migration.sql"), "utf8");
+  assert.match(measurementMigration, /ADD COLUMN "measurementKind"/);
+  assert.match(measurementMigration, /manager_plan_v1:goal:live_pipeline/);
+  assert.match(measurementMigration, /manager_plan_v1:goal:release_cycle/);
+  const conversationalMemoryMigration = await readFile(join(dir, "..", "..", "..", "prisma", "migrations", "20260713230000_manager_conversational_memory", "migration.sql"), "utf8");
+  assert.match(conversationalMemoryMigration, /ADD COLUMN "memoryFactId"/);
+  assert.match(conversationalMemoryMigration, /REFERENCES "ManagerMemoryFact"\("id"\)/);
 });
 
 test("manager golden scenarios cover original, cover, hybrid, and adversarial inputs", async () => {
@@ -764,6 +878,30 @@ test("manager knowledge health detects conflict and staleness while enforcing pr
   assert.match(answer.answer, /conflicts with the operating profile/i);
   assert.doesNotMatch(answer.answer, /Detroit/);
   assert.equal(answer.recommendation, null);
+});
+
+test("conversational memory requires an explicit safe request and exact reviewable confirmation", () => {
+  const ready = memoryCapture.assessManagerMemoryCapture("Remember that Morgan handles production advances");
+  assert.equal(ready.status, "ready");
+  assert.match(ready.key, /^operator_note_/);
+  assert.equal(ready.value, "Morgan handles production advances");
+  assert.equal(memoryCapture.managerMemoryCaptureMatches("Remember that Morgan handles production advances", ready), true);
+  assert.equal(memoryCapture.managerMemoryCaptureMatches("Remember that Morgan handles production advances", { ...ready, value: "Morgan handles all finances" }), false);
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Morgan handles production advances").status, "not_requested");
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Remember that our API key is secret-123").status, "blocked_sensitive");
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Remember that our home market is Chicago").status, "profile_owned");
+
+  const proposal = intelligence.deterministicManagerChat(managerFacts(), "Remember that Morgan handles production advances", now);
+  assert.equal(proposal.recommendation?.proposedAction?.type, "remember_fact");
+  assert.equal(proposal.recommendation?.proposedAction?.value, "Morgan handles production advances");
+  assert.match(proposal.answer, /after you review it/i);
+  const blocked = intelligence.deterministicManagerChat(managerFacts(), "Remember that our bank account password is hunter2", now);
+  assert.equal(blocked.recommendation, null);
+  assert.match(blocked.answer, /cannot be saved/i);
+  assert.doesNotMatch(blocked.answer, /hunter2/);
+  const profile = intelligence.deterministicManagerChat(managerFacts(), "Remember that our home market is Chicago", now);
+  assert.equal(profile.recommendation, null);
+  assert.match(profile.answer, /Band context/i);
 });
 
 test("manager briefs and conversation expose context gaps without judging the band", () => {

@@ -190,6 +190,14 @@ enum ManagerGoalStatus {
   abandoned
 }
 
+enum ManagerGoalMeasurementKind {
+  manual
+  qualified_prospects
+  confirmed_gigs
+  completed_gigs
+  completed_projects
+}
+
 enum ManagerInitiativeStatus {
   proposed
   active
@@ -485,23 +493,24 @@ model BandMember {
 }
 
 model ManagerGoal {
-  id             String                     @id @default(cuid())
-  artistId       String
-  workstream     ManagerWorkstream
-  title          String
-  description    String?
-  targetValue    Float?
-  targetUnit     String?
-  currentValue   Float?
-  deadline       DateTime?
-  status         ManagerGoalStatus          @default(draft)
-  sourceKey      String?
-  createdAt      DateTime                   @default(now())
-  updatedAt      DateTime                   @updatedAt
-  artist         Artist                     @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  initiatives    ManagerInitiative[]
-  projects       ArtistProject[]
-  progressEvents ManagerGoalProgressEvent[]
+  id              String                     @id @default(cuid())
+  artistId        String
+  workstream      ManagerWorkstream
+  title           String
+  description     String?
+  targetValue     Float?
+  targetUnit      String?
+  currentValue    Float?
+  measurementKind ManagerGoalMeasurementKind @default(manual)
+  deadline        DateTime?
+  status          ManagerGoalStatus          @default(draft)
+  sourceKey       String?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+  artist          Artist                     @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  initiatives     ManagerInitiative[]
+  projects        ArtistProject[]
+  progressEvents  ManagerGoalProgressEvent[]
 
   @@unique([artistId, sourceKey])
   @@index([artistId, status, deadline])
@@ -590,6 +599,7 @@ model ManagerMemoryFact {
   createdAt   DateTime                 @default(now())
   updatedAt   DateTime                 @updatedAt
   artist      Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  recommendations ManagerRecommendation[]
 
   @@unique([artistId, key])
   @@index([artistId, archivedAt, updatedAt])
@@ -635,16 +645,19 @@ model ManagerRecommendation {
   outcomeAt      DateTime?
   taskId         String?
   decisionId     String?                      @unique
+  memoryFactId   String?
   createdAt      DateTime                     @default(now())
   updatedAt      DateTime                     @updatedAt
   managerRun     ManagerRun                   @relation(fields: [managerRunId], references: [id], onDelete: Cascade)
   initiative     ManagerInitiative?           @relation(fields: [initiativeId], references: [id], onDelete: SetNull)
   task           Task?                        @relation(fields: [taskId], references: [id], onDelete: SetNull)
   decision       ManagerDecision?             @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+  memoryFact     ManagerMemoryFact?            @relation(fields: [memoryFactId], references: [id], onDelete: SetNull)
   evalExample    ManagerEvalExample?
 
   @@unique([managerRunId, stableKey])
   @@index([managerRunId, outcome])
+  @@index([memoryFactId])
   @@index([stableKey, outcome, updatedAt])
 }
 

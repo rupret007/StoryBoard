@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `812aaf1`
+Baseline for this round: `main` at `a1e85a9`
 
 ## Product and current architecture
 
@@ -441,6 +441,52 @@ mock-safe provider adapters.
   source-precedence safety scenario and deterministic unit/database/browser
   coverage.
 
+### P0 — Evidence-reconciled Manager goals (completed 2026-07-12)
+
+- [x] Close the plan-truth gap where StoryBoard could hold authoritative
+  qualified prospects, confirmed/completed gigs, or completed linked projects
+  while a Manager goal continued to report a manually entered zero.
+- [x] Add explicit goal measurement sources: manual, current
+  qualified/converted prospects, confirmed gigs in the goal window, completed
+  gigs in the goal window, and completed projects explicitly linked to the
+  goal. Unsupported goals remain manual rather than being guessed from text.
+- [x] Derive `manager_goal_measurement_v1` status as manual, not recorded, in
+  sync, records ahead, or recorded ahead. The projection names its source,
+  observed value, difference, evidence IDs, and next review action.
+- [x] Keep reconciliation human-controlled. A member must review the observed
+  value and send that exact value back; the API recomputes inside a serializable
+  transaction, rejects stale evidence, records one append-only progress event,
+  and audits a real change. Replay produces no duplicate event or audit.
+- [x] Make starter live-pipeline and release-cycle goals select qualified
+  prospects and completed linked projects respectively. Existing user-created
+  goals remain manual; migration `20260713220000_manager_goal_measurements`
+  adds the source without rewriting titles, targets, or progress.
+- [x] Feed measurement drift into plan health, briefs, conversation, redacted
+  provider context, and evidence validation. Routine positive drift stays
+  behind urgent operating work; unsupported recorded progress receives a
+  stronger review signal.
+- [x] Add Manager UI source selection and explicit reconciliation, then promote
+  the release contract to `manager_os_v12` / `manager_evals_v13` with unit,
+  disposable-database, and production-browser coverage.
+
+### P0 — Explicit, reviewable conversational memory (completed 2026-07-12)
+
+- [x] Let an operator explicitly ask Manager to remember a durable, normal-
+  sensitivity band fact. Merely mentioning a fact never creates memory.
+- [x] Present the exact proposed value in conversation and require a separate
+  member acceptance before saving it as a confirmed operator note. The
+  accepted recommendation links to the resulting memory fact and is
+  transactionally single-use, tenant-scoped, audited, and replay-safe.
+- [x] Keep canonical operating-profile facts in Band context rather than
+  creating duplicate truths. Refuse credentials, financial identifiers, and
+  health information without repeating the submitted secret in the response.
+- [x] Reject model-created, mismatched, or brief-created memory actions unless
+  they exactly match the current operator's explicit request. No new provider
+  or arbitrary write authority was introduced.
+- [x] Add migration `20260713230000_manager_conversational_memory`, unit,
+  disposable-database, evaluation, relationship-diagnostic, and Chromium
+  coverage; promote the contract to `manager_os_v13` / `manager_evals_v14`.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -548,6 +594,35 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Added explicit conversational memory capture. “Remember…” now
+  creates a visible proposal rather than a silent write; acceptance saves the
+  exact normal-sensitivity value with operator-confirmation provenance and an
+  audit trail. Profile-owned facts redirect to Band context, sensitive values
+  fail closed without being echoed, and grounding requires an exact match to
+  the current question. Migration
+  `20260713230000_manager_conversational_memory` links the accepted
+  recommendation to its memory fact without rewriting existing rows. The
+  release contract is `manager_os_v13` / `manager_evals_v14`. Validation
+  passed 89 API tests, two shared tests, three database workflows across all 31
+  migrations, three production Chromium workflows, production builds, the
+  relationship diagnostic with zero mismatches, and the 24/24 Manager gate at
+  100% safety. A final schema diff also found and closed a historical missing
+  migration for the existing Task status/due-date index; fresh and upgraded
+  databases now converge with no pending schema diff.
+- 2026-07-12: Added reviewable `manager_goal_measurement_v1` reconciliation so
+  Manager goals no longer drift silently from the operating records they are
+  meant to measure. The policy counts only explicitly selected sources,
+  preserves manual progress for unsupported metrics, and never changes a goal
+  until a member confirms the current observed value. Reconciliation is
+  tenant-scoped, stale-evidence protected, append-only, audited, and idempotent.
+  The design clean-rooms Andrea_NanoBot's general observable-outcome
+  reconciliation principle without copying its code, runtime, or data.
+  Container validation also pinned API/web images to Node 22.22.0 after the
+  floating Node 22 tag moved beyond the repository's declared 22.22.x runtime.
+  Validation passed 87 API tests, two shared tests, three database workflows
+  across all 29 migrations, three production Chromium workflows, production
+  builds, and the 22/22 `manager_os_v12` / `manager_evals_v13` gate at 100%
+  safety.
 - 2026-07-12: Added the code-owned `manager_knowledge_v1` source and freshness
   policy. Operating-profile writes now synchronize band mode, home market,
   ambition, and constraints to their compatibility memory rows atomically;

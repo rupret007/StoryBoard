@@ -98,6 +98,19 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   presentation, and unverified claims of completed outside actions before a
   model answer can replace the safe fallback. Feedback may shape reviewed evals,
   but runtime models cannot rewrite prompts, policy, schemas, or code.
+  Goal numbers also remain reviewable rather than inferred from prose.
+  `manager_goal_measurement_v1` reads only the goal's explicit source and
+  produces an evidence-backed observed value. A member must submit that exact
+  value to reconcile; the API recomputes under serializable isolation, rejects
+  stale evidence, and appends one audited progress event. Manual and external
+  metrics are never reverse-engineered from titles or notes.
+  Conversational memory uses the same explicit-confirmation boundary. Only a
+  current operator message beginning with a supported remember directive may
+  produce `remember_fact`; the proposal exposes the exact value, grounding
+  rechecks the key/label/value, and a separate accepted recommendation performs
+  the tenant-scoped audited write. Briefs and ordinary model prose cannot save
+  memory. Profile-owned facts redirect to their canonical form, and sensitive
+  values fail closed without being echoed.
   Owner-promoted `ManagerEvalExample` rows are bounded local fixtures, not an
   online training or self-deployment mechanism. Code-owned plan health derives
   explainable status from authoritative goals/initiatives/tasks, while numeric

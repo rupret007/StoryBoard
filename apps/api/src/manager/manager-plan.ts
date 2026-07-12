@@ -1,4 +1,4 @@
-import type { BandMode, ManagerWorkstream } from "../generated/prisma/enums";
+import type { BandMode, ManagerGoalMeasurementKind, ManagerWorkstream } from "../generated/prisma/enums";
 
 export const MANAGER_PLAN_TEMPLATE_VERSION = "manager_plan_v1";
 
@@ -26,6 +26,7 @@ export type ManagerPlanGoalTemplate = {
   targetValue: number;
   targetUnit: string;
   currentValue: number;
+  measurementKind: ManagerGoalMeasurementKind;
   deadline: Date;
   initiative: ManagerPlanInitiativeTemplate;
 };
@@ -40,6 +41,7 @@ function goal(
   title: string,
   targetValue: number,
   targetUnit: string,
+  measurementKind: ManagerGoalMeasurementKind,
   initiativeTitle: string,
   successMetric: string,
   tasks: string[],
@@ -53,6 +55,7 @@ function goal(
     targetValue,
     targetUnit,
     currentValue: 0,
+    measurementKind,
     deadline: afterDays(now, 90),
     initiative: {
       sourceKey: `${MANAGER_PLAN_TEMPLATE_VERSION}:initiative:${key}`,
@@ -72,25 +75,25 @@ function goal(
 
 export function managerPlanTemplate(bandMode: BandMode, now = new Date()) {
   const release = () => goal(
-    "release_cycle", "releases", bandMode === "original" ? "Ship the next release deliberately" : "Complete the next release cycle", 1, "release cycle",
+    "release_cycle", "releases", bandMode === "original" ? "Ship the next release deliberately" : "Complete the next release cycle", 1, "release cycle", "completed_projects",
     "Turn the next release into a dated, owned project",
     "A release date, asset checklist, milestones, and success measure are recorded.",
     ["Choose the release outcome and a realistic target date", "Audit recordings, artwork, distribution, and press assets", "Build the release milestones and first content calendar"], now
   );
   const live = (hybrid: boolean) => goal(
-    "live_pipeline", "live", hybrid ? "Grow dependable show revenue" : "Build a dependable paid-show pipeline", hybrid ? 3 : 10, hybrid ? "qualified opportunities" : "qualified buyers",
+    "live_pipeline", "live", hybrid ? "Grow dependable show revenue" : "Build a dependable paid-show pipeline", hybrid ? 3 : 10, hybrid ? "qualified opportunities" : "qualified buyers", "qualified_prospects",
     "Run one focused booking-market sprint",
     "One market has a ready booking profile, qualified prospects, buyer contacts, and reviewed outreach.",
     ["Finish the booking profile and define what a good-fit show means", "Choose one target market and qualify real prospects", "Attach buyer contacts and prepare a reviewed pitch campaign"], now
   );
   const audience = () => goal(
-    "audience_loop", "audience", "Grow a measurable core audience", 3, "measured experiments",
+    "audience_loop", "audience", "Grow a measurable core audience", 3, "measured experiments", "manual",
     "Build an audience loop around shows and releases",
     "Three small audience experiments have an owner, date, measure, and recorded result.",
     ["Choose one audience signal the band can measure consistently", "Design the first show or release audience-capture experiment", "Assign the next three audience experiments and review dates"], now
   );
   const showBusiness = () => goal(
-    "show_business", "business", "Make every show financially visible", 1, "documented show process",
+    "show_business", "business", "Make every show financially visible", 1, "documented show process", "manual",
     "Create the band's repeatable show-business checklist",
     "The quote-to-settlement path names required terms, documents, payment checkpoints, expenses, and member payout review.",
     ["Write the minimum deal terms required before accepting a show", "Review the agreement, invoice, deposit, and cancellation workflow", "Define the post-show settlement and member payout checklist"], now

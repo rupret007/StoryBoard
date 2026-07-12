@@ -20,6 +20,12 @@ and review date. A later immutable review records `worked`, `mixed`,
 are operating work, while reviewed results are bounded evidence rather than a
 rule the system may generalize automatically. `ManagerMemoryFact` stores only explicit
 facts with source, confidence, sensitivity, and confirmation time.
+An explicit `remember_fact` recommendation is the only conversational memory
+write: its exact value is shown before acceptance, the current operator request
+must match it byte-for-byte after normalization, and acceptance upserts a
+normal-sensitivity `operator_confirmation` fact. `ManagerRecommendation.memoryFactId`
+retains that provenance. Profile-owned facts remain in
+`ArtistOperatingProfile`, while sensitive conversational capture is refused.
 `ManagerRun` and `ManagerRecommendation` preserve the prompt/model version,
 facts read, structured output, safe proposed actions, outcome, and runtime
 metadata. `ManagerConversation` and `ManagerMessage` retain a shared,
@@ -40,9 +46,10 @@ Assistant messages can reference a reviewable
 `ManagerRecommendation`, but cannot directly perform provider, legal, or
 financial actions. Recommendation outcome reason/note/time support reviewed
 learning; accepted recommendations link to a task or one open decision draft.
-Two immediate internal recommendation types reuse existing authorities:
+Three immediate internal recommendation types reuse existing authorities:
 `generate_event_advance` creates `show_advance_v1` Tasks for a cited event and
 `generate_project_plan` creates `project_plan_v1` Tasks for a cited project.
+`remember_fact` writes only the exact reviewed normal-sensitivity operator note.
 Their target ownership and date are revalidated, task source keys make replay
 idempotent, and a successful acceptance records `action_executed` and completes
 the recommendation in the same transaction.
@@ -67,9 +74,16 @@ result; the recommendation rows remain the executable review boundary.
 Conversation-created decisions have `needsFraming=true`, cannot be chosen until
 a member saves real options/tradeoffs, and complete the linked recommendation
 only after an outcome review. Task completion is attributed automatically.
-`ManagerGoalProgressEvent` is the append-only source
-for manual numeric progress updates and retains prior/current values and actor.
-Plan health is derived—not stored—from goal measurement, deadlines, linked
+`ManagerGoal.measurementKind` declares whether progress is manual or derived
+from one bounded StoryBoard source: current qualified/converted prospects,
+confirmed gigs in the goal window, completed gigs in the goal window, or
+completed projects explicitly linked to the goal. The non-persistent
+`manager_goal_measurement_v1` projection reports the observed value, drift,
+source label, and evidence IDs. `ManagerGoalProgressEvent` is the append-only
+source for both manual numeric updates and member-approved reconciliation; it
+retains prior/current values, actor, policy source, and source kind. The sync
+route recomputes evidence in a serializable transaction and creates no event
+when already aligned. Plan health is derived—not stored—from goal measurement, deadlines, linked
 initiatives, blockers, task ownership/state, and elapsed timeline. Nullable,
 artist-unique `sourceKey` values on goals, initiatives, and tasks identify
 `manager_plan_v1` starter records without constraining normal user-created

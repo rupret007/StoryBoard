@@ -82,7 +82,9 @@ local Postgres and Redis data.
 Allocate at least 2 GB of memory to Docker Desktop; image compilation includes
 TypeScript, Prisma client generation, and Next.js production builds.
 
-The API image uses Nest's SWC emitter after Prisma generation to keep image
+The API and web images pin Node 22.22.0 to match the repository's declared
+22.22.x engine instead of drifting with the floating Node 22 tag. The API image
+uses Nest's SWC emitter after Prisma generation to keep image
 assembly within small Docker Desktop memory limits. This does not replace the
 strict `pnpm typecheck`/`pnpm test` release gate; CI runs those before the
 container smoke. `.dockerignore` excludes workspace builds, generated Prisma
@@ -286,6 +288,13 @@ Manager routes:
 - `GET` / `POST` / `PATCH /manager/members`, `/manager/goals`, and
   `/manager/initiatives`
 - `GET /manager/plan-health`; `GET` / `POST /manager/goals/:id/progress`
+- `GET /manager/goal-measurements` — current `manager_goal_measurement_v1`
+  projection for every goal, including source, observed/recorded values, drift,
+  and bounded evidence IDs
+- `POST /manager/goals/:id/sync-progress` with the last displayed
+  `{ "observedValue": 2 }`; the API recomputes inside the transaction, rejects
+  stale evidence with `409`, and creates an audited progress event only when
+  the value changes
 - `GET /manager/commitment-health` — ranked blocked, overdue, deferred,
   waiting, ownerless, due-soon, and unscheduled task commitments
 - `GET /manager/context-health` — a deterministic, tenant-scoped projection of
@@ -317,7 +326,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v11`)
+  (owner-only; currently accepts only the code-registered `manager_os_v13`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -373,7 +382,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v11` retains the current operator question and at most 12
+version `manager_os_v13` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -394,6 +403,12 @@ itself immediately after persistence.
 Conversation may propose one `create_decision` draft only for an explicit
 two-option choice. Acceptance creates an open, linked, tenant-owned decision;
 the band must save real framing in a separate write before it can choose.
+Conversation may also propose `remember_fact` only when the current operator
+explicitly asks to remember the exact normal-sensitivity statement. The value
+is displayed before acceptance and saved with operator-confirmation provenance
+only after **Remember this**. Ordinary conversation and scheduled briefs cannot
+write memory; operating-profile facts redirect to Band context, and credentials,
+financial identifiers, and health information are refused.
 Generated briefs remain limited to `create_task` proposals.
 Each assistant message links to the exact `ManagerRun` that produced it.
 Members can record one idempotent feedback row per response/operator; feedback
@@ -445,6 +460,13 @@ recommendation and never activates a prompt/policy version.
 Goal progress accepts exactly one of `value` or `delta`; a delta requires an
 existing current value. Each update transactionally changes the goal and adds
 an immutable `ManagerGoalProgressEvent` with the prior value, actor, and note.
+Goals default to `measurementKind=manual`. A member may instead select
+`qualified_prospects`, `confirmed_gigs`, `completed_gigs`, or
+`completed_projects`. Qualified prospects count the current qualified/converted
+pool. Gig counts use the goal creation/deadline performance window. Completed
+projects count only projects explicitly linked by `goalId`. The Manager exposes
+drift but never synchronizes it automatically; unsupported metrics remain
+manual. Repeated synchronization at the same observed value is a no-op.
 `GET /manager/plan-health` is deterministic: it scores active goals from
 deadlines, recorded measurements, linked initiatives, blocked work, and linked
 task state, and returns the reasons/evidence for every classification.
