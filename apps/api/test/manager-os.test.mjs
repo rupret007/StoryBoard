@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, subjectReference, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -26,6 +26,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-goal-target.js"),
   loadApi("manager/manager-conversation-continuity.js"),
   loadApi("manager/manager-subject-reference.js"),
+  loadApi("manager/manager-recommendation-review.js"),
   loadApi("manager/manager-response-review.js"),
   loadApi("manager/manager-memory-capture.js"),
   loadApi("manager/manager-goal-measurement.js"),
@@ -683,6 +684,8 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerMemoryPatchSchema.safeParse({}).success, false);
   assert.equal(managerSchemas.managerMemoryPatchSchema.safeParse({ value: undefined, unknown: true }).success, false);
   assert.equal(managerSchemas.managerEvalPromotionSchema.safeParse({ label: "useful", notes: "Good prioritization" }).success, true);
+  assert.equal(managerSchemas.managerEvalPromotionSchema.safeParse({ label: "needs_revision", notes: "Lead with the recorded deadline." }).success, true);
+  assert.equal(managerSchemas.managerEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
   assert.equal(managerSchemas.managerEvalPromotionSchema.safeParse({ label: "ship_it" }).success, false);
   assert.equal(managerSchemas.managerGoalProgressSchema.safeParse({ value: 3, note: "Booked another show" }).success, true);
   assert.equal(managerSchemas.managerGoalProgressSchema.safeParse({ delta: 1 }).success, true);
@@ -764,6 +767,87 @@ test("manager response feedback is exact-message, tenant-safe, idempotent, and a
   assert.equal(upserts, 2);
 });
 
+test("manager recommendation outcome review keeps finished results bounded without treating completion as usefulness", () => {
+  const candidate = (recommendationId, stableKey, outcomeAt, overrides = {}) => ({
+    recommendationId,
+    stableKey,
+    workstream: "live",
+    title: `Advice ${recommendationId}`,
+    reason: "A recorded commitment needed attention.",
+    nextAction: "Complete the linked task.",
+    priority: "med",
+    evidenceIds: ["task-a"],
+    actionType: "create_task",
+    outcome: "completed",
+    outcomeReason: "task_completed",
+    outcomeNote: null,
+    outcomeAt,
+    createdAt: outcomeAt,
+    promptVersion: "manager_os_v22",
+    cadence: "daily",
+    task: { id: "task-a", title: "Finish the work", status: "done" },
+    decision: null,
+    ...overrides
+  });
+  const queue = recommendationReview.selectManagerRecommendationEvalReviewQueue([
+    candidate("rec-new", "repeat-key", new Date("2026-07-12T11:00:00.000Z")),
+    candidate("rec-old", "repeat-key", new Date("2026-07-11T11:00:00.000Z"), { outcome: "dismissed", outcomeReason: "wrong_priority" }),
+    candidate("rec-blocked", "blocked-key", new Date("2026-07-12T10:00:00.000Z"), { outcome: "blocked", outcomeReason: "missing_context" }),
+    candidate("rec-stale", "stale-key", new Date("2026-03-01T10:00:00.000Z")),
+    candidate("rec-future", "future-key", new Date("2026-07-13T10:00:00.000Z"))
+  ], 5, now);
+  assert.equal(queue.policyVersion, "manager_recommendation_eval_review_v1");
+  assert.equal(queue.eligibleCount, 3);
+  assert.equal(queue.stableKeyCount, 2);
+  assert.deepEqual(queue.items.map((item) => item.recommendationId), ["rec-new", "rec-blocked"]);
+  assert.deepEqual(queue.items.map((item) => item.selectionReason), ["completed_work", "blocked_advice"]);
+  assert.deepEqual(recommendationReview.summarizeManagerRecommendationReviews([{ label: "useful" }, { label: "not_useful" }, { label: "needs_revision" }, { label: "unknown" }]), { total: 3, useful: 1, notUseful: 1, needsRevision: 1, usefulRate: 1 / 3 });
+});
+
+test("manager recommendation outcome review reads only finished, unpromoted advice for the active artist", async () => {
+  const calls = [];
+  let priorReviews = [];
+  const client = {
+    managerRecommendation: {
+      findMany: async (input) => {
+        calls.push(input);
+        if (input.where.managerRun.artistId !== "artist-a") return [];
+        return [{
+          id: "rec-a",
+          stableKey: "task-task-a",
+          workstream: "band_operations",
+          title: "Finish the real task",
+          reason: "The task was ready.",
+          nextAction: "Complete it.",
+          priority: "med",
+          evidence: ["task-a", 42],
+          proposedAction: { type: "create_task" },
+          outcome: "completed",
+          outcomeReason: "task_completed",
+          outcomeNote: null,
+          outcomeAt: new Date("2026-07-12T11:00:00.000Z"),
+          createdAt: new Date("2026-07-10T11:00:00.000Z"),
+          managerRun: { promptVersion: "manager_os_v22", cadence: "daily" },
+          task: { id: "task-a", title: "Finish the real task", status: "done" },
+          decision: null
+        }];
+      }
+    },
+    managerEvalExample: { findMany: async () => priorReviews }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => assert.fail("Outcome review reads must not audit or write") }, { get: () => false });
+  const queue = await service.recommendationEvalReview("artist-a", 3, now);
+  assert.equal(queue.items[0].recommendationId, "rec-a");
+  assert.deepEqual(queue.items[0].evidenceIds, ["task-a"]);
+  assert.equal(queue.items[0].actionType, "create_task");
+  assert.deepEqual(calls[0].where.outcome.in.sort(), ["blocked", "completed", "dismissed"]);
+  assert.deepEqual(calls[0].where.evalExample, { is: null });
+  assert.equal(calls[0].take, 100);
+  priorReviews = [{ createdAt: new Date("2026-07-12T11:05:00.000Z"), recommendation: { stableKey: "task-task-a", outcomeAt: new Date("2026-07-12T11:00:00.000Z") } }];
+  assert.equal((await service.recommendationEvalReview("artist-a", 3, now)).items.length, 0);
+  assert.equal((await service.recommendationEvalReview("artist-b", 3, now)).items.length, 0);
+});
+
 test("manager response review selects recent unrated answers across conversations without recording a verdict", () => {
   const candidate = (messageId, conversationId, createdAt, overrides = {}) => ({
     messageId,
@@ -835,12 +919,13 @@ test("manager response review reads only the active artist and current operator'
   assert.equal((await service.responseEvalReview("artist-b", "operator-a", 3, now)).items.length, 0);
 });
 
-test("manager response review route requires workflow mutation permission and bounds the queue", async () => {
+test("manager learning review routes enforce owner/member roles and bound every queue", async () => {
   const calls = [];
   const controller = new managerControllerMod.ManagerController(
     {
       responseReview: async (artistId, operatorId, limit) => { calls.push({ route: "feedback", artistId, operatorId, limit }); return { items: [] }; },
-      responseEvalReview: async (artistId, operatorId, limit) => { calls.push({ route: "eval", artistId, operatorId, limit }); return { items: [] }; }
+      responseEvalReview: async (artistId, operatorId, limit) => { calls.push({ route: "eval", artistId, operatorId, limit }); return { items: [] }; },
+      recommendationEvalReview: async (artistId, limit) => { calls.push({ route: "recommendation", artistId, limit }); return { items: [] }; }
     },
     { resolveArtistId: async () => "artist-a" },
     {
@@ -850,11 +935,14 @@ test("manager response review route requires workflow mutation permission and bo
   );
   await controller.responseReview("2", { id: "member-a" }, {}, "artist-a");
   await controller.responseEvalReview("3", { id: "owner-a" }, {}, "artist-a");
-  assert.deepEqual(calls, [{ route: "feedback", artistId: "artist-a", operatorId: "member-a", limit: 2 }, { route: "eval", artistId: "artist-a", operatorId: "owner-a", limit: 3 }]);
+  await controller.recommendationEvalReview("4", { id: "owner-a" }, {}, "artist-a");
+  assert.deepEqual(calls, [{ route: "feedback", artistId: "artist-a", operatorId: "member-a", limit: 2 }, { route: "eval", artistId: "artist-a", operatorId: "owner-a", limit: 3 }, { route: "recommendation", artistId: "artist-a", limit: 4 }]);
   await assert.rejects(() => controller.responseReview("2", { id: "viewer-a" }, {}, "artist-a"), /viewer cannot mutate workflow/);
   await assert.rejects(() => controller.responseEvalReview("2", { id: "member-a" }, {}, "artist-a"), /owner required/);
+  await assert.rejects(() => controller.recommendationEvalReview("2", { id: "member-a" }, {}, "artist-a"), /owner required/);
   await assert.rejects(() => controller.responseReview("6", { id: "member-a" }, {}, "artist-a"), (error) => error?.getStatus?.() === 400);
   await assert.rejects(() => controller.responseEvalReview("6", { id: "owner-a" }, {}, "artist-a"), (error) => error?.getStatus?.() === 400);
+  await assert.rejects(() => controller.recommendationEvalReview("6", { id: "owner-a" }, {}, "artist-a"), (error) => error?.getStatus?.() === 400);
 });
 
 test("manager conversation summaries stay bounded, ordered, and useful for history navigation", async () => {

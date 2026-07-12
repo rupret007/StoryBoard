@@ -669,7 +669,17 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const learning = await manager.learningSummary(artist.id);
   assert.equal(learning.completed, 3);
   if (dismissible) assert.equal(learning.dismissalReasons[0]?.reason, "wrong_priority");
+  assert.equal(learning.recommendationReviews.total, 0);
+  const recommendationReviewQueue = await manager.recommendationEvalReview(artist.id, 5);
+  assert.equal(recommendationReviewQueue.policyVersion, "manager_recommendation_eval_review_v1");
+  assert.ok(recommendationReviewQueue.items.some((item) => item.recommendationId === actionable.id));
+  assert.equal(recommendationReviewQueue.items.find((item) => item.recommendationId === actionable.id)?.task?.status, "done");
+  assert.equal((await manager.recommendationEvalReview(foreignArtist.id, 5)).items.some((item) => item.recommendationId === actionable.id), false);
   const evalExample = await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
+  assert.equal((await manager.recommendationEvalReview(artist.id, 5)).items.some((item) => item.recommendationId === actionable.id), false);
+  const reviewedLearning = await manager.learningSummary(artist.id);
+  assert.equal(reviewedLearning.recommendationReviews.total, 1);
+  assert.equal(reviewedLearning.recommendationReviews.usefulRate, 1);
   const revisedEvalExample = await manager.promoteEvalExample(artist.id, actionable.id, { label: "needs_revision", notes: "Keep the action, improve the explanation" }, operator.email, operator.id);
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);

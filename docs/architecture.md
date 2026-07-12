@@ -140,6 +140,14 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   corrected cases reuse the existing explicit promotion write, and corrected
   cases still require reviewed expected behavior. Promotion does not resolve a
   failure or activate a candidate version.
+  The owner-only `manager_recommendation_eval_review_v1` projection performs
+  the same recovery for finished advice. It selects only completed, dismissed,
+  or blocked recommendations with an observed outcome, excludes suggested and
+  accepted work, preserves linked task/decision state, and never equates
+  completion with usefulness. One recent result per stable key prevents repeat
+  runs from dominating; a prior review covers that key through its outcome
+  time, while a later real outcome may re-enter. Fetches remain read-only and
+  explicit promotion still uses the audited evaluation boundary.
   Conversation recovery uses the existing tenant-scoped records rather than a
   second memory store. The list projection returns at most 20 newest-first
   summaries with the latest message and total message count; detail returns at

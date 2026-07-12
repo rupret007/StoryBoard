@@ -341,6 +341,11 @@ Manager routes:
   (bounded to 50 messages and the requesting operator's feedback)
 - `GET /manager/memory`, `PATCH /manager/memory/:id`, and
   `GET /manager/learning`
+- `GET /manager/recommendation-eval-review?limit=3` — owner-only, read-only
+  queue of completed, dismissed, or blocked recommendations from the last 90
+  days that have no reviewed example for that observed stable-key result.
+  `limit` accepts 1–5. Suggested and accepted work is excluded; fetching never
+  infers usefulness, audits, promotes, or activates anything.
 - `GET /manager/response-review?limit=3` — member/owner-only, read-only queue
   of the current operator's unrated answers from the last 90 days. `limit`
   accepts 1–5. Candidates are tenant-scoped, require a persisted Manager run
@@ -366,7 +371,8 @@ Manager routes:
   must be future, cross-artist/inactive member IDs return not found, and note
   content is never copied to provider context or audit metadata.
 - `GET /manager/eval-examples` and
-  `POST /manager/recommendations/:id/promote-eval` (owner-only)
+  `POST /manager/recommendations/:id/promote-eval` (owner-only;
+  `needs_revision` requires a 10–2000 character `notes` explanation)
 - `GET /manager/response-eval-examples`,
   `POST /manager/messages/:id/promote-eval`, and
   `POST /manager/response-eval-examples/:id/resolve` (owner-only). Promote only
@@ -599,6 +605,16 @@ answer requires a 10–3000 character expected behavior before it can be added a
 the triage queue only after that write succeeds. Promotion merely adds a local
 regression example: it does not resolve a failure, pass the offline gate, or
 activate a Manager version.
+
+Owners see `manager_recommendation_eval_review_v1` in the same Learning panel.
+It retains the finished recommendation, outcome reason/note, prompt version,
+evidence IDs, and current linked task or decision state. One latest item per
+stable recommendation key is presented; an existing review suppresses older
+duplicates through that observed outcome, but not a genuinely later result.
+The owner explicitly keeps the pattern as `useful`, marks it `not_useful`, or
+adds a written `needs_revision` case. A successful promotion refills the queue
+and updates the 90-day advice-review metrics. It does not edit or activate a
+Manager version.
 
 The Manager page loads ten recent conversation summaries and opens the newest
 thread initially. New conversation preserves that history; choosing another

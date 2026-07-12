@@ -1100,6 +1100,63 @@ Implementation and validation:
   at 100% safety, typecheck, lint, production builds, container readiness, and
   `git diff --check`.
 
+### P0 — Owner-reviewed Manager recommendation outcomes (completed 2026-07-12)
+
+- [x] Add a code-owned `manager_recommendation_eval_review_v1` projection for
+  completed, dismissed, or blocked Manager recommendations that have an
+  observed outcome but no `ManagerEvalExample` yet. Exclude suggested and
+  accepted work because neither is a finished result.
+- [x] Keep the queue owner-only, active-artist scoped, read-only on fetch,
+  bounded to the last 90 days, and limited to one recent result per stable
+  recommendation key so repeated runs cannot crowd out other patterns.
+- [x] Preserve the exact recommendation, prompt version, outcome reason/note,
+  evidence IDs, and current linked task or decision state. Do not infer that a
+  completed action was useful merely because it finished.
+- [x] Let the owner explicitly keep a result as `useful`, mark it
+  `not_useful`, or capture `needs_revision` with a written explanation. Reuse
+  the existing audited eval-promotion write and remove the item only after a
+  successful promotion.
+- [x] Surface reviewed recommendation totals in the 90-day learning summary;
+  do not let a queue read or verdict edit prompts, deploy a version, broaden
+  authority, or trigger external work.
+- [x] Add projection, service, role, tenant-database, and Chromium coverage;
+  update operator docs and run the complete release gate.
+
+Root cause and design evidence:
+
+- StoryBoard already suppresses accepted/completed advice and supports
+  owner-promoted recommendation eval examples, but promotion controls exist
+  only on recommendations still visible in the latest brief or open chat. A
+  completed task proves execution, not usefulness, and there is no durable
+  review inbox for the owner to make that distinction after the result is
+  known.
+- Andrea_NanoBot's committed owner outcome-review work validates the clean-room
+  product principle that human verdicts should remain directly reachable and
+  should not be inferred from completion. StoryBoard will reuse none of its
+  implementation, schema, runtime, or message-routing code; this package uses
+  StoryBoard's existing recommendation, audit, role, and evaluation boundaries.
+
+Implementation and validation:
+
+- `GET /manager/recommendation-eval-review?limit=3` selects only finished
+  recommendations from the active artist whose observed result is not already
+  covered by an owner review. It returns at most five items, keeps one newest
+  result per stable key, and carries the exact recommendation, prompt/cadence,
+  evidence, outcome, and current linked task or decision state.
+- A reviewed example covers older duplicates of the same stable advice pattern
+  through that result's `outcomeAt`; a genuinely newer result may enter the
+  queue later. Reads remain side-effect free. The owner UI requires an explicit
+  usefulness label, requires a written explanation for negative/revision
+  paths, reuses the audited promotion route, refills after success, and reports
+  reviewed/useful advice separately from mere completion.
+- No schema migration or Manager prompt/dataset version change was needed.
+  Validation passed 115 API + 2 shared tests, all 35 migrations and 3
+  disposable-Postgres workflows, the complete relationship diagnostic, 3
+  Chromium journeys including outcome promotion and metric refresh, the
+  unchanged 48/48 `manager_os_v22` / `manager_evals_v24` gate at 100% safety,
+  typecheck, lint, production builds, container readiness, and
+  `git diff --check`.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,

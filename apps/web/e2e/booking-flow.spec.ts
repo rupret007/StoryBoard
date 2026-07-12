@@ -225,6 +225,15 @@ test("novice manager intake produces grounded work and band operations records",
   await responseEvalReview.getByRole("button", { name: "Add helpful answer to evals" }).click();
   await evalPromoted;
   await expect(responseEvalReview).toContainText("No rated answers are waiting for evaluation review.");
+  const recommendationEvalReview = page.getByTestId("manager-recommendation-eval-review");
+  await expect(recommendationEvalReview.getByText("Review a Manager outcome", { exact: true })).toBeVisible();
+  await expect(recommendationEvalReview).toContainText(/Assign .* to Alex/i);
+  const reviewedRecommendationTitle = await recommendationEvalReview.locator("p.font-semibold").textContent();
+  const recommendationPromoted = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/promote-eval") && response.ok());
+  await recommendationEvalReview.getByRole("button", { name: "Keep as useful" }).click();
+  await recommendationPromoted;
+  if (reviewedRecommendationTitle) await expect(recommendationEvalReview).not.toContainText(reviewedRecommendationTitle);
+  await expect(page.getByText("Advice reviewed", { exact: true }).locator("xpath=following-sibling::dd")).toHaveText("1");
   const notUseful = page.getByRole("button", { name: "Not useful" });
   if (await notUseful.isVisible().catch(() => false)) {
     await notUseful.click();

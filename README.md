@@ -115,6 +115,11 @@ remains human-reviewed and approval-gated. Accepted recommendations are
 single-use and linked to their task or decision; completing a task or reviewing
 a decision records the outcome automatically. Dismissal reasons and bounded
 cooldowns keep the Manager from repeating recently rejected or finished work.
+Owners also get a read-only queue of finished recommendations that have not yet
+been reviewed for the regression set. Completion is shown as execution—not
+proof of usefulness—and the owner explicitly chooses useful, not useful, or
+needs revision. Repeated runs with the same stable advice key do not crowd out
+other patterns; a genuinely newer observed result can be reviewed later.
 Every delivered conversational answer is linked to its exact Manager run and
 can be rated helpful or corrected with a bounded reason. Recent explicit
 feedback changes only code-owned presentation guidance (for example, lead with

@@ -44,6 +44,7 @@ import { deterministicManagerGoalTarget, MANAGER_GOAL_TARGET_POLICY_VERSION } fr
 import { MANAGER_CONVERSATION_CONTINUITY_POLICY_VERSION, resolveManagerConversationContinuity } from "./manager-conversation-continuity";
 import { MANAGER_SUBJECT_REFERENCE_POLICY_VERSION, managerSubjectCandidates, resolveManagerSubjectReference } from "./manager-subject-reference";
 import { selectManagerResponseEvalReviewQueue, selectManagerResponseReviewQueue } from "./manager-response-review";
+import { selectManagerRecommendationEvalReviewQueue, summarizeManagerRecommendationReviews } from "./manager-recommendation-review";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const MANAGER_FACT_AGGREGATES = [
@@ -352,7 +353,7 @@ export class ManagerService {
 
   async learningSummary(artistId: string) {
     const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-    const [rows, responseRows] = await Promise.all([
+    const [rows, responseRows, recommendationReviewRows] = await Promise.all([
       this.prisma.client.managerRecommendation.findMany({
         where: { managerRun: { artistId }, createdAt: { gte: since } },
         select: { outcome: true, outcomeReason: true, outcomeAt: true, task: { select: { status: true } } }
@@ -360,6 +361,12 @@ export class ManagerService {
       this.prisma.client.managerMessageFeedback.findMany({
         where: { artistId, createdAt: { gte: since } },
         select: { helpful: true, reason: true },
+        orderBy: { createdAt: "desc" },
+        take: 500
+      }),
+      this.prisma.client.managerEvalExample.findMany({
+        where: { artistId, createdAt: { gte: since } },
+        select: { label: true },
         orderBy: { createdAt: "desc" },
         take: 500
       })
@@ -379,8 +386,79 @@ export class ManagerService {
       completionRate: counts.accepted + counts.completed ? counts.completed / (counts.accepted + counts.completed) : null,
       openAcceptedTasks: rows.filter((row) => row.outcome === "accepted" && row.task?.status !== "done").length,
       dismissalReasons: Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({ reason, count })),
-      responseFeedback: summarizeManagerResponseFeedback(responseRows)
+      responseFeedback: summarizeManagerResponseFeedback(responseRows),
+      recommendationReviews: summarizeManagerRecommendationReviews(recommendationReviewRows)
     };
+  }
+
+  async recommendationEvalReview(artistId: string, limit = 3, now = new Date()) {
+    const since = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const [rows, priorReviews] = await Promise.all([
+      this.prisma.client.managerRecommendation.findMany({
+        where: {
+          managerRun: { artistId },
+          outcome: { in: [ManagerRecommendationOutcome.completed, ManagerRecommendationOutcome.dismissed, ManagerRecommendationOutcome.blocked] },
+          outcomeAt: { gte: since, lte: now },
+          evalExample: { is: null }
+        },
+        select: {
+          id: true,
+          stableKey: true,
+          workstream: true,
+          title: true,
+          reason: true,
+          nextAction: true,
+          priority: true,
+          evidence: true,
+          proposedAction: true,
+          outcome: true,
+          outcomeReason: true,
+          outcomeNote: true,
+          outcomeAt: true,
+          createdAt: true,
+          managerRun: { select: { promptVersion: true, cadence: true } },
+          task: { select: { id: true, title: true, status: true } },
+          decision: { select: { id: true, title: true, status: true, reviewOutcome: true } }
+        },
+        orderBy: [{ outcomeAt: "desc" }, { id: "asc" }],
+        take: 100
+      }),
+      this.prisma.client.managerEvalExample.findMany({
+        where: { artistId },
+        select: { createdAt: true, recommendation: { select: { stableKey: true, outcomeAt: true } } },
+        orderBy: { createdAt: "desc" }
+      })
+    ]);
+    const reviewedThrough = new Map<string, number>();
+    for (const review of priorReviews) {
+      const reviewedAt = (review.recommendation.outcomeAt ?? review.createdAt).getTime();
+      reviewedThrough.set(review.recommendation.stableKey, Math.max(reviewedThrough.get(review.recommendation.stableKey) ?? 0, reviewedAt));
+    }
+    return selectManagerRecommendationEvalReviewQueue(rows.flatMap((row) => {
+      if (!row.outcomeAt || (row.outcome !== ManagerRecommendationOutcome.completed && row.outcome !== ManagerRecommendationOutcome.dismissed && row.outcome !== ManagerRecommendationOutcome.blocked)) return [];
+      if (row.outcomeAt.getTime() <= (reviewedThrough.get(row.stableKey) ?? 0)) return [];
+      const proposedAction = objectRecord(row.proposedAction);
+      return [{
+        recommendationId: row.id,
+        stableKey: row.stableKey,
+        workstream: row.workstream,
+        title: row.title,
+        reason: row.reason,
+        nextAction: row.nextAction,
+        priority: row.priority,
+        evidenceIds: Array.isArray(row.evidence) ? row.evidence.filter((value): value is string => typeof value === "string").slice(0, 20) : [],
+        actionType: typeof proposedAction.type === "string" ? proposedAction.type : null,
+        outcome: row.outcome,
+        outcomeReason: row.outcomeReason,
+        outcomeNote: row.outcomeNote,
+        outcomeAt: row.outcomeAt,
+        createdAt: row.createdAt,
+        promptVersion: row.managerRun.promptVersion,
+        cadence: row.managerRun.cadence,
+        task: row.task,
+        decision: row.decision
+      }];
+    }), limit, now);
   }
 
   private async responseReviewCandidates(artistId: string, operatorId: string, feedbackState: "unrated" | "rated", now: Date) {

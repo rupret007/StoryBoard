@@ -79,7 +79,9 @@ export const managerMessageFeedbackSchema = z.object({
 });
 export const managerRecommendationReasons = ["accepted", "action_executed", "task_completed", "decision_reviewed", "already_handled", "not_relevant", "wrong_priority", "bad_timing", "missing_context", "other"] as const;
 export const managerRecommendationFeedbackSchema = z.object({ reason: z.enum(managerRecommendationReasons).optional(), note: z.string().trim().max(1000).nullable().optional() }).strict();
-export const managerEvalPromotionSchema = z.object({ label: z.enum(["useful", "not_useful", "needs_revision"]), notes: z.string().trim().max(2000).nullable().optional() }).strict();
+export const managerEvalPromotionSchema = z.object({ label: z.enum(["useful", "not_useful", "needs_revision"]), notes: z.string().trim().max(2000).nullable().optional() }).strict().superRefine((input, context) => {
+  if (input.label === "needs_revision" && (!input.notes || input.notes.length < 10)) context.addIssue({ code: "custom", path: ["notes"], message: "Describe what should change in at least 10 characters" });
+});
 export const managerResponseEvalPromotionSchema = z.object({
   label: z.enum(["useful", "not_useful", "needs_revision"]),
   expectedBehavior: z.string().trim().min(10).max(3000).nullable().optional(),

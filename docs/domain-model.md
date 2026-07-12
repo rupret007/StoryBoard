@@ -51,6 +51,14 @@ that owner's rated messages whose one-to-one `ManagerResponseEvalExample` is
 still absent. Helpful and corrected verdicts retain the exact feedback;
 promotion remains a separate audited upsert, corrected cases require expected
 behavior, and version resolution/activation remain later explicit processes.
+The owner-only `manager_recommendation_eval_review_v1` projection selects
+finished `ManagerRecommendation` rows with no review for that observed stable
+key result. It excludes suggested and accepted work, retains the exact outcome
+and linked task/decision state, and presents one newest result per stable key.
+An existing `ManagerEvalExample` covers older results for that key through its
+recorded outcome time; a later outcome can be reviewed independently. Queue
+reads create nothing. Explicit promotion remains the audited write and its
+label—not task completion—records the owner's usefulness verdict.
 The non-persistent `manager_conversation_continuity_v1` projection reads only
 the immediately preceding assistant message's structured recommendation. It
 classifies bounded explain, recheck, blocking, details, and action follow-ups,
