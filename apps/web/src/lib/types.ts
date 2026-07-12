@@ -205,6 +205,10 @@ export type Task = {
   status: string;
   ownerLabel?: string | null;
   dueAt?: string | null;
+  blockedReason?: string | null;
+  waitingOn?: string | null;
+  deferralCount?: number;
+  lastDeferredAt?: string | null;
   opportunityId?: string | null;
   opportunity?: BookingOpportunity | null;
   projectId?: string | null;
@@ -243,6 +247,7 @@ export type ManagerProfile = {
 };
 export type BandMember = { id: string; name: string; email?: string | null; roles: string[]; instruments: string[]; active: boolean };
 export type ManagerContextHealth = { score: number; status: "thin" | "usable" | "strong"; summary: string; dimensions: { section: "identity" | "people" | "business" | "execution"; score: number; maxScore: 25; detail: string }[]; gaps: { code: string; section: "identity" | "people" | "business" | "execution"; importance: "high" | "med" | "low"; question: string; reason: string; evidenceIds: string[] }[]; nextQuestion?: string | null; evidenceIds: string[] };
+export type ManagerCommitmentHealth = { observedAt: string; summary: string; counts: { open: number; blocked: number; overdue: number; waiting: number; unassigned: number; repeatedlyDeferred: number; dueSoon: number; unscheduled: number }; items: { taskId: string; title: string; state: "blocked" | "overdue" | "repeatedly_deferred" | "waiting" | "unassigned" | "due_soon" | "unscheduled" | "active"; severity: "high" | "med" | "low"; status: string; ownerLabel: string | null; dueAt: string | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number; lastDeferredAt: string | null; reasons: string[]; evidenceIds: string[] }[]; nextAction: string; evidenceIds: string[] };
 export type ManagerGoalProgressEvent = { id: string; previousValue?: number | null; value: number; delta?: number | null; note?: string | null; createdAt: string };
 export type ManagerGoal = { id: string; sourceKey?: string | null; workstream: string; title: string; targetValue?: number | null; targetUnit?: string | null; currentValue?: number | null; deadline?: string | null; status: string; initiatives?: ManagerInitiative[]; progressEvents?: ManagerGoalProgressEvent[] };
 export type ManagerInitiative = { id: string; sourceKey?: string | null; goalId?: string | null; workstream: string; title: string; description?: string | null; status: string; startsAt?: string | null; dueAt?: string | null; successMetric?: string | null; tasks?: { id: string; title: string; status: string; ownerLabel?: string | null; dueAt?: string | null }[] };

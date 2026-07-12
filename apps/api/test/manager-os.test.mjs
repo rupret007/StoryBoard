@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = (path) => import(pathToFileURL(join(dir, "..", "dist", path)).href);
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, intelligence, responseQuality, outcomeReview, contextHealth, commitmentHealth, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -18,6 +18,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-response-quality.js"),
   loadApi("manager/manager-outcome-review.js"),
   loadApi("manager/manager-context-health.js"),
+  loadApi("manager/manager-commitment-health.js"),
   loadApi("tasks/tasks.service.js"),
   loadApi("manager/manager-evaluation.js"),
   loadApi("manager/manager-plan.js"),
@@ -325,10 +326,21 @@ test("brief and plan conversation advance an existing linked step instead of inv
 });
 
 test("a pre-intake cached brief is invalidated when setup completes", async () => {
-  const service = new managerMod.ManagerService({ client: {} }, { log: async () => undefined }, { get: () => false });
+  const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   service.latestBrief = async () => ({ id: "old-brief", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-12T11:00:00.000Z") });
+  service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
+  const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
+  assert.equal(result.id, "new-brief");
+  assert.equal(generations, 1);
+});
+
+test("a cached brief is invalidated when commitment facts change", async () => {
+  const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => ({ updatedAt: new Date("2026-07-12T11:00:00.000Z") }) } } }, { log: async () => undefined }, { get: () => false });
+  let generations = 0;
+  service.latestBrief = async () => ({ id: "old-brief", createdAt: new Date("2026-07-12T10:00:00.000Z") });
+  service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-01T00:00:00.000Z") });
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
   const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
   assert.equal(result.id, "new-brief");
@@ -356,11 +368,11 @@ test("goal progress is append-only, artist-scoped, and audited", async () => {
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v7", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v8", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v7", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v7", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v8", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v8", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
@@ -505,6 +517,71 @@ test("manager briefs and conversation expose context gaps without judging the ba
   assert.equal(answer.recommendation, null);
 });
 
+test("commitment health ranks recorded blockers, waits, deferrals, ownership, and dates without inventing causes", () => {
+  const tasks = [
+    { id: "task-blocked", title: "Confirm stage dimensions", status: "blocked", ownerLabel: "Alex", dueAt: new Date("2026-07-11T12:00:00.000Z"), blockedReason: "Promoter has not supplied the stage plot", waitingOn: "Promoter", deferralCount: 0, lastDeferredAt: null },
+    { id: "task-overdue", title: "Send input list", status: "in_progress", ownerLabel: "Jordan", dueAt: new Date("2026-07-10T12:00:00.000Z"), blockedReason: null, waitingOn: null, deferralCount: 0, lastDeferredAt: null },
+    { id: "task-slip", title: "Finish release artwork", status: "todo", ownerLabel: null, dueAt: new Date("2026-07-30T12:00:00.000Z"), blockedReason: null, waitingOn: null, deferralCount: 2, lastDeferredAt: new Date("2026-07-11T12:00:00.000Z") }
+  ];
+  const health = commitmentHealth.deterministicManagerCommitmentHealth(tasks, now);
+  assert.equal(health.items[0].taskId, "task-blocked");
+  assert.equal(health.items[0].state, "blocked");
+  assert.match(health.items[0].reasons.join(" "), /Promoter has not supplied/);
+  assert.equal(health.counts.blocked, 1);
+  assert.equal(health.counts.overdue, 2);
+  assert.equal(health.counts.waiting, 1);
+  assert.equal(health.counts.repeatedlyDeferred, 1);
+  assert.equal(health.counts.unassigned, 1);
+  assert.match(health.nextAction, /waiting on Promoter/i);
+  assert.match(health.summary, /^2 open commitments need intervention/);
+
+  const facts = managerFacts({ tasks, commitmentHealth: health });
+  const brief = intelligence.deterministicManagerBrief(facts, now);
+  assert.match(brief.today[0].title, /Unblock Confirm stage dimensions/);
+  assert.ok(brief.waitingOn.some((item) => /waiting on Promoter/.test(item.title)));
+  assert.ok(brief.risksAndOpportunities.some((item) => item.title === "Blocked commitments"));
+  const answer = intelligence.deterministicManagerChat(facts, "What is blocked or slipping?", now);
+  assert.match(answer.answer, /Promoter has not supplied/);
+  assert.match(answer.answer, /Finish release artwork/);
+  assert.deepEqual(answer.citations, ["task-blocked", "task-overdue", "task-slip"]);
+});
+
+test("task follow-through requires a blocker, counts deferrals, clears resolved state, and fails stale writes closed", async () => {
+  let row = { id: "task-a", artistId: "artist-a", title: "Confirm stage dimensions", status: "in_progress", ownerLabel: "Alex", dueAt: new Date("2026-07-15T12:00:00.000Z"), blockedReason: null, waitingOn: null, deferralCount: 0, lastDeferredAt: null, updatedAt: new Date("2026-07-01T12:00:00.000Z") };
+  let audits = 0;
+  let loseNextWrite = false;
+  const client = {
+    task: {
+      findFirst: async ({ where }) => where.id === row.id && where.artistId === row.artistId ? { ...row } : null,
+      updateMany: async ({ where, data }) => {
+        if (loseNextWrite || where.updatedAt.getTime() !== row.updatedAt.getTime()) { loseNextWrite = false; return { count: 0 }; }
+        const deferralCount = typeof data.deferralCount === "object" && data.deferralCount?.increment ? row.deferralCount + data.deferralCount.increment : data.deferralCount ?? row.deferralCount;
+        row = { ...row, ...data, deferralCount, updatedAt: new Date(row.updatedAt.getTime() + 1) };
+        return { count: 1 };
+      },
+      findUniqueOrThrow: async () => ({ ...row })
+    },
+    managerRecommendation: { updateMany: async () => ({ count: 0 }) }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new tasksMod.TasksService({ client }, { log: async () => { audits += 1; } });
+  await assert.rejects(() => service.patch("artist-a", row.id, { status: "blocked" }, "member@test", "operator-a"), /requires a reason/);
+  assert.equal(audits, 0);
+  const blocked = await service.patch("artist-a", row.id, { status: "blocked", blockedReason: "Promoter has not sent the stage plot", waitingOn: "Promoter", dueAt: "2026-07-20" }, "member@test", "operator-a");
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.deferralCount, 1);
+  assert.ok(blocked.lastDeferredAt instanceof Date);
+  const deferredAgain = await service.patch("artist-a", row.id, { dueAt: "2026-07-27" }, "member@test", "operator-a");
+  assert.equal(deferredAgain.deferralCount, 2);
+  const resumed = await service.patch("artist-a", row.id, { status: "in_progress" }, "member@test", "operator-a");
+  assert.equal(resumed.blockedReason, null);
+  assert.equal(resumed.waitingOn, "Promoter");
+  loseNextWrite = true;
+  await assert.rejects(() => service.patch("artist-a", row.id, { ownerLabel: "Jordan" }, "member@test", "operator-a"), /changed while you were editing/i);
+  assert.equal(audits, 3);
+  await assert.rejects(() => service.patch("artist-b", row.id, { ownerLabel: "Jordan" }, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+});
+
 test("manager outcome review is explicit when no result evidence exists", () => {
   const review = outcomeReview.deterministicManagerOutcomeReview({ windowDays: 90, through: now, events: [], projects: [], completedTasks: [], campaignRecipients: [] });
   assert.equal(review.confidence, 0);
@@ -568,8 +645,9 @@ test("reviewed outcomes suppress repeated advice only for a bounded cooldown", (
 
 test("finishing a linked task attributes completion to the accepted recommendation", async () => {
   let attributed = null;
+  let row = { id: "task-a", artistId: "artist-a", status: "in_progress", ownerLabel: "Alex", dueAt: null, blockedReason: null, waitingOn: null, deferralCount: 0, updatedAt: new Date("2026-07-01T00:00:00.000Z") };
   const client = {
-    task: { findFirst: async () => ({ id: "task-a" }), update: async ({ data }) => ({ id: "task-a", ...data }) },
+    task: { findFirst: async () => ({ ...row }), updateMany: async ({ data }) => { row = { ...row, ...data }; return { count: 1 }; }, findUniqueOrThrow: async () => ({ ...row }) },
     managerRecommendation: { updateMany: async (args) => { attributed = args; return { count: 1 }; } }
   };
   client.$transaction = async (fn) => fn(client);
@@ -607,6 +685,12 @@ test("manager grounding rejects a whole response with invented evidence", () => 
   assert.equal(service.chatOutputIsGrounded({ answer: "Decision", citations: [], recommendation: { stableKey: "decision-a", title: "Choose", reason: "Tradeoff", nextAction: "Review", workstream: "live", priority: "med", evidenceIds: [], proposedAction: { type: "create_decision", workstream: "live", title: "Which market?", context: null, options: [{ label: "Milwaukee", tradeoff: "Closer" }, { label: "Detroit", tradeoff: "Stronger fit" }] } } }, facts), true);
   const emptyBrief = { summary: "Brief", today: [], thisWeek: [], decisionsNeeded: [], waitingOn: [], risksAndOpportunities: [] };
   assert.equal(service.briefIsGrounded({ ...emptyBrief, today: [{ stableKey: "decision-a", title: "Choose", reason: "Tradeoff", nextAction: "Review", workstream: "live", priority: "med", evidenceIds: [], proposedAction: { type: "create_decision", workstream: "live", title: "Which market?", context: null, options: [{ label: "Milwaukee", tradeoff: "Closer" }, { label: "Detroit", tradeoff: "Stronger fit" }] } }] }, facts), false);
+  const commitmentTasks = [{ id: "task-blocked", title: "Confirm stage dimensions", status: "blocked", ownerLabel: "Alex", dueAt: new Date("2026-07-20T12:00:00.000Z"), blockedReason: "Promoter has not supplied the stage plot", waitingOn: "Promoter", deferralCount: 0 }];
+  const commitmentFacts = managerFacts({ tasks: commitmentTasks, commitmentHealth: commitmentHealth.deterministicManagerCommitmentHealth(commitmentTasks, now) });
+  assert.equal(service.chatOutputIsGrounded({ answer: "Grounded but irrelevant", citations: ["goal-a"], recommendation: null }, commitmentFacts, "What is blocked or slipping?"), false);
+  assert.equal(service.chatOutputIsGrounded({ answer: "Exact blocker", citations: ["task-blocked"], recommendation: null }, commitmentFacts, "What is blocked or slipping?"), true);
+  assert.equal(service.chatOutputIsGrounded({ answer: "Duplicate work", citations: ["task-blocked"], recommendation: { stableKey: "duplicate-task", title: "Duplicate", reason: "Wrong", nextAction: "Create it", workstream: "band_operations", priority: "med", evidenceIds: ["task-blocked"], proposedAction: { type: "create_task", title: "Confirm stage dimensions", dueAt: null, initiativeId: null } } }, commitmentFacts, "What is blocked or slipping?"), false);
+  assert.equal(service.briefIsGrounded({ ...emptyBrief, today: [{ stableKey: "other-work", title: "Other", reason: "Lower priority", nextAction: "Do it", workstream: "band_operations", priority: "med", evidenceIds: ["goal-a"], proposedAction: null }] }, commitmentFacts), false);
 });
 
 test("operations validation rejects unknown fields, invalid money, and bad settlement splits", () => {

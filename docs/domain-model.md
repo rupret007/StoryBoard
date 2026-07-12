@@ -145,7 +145,11 @@ recipient; it never sends an email or advances the booking stage automatically.
 
 Represents a piece of operational follow-through. Tasks may exist independently
 or attach to a booking opportunity, event, project, or manager initiative. They
-carry ownership labels, due dates, and checklist metadata.
+carry ownership labels, due dates, and checklist metadata. Blocked tasks require
+`blockedReason`; `waitingOn` records the external or internal party holding the
+next step. `deferralCount` and `lastDeferredAt` preserve repeated later-date
+changes. `ManagerCommitmentHealth` is a non-persistent ranked view over these
+facts; it does not create a second task state machine.
 
 ### ApprovalRequest
 

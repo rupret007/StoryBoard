@@ -23,7 +23,7 @@ export default async function TasksPage() {
     <div className="space-y-8">
       <PageHeader
         title="Tasks"
-        description="Follow-ups tied to the pipeline — overdue highlights use due dates."
+        description="Own, schedule, unblock, and close the band's commitments without silently losing the reason work slipped."
       />
       <TasksClient initialTasks={tasks} opportunities={opportunities} members={members} />
     </div>

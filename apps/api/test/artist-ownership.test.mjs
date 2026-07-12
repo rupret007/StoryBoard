@@ -149,36 +149,38 @@ test("booking venue links stay within the current artist and may be cleared", as
 test("task opportunity and project links stay within the current artist and may be cleared", async () => {
   const calls = { opportunityLookups: 0, projectLookups: 0, creates: 0, updates: 0 };
   const { audit, events } = auditSpy();
-  const service = new tasksMod.TasksService(
-    {
-      client: {
-        bookingOpportunity: {
-          findFirst: async ({ where }) => {
-            calls.opportunityLookups += 1;
-            return where.id === "opportunity-a" && where.artistId === "artist-a"
-              ? { id: "opportunity-a" }
-              : null;
-          }
-        },
-        artistProject: {
-          findFirst: async ({ where }) => {
-            calls.projectLookups += 1;
-            return where.id === "project-a" && where.artistId === "artist-a" ? { id: "project-a" } : null;
-          }
-        },
-        task: {
-          findFirst: async () => ({ id: "task-a" }),
-          create: async ({ data }) => {
-            calls.creates += 1;
-            return { id: "task-a", ...data };
-          },
-          update: async ({ data }) => {
-            calls.updates += 1;
-            return { id: "task-a", ...data };
-          }
-        }
+  let taskRow = { id: "task-a", artistId: "artist-a", status: "todo", ownerLabel: null, dueAt: null, blockedReason: null, waitingOn: null, deferralCount: 0, updatedAt: new Date("2026-07-01T00:00:00.000Z") };
+  const client = {
+    managerRecommendation: { updateMany: async () => ({ count: 0 }) },
+    bookingOpportunity: {
+      findFirst: async ({ where }) => {
+        calls.opportunityLookups += 1;
+        return where.id === "opportunity-a" && where.artistId === "artist-a" ? { id: "opportunity-a" } : null;
       }
     },
+    artistProject: {
+      findFirst: async ({ where }) => {
+        calls.projectLookups += 1;
+        return where.id === "project-a" && where.artistId === "artist-a" ? { id: "project-a" } : null;
+      }
+    },
+    task: {
+      findFirst: async ({ where }) => where.id === taskRow.id && where.artistId === taskRow.artistId ? { ...taskRow } : null,
+      create: async ({ data }) => {
+        calls.creates += 1;
+        return { id: `task-${calls.creates}`, ...data };
+      },
+      updateMany: async ({ data }) => {
+        calls.updates += 1;
+        taskRow = { ...taskRow, ...data, updatedAt: new Date(taskRow.updatedAt.getTime() + 1) };
+        return { count: 1 };
+      },
+      findUniqueOrThrow: async () => ({ ...taskRow })
+    }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new tasksMod.TasksService(
+    { client },
     audit
   );
 
@@ -263,4 +265,10 @@ test("booking and task request schemas reject malformed values and unknown field
     taskSchemaMod.taskPatchSchema.safeParse({ status: "invalid" }).success,
     false
   );
+  assert.equal(taskSchemaMod.taskCreateSchema.safeParse({ title: "Blocked without context", status: "blocked" }).success, false);
+  assert.equal(taskSchemaMod.taskCreateSchema.safeParse({ title: "Blocked with context", status: "blocked", blockedReason: "Waiting for the promoter's stage dimensions", waitingOn: "Promoter" }).success, true);
+  assert.equal(taskSchemaMod.taskCreateSchema.safeParse({ title: "Not blocked", blockedReason: "Contradictory state" }).success, false);
+  assert.equal(taskSchemaMod.taskCreateSchema.safeParse({ title: "Already done", status: "done", waitingOn: "Promoter" }).success, false);
+  assert.equal(taskSchemaMod.taskPatchSchema.safeParse({ status: "in_progress", blockedReason: "Contradictory state" }).success, false);
+  assert.equal(taskSchemaMod.taskPatchSchema.safeParse({ blockedReason: "Reason", surprise: true }).success, false);
 });

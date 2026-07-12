@@ -21,6 +21,7 @@ export function TasksClient({
   const router = useRouter();
   const now = useMemo(() => new Date(), []);
   const grouped = useMemo(() => {
+    const blocked: Task[] = [];
     const overdue: Task[] = [];
     const open: Task[] = [];
     const done: Task[] = [];
@@ -29,13 +30,17 @@ export function TasksClient({
         done.push(t);
         continue;
       }
+      if (t.status === "blocked") {
+        blocked.push(t);
+        continue;
+      }
       if (t.dueAt && new Date(t.dueAt) < now) {
         overdue.push(t);
       } else {
         open.push(t);
       }
     }
-    return { overdue, open, done };
+    return { blocked, overdue, open, done };
   }, [initialTasks, now]);
 
   const [title, setTitle] = useState("");
@@ -74,8 +79,8 @@ export function TasksClient({
           New follow-up
         </h2>
         <p className="mt-1 text-xs text-[var(--text-muted)]">
-          Tie tasks to opportunities. Overdue uses the due date; stale follow-ups
-          use last update (see weekly summary).
+          Every real commitment needs an owner and a credible date. If work is
+          blocked, record why and who the band is waiting on.
         </p>
         <form
           className="mt-4 grid gap-4 sm:grid-cols-4"
@@ -138,10 +143,18 @@ export function TasksClient({
       ) : (
         <div className="space-y-6">
           <TaskSection
+            title="Blocked"
+            subtitle="Cannot move until a recorded blocker is resolved"
+            tasks={grouped.blocked}
+            tone="danger"
+            onSaved={() => router.refresh()}
+            ownerOptions={members.filter((member) => member.active).map((member) => member.name)}
+          />
+          <TaskSection
             title="Overdue"
             subtitle="Due date in the past, not done"
             tasks={grouped.overdue}
-            tone="danger"
+            tone="warning"
             onSaved={() => router.refresh()}
             ownerOptions={members.filter((member) => member.active).map((member) => member.name)}
           />
@@ -178,7 +191,7 @@ function TaskSection({
   title: string;
   subtitle: string;
   tasks: Task[];
-  tone: "danger" | "neutral" | "success";
+  tone: "danger" | "warning" | "neutral" | "success";
   onSaved: () => void;
   ownerOptions: string[];
 }) {
@@ -188,6 +201,8 @@ function TaskSection({
   const border =
     tone === "danger"
       ? "border-red-500/20"
+      : tone === "warning"
+        ? "border-amber-500/20"
       : tone === "success"
         ? "border-emerald-500/20"
         : "border-[var(--border)]";
@@ -197,6 +212,8 @@ function TaskSection({
       <div className="mb-4 flex items-center gap-2">
         {tone === "danger" ? (
           <CircleAlert className="h-4 w-4 text-red-400" />
+        ) : tone === "warning" ? (
+          <CircleAlert className="h-4 w-4 text-amber-400" />
         ) : tone === "success" ? (
           <CheckCircle2 className="h-4 w-4 text-emerald-400" />
         ) : (
@@ -208,18 +225,20 @@ function TaskSection({
           </h3>
           <p className="text-xs text-[var(--text-muted)]">{subtitle}</p>
         </div>
-        <Badge variant={tone === "danger" ? "danger" : tone === "success" ? "success" : "neutral"} className="ml-auto">
+        <Badge variant={tone === "danger" ? "danger" : tone === "warning" ? "warning" : tone === "success" ? "success" : "neutral"} className="ml-auto">
           {tasks.length}
         </Badge>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
+        <table className="w-full min-w-[1180px] text-left text-sm">
           <thead className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             <tr>
               <th className="pb-2 pr-4">Task</th>
               <th className="pb-2 pr-4">Status</th>
               <th className="pb-2 pr-4">Owner</th>
               <th className="pb-2 pr-4">Due</th>
+              <th className="pb-2 pr-4">Waiting on</th>
+              <th className="pb-2 pr-4">Blocker</th>
               <th className="pb-2 pr-4">Opportunity</th>
               <th className="pb-2 w-24" />
             </tr>
@@ -246,24 +265,36 @@ function TaskRow({
 }) {
   const [status, setStatus] = useState(t.status);
   const [ownerLabel, setOwnerLabel] = useState(t.ownerLabel ?? "");
+  const [dueAt, setDueAt] = useState(t.dueAt?.slice(0, 10) ?? "");
+  const [waitingOn, setWaitingOn] = useState(t.waitingOn ?? "");
+  const [blockedReason, setBlockedReason] = useState(t.blockedReason ?? "");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     setStatus(t.status);
     setOwnerLabel(t.ownerLabel ?? "");
-  }, [t.status, t.ownerLabel]);
+    setDueAt(t.dueAt?.slice(0, 10) ?? "");
+    setWaitingOn(t.waitingOn ?? "");
+    setBlockedReason(t.blockedReason ?? "");
+  }, [t.status, t.ownerLabel, t.dueAt, t.waitingOn, t.blockedReason]);
+
+  const changed = status !== t.status || ownerLabel !== (t.ownerLabel ?? "") || dueAt !== (t.dueAt?.slice(0, 10) ?? "") || waitingOn !== (t.waitingOn ?? "") || (status === "blocked" ? blockedReason !== (t.blockedReason ?? "") : Boolean(t.blockedReason));
 
   async function save() {
-    if (status === t.status && ownerLabel === (t.ownerLabel ?? "")) {
+    if (!changed || (status === "blocked" && !blockedReason.trim())) {
       return;
     }
     setBusy(true);
+    setError("");
     try {
       await apiFetch(`/tasks/${t.id}`, {
         method: "PATCH",
-        json: { status, ownerLabel: ownerLabel.trim() || null }
+        json: { status, ownerLabel: ownerLabel.trim() || null, dueAt: dueAt || null, waitingOn: status === "done" ? null : waitingOn.trim() || null, blockedReason: status === "blocked" ? blockedReason.trim() : null }
       });
       onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Task update failed");
     } finally {
       setBusy(false);
     }
@@ -275,6 +306,7 @@ function TaskRow({
       <td className="py-3 pr-4">
         <select
           className="sb-select py-1.5 text-xs"
+          aria-label={`Status for ${t.title}`}
           value={status}
           onChange={(e) => setStatus(e.target.value)}
         >
@@ -292,7 +324,14 @@ function TaskRow({
         </select>
       </td>
       <td className="py-3 pr-4 tabular-nums text-[var(--text-secondary)]">
-        {t.dueAt ? new Date(t.dueAt).toLocaleDateString() : "—"}
+        <input className="sb-input min-w-36 py-1.5 text-xs" type="date" aria-label={`Due date for ${t.title}`} value={dueAt} disabled={status === "done"} onChange={(event) => setDueAt(event.target.value)} />
+        {t.deferralCount ? <span className="mt-1 block text-[10px] text-amber-300">Deferred {t.deferralCount}×</span> : null}
+      </td>
+      <td className="py-3 pr-4">
+        <input className="sb-input min-w-40 py-1.5 text-xs" aria-label={`Waiting on for ${t.title}`} value={waitingOn} disabled={status === "done"} maxLength={240} onChange={(event) => setWaitingOn(event.target.value)} placeholder="Person or organization" />
+      </td>
+      <td className="py-3 pr-4">
+        {status === "blocked" ? <input className="sb-input min-w-56 py-1.5 text-xs" aria-label={`Blocker for ${t.title}`} value={blockedReason} required maxLength={1000} onChange={(event) => setBlockedReason(event.target.value)} placeholder="What prevents the next step?" /> : <span className="text-[var(--text-muted)]">—</span>}
       </td>
       <td className="py-3 pr-4 text-[var(--text-muted)]">
         {t.opportunity?.title ?? "—"}
@@ -300,12 +339,13 @@ function TaskRow({
       <td className="py-3">
         <button
           type="button"
-          disabled={busy || (status === t.status && ownerLabel === (t.ownerLabel ?? ""))}
+          disabled={busy || !changed || (status === "blocked" && !blockedReason.trim())}
           onClick={() => void save()}
           className="sb-btn-secondary py-1.5 text-xs disabled:opacity-40"
         >
           Save
         </button>
+        {error ? <p className="mt-1 max-w-40 text-[10px] text-red-300" role="alert">{error}</p> : null}
       </td>
     </tr>
   );

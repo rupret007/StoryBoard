@@ -1,0 +1,5 @@
+ALTER TABLE "Task"
+ADD COLUMN "blockedReason" TEXT,
+ADD COLUMN "waitingOn" TEXT,
+ADD COLUMN "deferralCount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "lastDeferredAt" TIMESTAMP(3);

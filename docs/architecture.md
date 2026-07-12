@@ -106,6 +106,12 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   work. Tasks are deliberately unassigned until a person chooses an owner.
   Owner-triggered offline evaluation
   runs are version-allowlisted and recorded; there is no self-activation path.
+- Manager commitment health is deterministic derived data over tenant-owned
+  tasks. Blocked work requires an explicit reason, later dates accumulate
+  deferral evidence, and stale writes use compare-and-set protection. The same
+  ranking drives Manager Today, Waiting on, risks, chat, and UI. Model briefs
+  cannot displace a high-severity commitment, and blocker questions cannot
+  propose duplicate work.
 - Show readiness is deterministic derived data, not a model assertion or an
   editable status. It uses the tenant-scoped event graph, active lineup, dated
   urgency, explicit evidence IDs, and premise-coverage confidence. Operations

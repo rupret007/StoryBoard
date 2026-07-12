@@ -76,7 +76,7 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByText(/65\/100 · At risk/i)).toBeVisible();
   await expect(page.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
   await expect(page.getByText("Complete the next release cycle", { exact: true })).toHaveCount(1);
-  await expect(page.getByText("Finish the booking profile and define what a good-fit show means", { exact: false })).toBeVisible();
+  await expect(page.getByText("Finish the booking profile and define what a good-fit show means", { exact: true }).first()).toBeVisible();
   const context = page.getByTestId("manager-context");
   await expect(context.getByText(/45\/100 · Thin/i)).toBeVisible();
   await context.getByRole("button", { name: "Edit context" }).click();
@@ -153,7 +153,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v7", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v8", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -192,9 +192,26 @@ test("novice manager intake produces grounded work and band operations records",
 
   await page.goto("/tasks");
   const firstPlanOwner = page.getByLabel("Owner for Finish the booking profile and define what a good-fit show means");
+  const firstPlanTaskRow = firstPlanOwner.locator("xpath=ancestor::tr");
   await firstPlanOwner.selectOption("Alex");
-  await firstPlanOwner.locator("xpath=ancestor::tr").getByRole("button", { name: "Save" }).click();
+  await firstPlanTaskRow.getByLabel("Status for Finish the booking profile and define what a good-fit show means").selectOption("blocked");
+  await firstPlanTaskRow.getByLabel("Waiting on for Finish the booking profile and define what a good-fit show means").fill("Bandleader");
+  await firstPlanTaskRow.getByLabel("Blocker for Finish the booking profile and define what a good-fit show means").fill("The band has not agreed on the target room size.");
+  const deferredDate = new Date(Date.now() + 180 * 86400000).toISOString().slice(0, 10);
+  await firstPlanTaskRow.getByLabel("Due date for Finish the booking profile and define what a good-fit show means").fill(deferredDate);
+  await firstPlanTaskRow.getByRole("button", { name: "Save" }).click();
   await expect(page.getByLabel("Owner for Finish the booking profile and define what a good-fit show means")).toHaveValue("Alex");
+  await expect(page.getByRole("heading", { name: "Blocked", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Blocker for Finish the booking profile and define what a good-fit show means")).toHaveValue("The band has not agreed on the target room size.");
+
+  await page.goto("/manager");
+  const followThrough = page.getByTestId("manager-commitments");
+  await expect(followThrough.getByText(/open commitment.*intervention now/i)).toBeVisible();
+  await expect(followThrough.getByText("The band has not agreed on the target room size.", { exact: false }).first()).toBeVisible();
+  const blockedQuestion = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
+  await blockedQuestion.fill("What is blocked or slipping?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "target room size" })).toContainText("Bandleader");
 
   await page.goto("/operations");
   await page.getByLabel("Title").fill(`E2E rehearsal ${suffix}`);

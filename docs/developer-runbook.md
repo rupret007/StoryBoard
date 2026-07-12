@@ -206,6 +206,12 @@ database/Redis/worker state; it never returns URLs, credentials, or queue data.
 - `POST /tasks` and `PATCH /tasks/:id` accept nullable artist-owned
   `opportunityId` and `projectId` links. Each relation is checked before write;
   a foreign ID returns generic not-found with no audit event.
+- A task with `status: "blocked"` requires `blockedReason`; `waitingOn` may name
+  the person or organization holding the next step. Moving an incomplete task
+  to a later date (or clearing an existing date) increments `deferralCount` and
+  records `lastDeferredAt`.
+- Task patches use tenant-scoped compare-and-set updates. A stale screen returns
+  an error without overwriting newer status, ownership, blocker, or date data.
 
 ## Commands (`POST /commands/execute`)
 
@@ -280,6 +286,8 @@ Manager routes:
 - `GET` / `POST` / `PATCH /manager/members`, `/manager/goals`, and
   `/manager/initiatives`
 - `GET /manager/plan-health`; `GET` / `POST /manager/goals/:id/progress`
+- `GET /manager/commitment-health` — ranked blocked, overdue, deferred,
+  waiting, ownerless, due-soon, and unscheduled task commitments
 - `GET /manager/context-health` — a deterministic, tenant-scoped projection of
   recorded identity, people, business, and current-execution context
 - `GET /manager/plan`; `POST /manager/plan/ensure` fills only missing
@@ -301,7 +309,7 @@ Manager routes:
 - `GET /manager/eval-examples` and
   `POST /manager/recommendations/:id/promote-eval` (owner-only)
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v7`)
+  (owner-only; currently accepts only the code-registered `manager_os_v8`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -312,7 +320,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v7` retains the current operator question and at most 12
+version `manager_os_v8` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -330,7 +338,10 @@ A deterministic post-output gate rejects canned openings, assistant/meta
 language, excessive length/formatting, and claims of completed outside actions;
 the deterministic manager answer is used when model output fails the gate.
 Chat may return one reviewable recommendation through the same recommendation
-API. Acceptance currently permits only `create_task`. The model does not
+API. Acceptance permits only `create_task` and an open `create_decision` draft.
+For commitment questions, code requires the top recorded pressure item as
+evidence and rejects duplicate task proposals. Generated briefs must keep a
+high-severity commitment first or fall back to deterministic output. The model does not
 receive provider-write, SQL, or arbitrary tool execution. Sending, signing,
 publishing, payments, legal conclusions, and provider writes stay in Approvals.
 Recommendation acceptance uses a transaction so concurrent clicks cannot
@@ -367,7 +378,10 @@ Plan health also flags unassigned open tasks and timeline progress that trails
 the elapsed share of a measurable goal. Intake creates two band-mode-specific
 goals, one initiative per goal, and three dated starter tasks per initiative.
 Tasks start unassigned intentionally; use the Tasks workspace to choose a real
-band member or other owner. Re-running plan ensure is idempotent.
+band member or other owner. Blocked tasks need a reason; the workspace can also
+record a waiting party and reschedule a date. `ManagerCommitmentHealth` is
+derived from current task facts and deferral history, never edited as a score.
+Re-running plan ensure is idempotent.
 
 The evaluation runner is offline and makes no provider request. It executes
 the code-registered golden scenarios and checks owner-reviewed examples. An

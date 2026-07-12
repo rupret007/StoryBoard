@@ -110,9 +110,10 @@ feedback changes only code-owned presentation guidance (for example, lead with
 the answer, be more specific, or be shorter); it cannot add tools or expand
 authority. A deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v7`
+already performed an outside action. Prompt/policy version `manager_os_v8`
 and its offline eval suite cover response quality, conversation-created
-decision framing/review, and respectful missing-context guidance.
+decision framing/review, commitment follow-through, and respectful
+missing-context guidance.
 The Manager also has one shared, deterministic 90-day outcome review. Completed
 shows, projects, tasks, campaign results, attendance, post-show notes,
 relationship outcomes, invoices, expenses, and finalized settlements are
@@ -131,6 +132,14 @@ An explicit two-option Manager question can prepare this open decision as a
 draft. The draft labels its tradeoffs unknown and remains unchoosable until a
 member reviews and saves the real framing; generic advice questions do not
 create decisions.
+The **Follow-through** board makes existing work credible before the Manager
+suggests more. Blocked tasks require a reason and may name who the band is
+waiting on; later due dates increment a deferral counter instead of erasing the
+slip. Stale concurrent edits fail closed. One deterministic projection ranks
+blocked, overdue, repeatedly deferred, waiting, ownerless, and due-soon work
+for Manager Today, Waiting on, risks, and conversation. When OpenAI is enabled,
+code still requires the highest-severity commitment to remain first and rejects
+a duplicate task proposal for a blocker question.
 The **Band context** panel makes the Manager's information quality inspectable.
 It derives four 25-point dimensions—identity, people, business, and current
 execution—from artist-owned structured records, then asks the highest-value

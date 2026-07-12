@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `da3628d`
+Baseline for this round: `main` at `22f7555`
 
 ## Product and current architecture
 
@@ -154,7 +154,7 @@ mock-safe provider adapters.
   progress stays explicit; completed recommendation tasks contribute through
   their linked initiative without inventing a numeric goal increment.
 - [x] Add an owner-triggered offline evaluation runner over versioned golden
-  scenarios (currently fifteen) plus owner-reviewed examples. Candidate versions are code-allowlisted,
+  scenarios (currently sixteen) plus owner-reviewed examples. Candidate versions are code-allowlisted,
   unresolved same-version revision labels fail the run, results are persisted,
   and there is no automatic activation endpoint.
 - [x] Make guided intake deliver the promised executable 90-day plan: two
@@ -285,6 +285,28 @@ mock-safe provider adapters.
 - [x] Promote the reviewed policy to `manager_os_v7` / `manager_evals_v6`.
   The 15/15 offline gate retains 100% safety and no self-activation path.
 
+### P0 — Evidence-ranked commitment follow-through (completed 2026-07-12)
+
+- [x] Make blocked work explainable. A blocked task must carry a concise reason;
+  work may also name the person or organization the band is waiting on.
+- [x] Let members reschedule task due dates from the primary task workflow.
+  Count deliberate deferrals and preserve the last deferral time so repeatedly
+  slipping work is visible instead of silently appearing current.
+- [x] Use tenant-scoped compare-and-set task updates so two members cannot
+  overwrite each other's status, owner, blocker, or date from stale screens.
+- [x] Add one deterministic, non-persistent commitment projection over open
+  tasks. Rank blocked, overdue, repeatedly deferred, waiting, ownerless, and
+  due-soon work from recorded facts and expose the reason for every rank.
+- [x] Feed that projection into Manager Today, Waiting on, risk signals,
+  conversation, and a focused Follow-through workspace. Do not create new work
+  when the correct action is to resolve, reassign, reschedule, or close existing
+  work.
+- [x] Add forward migration `20260713180000_task_commitment_followthrough`,
+  strict schemas, tenant/audit regression coverage, a new golden evaluation,
+  database coverage, and a production
+  browser path. Keep provider, legal, financial, and external authority
+  unchanged.
+
 ### P0 — Shared show-readiness intelligence (completed 2026-07-12)
 
 - [x] Replace disconnected show-status heuristics with one deterministic,
@@ -392,6 +414,19 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Closed the Manager follow-through gap with an evidence-ranked
+  commitment projection and forward migration
+  `20260713180000_task_commitment_followthrough`. Blocked tasks now require a
+  reason, may name the waiting party, retain deferral count/time, and use
+  compare-and-set updates. The Tasks workspace can edit dates and blockers;
+  Manager Today, Waiting on, risks, chat, and the new Follow-through card share
+  the same derived ranking. Model output must preserve the highest-severity
+  commitment and cannot create duplicate work for blocker questions. The
+  clean-room design borrows Andrea_NanoBot's explicit follow-through outcome
+  principle; no source code or broader authority was imported. Validation
+  passed 74 API tests, all three 25-migration database workflows, three
+  production Chromium workflows, and the 16/16 `manager_os_v8` gate at 100%
+  safety.
 - 2026-07-12: Connected Manager conversation to the evidence-to-decision loop.
   A direct two-option question can now become one linked open draft, while
   generic advice keeps its existing intent. The band must replace unknown

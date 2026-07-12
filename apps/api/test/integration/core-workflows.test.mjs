@@ -430,6 +430,24 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const completedRecommendation = await client.managerRecommendation.findUniqueOrThrow({ where: { id: actionable.id } });
   assert.equal(completedRecommendation.outcome, "completed");
   assert.equal(completedRecommendation.outcomeReason, "task_completed");
+  const commitmentTask = await taskService.create(artist.id, { title: "Confirm integration stage dimensions", ownerLabel: member.name, dueAt: new Date(Date.now() + 2 * 86400000).toISOString() }, operator.email, operator.id);
+  await assert.rejects(() => taskService.patch(artist.id, commitmentTask.id, { status: "blocked" }, operator.email, operator.id), /requires a reason/);
+  await assert.rejects(() => taskService.patch(foreignArtist.id, commitmentTask.id, { ownerLabel: "Foreign owner" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  const blockedCommitment = await taskService.patch(artist.id, commitmentTask.id, { status: "blocked", blockedReason: "Promoter has not supplied the stage plot", waitingOn: "Promoter", dueAt: new Date(Date.now() + 4 * 86400000).toISOString() }, operator.email, operator.id);
+  assert.equal(blockedCommitment.deferralCount, 1);
+  const deferredCommitment = await taskService.patch(artist.id, commitmentTask.id, { dueAt: new Date(Date.now() + 6 * 86400000).toISOString() }, operator.email, operator.id);
+  assert.equal(deferredCommitment.deferralCount, 2);
+  const commitmentSnapshot = await manager.commitmentHealth(artist.id);
+  assert.equal(commitmentSnapshot.items[0].taskId, commitmentTask.id);
+  assert.equal(commitmentSnapshot.items[0].state, "blocked");
+  assert.equal(commitmentSnapshot.counts.repeatedlyDeferred, 1);
+  const commitmentChat = await manager.chat(artist.id, { message: "What is blocked or slipping?" }, operator.email, operator.id);
+  assert.match(commitmentChat.message.content, /Promoter has not supplied the stage plot/);
+  assert.ok(commitmentChat.message.citations.includes(commitmentTask.id));
+  const resumedCommitment = await taskService.patch(artist.id, commitmentTask.id, { status: "in_progress", waitingOn: null }, operator.email, operator.id);
+  assert.equal(resumedCommitment.blockedReason, null);
+  assert.equal(resumedCommitment.waitingOn, null);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: commitmentTask.id, action: "task.updated" } }), 3);
   const dismissible = intake.recommendations.find((recommendation) => recommendation.id !== actionable.id);
   if (dismissible) await manager.recommendation(artist.id, dismissible.id, "dismissed", { reason: "wrong_priority", note: "Release work comes first" }, operator.email, operator.id);
   const refreshedBrief = await manager.generateBrief(artist.id, "daily", operator.email, operator.id);
@@ -442,10 +460,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v7", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v8", operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v7", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v8", operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -497,7 +515,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const persistedConversation = await manager.conversation(artist.id, firstChat.conversationId, operator.id);
   assert.deepEqual(persistedConversation.messages.map((message) => message.role), ["user", "assistant", "user", "assistant"]);
   assert.equal(persistedConversation.messages.find((message) => message.id === firstChat.message.id)?.feedback?.helpful, true);
-  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 3);
+  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 4);
   await assert.rejects(() => manager.conversation(foreignArtist.id, firstChat.conversationId, operator.id), (error) => error?.getStatus?.() === 404);
 
   const venue = await client.venue.create({ data: { artistId: artist.id, name: "Owned Room", city: "Chicago" } });

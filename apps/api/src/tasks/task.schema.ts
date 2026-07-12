@@ -8,6 +8,8 @@ const dueAt = z.union([
   z.iso.date(),
   z.iso.datetime({ offset: true, local: true })
 ]);
+const blockedReason = z.string().trim().min(1).max(1000).nullable();
+const waitingOn = z.string().trim().min(1).max(240).nullable();
 
 /** Accepted fields for creating a task. */
 export const taskCreateSchema = z
@@ -17,9 +19,16 @@ export const taskCreateSchema = z
     projectId: relatedProjectId.nullable().optional(),
     status: z.enum(taskStatusValues).optional(),
     ownerLabel: z.string().nullable().optional(),
-    dueAt: dueAt.nullable().optional()
+    dueAt: dueAt.nullable().optional(),
+    blockedReason: blockedReason.optional(),
+    waitingOn: waitingOn.optional()
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    if (input.status === "blocked" && !input.blockedReason) context.addIssue({ code: "custom", path: ["blockedReason"], message: "A blocked task requires a reason" });
+    if (input.status !== "blocked" && input.blockedReason) context.addIssue({ code: "custom", path: ["blockedReason"], message: "A blocker may only be recorded on a blocked task" });
+    if (input.status === "done" && input.waitingOn) context.addIssue({ code: "custom", path: ["waitingOn"], message: "Completed work cannot remain waiting on someone" });
+  });
 
 /** Accepted fields for updating a task. Unknown keys are rejected. */
 export const taskPatchSchema = z
@@ -29,9 +38,15 @@ export const taskPatchSchema = z
     projectId: relatedProjectId.nullable().optional(),
     status: z.enum(taskStatusValues).optional(),
     ownerLabel: z.string().nullable().optional(),
-    dueAt: dueAt.nullable().optional()
+    dueAt: dueAt.nullable().optional(),
+    blockedReason: blockedReason.optional(),
+    waitingOn: waitingOn.optional()
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    if (input.status && input.status !== "blocked" && input.blockedReason) context.addIssue({ code: "custom", path: ["blockedReason"], message: "A blocker may only be recorded on a blocked task" });
+    if (input.status === "done" && input.waitingOn) context.addIssue({ code: "custom", path: ["waitingOn"], message: "Completed work cannot remain waiting on someone" });
+  });
 
 export type TaskCreateInput = z.infer<typeof taskCreateSchema>;
 export type TaskPatchInput = z.infer<typeof taskPatchSchema>;

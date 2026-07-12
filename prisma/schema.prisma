@@ -915,6 +915,10 @@ model Task {
   status                     TaskStatus                @default(todo)
   ownerLabel                 String?
   dueAt                      DateTime?
+  blockedReason              String?
+  waitingOn                  String?
+  deferralCount              Int                       @default(0)
+  lastDeferredAt             DateTime?
   checklist                  Json?
   sourceKey                  String?
   createdAt                  DateTime                  @default(now())

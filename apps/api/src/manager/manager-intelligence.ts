@@ -4,6 +4,7 @@ import type { EventDayOfView } from "../operations/event-day-of";
 import type { ProjectReadiness } from "../operations/project-plan";
 import type { ManagerOutcomeReview } from "./manager-outcome-review";
 import type { ManagerContextHealth } from "./manager-context-health";
+import { managerQuestionAsksAboutCommitments, type ManagerCommitmentHealth } from "./manager-commitment-health";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -50,7 +51,7 @@ export type ManagerFacts = {
   members: { id: string; name: string }[];
   goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; createdAt?: Date }[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
-  tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null }[];
+  tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null }[];
   opportunities: { id: string; title: string; stage: string; updatedAt: Date; targetDate: Date | null }[];
   events: {
     id: string;
@@ -73,6 +74,7 @@ export type ManagerFacts = {
   settlements: { id: string; status: string; currency: string; grossMinor: number; expenseMinor: number; netMinor: number; event: { title: string } }[];
   outcomeReview?: ManagerOutcomeReview;
   contextHealth?: ManagerContextHealth;
+  commitmentHealth?: ManagerCommitmentHealth;
   recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null }[];
 };
 
@@ -217,6 +219,7 @@ export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Da
     const completedTasks = tasks.filter((task) => task.status === "done").length;
     const openTasks = tasks.length - completedTasks;
     const blocked = initiatives.filter((initiative) => initiative.status === "blocked");
+    const blockedTasks = tasks.filter((task) => task.status === "blocked");
     const overdueInitiatives = initiatives.filter((initiative) => initiative.status !== "completed" && initiative.dueAt && initiative.dueAt < now);
     const overdue = tasks.filter((task) => task.status !== "done" && task.dueAt && task.dueAt < now);
     const unassigned = tasks.filter((task) => task.status !== "done" && !task.ownerLabel?.trim());
@@ -234,9 +237,10 @@ export function deterministicManagerPlanHealth(facts: ManagerFacts, now = new Da
     if (deadlinePast && (progressRatio === null || progressRatio < 1)) {
       status = "off_track";
       reasons.push("The goal deadline has passed without recorded completion.");
-    } else if (blocked.length || overdueInitiatives.length || overdue.length || unassigned.length || behindPace || (deadlineSoon && (progressRatio === null || progressRatio < 0.75))) {
+    } else if (blocked.length || blockedTasks.length || overdueInitiatives.length || overdue.length || unassigned.length || behindPace || (deadlineSoon && (progressRatio === null || progressRatio < 0.75))) {
       status = "at_risk";
       if (blocked.length) reasons.push(`${blocked.length} linked initiative${blocked.length === 1 ? " is" : "s are"} blocked.`);
+      if (blockedTasks.length) reasons.push(`${blockedTasks.length} linked task${blockedTasks.length === 1 ? " is" : "s are"} blocked${blockedTasks[0]?.blockedReason ? `: ${blockedTasks[0].blockedReason}` : "."}`);
       if (overdueInitiatives.length) reasons.push(`${overdueInitiatives.length} linked initiative${overdueInitiatives.length === 1 ? " is" : "s are"} overdue.`);
       if (overdue.length) reasons.push(`${overdue.length} linked task${overdue.length === 1 ? " is" : "s are"} overdue.`);
       if (unassigned.length) reasons.push(`${unassigned.length} linked task${unassigned.length === 1 ? " needs" : "s need"} a real owner.`);
@@ -311,7 +315,20 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
   }
 
   const overdueTasks = facts.tasks.filter((task) => task.status !== "done" && task.dueAt && task.dueAt < now);
-  if (overdueTasks[0]) {
+  const commitment = facts.commitmentHealth?.items[0];
+  if (commitment && commitment.state !== "active") {
+    const item = {
+      stableKey: `commitment-${commitment.state}-${commitment.taskId}`,
+      title: commitment.state === "blocked" ? `Unblock ${commitment.title}` : commitment.state === "overdue" ? `Recommit ${commitment.title}` : commitment.state === "repeatedly_deferred" ? `Re-scope ${commitment.title}` : commitment.state === "waiting" ? `Close the wait on ${commitment.title}` : commitment.state === "unassigned" ? `Assign ${commitment.title}` : `Make ${commitment.title} credible`,
+      reason: commitment.reasons.join(" "),
+      nextAction: facts.commitmentHealth!.nextAction,
+      workstream: "band_operations" as const,
+      priority: commitment.severity === "high" ? "high" as const : "med" as const,
+      evidenceIds: [commitment.taskId],
+      proposedAction: null
+    };
+    if (commitment.severity === "high") addToday(item); else addWeek(item);
+  } else if (!facts.commitmentHealth && overdueTasks[0]) {
     addToday({
       stableKey: "overdue-work",
       title: `Clear ${overdueTasks.length} overdue task${overdueTasks.length === 1 ? "" : "s"}`,
@@ -534,6 +551,7 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
       ...openApprovals.map((approval) => ({ title: approval.title, explanation: `This ${approval.actionType.replaceAll("_", " ")} is waiting for human approval.`, evidenceIds: [approval.id] }))
     ].slice(0, 8),
     waitingOn: [
+      ...(facts.commitmentHealth?.items.filter((item) => item.waitingOn).map((item) => ({ title: `${item.title} — waiting on ${item.waitingOn}`, dueAt: item.dueAt, evidenceIds: [item.taskId] })) ?? []),
       ...proposedDeals.map((deal) => ({ title: deal.title, dueAt: deal.expiresAt?.toISOString() ?? null, evidenceIds: [deal.id] })),
       ...facts.campaignRecipients.filter((recipient) => recipient.status === "sent").map((recipient) => ({ title: "Booking outreach awaiting reply", dueAt: recipient.followUpDueAt?.toISOString() ?? null, evidenceIds: [recipient.id] }))
     ].slice(0, 10),
@@ -541,6 +559,8 @@ export function deterministicManagerBrief(facts: ManagerFacts, now = new Date())
       ...(availabilityConflicts.length ? [{ title: "Member availability conflict", detail: `${availabilityConflicts.length} upcoming event${availabilityConflicts.length === 1 ? " has" : "s have"} an unavailable participant.`, confidence: 1, evidenceIds: availabilityConflicts.slice(0, 8).map((event) => event.id) }] : []),
       ...(readinessRisks.length ? [{ title: "Show readiness gaps", detail: `${readinessRisks.length} upcoming show${readinessRisks.length === 1 ? " has" : "s have"} unresolved operational gaps; the nearest is ${readinessRisks[0]?.readiness?.score ?? 0}/100.`, confidence: readinessRisks[0]?.readiness?.confidence ?? 0.5, evidenceIds: readinessRisks.slice(0, 8).map((event) => event.id) }] : []),
       ...(overdueInvoices.length ? [{ title: "Overdue receivables", detail: `${overdueInvoices.length} invoice${overdueInvoices.length === 1 ? " is" : "s are"} past the recorded due date.`, confidence: 1, evidenceIds: overdueInvoices.slice(0, 8).map((item) => item.id) }] : []),
+      ...(facts.commitmentHealth?.counts.blocked ? [{ title: "Blocked commitments", detail: `${facts.commitmentHealth.counts.blocked} task${facts.commitmentHealth.counts.blocked === 1 ? " is" : "s are"} blocked with a recorded reason.`, confidence: 1, evidenceIds: facts.commitmentHealth.items.filter((item) => item.state === "blocked").slice(0, 8).map((item) => item.taskId) }] : []),
+      ...(facts.commitmentHealth?.counts.repeatedlyDeferred ? [{ title: "Repeatedly deferred work", detail: `${facts.commitmentHealth.counts.repeatedlyDeferred} task${facts.commitmentHealth.counts.repeatedlyDeferred === 1 ? " has" : "s have"} moved at least twice and should be re-scoped before another date change.`, confidence: 1, evidenceIds: facts.commitmentHealth.items.filter((item) => item.deferralCount >= 2).slice(0, 8).map((item) => item.taskId) }] : []),
       ...(unreadReplies.length ? [{ title: "Fresh booking interest", detail: `${unreadReplies.length} booking repl${unreadReplies.length === 1 ? "y is" : "ies are"} waiting for review.`, confidence: 1, evidenceIds: unreadReplies.slice(0, 8).map((reply) => reply.id) }] : []),
       ...(activeOpportunities.length ? [{ title: "Active live pipeline", detail: `${activeOpportunities.length} booking opportunit${activeOpportunities.length === 1 ? "y can" : "ies can"} be advanced deliberately.`, confidence: 1, evidenceIds: activeOpportunities.slice(0, 8).map((opportunity) => opportunity.id) }] : [])
     ]
@@ -570,6 +590,7 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
   const teamQuestion = questionHas(question, /\b(member|lineup|bandmate|who|available)\b/);
   const planQuestion = questionHas(question, /\b(goal|plan|progress|track|realistic|strategy|90-day|90 day)\b/);
   const releaseQuestion = questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
+  const commitmentQuestion = managerQuestionAsksAboutCommitments(question);
   const outcomeQuestion = questionHas(question, /\b(last show|recent shows?|what worked|what did(?:n't| not) work|how did we do|outcomes?|learn(?:ed|ing)|post-show|review the show|recent results?|show results?|campaign results?)\b/);
   const decisionQuestion = Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
   const contextQuestion = questionHas(question, /\b(what do you (?:still )?(?:need|know)|what are you missing|missing context|band context|about (?:us|the band)|know about (?:us|the band)|setup|profile completeness)\b/);
@@ -655,6 +676,16 @@ export function deterministicManagerChat(facts: ManagerFacts, question: string, 
     return {
       answer: `For “${target.title}”, the band chose “${target.choice}”.${target.rationale ? ` The recorded reason was: ${target.rationale}` : ""}${target.expectedOutcome ? ` The expected result was: ${target.expectedOutcome}` : ""}\n\n${reviewDue ? "The review date has arrived. Record what actually happened—even if the result is mixed or inconclusive—before changing the story after the fact." : target.reviewAt ? `The review is scheduled for ${eventDate(target.reviewAt)}. Keep the choice intact until there is enough outcome evidence to judge it.` : "No review date is recorded, so this choice does not yet have a reliable learning checkpoint."}`,
       citations,
+      recommendation: null
+    };
+  }
+
+  if (commitmentQuestion && facts.commitmentHealth) {
+    const pressure = facts.commitmentHealth.items.filter((item) => item.state !== "active").slice(0, 3);
+    const lines = pressure.map((item) => `• ${item.title} — ${item.reasons.join(" ")} ${item.ownerLabel ? `Owner: ${item.ownerLabel}.` : "No owner is recorded."}`);
+    return {
+      answer: `${facts.commitmentHealth.summary}${lines.length ? `\n\n${lines.join("\n")}` : ""}\n\n${facts.commitmentHealth.nextAction}`,
+      citations: pressure.map((item) => item.taskId),
       recommendation: null
     };
   }
