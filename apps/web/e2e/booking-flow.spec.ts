@@ -329,7 +329,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v29", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v30", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -411,13 +411,24 @@ test("novice manager intake produces grounded work and band operations records",
   const goalPathReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: /goal path|active goal path/i }).last();
   await expect(goalPathReply).toContainText(/does not estimate effort, conversion, duration, or private capacity/i);
 
+  const eventTitle = `E2E rehearsal ${suffix}`;
+  await blockedQuestion.fill(`Record a confirmed gig called "${eventTitle}" on 2026-09-15 at 7:00 PM at "E2E Working Room"`);
+  await page.getByRole("button", { name: "Send message" }).click();
+  const eventProposal = page.getByText("Suggested band event", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await expect(eventProposal).toContainText(`Event: ${eventTitle}`);
+  await expect(eventProposal).toContainText("Status: confirmed");
+  await expect(eventProposal).toContainText("2 active members will start as unknown");
+  await expect(eventProposal).toContainText("does not contact anyone or add an external calendar event");
+  const eventCreated = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/accept") && response.ok());
+  await eventProposal.getByRole("button", { name: "Create event" }).click();
+  await eventCreated;
+  await expect(eventProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Event and availability list created.", { exact: true })).toBeVisible();
+
   await page.goto("/operations");
-  await page.getByLabel("Title").fill(`E2E rehearsal ${suffix}`);
-  const eventStart = new Date(Date.now() + 90 * 86400000);
+  const eventStart = new Date("2026-09-16T00:00:00.000Z");
   const localEventStart = new Date(eventStart.getTime() - eventStart.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  await page.getByLabel("Starts").fill(localEventStart);
-  await page.getByRole("button", { name: "Add event" }).click();
-  await expect(page.getByText(`E2E rehearsal ${suffix}`, { exact: true })).toBeVisible();
+  await expect(page.getByText(eventTitle, { exact: true })).toBeVisible();
   await expect(page.getByText(/not show-ready yet/i)).toBeVisible();
   await expect(page.getByText(/confidence/i).first()).toBeVisible();
   await page.getByRole("button", { name: "Generate advance checklist" }).click();
@@ -468,7 +479,9 @@ test("novice manager intake produces grounded work and band operations records",
   const showQuestion = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
   await showQuestion.fill("Are we ready for our next show?");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: `E2E rehearsal ${suffix}` })).toContainText(/\d+\/100/);
+  const liveCalendarAnswer = page.getByTestId("manager-conversation-messages").locator("p.whitespace-pre-wrap").filter({ hasText: "Here is the live calendar I would manage first:" });
+  await expect(liveCalendarAnswer).toContainText(`E2E rehearsal ${suffix}`);
+  await expect(liveCalendarAnswer).toContainText(/\d+\/100/);
   const projectDue = new Date(Date.now() + 120 * 86400000).toISOString().slice(0, 10);
   await showQuestion.fill(`Create a release project called "E2E release ${suffix}" due ${projectDue}`);
   await page.getByRole("button", { name: "Send message" }).click();

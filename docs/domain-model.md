@@ -95,6 +95,17 @@ atomically creates the active `ArtistProject` and all source-keyed milestone
 `Task` rows. `ManagerRecommendation.projectId` retains the resulting link. Raw
 chat text and sensitive values are excluded from trace and audit metadata, and
 the provider output schema cannot emit this action.
+`manager_event_capture_v1` stages `create_conversation_event` only from an
+explicit supported event name, exact date/time, and saved IANA timezone. Its
+action carries the source message, event type/status/title, UTC start plus
+timezone, optional location, and the exact active `BandMember` ID set shown in
+the preview. Acceptance re-parses the source and rechecks duplicate events and
+that lineup inside a serializable transaction, then atomically creates the
+`BandEvent`, `unknown` `EventParticipant` rows, and
+`ManagerRecommendation.eventId` link. Draft is the default; hold/confirmed must
+be explicit. DST gaps/overlaps, stale lineups, secrets, ambiguity, and replay
+fail closed. The action is absent from provider output and never writes an
+external calendar or sends a message.
 Conversation list reads are a non-persistent summary projection: newest first,
 at most 20, with the latest message and `_count.messages` mapped to
 `messageCount`. Conversation detail remains the message source of truth, reads

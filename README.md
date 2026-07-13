@@ -151,7 +151,7 @@ to deterministic and provider-backed answers through
 action explicit, simplify tone, or ask one evidence-backed missing-premise
 question. Raw correction notes never become instructions, and adaptation cannot
 change facts, citations, recommendations, tools, permissions, or writes.
-Prompt/policy version `manager_os_v29`
+Prompt/policy version `manager_os_v30`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -207,6 +207,15 @@ project plus its source-keyed `project_plan_v1` tasks atomically. Release,
 content-campaign, tour, and business projects are supported; vague dates,
 multiple projects, implicit planning, secrets, and provider-generated project
 actions fail closed.
+Events now use the same reviewed path. An explicit request such as `Schedule a
+rehearsal called "Album run-through" on 2026-10-15 at 7:00 PM` routes through
+`manager_event_capture_v1`. StoryBoard requires the saved Manager timezone,
+shows the exact event/status/local start/location and active-lineup count, then
+creates the internal event plus `unknown` availability rows only after
+acceptance. `draft` is the default; `hold` or `confirmed` must be stated. DST
+gaps/overlaps, missing timezones, ambiguous or duplicate events, secrets, stale
+lineups, and provider-generated event actions fail closed. This flow never
+contacts anyone, generates an advance, or writes to an external calendar.
 `manager_work_sequence_v1` projection makes task order explicit. Members can
 record one Task as another Task's prerequisite; the API rejects cross-artist
 links, self-links, cycles, impossible date order, and completion that skips

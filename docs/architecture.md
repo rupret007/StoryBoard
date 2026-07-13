@@ -146,6 +146,14 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   atomically creates the project plus every source-keyed milestone in one
   serializable transaction. The resulting recommendation links the project;
   provider output cannot emit this action or bypass the duplicate preflight.
+  `manager_event_capture_v1` extends that lifecycle to the event spine. The
+  code-owned resolver requires one supported event, exact local date/time, and
+  the saved IANA timezone; it rejects invalid or repeated DST wall times rather
+  than guessing. The preview binds the explicit status and current active
+  lineup. Acceptance re-parses the tenant source, rechecks event duplication and
+  the lineup, claims the recommendation, and atomically creates the event plus
+  unknown availability rows. It links the completed recommendation but creates
+  no provider, calendar, message, advance, deal, or payment side effect.
   A deterministic response-quality gate rejects canned/meta prose, excessive
   presentation, and unverified claims of completed outside actions before a
   model answer can replace the safe fallback. Feedback may shape reviewed evals,

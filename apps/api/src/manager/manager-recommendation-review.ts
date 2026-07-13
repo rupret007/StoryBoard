@@ -23,6 +23,7 @@ export type ManagerRecommendationEvalReviewCandidate = {
   task: { id: string; title: string; status: string } | null;
   decision: { id: string; title: string; status: string; reviewOutcome: string | null } | null;
   project: { id: string; name: string; status: string } | null;
+  event: { id: string; title: string; status: string } | null;
 };
 
 export type ManagerRecommendationEvalReviewItem = ManagerRecommendationEvalReviewCandidate & {

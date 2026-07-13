@@ -682,6 +682,7 @@ model ManagerRecommendation {
   decisionId     String?                      @unique
   memoryFactId   String?
   projectId      String?
+  eventId        String?
   createdAt      DateTime                     @default(now())
   updatedAt      DateTime                     @updatedAt
   managerRun     ManagerRun                   @relation(fields: [managerRunId], references: [id], onDelete: Cascade)
@@ -690,12 +691,14 @@ model ManagerRecommendation {
   decision       ManagerDecision?             @relation(fields: [decisionId], references: [id], onDelete: SetNull)
   memoryFact     ManagerMemoryFact?           @relation(fields: [memoryFactId], references: [id], onDelete: SetNull)
   project        ArtistProject?                @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  event          BandEvent?                    @relation(fields: [eventId], references: [id], onDelete: SetNull)
   evalExample    ManagerEvalExample?
 
   @@unique([managerRunId, stableKey])
   @@index([managerRunId, outcome])
   @@index([memoryFactId])
   @@index([projectId])
+  @@index([eventId])
   @@index([stableKey, outcome, updatedAt])
 }
 
@@ -1379,6 +1382,7 @@ model BandEvent {
   invoices            Invoice[]
   expenses            Expense[]
   settlement          Settlement?
+  managerRecommendations ManagerRecommendation[]
 
   @@index([artistId, status, startsAt])
 }

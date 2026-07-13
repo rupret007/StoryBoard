@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, contextCapture, taskCapture, taskUpdate, taskAssignment, projectCapture, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, naturalFeedback, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, contextCapture, taskCapture, taskUpdate, taskAssignment, projectCapture, eventCapture, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, naturalFeedback, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -24,6 +24,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-task-update.js"),
   loadApi("manager/manager-task-assignment.js"),
   loadApi("manager/manager-project-capture.js"),
+  loadApi("manager/manager-event-capture.js"),
   loadApi("manager/manager-knowledge-health.js"),
   loadApi("manager/manager-evidence-health.js"),
   loadApi("manager/manager-work-sequence.js"),
@@ -402,6 +403,59 @@ test("Manager project capture refuses ambiguity, duplicates, secrets, questions,
   assert.equal(duplicate.duplicateProjectId, "project-a");
 });
 
+test("Manager event capture stages one exact timezone-safe event and unknown lineup review", () => {
+  const members = [{ id: "member-b", name: "Jordan" }, { id: "member-a", name: "Alex" }];
+  const captured = eventCapture.resolveManagerEventCapture({
+    message: 'Record a confirmed gig called "Bluebird show" on October 15, 2026 at 7:00 PM at "Bluebird Theater"',
+    sourceMessageId: "message-event",
+    sourceMessageCreatedAt: now,
+    timezone: "America/Chicago",
+    events: [],
+    members
+  });
+  assert.equal(captured.status, "ready");
+  assert.equal(captured.action.type, "create_conversation_event");
+  assert.equal(captured.action.eventType, "gig");
+  assert.equal(captured.action.status, "confirmed");
+  assert.equal(captured.action.title, "Bluebird show");
+  assert.equal(captured.action.startsAt, "2026-10-16T00:00:00.000Z");
+  assert.equal(captured.action.timezone, "America/Chicago");
+  assert.equal(captured.action.locationName, "Bluebird Theater");
+  assert.deepEqual(captured.action.bandMemberIds, ["member-a", "member-b"]);
+  assert.match(captured.preview, /Oct 15, 2026, 7:00 PM CDT/);
+  assert.match(captured.preview, /2 active members will start as unknown/);
+  assert.match(captured.preview, /does not contact anyone or add an external calendar event/i);
+  assert.equal(eventCapture.managerConversationEventActionMatchesMessage(captured.action, { id: "message-event", content: 'Record a confirmed gig called "Bluebird show" on October 15, 2026 at 7:00 PM at "Bluebird Theater"', createdAt: now }, [], members), true);
+  assert.equal(eventCapture.managerConversationEventActionMatchesMessage(captured.action, { id: "message-event", content: 'Record a confirmed gig called "Bluebird show" on October 15, 2026 at 7:00 PM at "Bluebird Theater"', createdAt: now }, [], members.slice(0, 1)), false);
+  const recommendation = eventCapture.managerConversationEventRecommendation(captured.action);
+  assert.equal(recommendation.proposedAction.type, "create_conversation_event");
+  assert.equal(recommendation.workstream, "live");
+  assert.deepEqual(recommendation.evidenceIds, ["member-a", "member-b"]);
+
+  const rehearsal = eventCapture.resolveManagerEventCapture({ message: "Schedule a rehearsal called Album run-through on 2026-10-15 at 19:00", sourceMessageId: "message-rehearsal", sourceMessageCreatedAt: now, timezone: "America/Chicago", events: [], members: [] });
+  assert.equal(rehearsal.action.eventType, "rehearsal");
+  assert.equal(rehearsal.action.status, "draft");
+  assert.equal(rehearsal.action.locationName, null);
+});
+
+test("Manager event capture refuses unsafe, ambiguous, duplicate, and timezone-invalid scheduling", () => {
+  const input = (message, timezone = "America/Chicago", events = []) => eventCapture.resolveManagerEventCapture({ message, sourceMessageId: "message-event", sourceMessageCreatedAt: now, timezone, events, members: [{ id: "member-a", name: "Alex" }] });
+  assert.equal(input("We should rehearse next week").status, "not_event");
+  assert.equal(input("Schedule a rehearsal").status, "needs_clarification");
+  assert.equal(input("Schedule a rehearsal called Album run-through on 2026-10-15 at 7:00 PM", null).status, "needs_clarification");
+  assert.equal(input("Schedule a rehearsal called Album run-through on 2026-02-30 at 7:00 PM").status, "needs_clarification");
+  assert.equal(input("Schedule a rehearsal called Album run-through on 2026-10-15 at 7").status, "needs_clarification");
+  assert.equal(input("Schedule a rehearsal called Rotate API key: sk-secret-value on 2026-10-15 at 7:00 PM").status, "blocked_sensitive");
+  assert.equal(input("Schedule a rehearsal called Album run-through on 2026-10-15 at 7:00 PM?").status, "needs_clarification");
+  assert.equal(input("Schedule a rehearsal called First on 2026-10-15 at 7:00 PM and also a meeting called Second on 2026-10-16 at 7:00 PM").status, "needs_clarification");
+  assert.equal(input("Schedule a rehearsal called Spring clock on 2026-03-08 at 2:30 AM").status, "needs_clarification");
+  assert.equal(input("Schedule a rehearsal called Fall clock on 2026-11-01 at 1:30 AM").status, "needs_clarification");
+  const duplicateStart = new Date("2026-10-16T00:00:00.000Z");
+  const duplicate = input("Record a confirmed gig called Bluebird show on 2026-10-15 at 7:00 PM", "America/Chicago", [{ id: "event-a", type: "gig", status: "confirmed", title: "Bluebird Show", startsAt: duplicateStart }]);
+  assert.equal(duplicate.status, "duplicate");
+  assert.equal(duplicate.duplicateEventId, "event-a");
+});
+
 test("Manager task updates resolve one current task and stage exact reviewed changes", () => {
   const task = { id: "task-a", title: "Confirm rehearsal", status: "todo", dueAt: new Date("2026-07-18T12:00:00.000Z"), updatedAt: new Date("2026-07-12T11:00:00.000Z"), blockedReason: null, waitingOn: null, prerequisites: [], dependents: [] };
   const input = (message, tasks = [task], timezone = "America/Chicago") => taskUpdate.resolveManagerTaskUpdate({ message, sourceMessageId: "message-a", sourceMessageCreatedAt: now, timezone, tasks });
@@ -722,6 +776,7 @@ test("manager action authorization is code-owned and defaults to forbidden", () 
   assert.equal(policy.classifyManagerAction("update_conversation_task"), "internal");
   assert.equal(policy.classifyManagerAction("assign_conversation_task"), "internal");
   assert.equal(policy.classifyManagerAction("create_conversation_project"), "internal");
+  assert.equal(policy.classifyManagerAction("create_conversation_event"), "internal");
   assert.equal(policy.classifyManagerAction("create_decision"), "internal");
   assert.equal(policy.classifyManagerAction("generate_event_advance"), "internal");
   assert.equal(policy.classifyManagerAction("generate_project_plan"), "internal");
@@ -871,6 +926,52 @@ test("accepted conversational project is source-bound, atomic, duplicate-safe, t
   await assert.rejects(() => service.recommendation("artist-b", "rec-project", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
   assert.equal(projects.length, 1);
   assert.equal(milestoneCount, 6);
+});
+
+test("accepted conversational event is source-bound, timezone-safe, lineup-bound, tenant-scoped, linked, and audited", async () => {
+  const source = { id: "message-event", content: 'Record a confirmed gig called "Bluebird show" on 2026-10-15 at 7:00 PM at "Bluebird Theater"', createdAt: new Date("2026-07-12T12:00:00.000Z") };
+  const activeMembers = [{ id: "member-a", name: "Alex" }, { id: "member-b", name: "Jordan" }];
+  const captured = eventCapture.resolveManagerEventCapture({ message: source.content, sourceMessageId: source.id, sourceMessageCreatedAt: source.createdAt, timezone: "America/Chicago", events: [], members: activeMembers });
+  assert.equal(captured.status, "ready");
+  let outcome = "suggested"; let events = []; let participantCount = 0; const audits = [];
+  const client = {
+    managerRecommendation: {
+      findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-event", outcome, taskId: null, decisionId: null, memoryFactId: null, projectId: null, eventId: null, task: null, decision: null, memoryFact: null, project: null, event: null, proposedAction: captured.action, evidence: captured.action.bandMemberIds, managerRun: { message: { id: "answer-event", conversationId: "conversation-a", createdAt: new Date("2026-07-12T12:00:01.000Z") } } } : null,
+      updateMany: async ({ data }) => { if (outcome !== "suggested") return { count: 0 }; outcome = data.outcome; return { count: 1 }; },
+      update: async ({ data }) => ({ id: "rec-event", outcome, taskId: null, decisionId: null, memoryFactId: null, projectId: null, eventId: data.eventId ?? null })
+    },
+    managerMessage: { findFirst: async ({ where }) => where.id === source.id && where.conversationId === "conversation-a" ? source : null },
+    bandMember: { findMany: async ({ where }) => where.artistId === "artist-a" && where.active ? activeMembers : [] },
+    bandEvent: {
+      findMany: async ({ where }) => events.filter((event) => event.artistId === where.artistId),
+      create: async ({ data }) => { const event = { id: "event-chat", ...data }; events = [event]; return event; }
+    },
+    eventParticipant: {
+      createMany: async ({ data }) => { participantCount += data.length; assert.deepEqual(data.map((participant) => participant.bandMemberId), ["member-a", "member-b"]); assert.equal(data.every((participant) => participant.eventId === "event-chat" && participant.response === "unknown"), true); return { count: data.length }; }
+    }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+  const accepted = await service.recommendation("artist-a", "rec-event", "accepted", {}, "member@test", "operator-a");
+  assert.equal(accepted.outcome, "completed");
+  assert.equal(accepted.eventId, "event-chat");
+  assert.equal(events[0].artistId, "artist-a");
+  assert.equal(events[0].type, "gig");
+  assert.equal(events[0].status, "confirmed");
+  assert.equal(events[0].title, "Bluebird show");
+  assert.equal(events[0].startsAt.toISOString(), "2026-10-16T00:00:00.000Z");
+  assert.equal(events[0].timezone, "America/Chicago");
+  assert.equal(events[0].locationName, "Bluebird Theater");
+  assert.equal(participantCount, 2);
+  const eventAudit = audits.find((entry) => entry.action === "event.created_from_manager_chat");
+  assert.equal(eventAudit.aggregateId, "event-chat");
+  assert.equal(eventAudit.metadata.participantCount, 2);
+  assert.equal(eventAudit.metadata.locationPresent, true);
+  assert.equal(JSON.stringify(eventAudit.metadata).includes(source.content), false);
+  await assert.rejects(() => service.recommendation("artist-a", "rec-event", "accepted", {}, "member@test", "operator-a"), /already been decided/);
+  await assert.rejects(() => service.recommendation("artist-b", "rec-event", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+  assert.equal(events.length, 1);
+  assert.equal(participantCount, 2);
 });
 
 test("accepted conversational task update is source-bound, optimistic, tenant-safe, atomic, and audited", async () => {
@@ -1214,7 +1315,7 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v29", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v30", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "available", effectiveUntil: "2026-07-20T12:00:00.000Z" }).success, true);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "busy" }).success, false);
@@ -1335,7 +1436,7 @@ test("manager recommendation outcome review keeps finished results bounded witho
     outcomeNote: null,
     outcomeAt,
     createdAt: outcomeAt,
-    promptVersion: "manager_os_v29",
+    promptVersion: "manager_os_v30",
     cadence: "daily",
     task: { id: "task-a", title: "Finish the work", status: "done" },
     decision: null,
@@ -1379,7 +1480,7 @@ test("manager recommendation outcome review reads only finished, unpromoted advi
           outcomeNote: null,
           outcomeAt: new Date("2026-07-12T11:00:00.000Z"),
           createdAt: new Date("2026-07-10T11:00:00.000Z"),
-          managerRun: { promptVersion: "manager_os_v29", cadence: "daily" },
+          managerRun: { promptVersion: "manager_os_v30", cadence: "daily" },
           task: { id: "task-a", title: "Finish the real task", status: "done" },
           decision: null
         }];
@@ -1409,7 +1510,7 @@ test("manager response review selects recent unrated answers across conversation
     answer: `Answer ${messageId}`,
     citations: [],
     actionTypes: [],
-    promptVersion: "manager_os_v29",
+    promptVersion: "manager_os_v30",
     mode: "deterministic",
     createdAt,
     ...overrides
@@ -1450,7 +1551,7 @@ test("manager response review reads only the active artist and current operator'
           proposedActions: [],
           createdAt: new Date("2026-07-12T11:00:00.000Z"),
           conversation: { title: "What needs attention?" },
-          managerRun: { promptVersion: "manager_os_v29", mode: "deterministic" },
+          managerRun: { promptVersion: "manager_os_v30", mode: "deterministic" },
           feedback: where.feedback.some ? [{ helpful: true, reason: null, note: null, updatedAt: new Date("2026-07-12T11:05:00.000Z") }] : [],
           responseEval: null
         }];
@@ -1756,22 +1857,22 @@ test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v29", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v30", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v29", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v29", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v30", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v30", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v29", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v29", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v30", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v30", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v29", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v29", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v29", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v30", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v30", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v30", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 

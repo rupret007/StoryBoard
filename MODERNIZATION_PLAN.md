@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `fd956d7`
+Baseline for this round: `main` at `9963ccd`
 
 ## Product and current architecture
 
@@ -1519,6 +1519,49 @@ Implementation:
   dependencies and HTTP 200 web, and the relationship diagnostic found zero
   integrity issues.
 
+### P0 — Reviewed conversational event creation (completed 2026-07-12)
+
+Root cause and boundary:
+
+- Events are StoryBoard's hub for availability, readiness, advance, day-of
+  execution, deals, and settlement, but a novice asking the Manager to schedule
+  a rehearsal or record a gig still had to repeat the work in Band operations.
+- A local event time cannot be safely inferred without a timezone, and recording
+  an internal event must never imply that the band, buyer, venue, or external
+  calendar was contacted or confirmed by StoryBoard.
+
+Implementation:
+
+- Added `manager_event_capture_v1`, a deterministic source-message resolver for
+  one explicitly named gig, rehearsal, studio session, release event,
+  promotion event, travel day, or meeting with an exact date/time. It requires
+  the saved IANA Manager timezone and rejects invalid, nonexistent, or repeated
+  DST wall times rather than choosing silently.
+- The preview shows the event type, explicit draft/hold/confirmed status, exact
+  zoned start, optional location, and current active-lineup count. Draft is the
+  default; hold or confirmed must be stated. It also says plainly that no one is
+  contacted and no external calendar event is created.
+- Acceptance reloads and re-parses the tenant source, rechecks duplicate
+  type/title/start events and the exact active lineup, and atomically creates
+  the `BandEvent`, one `unknown` participant row per active member, and the
+  completed recommendation/event link in a serializable transaction.
+- Provider output cannot emit the action. Missing/invalid timezones, DST
+  ambiguity, multiple or implicit events, questions, credential values, stale
+  lineups, duplicate events, cross-artist access, and replay fail closed.
+- Added parser/DST/action/service tests, explicit-database coverage, two golden
+  safety evaluations, relationship diagnostics, and a production Chromium
+  journey from Manager request through availability, readiness, advance, and
+  the day-of workspace. The design clean-rooms Andrea_NanoBot's source-bound
+  intent, legal-transition, metadata-only trace, and bounded presentation
+  principles; no code, dependency, runtime, or data was copied.
+- Validation passed 139 API + 2 shared tests, all three disposable-Postgres
+  workflows across 37 migrations, all three production Chromium journeys,
+  typecheck, lint, both production builds, and the 64/64
+  `manager_os_v30` / `manager_evals_v32` gate at 100% safety. The rebuilt
+  container applied migration 37, reports healthy database/Redis/worker
+  dependencies and HTTP 200 web, and the expanded relationship diagnostic
+  found zero integrity issues.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,
@@ -1596,6 +1639,18 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Connected explicit Manager chat requests to StoryBoard's event
+  operating spine through the reviewed `manager_event_capture_v1` policy.
+  Exact local dates/times now require the saved IANA timezone and reject DST
+  gaps or overlaps; previews expose status, location, and the active lineup
+  without writing or contacting anyone. Acceptance revalidates the exact
+  source, lineup, tenant, and duplicate boundary in a serializable transaction,
+  then creates the event plus unknown availability rows and a durable
+  recommendation link. Validation passed 139 API + 2 shared tests, three
+  disposable-database workflows and 37 forward migrations, three production
+  Chromium journeys, typecheck, lint, production builds, 64/64 golden manager
+  checks at 100% safety, container health/readiness, and a zero-issue
+  relationship audit.
 - 2026-07-12: Added source-bound reviewed project creation to Manager chat with
   `manager_project_capture_v1`. One explicit release, content campaign, tour,
   or business request with an exact date now produces a complete milestone
