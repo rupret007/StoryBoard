@@ -1097,6 +1097,9 @@ reconnect Google with `gmail.readonly` and opt the artist into tracked replies:
 - `POST /booking-replies/sync` — bounded manual check of StoryBoard-created threads.
 - `POST /booking-replies/:id/analyze` — transient, explicitly enabled AI analysis.
 - `POST /booking-replies/:id/apply-terms` — explicitly apply reviewed facts to the linked opportunity.
+- `POST /booking-replies/:id/prepare-confirmation` — validate reviewed terms and prepare an
+  approval that marks the linked opportunity as confirmed and upserts a gig event
+  (reviewed, idempotent).
 - `POST /booking-replies/:id/prepare-approval` — prepare a threaded Gmail draft through Approvals; never sends.
 
 The periodic worker uses `GMAIL_REPLY_SYNC_REPEAT_MS` (15 minutes by default),
@@ -1131,9 +1134,9 @@ enablement requires the applicable OAuth verification and security review.
   and `offset` (default 0).
 - `GET /approvals/ready-to-execute` — **approved** rows with executable action
   types: `outbound_email_batch`, `outbound_email_send_batch`,
-  `calendar_hold_batch`, `drive_ensure_folder`. Supports `limit` (1–200, default
-  100) and `offset` (default 0), and keeps executability in the database
-  predicate.
+  `calendar_hold_batch`, `drive_ensure_folder`, `booking_reply_confirm`.
+  Supports `limit` (1–200, default 100) and `offset` (default 0), and keeps
+  executability in the database predicate.
 - `GET /approvals/:id/reconciliations` — bounded append-only history (at most
   50 receipts), resolution state, and role-derived capabilities. Viewers may
   read it.

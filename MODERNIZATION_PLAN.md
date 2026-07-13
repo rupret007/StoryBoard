@@ -97,6 +97,7 @@ mock-safe provider adapters.
 - [x] Add the Booking inbox with bounded reply metadata, manual synchronization, periodic BullMQ checks, reconnect status, outcome review, and tenant-safe audit events.
 - [x] Add explicit per-artist AI email-analysis consent. Full message bodies are fetched transiently for a selected reply; only structured analysis, confidence, and proposed deal facts are retained.
 - [x] Require members to apply extracted terms explicitly and route threaded reply drafts through the existing approval center. No reply is automatically sent and no opportunity stage changes automatically.
+- [x] Add reply-to-opportunity confirmation preparation: validate reviewed terms, prepare `booking_reply_confirm` approval, execute idempotently to confirm opportunities, and upsert a `BandEvent` with audited linkage.
 - [ ] Enable in production only after Google restricted-scope verification, security/privacy review, and real Gmail acceptance testing. `GMAIL_REPLY_SYNC_ENABLED` remains false by default.
 
 ### P0 — Manager brain and guided operating system (completed 2026-07-11)

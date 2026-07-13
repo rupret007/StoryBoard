@@ -586,6 +586,10 @@ Gmail draft that references the immutable snapshot; the human must attach the
 PDF. Binary Drive upload and Gmail attachment remain a later adapter package.
 
 **Booking reply loop:** When `GMAIL_REPLY_SYNC_ENABLED=true` and an owner reconnects Google with `gmail.readonly`, the Booking inbox checks only Gmail threads created by StoryBoard campaigns. It stores bounded message metadata/snippets, not full bodies or attachments. AI analysis is a separate per-artist opt-in; selected bodies are fetched transiently and discarded after structured terms are derived. Applying terms and creating a threaded Gmail reply draft both require explicit actions, and drafts still pass through Approvals. Keep reply sync disabled until Google restricted-scope requirements are satisfied.
+Owners can additionally execute a validated booking-confirmation flow from a reply:
+`POST /booking-replies/:id/prepare-confirmation` validates reviewed terms and
+prepares a `booking_reply_confirm` approval; execution confirms the linked
+opportunity and idempotently upserts a confirmed gig event.
 
 Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/environment-setup-plan.md`.
 
