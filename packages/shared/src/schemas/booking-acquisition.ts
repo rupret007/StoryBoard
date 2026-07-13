@@ -361,7 +361,7 @@ export const bookingCampaignRecipientPatchSchema = z
 
 export const bookingCampaignPrepareApprovalSchema = z
   .object({
-    recipientIds: z.array(z.string().trim().min(1).max(128)).min(1).max(100).optional()
+    recipientIds: z.array(z.string().trim().min(1).max(128)).min(1).max(25).optional()
   })
   .strict()
   .superRefine((value, ctx) => {

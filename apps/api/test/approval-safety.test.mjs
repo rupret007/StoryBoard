@@ -15,7 +15,7 @@ const [approvalsMod, logisticsMod] = await Promise.all([
   load("operations/event-logistics.js")
 ]);
 
-function fakeHarness({ approval, event = null, recommendation = null, failSuccessAudit = false } = {}) {
+function fakeHarness({ approval, event = null, recommendation = null, failSuccessAudit = false, driveExecution = null } = {}) {
   const approvals = new Map(approval ? [[approval.id, approval]] : []);
   const events = new Map(event ? [[event.id, event]] : []);
   const recommendations = new Map(
@@ -23,6 +23,7 @@ function fakeHarness({ approval, event = null, recommendation = null, failSucces
   );
   const auditEvents = [];
   const notifications = [];
+  const reconciliationReceipts = [];
   const providerCalls = { calendar: 0, drive: 0 };
   const matches = (row, where = {}) => {
     if (where.id !== undefined && row.id !== where.id) return false;
@@ -48,14 +49,16 @@ function fakeHarness({ approval, event = null, recommendation = null, failSucces
   };
   const approvalDelegate = {
     findFirst: async ({ where }) => [...approvals.values()].find((row) => matches(row, where)) ?? null,
-    findMany: async ({ where }) => [...approvals.values()].filter((row) => matches(row, where)),
+    findMany: async ({ where }) => [...approvals.values()]
+      .filter((row) => matches(row, where))
+      .map((row) => ({ ...row, reconciliations: row.reconciliations ?? [] })),
     findUniqueOrThrow: async ({ where }) => {
       const row = approvals.get(where.id);
       if (!row) throw new Error("missing approval");
       return row;
     },
     create: async ({ data }) => {
-      const row = { id: `approval-${approvals.size + 1}`, executionAttemptedAt: null, approvedAt: null, approvedBy: null, createdAt: new Date(), updatedAt: new Date(), ...data };
+      const row = { id: `approval-${approvals.size + 1}`, executionAttemptedAt: null, approvedAt: null, approvedBy: null, reconciliations: [], createdAt: new Date(), updatedAt: new Date(), ...data };
       approvals.set(row.id, row);
       return row;
     },
@@ -63,7 +66,7 @@ function fakeHarness({ approval, event = null, recommendation = null, failSucces
       const key = where.artistId_sourceKey;
       const existing = [...approvals.values()].find((row) => row.artistId === key.artistId && row.sourceKey === key.sourceKey);
       if (existing) return existing;
-      const row = { executionAttemptedAt: null, approvedAt: null, approvedBy: null, createdAt: new Date(), updatedAt: new Date(), ...create };
+      const row = { executionAttemptedAt: null, approvedAt: null, approvedBy: null, reconciliations: [], createdAt: new Date(), updatedAt: new Date(), ...create };
       approvals.set(row.id, row);
       return row;
     },
@@ -106,6 +109,38 @@ function fakeHarness({ approval, event = null, recommendation = null, failSucces
   };
   const client = {
     approvalRequest: approvalDelegate,
+    approvalReconciliation: {
+      findUnique: async ({ where }) => {
+        const key = where.artistId_idempotencyKey;
+        return reconciliationReceipts.find(
+          (row) =>
+            row.artistId === key.artistId &&
+            row.idempotencyKey === key.idempotencyKey
+        ) ?? null;
+      },
+      findMany: async ({ where }) =>
+        reconciliationReceipts.filter(
+          (row) =>
+            row.artistId === where.artistId &&
+            row.approvalId === where.approvalId
+        ),
+      findFirst: async ({ where }) =>
+        reconciliationReceipts.find(
+          (row) =>
+            row.artistId === where.artistId &&
+            row.approvalId === where.approvalId &&
+            where.outcome.in.includes(row.outcome)
+        ) ?? null,
+      create: async ({ data }) => {
+        const row = {
+          id: `reconciliation-${reconciliationReceipts.length + 1}`,
+          ...data,
+          createdAt: new Date()
+        };
+        reconciliationReceipts.push(row);
+        return row;
+      }
+    },
     auditEvent: { create: async ({ data }) => (auditEvents.push(data), data) },
     bandEvent: bandEventDelegate,
     bookingOpportunity: { count: async () => 0 },
@@ -115,7 +150,11 @@ function fakeHarness({ approval, event = null, recommendation = null, failSucces
   const adapters = {
     gmail: { mode: "mock", draftMessage: async () => { throw new Error("unused"); }, sendMessage: async () => { throw new Error("unused"); } },
     calendar: { mode: "mock", proposeHold: async () => (providerCalls.calendar += 1, { eventId: "calendar-1", htmlLink: "https://calendar.test/1" }) },
-    drive: { mode: "mock", ensureStoryboardFolder: async () => (providerCalls.drive += 1, { folderId: "folder-1", webViewLink: "https://drive.test/folder-1" }) }
+    drive: { mode: "mock", ensureStoryboardFolder: async () => {
+      providerCalls.drive += 1;
+      if (driveExecution) return driveExecution();
+      return { folderId: "folder-1", webViewLink: "https://drive.test/folder-1" };
+    } }
   };
   const service = new approvalsMod.ApprovalsService(
     { client },
@@ -127,7 +166,7 @@ function fakeHarness({ approval, event = null, recommendation = null, failSucces
     { resolveForArtist: async () => adapters },
     { enqueueApprovalNotify: async (input) => notifications.push(input) }
   );
-  return { service, approvals, events, recommendations, auditEvents, notifications, providerCalls };
+  return { service, approvals, events, recommendations, auditEvents, notifications, providerCalls, reconciliationReceipts };
 }
 
 function approvalRow(overrides = {}) {
@@ -146,6 +185,7 @@ function approvalRow(overrides = {}) {
     approvedBy: null,
     approvedAt: null,
     executionAttemptedAt: null,
+    reconciliations: [],
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides
@@ -207,6 +247,105 @@ test("dry run does not consume the execution claim and a real execution remains 
     /already executed/i
   );
   assert.equal(harness.providerCalls.drive, 1);
+});
+
+test("an in-flight provider execution cannot be reconciled before its one-shot claim finalizes", async () => {
+  let releaseProvider;
+  let providerEntered;
+  const entered = new Promise((resolve) => {
+    providerEntered = resolve;
+  });
+  const blockedProvider = new Promise((resolve) => {
+    releaseProvider = resolve;
+  });
+  const approval = approvalRow({ status: "approved" });
+  const harness = fakeHarness({
+    approval,
+    driveExecution: async () => {
+      providerEntered();
+      await blockedProvider;
+      return {
+        folderId: "folder-1",
+        webViewLink: "https://drive.test/folder-1"
+      };
+    }
+  });
+
+  const execution = harness.service.executeApproved(
+    "artist-1",
+    approval.id,
+    "owner@test.invalid"
+  );
+  await entered;
+  assert.equal(approval.status, "approved");
+  assert.equal(approval.executionAttemptedAt instanceof Date, true);
+  await assert.rejects(
+    harness.service.recordReconciliation(
+      "artist-1",
+      approval.id,
+      {
+        outcome: "still_unknown",
+        note: "Checked the provider console while the request was still running.",
+        checkedLocation: "Google Drive web interface",
+        providerReference: null,
+        observedAt: new Date().toISOString(),
+        idempotencyKey: "aa064cf1-582f-4842-a98b-6d0da170cbf6"
+      },
+      "owner@test.invalid",
+      "operator-1"
+    ),
+    /execution is still in progress/i
+  );
+  assert.equal(harness.reconciliationReceipts.length, 0);
+
+  releaseProvider();
+  const finalized = await execution;
+  assert.equal(finalized.status, "executed");
+  assert.equal(approval.status, "executed");
+  assert.equal(harness.providerCalls.drive, 1);
+  await assert.rejects(
+    harness.service.recordReconciliation(
+      "artist-1",
+      approval.id,
+      {
+        outcome: "still_unknown",
+        note: "Checked the completed provider request after it finalized.",
+        checkedLocation: "Google Drive web interface",
+        providerReference: null,
+        observedAt: new Date().toISOString(),
+        idempotencyKey: "71da3f8c-e1ba-49e3-83e1-ef2920de2ce4"
+      },
+      "owner@test.invalid",
+      "operator-1"
+    ),
+    /does not have an uncertain or failed execution/i
+  );
+});
+
+test("an approved non-executable record never consumes an execution claim", async () => {
+  const approval = approvalRow({
+    status: "approved",
+    actionType: "release_checklist_draft",
+    payload: { steps: ["Confirm release date"] }
+  });
+  const harness = fakeHarness({ approval });
+  await assert.rejects(
+    () =>
+      harness.service.executeApproved(
+        "artist-1",
+        approval.id,
+        "owner@test.invalid"
+      ),
+    /execution not enabled/i
+  );
+  assert.equal(approval.executionAttemptedAt, null);
+  assert.deepEqual(harness.providerCalls, { calendar: 0, drive: 0 });
+  assert.equal(
+    harness.auditEvents.some(
+      (event) => event.action === "approval.execution.started"
+    ),
+    false
+  );
 });
 
 test("event logistics rejects a stale fingerprint before provider work", async () => {

@@ -1,4 +1,8 @@
 import { Injectable } from "@nestjs/common";
+import {
+  APPROVAL_LIFECYCLE_POLICY_VERSION,
+  partitionApprovalLifecycle
+} from "../approvals/approval-lifecycle";
 import type {
   ApprovalRequest,
   BookingOpportunity,
@@ -19,7 +23,14 @@ export class WeeklySummaryService {
         where: { artistId },
         include: { opportunity: true }
       }),
-      this.prisma.client.approvalRequest.findMany({ where: { artistId } }),
+      this.prisma.client.approvalRequest.findMany({
+        where: { artistId },
+        include: {
+          reconciliations: {
+            select: { outcome: true, createdAt: true }
+          }
+        }
+      }),
       this.prisma.client.auditEvent.findMany({
         where: { artistId },
         orderBy: { createdAt: "desc" },
@@ -60,14 +71,29 @@ export class WeeklySummaryService {
       return d < cutoff;
     });
 
-    const pendingApprovals = approvals.filter((a: ApprovalRequest) =>
-      ["proposed", "pending"].includes(a.status)
-    );
+    const approvalWorkQueue = partitionApprovalLifecycle(approvals);
+    const pendingApprovals: ApprovalRequest[] =
+      approvalWorkQueue.pendingDecision;
 
     const recommendations: string[] = [];
+    if (approvalWorkQueue.needsReconciliation.length > 0) {
+      recommendations.push(
+        `${approvalWorkQueue.needsReconciliation.length} approval outcome(s) need reconciliation. Check the provider before preparing a replacement; never retry an uncertain outside write blindly.`
+      );
+    }
+    if (approvalWorkQueue.readyToExecute.length > 0) {
+      recommendations.push(
+        `${approvalWorkQueue.readyToExecute.length} approved request(s) are ready for the separate execution step.`
+      );
+    }
     if (pendingApprovals.length > 0) {
       recommendations.push(
-        `You have ${pendingApprovals.length} approval(s) waiting. Review them before any outbound sends.`
+        `You have ${pendingApprovals.length} approval decision(s) waiting. Review them before any outbound work is authorized.`
+      );
+    }
+    if (approvalWorkQueue.approvedNotExecutable.length > 0) {
+      recommendations.push(
+        `${approvalWorkQueue.approvedNotExecutable.length} approved request(s) have no executable StoryBoard action. Review their status rather than assuming the work ran.`
       );
     }
     if (overdueTasks.length > 0) {
@@ -91,6 +117,16 @@ export class WeeklySummaryService {
       overdueTasks,
       staleFollowUpsOlderThan7d: staleFollowUps,
       pendingApprovals,
+      approvalWorkQueue: {
+        policyVersion: APPROVAL_LIFECYCLE_POLICY_VERSION,
+        counts: approvalWorkQueue.counts,
+        pendingDecision: approvalWorkQueue.pendingDecision,
+        readyToExecute: approvalWorkQueue.readyToExecute,
+        executionInProgress: approvalWorkQueue.executionInProgress,
+        needsReconciliation: approvalWorkQueue.needsReconciliation,
+        reconciled: approvalWorkQueue.reconciled,
+        approvedNotExecutable: approvalWorkQueue.approvedNotExecutable
+      },
       recentAudit: projectAuditEventsForRead(audit),
       recentCommands: commands,
       recommendations

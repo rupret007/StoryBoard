@@ -8,8 +8,9 @@ const loadApi = async (path) => { const module = await import(pathToFileURL(join
 const loadShared = (path) =>
   import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
 
-const [prospectsMod, ticketmasterMod, acquisitionSchemaMod] = await Promise.all([
+const [prospectsMod, campaignsMod, ticketmasterMod, acquisitionSchemaMod] = await Promise.all([
   loadApi("booking/booking-prospects.service.js"),
+  loadApi("booking/booking-campaigns.service.js"),
   loadApi("integrations/adapters/ticketmaster/real-ticketmaster.adapter.js"),
   loadShared("schemas/booking-acquisition.js")
 ]);
@@ -37,6 +38,12 @@ test("booking profile and campaign templates reject incomplete ranges and unknow
   assert.equal(
     acquisitionSchemaMod.bookingCampaignPrepareApprovalSchema.safeParse({
       recipientIds: ["recipient-a", "recipient-a"]
+    }).success,
+    false
+  );
+  assert.equal(
+    acquisitionSchemaMod.bookingCampaignPrepareApprovalSchema.safeParse({
+      recipientIds: Array.from({ length: 26 }, (_, index) => `recipient-${index}`)
     }).success,
     false
   );
@@ -188,6 +195,103 @@ test("prospect buyer contact action links owned contacts or creates one atomical
     auditEvents.filter((event) => event.action === "booking_prospect.contact_linked").length,
     2
   );
+});
+
+test("campaign recipient additions serialize the 25-recipient limit", async () => {
+  const recipients = Array.from({ length: 24 }, (_, index) => ({
+    id: `existing-${index}`
+  }));
+  const auditEvents = [];
+  const rowLockCalls = [];
+  let transactionTail = Promise.resolve();
+  const tx = {
+    $queryRaw: async (_query, campaignId, artistId) => {
+      rowLockCalls.push({ campaignId, artistId });
+      return [{ id: campaignId }];
+    },
+    bookingCampaign: {
+      findFirst: async () => ({
+        status: "draft",
+        approvalRequestId: null,
+        _count: { recipients: recipients.length }
+      })
+    },
+    bookingProspect: {
+      findFirst: async ({ where }) => ({
+        id: where.id,
+        artistId: "artist-a",
+        status: "qualified",
+        contactId: null,
+        opportunityId: null
+      })
+    },
+    bookingCampaignRecipient: {
+      create: async ({ data }) => {
+        const recipient = {
+          id: `recipient-${recipients.length + 1}`,
+          ...data
+        };
+        recipients.push(recipient);
+        return recipient;
+      }
+    }
+  };
+  const client = {
+    $transaction: async (callback) => {
+      let release;
+      const previous = transactionTail;
+      transactionTail = new Promise((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await callback(tx);
+      } finally {
+        release();
+      }
+    }
+  };
+  const service = new campaignsMod.BookingCampaignsService(
+    { client },
+    {
+      log: async (event, auditClient) => {
+        assert.equal(auditClient, tx);
+        auditEvents.push(event);
+      }
+    },
+    { assertReady: async () => ({}) },
+    {}
+  );
+
+  const results = await Promise.allSettled([
+    service.addRecipient("artist-a", "campaign-a", {
+      prospectId: "prospect-a"
+    }),
+    service.addRecipient("artist-a", "campaign-a", {
+      prospectId: "prospect-b"
+    })
+  ]);
+
+  assert.equal(
+    results.filter(({ status }) => status === "fulfilled").length,
+    1,
+    results
+      .map((result) =>
+        result.status === "fulfilled"
+          ? "fulfilled"
+          : `rejected: ${result.reason?.message ?? String(result.reason)}`
+      )
+      .join("; ")
+  );
+  const rejected = results.find(({ status }) => status === "rejected");
+  assert.equal(rejected?.reason?.getStatus?.(), 400);
+  assert.equal(rejected?.reason?.message, "A campaign may contain at most 25 recipients");
+  assert.equal(recipients.length, 25);
+  assert.equal(auditEvents.length, 1);
+  assert.deepEqual(rowLockCalls, [
+    { campaignId: "campaign-a", artistId: "artist-a" },
+    { campaignId: "campaign-a", artistId: "artist-a" }
+  ]);
 });
 
 test("discovery is manual-only when Ticketmaster is not configured", async () => {

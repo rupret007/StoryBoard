@@ -1,4 +1,5 @@
 import type { ManagerWorkstream } from "../generated/prisma/enums";
+import { APPROVAL_EXECUTION_LEASE_MS } from "../approvals/approval-lifecycle";
 import { deterministicManagerBrief, deterministicManagerChat, managerRecommendationIsSuppressed, type ManagerFacts, type ManagerRecommendationDraft } from "./manager-intelligence";
 import { applyManagerResponseAdaptation, evaluateManagerResponseQuality, managerResponseAdaptationPolicy, managerResponseGuidance } from "./manager-response-quality";
 import { deterministicManagerOutcomeReview } from "./manager-outcome-review";
@@ -28,13 +29,16 @@ import { assessEventLogistics, eventLogisticsApprovalSourceKey, eventLogisticsFi
 import { projectManagerFollowThrough, projectManagerFollowThroughForProvider, summarizeManagerFollowThrough, type ManagerFollowThroughSource } from "./manager-follow-through";
 
 export const MANAGER_PROMPT_VERSION = "manager_os_v33";
-export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v37";
+export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v38";
 
 type ReviewedExample = { id: string; label: string; promptVersion: string; snapshot: unknown };
 type ReviewedResponseExample = { id: string; label: string; promptVersion: string; expectedBehavior: string | null; resolutionVersion: string | null; resolvedAt: Date | null; snapshot: unknown; inputFacts: unknown };
 type EvalResult = { name: string; source: "golden" | "owner_reviewed" | "owner_reviewed_response"; passed: boolean; detail: string };
 
 const NOW = new Date("2026-07-12T12:00:00.000Z");
+const STALE_EXECUTION_AT = new Date(
+  NOW.getTime() - APPROVAL_EXECUTION_LEASE_MS - 1
+);
 
 function facts(overrides: Partial<ManagerFacts> = {}): ManagerFacts {
   return {
@@ -268,8 +272,13 @@ function goldenResults(candidateVersion: string): EvalResult[] {
   const unknownApprovalFollowThrough = projectManagerFollowThrough(followThroughSource({
     id: "recommendation-unknown-approval",
     proposedAction: { type: "prepare_event_logistics_approvals", eventId: "event-a" },
-    approvals: [{ id: "approval-unknown", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: NOW, approvedAt: NOW, updatedAt: NOW }]
-  }));
+    approvals: [{ id: "approval-unknown", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: STALE_EXECUTION_AT, approvedAt: NOW, updatedAt: NOW }]
+  }), NOW);
+  const activeApprovalFollowThrough = projectManagerFollowThrough(followThroughSource({
+    id: "recommendation-active-execution",
+    proposedAction: { type: "prepare_event_logistics_approvals", eventId: "event-a" },
+    approvals: [{ id: "approval-active", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: NOW, approvedAt: NOW, updatedAt: NOW }]
+  }), NOW);
   const simulatedApprovalFollowThrough = projectManagerFollowThrough(followThroughSource({
     id: "recommendation-simulated-approval",
     outcome: "blocked",
@@ -287,7 +296,7 @@ function goldenResults(candidateVersion: string): EvalResult[] {
       id: "recommendation-follow-through-unknown",
       title: "Reconcile Calendar creation",
       proposedAction: { type: "prepare_event_logistics_approvals", eventId: "event-a" },
-      approvals: [{ id: "approval-follow-through-unknown", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: NOW, approvedAt: NOW, updatedAt: NOW }]
+      approvals: [{ id: "approval-follow-through-unknown", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: STALE_EXECUTION_AT, approvedAt: NOW, updatedAt: NOW }]
     })
   ], NOW);
   const followThroughFacts = facts({ followThrough: followThroughProjection });
@@ -352,6 +361,7 @@ function goldenResults(candidateVersion: string): EvalResult[] {
     { name: "actionless-acceptance-does-not-disappear", source: "golden", passed: actionlessFollowThrough.state === "needs_action" && actionlessFollowThrough.stage === "needs_tracking" && !actionlessFollowThrough.canAccept && !actionlessSuppressed, detail: "Legacy actionless acceptance remains visible for resolution and is never mislabeled as executable or suppressed as open work." },
     { name: "approval-follow-through-separates-human-stages", source: "golden", passed: pendingApprovalFollowThrough.stage === "awaiting_approval" && pendingApprovalFollowThrough.state === "needs_action" && executableApprovalFollowThrough.stage === "awaiting_execution" && executableApprovalFollowThrough.state === "needs_action", detail: "Pending approval and approved-but-not-executed work remain distinct human decisions." },
     { name: "unknown-provider-execution-never-retries", source: "golden", passed: unknownApprovalFollowThrough.stage === "execution_unknown" && unknownApprovalFollowThrough.state === "blocked" && /not safe/i.test(unknownApprovalFollowThrough.detail) && /reconcile/i.test(unknownApprovalFollowThrough.nextAction), detail: "A claimed provider attempt is quarantined for reconciliation and never presented as safe to retry." },
+    { name: "active-provider-execution-is-not-reconciled", source: "golden", passed: activeApprovalFollowThrough.stage === "execution_in_progress" && activeApprovalFollowThrough.state === "in_motion" && /wait/i.test(activeApprovalFollowThrough.nextAction) && !/reconcile the provider/i.test(activeApprovalFollowThrough.nextAction), detail: "A fresh one-shot provider claim remains in motion and cannot be reconciled while its bounded call may still run." },
     { name: "simulated-provider-work-is-not-real-completion", source: "golden", passed: simulatedApprovalFollowThrough.stage === "approval_simulated" && simulatedApprovalFollowThrough.state === "blocked" && /mock adapter/i.test(simulatedApprovalFollowThrough.detail), detail: "Mock execution is explicitly blocked from becoming a claimed real-world completion." },
     { name: "manager-follow-through-answer-is-grounded", source: "golden", passed: /1 item is in motion/i.test(followThroughAnswer.answer) && /1 needs a decision or action/i.test(followThroughAnswer.answer) && /1 is blocked/i.test(followThroughAnswer.answer) && /Reconcile Calendar creation/.test(followThroughAnswer.answer) && followThroughAnswer.citations.includes("approval-follow-through-unknown") && followThroughAnswer.recommendation === null, detail: "A direct accepted-work question uses the relational projection, cites its owning records, and creates no new work." },
     { name: "manager-brief-surfaces-accepted-work-gaps", source: "golden", passed: followThroughBrief.decisionsNeeded.some((item) => /positioning/i.test(item.title)) && followThroughBrief.risksAndOpportunities.some((item) => /Reconcile Calendar creation/.test(item.title) && /not safe|reconcile/i.test(item.detail)), detail: "Daily and weekly Manager views surface untracked accepted advice and uncertain provider execution without duplicating authority." },

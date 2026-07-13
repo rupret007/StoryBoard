@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { requireTestDatabaseUrl } from "../../../../scripts/test-database.mjs";
 
 const testDatabaseUrl = requireTestDatabaseUrl();
@@ -22,6 +23,8 @@ const [
   prospectsMod,
   campaignsMod,
   approvalsMod,
+  approvalsControllerMod,
+  membershipMod,
   rolesMod,
   telegramMod,
   mockAdaptersMod,
@@ -38,6 +41,8 @@ const [
   load("booking/booking-prospects.service.js"),
   load("booking/booking-campaigns.service.js"),
   load("approvals/approvals.service.js"),
+  load("approvals/approvals.controller.js"),
+  load("auth/membership.service.js"),
   load("auth/role-policy.service.js"),
   load("workflow-automation/telegram-registration.service.js"),
   load("integrations/adapters/mock/mock-adapters.js"),
@@ -225,6 +230,435 @@ test("database integration: tenant links, roles, registration binding, and audit
   );
 });
 
+test("database integration: approval work queue is tenant-scoped and viewer-safe", async () => {
+  const [artist, foreignArtist] = await Promise.all([
+    client.artist.create({ data: { name: "Approval Queue Artist", slug: "approval-queue-artist-test" } }),
+    client.artist.create({ data: { name: "Foreign Approval Queue Artist", slug: "foreign-approval-queue-artist-test" } })
+  ]);
+  const [owner, member, viewer, foreignOperator] = await Promise.all([
+    client.operator.create({ data: { email: "approval-owner@test.invalid" } }),
+    client.operator.create({ data: { email: "approval-member@test.invalid" } }),
+    client.operator.create({ data: { email: "approval-viewer@test.invalid" } }),
+    client.operator.create({ data: { email: "approval-foreign@test.invalid" } })
+  ]);
+  await client.artistMembership.createMany({
+    data: [
+      { artistId: artist.id, operatorId: owner.id, role: "owner" },
+      { artistId: artist.id, operatorId: member.id, role: "member" },
+      { artistId: artist.id, operatorId: viewer.id, role: "viewer" },
+      { artistId: foreignArtist.id, operatorId: foreignOperator.id, role: "owner" }
+    ]
+  });
+
+  const [pending, ready, active, unknown, failed, nonExecutable, foreignApproval] = await Promise.all([
+    client.approvalRequest.create({ data: { artistId: artist.id, title: "Review buyer draft", status: "pending", actionType: "outbound_email_batch", payload: { drafts: [] } } }),
+    client.approvalRequest.create({ data: { artistId: artist.id, title: "Create show folder", status: "approved", actionType: "drive_ensure_folder", payload: { folderName: "Show files" }, approvedAt: new Date() } }),
+    client.approvalRequest.create({ data: { artistId: artist.id, title: "Calendar hold still running", status: "approved", actionType: "calendar_hold_batch", payload: { holds: [] }, approvedAt: new Date(), executionAttemptedAt: new Date() } }),
+    client.approvalRequest.create({ data: { artistId: artist.id, title: "Reconcile Calendar hold", status: "approved", actionType: "calendar_hold_batch", payload: { holds: [] }, approvedAt: new Date(), executionAttemptedAt: new Date(Date.now() - 2 * 60 * 60 * 1000) } }),
+    client.approvalRequest.create({ data: { artistId: artist.id, title: "Reconcile campaign send", status: "failed", actionType: "outbound_email_send_batch", payload: { drafts: [] }, approvedAt: new Date(), executionAttemptedAt: new Date() } }),
+    client.approvalRequest.create({ data: { artistId: artist.id, title: "Recorded release checklist", status: "approved", actionType: "release_checklist_draft", payload: { steps: [] }, approvedAt: new Date() } }),
+    client.approvalRequest.create({ data: { artistId: foreignArtist.id, title: "Foreign uncertain write", status: "approved", actionType: "drive_ensure_folder", payload: { folderName: "Foreign" }, approvedAt: new Date(), executionAttemptedAt: new Date() } })
+  ]);
+
+  const [prospect, foreignProspect] = await Promise.all([
+    client.bookingProspect.create({ data: { artistId: artist.id, kind: "festival", status: "qualified", name: "Queue Festival", city: "Chicago" } }),
+    client.bookingProspect.create({ data: { artistId: foreignArtist.id, kind: "festival", status: "qualified", name: "Foreign Festival", city: "Elsewhere" } })
+  ]);
+  const [campaign, foreignCampaign] = await Promise.all([
+    client.bookingCampaign.create({ data: { artistId: artist.id, name: "Queue campaign", subjectTemplate: "Hello", bodyTemplate: "Body", approvalRequestId: failed.id } }),
+    client.bookingCampaign.create({ data: { artistId: foreignArtist.id, name: "Foreign queue campaign", subjectTemplate: "Hello", bodyTemplate: "Body", approvalRequestId: nonExecutable.id } })
+  ]);
+  const [recipient, foreignRecipient] = await Promise.all([
+    client.bookingCampaignRecipient.create({ data: { campaignId: campaign.id, prospectId: prospect.id, status: "approval_requested" } }),
+    client.bookingCampaignRecipient.create({ data: { campaignId: foreignCampaign.id, prospectId: foreignProspect.id, status: "approval_requested" } })
+  ]);
+  await client.bookingCampaignDelivery.createMany({
+    data: [
+      { artistId: artist.id, approvalId: failed.id, recipientId: recipient.id, status: "unknown" },
+      // The schema permits this mismatched historical relation. The read model
+      // must fail closed and exclude it from the active artist's summary.
+      { artistId: foreignArtist.id, approvalId: failed.id, recipientId: foreignRecipient.id, status: "sent" }
+    ]
+  });
+
+  let providerResolutionCount = 0;
+  const approvals = new approvalsMod.ApprovalsService(
+    prisma,
+    audit,
+    { resolveForArtist: async () => {
+      providerResolutionCount += 1;
+      return mockAdaptersMod.mockAdapters;
+    } },
+    { enqueueApprovalNotify: async () => undefined }
+  );
+  const membership = new membershipMod.MembershipService(prisma);
+  const roles = new rolesMod.RolePolicyService(prisma);
+  const controller = new approvalsControllerMod.ApprovalsController(
+    approvals,
+    membership,
+    roles
+  );
+  const request = { storyboardSession: null };
+
+  const ownerQueue = await controller.workQueue(owner, request, artist.id);
+  assert.deepEqual(ownerQueue.counts, {
+    pendingDecision: 1,
+    readyToExecute: 1,
+    executionInProgress: 1,
+    needsReconciliation: 2,
+    reconciled: 0,
+    approvedNotExecutable: 1,
+    attentionTotal: 4
+  });
+  assert.deepEqual(ownerQueue.capabilities, { canDecide: true, canExecute: true, canReconcile: true });
+  assert.equal(ownerQueue.readyToExecute[0]?.id, ready.id);
+  assert.equal(ownerQueue.pendingDecision[0]?.id, pending.id);
+  assert.equal(ownerQueue.executionInProgress[0]?.id, active.id);
+  assert.equal(ownerQueue.executionInProgress[0]?.capabilities.canReconcile, false);
+  assert.equal(ownerQueue.needsReconciliation.some((item) => item.id === unknown.id), true);
+  assert.equal(ownerQueue.needsReconciliation.some((item) => item.id === foreignApproval.id), false);
+  const failedItem = ownerQueue.needsReconciliation.find((item) => item.id === failed.id);
+  assert.equal(failedItem?.campaignId, campaign.id);
+  assert.deepEqual(failedItem?.deliverySummary, {
+    total: 1,
+    pending: 0,
+    drafted: 0,
+    sending: 0,
+    sent: 0,
+    failed: 0,
+    unknown: 1
+  });
+  assert.equal(ownerQueue.approvedNotExecutable[0]?.campaignId, null);
+
+  const viewerQueue = await controller.workQueue(viewer, request, artist.id);
+  assert.deepEqual(viewerQueue.capabilities, { canDecide: false, canExecute: false, canReconcile: false });
+  assert.equal(
+    [
+      ...viewerQueue.pendingDecision,
+      ...viewerQueue.readyToExecute,
+      ...viewerQueue.executionInProgress,
+      ...viewerQueue.needsReconciliation,
+      ...viewerQueue.reconciled,
+      ...viewerQueue.approvedNotExecutable
+    ].every(
+      (item) =>
+        !item.capabilities.canApprove &&
+        !item.capabilities.canReject &&
+        !item.capabilities.canExecute &&
+        !item.capabilities.canReconcile &&
+        !item.capabilities.canRetry
+    ),
+    true
+  );
+  await assert.rejects(
+    () => controller.approve(pending.id, viewer, request, artist.id),
+    (error) => error?.getStatus?.() === 403
+  );
+  assert.equal((await client.approvalRequest.findUniqueOrThrow({ where: { id: pending.id } })).status, "pending");
+  await assert.rejects(
+    () => controller.workQueue(foreignOperator, request, artist.id),
+    (error) => error?.getStatus?.() === 403
+  );
+  const activeHistory = await controller.reconciliations(
+    active.id,
+    member,
+    request,
+    artist.id
+  );
+  assert.equal(activeHistory.capabilities.canReconcile, false);
+  await assert.rejects(
+    () =>
+      controller.recordReconciliation(
+        active.id,
+        {
+          outcome: "still_unknown",
+          note: "The provider request is still inside its one-shot execution lease.",
+          checkedLocation: "Google Calendar for approval-queue-owner",
+          providerReference: null,
+          observedAt: new Date().toISOString(),
+          idempotencyKey: randomUUID()
+        },
+        member,
+        request,
+        artist.id
+      ),
+    (error) => error?.getStatus?.() === 409
+  );
+  assert.equal(
+    await client.approvalReconciliation.count({
+      where: { approvalId: active.id }
+    }),
+    0
+  );
+
+  const unknownBefore = await client.approvalRequest.findUniqueOrThrow({
+    where: { id: unknown.id }
+  });
+  const stillUnknownInput = {
+    outcome: "still_unknown",
+    note: "Checked the Calendar account, but the event could not be identified conclusively.",
+    checkedLocation: "Google Calendar for approval-queue-owner",
+    providerReference: null,
+    observedAt: new Date().toISOString(),
+    idempotencyKey: randomUUID()
+  };
+  await assert.rejects(
+    () =>
+      controller.recordReconciliation(
+        unknown.id,
+        stillUnknownInput,
+        viewer,
+        request,
+        artist.id
+      ),
+    (error) => error?.getStatus?.() === 403
+  );
+  const firstCheck = await controller.recordReconciliation(
+    unknown.id,
+    stillUnknownInput,
+    owner,
+    request,
+    artist.id
+  );
+  assert.equal(firstCheck.created, true);
+  assert.equal(firstCheck.receipt.outcome, "still_unknown");
+  assert.equal((await controller.workQueue(owner, request, artist.id)).counts.needsReconciliation, 2);
+
+  const noEffectInput = {
+    outcome: "no_external_effect_observed",
+    note: "Checked the exact Calendar and date range; no matching event exists, so a fresh request is safe.",
+    checkedLocation: "Google Calendar, July 2026 date range",
+    providerReference: null,
+    observedAt: new Date().toISOString(),
+    idempotencyKey: randomUUID()
+  };
+  const terminal = await controller.recordReconciliation(
+    unknown.id,
+    noEffectInput,
+    member,
+    request,
+    artist.id
+  );
+  assert.equal(terminal.created, true);
+  assert.equal(terminal.receipt.outcome, "no_external_effect_observed");
+  const replay = await controller.recordReconciliation(
+    unknown.id,
+    noEffectInput,
+    member,
+    request,
+    artist.id
+  );
+  assert.equal(replay.created, false);
+  assert.equal(replay.receipt.id, terminal.receipt.id);
+  await assert.rejects(
+    () =>
+      controller.recordReconciliation(
+        unknown.id,
+        { ...noEffectInput, note: `${noEffectInput.note} Different evidence.` },
+        member,
+        request,
+        artist.id
+      ),
+    (error) => error?.getStatus?.() === 409
+  );
+  await assert.rejects(
+    () =>
+      controller.recordReconciliation(
+        unknown.id,
+        { ...noEffectInput, idempotencyKey: randomUUID() },
+        owner,
+        request,
+        artist.id
+      ),
+    (error) => error?.getStatus?.() === 409
+  );
+  const afterNoEffect = await controller.workQueue(owner, request, artist.id);
+  assert.equal(afterNoEffect.counts.needsReconciliation, 1);
+  assert.equal(afterNoEffect.counts.reconciled, 1);
+  assert.equal(afterNoEffect.reconciled[0]?.id, unknown.id);
+  assert.equal(afterNoEffect.reconciled[0]?.capabilities.canRetry, false);
+
+  const effectInput = {
+    outcome: "external_effect_observed",
+    note: "Found the provider-side message created by this request and recorded its immutable reference.",
+    checkedLocation: "Gmail Sent folder for the connected booking account",
+    providerReference: "message-id:storyboard-integration-test",
+    observedAt: new Date().toISOString(),
+    idempotencyKey: randomUUID()
+  };
+  await controller.recordReconciliation(
+    failed.id,
+    effectInput,
+    owner,
+    request,
+    artist.id
+  );
+  const fullyReconciled = await controller.workQueue(owner, request, artist.id);
+  assert.equal(fullyReconciled.counts.needsReconciliation, 0);
+  assert.equal(fullyReconciled.counts.reconciled, 2);
+  const viewerHistory = await controller.reconciliations(
+    failed.id,
+    viewer,
+    request,
+    artist.id
+  );
+  assert.equal(viewerHistory.resolved, true);
+  assert.equal(viewerHistory.capabilities.canReconcile, false);
+  assert.equal(viewerHistory.capabilities.canRetry, false);
+
+  const unknownAfter = await client.approvalRequest.findUniqueOrThrow({
+    where: { id: unknown.id }
+  });
+  assert.equal(unknownAfter.status, unknownBefore.status);
+  assert.equal(
+    unknownAfter.executionAttemptedAt?.toISOString(),
+    unknownBefore.executionAttemptedAt?.toISOString()
+  );
+  assert.equal(providerResolutionCount, 0);
+  assert.equal(
+    await client.auditEvent.count({
+      where: {
+        artistId: artist.id,
+        action: "approval.reconciliation_recorded"
+      }
+    }),
+    3
+  );
+
+  const knownEffect = await client.approvalRequest.create({
+    data: {
+      artistId: artist.id,
+      title: "Known partial provider effect",
+      status: "failed",
+      actionType: "outbound_email_batch",
+      executionAttemptedAt: new Date(),
+      payload: {
+        executionResult: {
+          gmailMode: "real",
+          drafts: [{ draftId: "provider-draft-known-effect" }]
+        }
+      }
+    }
+  });
+  const reconciliationAuditsBeforeContradiction =
+    await client.auditEvent.count({
+      where: {
+        artistId: artist.id,
+        action: "approval.reconciliation_recorded"
+      }
+    });
+  await assert.rejects(
+    () =>
+      approvals.recordReconciliation(
+        artist.id,
+        knownEffect.id,
+        {
+          ...noEffectInput,
+          note: "The operator did not find a draft, despite StoryBoard already holding a provider draft reference.",
+          observedAt: new Date().toISOString(),
+          idempotencyKey: randomUUID()
+        },
+        owner.email,
+        owner.id
+      ),
+    (error) => error?.getStatus?.() === 409
+  );
+  assert.equal(
+    await client.approvalReconciliation.count({
+      where: { approvalId: knownEffect.id }
+    }),
+    0
+  );
+  assert.equal(
+    await client.auditEvent.count({
+      where: {
+        artistId: artist.id,
+        action: "approval.reconciliation_recorded"
+      }
+    }),
+    reconciliationAuditsBeforeContradiction
+  );
+  await assert.rejects(
+    () =>
+      approvals.recordReconciliation(
+        artist.id,
+        foreignApproval.id,
+        { ...stillUnknownInput, idempotencyKey: randomUUID() },
+        owner.email,
+        owner.id
+      ),
+    (error) => error?.getStatus?.() === 404
+  );
+  await assert.rejects(
+    () =>
+      client.approvalReconciliation.create({
+        data: {
+          artistId: artist.id,
+          approvalId: foreignApproval.id,
+          outcome: "still_unknown",
+          resolutionKey: null,
+          note: "This mismatched row must be rejected by the composite foreign key.",
+          evidence: { checkedLocation: "integration test", providerReference: null },
+          idempotencyKey: randomUUID(),
+          observedAt: new Date(),
+          actorLabel: owner.email,
+          actorOperatorId: owner.id
+        }
+      }),
+    (error) => error?.code === "P2003"
+  );
+
+  const concurrent = await client.approvalRequest.create({
+    data: {
+      artistId: artist.id,
+      title: "Concurrent reconciliation",
+      status: "failed",
+      actionType: "drive_ensure_folder",
+      payload: { folderName: "Concurrent" },
+      executionAttemptedAt: new Date()
+    }
+  });
+  const concurrentBase = {
+    note: "The provider was checked once; only one terminal conclusion may be recorded.",
+    checkedLocation: "Google Drive root folder",
+    observedAt: new Date().toISOString()
+  };
+  const concurrentResults = await Promise.allSettled([
+    approvals.recordReconciliation(
+      artist.id,
+      concurrent.id,
+      {
+        ...concurrentBase,
+        outcome: "no_external_effect_observed",
+        providerReference: null,
+        idempotencyKey: randomUUID()
+      },
+      owner.email,
+      owner.id
+    ),
+    approvals.recordReconciliation(
+      artist.id,
+      concurrent.id,
+      {
+        ...concurrentBase,
+        outcome: "external_effect_observed",
+        providerReference: "drive-folder:concurrent-test",
+        idempotencyKey: randomUUID()
+      },
+      member.email,
+      member.id
+    )
+  ]);
+  assert.equal(concurrentResults.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(concurrentResults.filter((result) => result.status === "rejected").length, 1);
+  assert.equal(
+    await client.approvalReconciliation.count({
+      where: { approvalId: concurrent.id, resolutionKey: "terminal" }
+    }),
+    1
+  );
+});
+
 test("database integration: prospect conversion and approved campaign drafts stay tenant-scoped", async () => {
   const [artistA, artistB] = await Promise.all([
     client.artist.create({ data: { name: "Campaign Artist", slug: "campaign-artist-test" } }),
@@ -339,6 +773,68 @@ test("database integration: prospect conversion and approved campaign drafts sta
     profiles,
     approvals
   );
+  const capacityCampaign = await campaigns.create(artistA.id, {
+    name: "Campaign recipient capacity",
+    subjectTemplate: "Booking inquiry — {{artistName}}",
+    bodyTemplate: "Hi {{contactName}}, {{bookingPitch}}"
+  });
+  const capacityProspects = await Promise.all(
+    Array.from({ length: 26 }, (_, index) =>
+      client.bookingProspect.create({
+        data: {
+          artistId: artistA.id,
+          kind: "festival",
+          status: "qualified",
+          name: `Capacity prospect ${index + 1}`,
+          city: "Austin"
+        }
+      })
+    )
+  );
+  await client.bookingCampaignRecipient.createMany({
+    data: capacityProspects.slice(0, 24).map((prospect) => ({
+      campaignId: capacityCampaign.id,
+      prospectId: prospect.id,
+      status: "needs_contact"
+    }))
+  });
+  const concurrentCapacityAdds = await Promise.allSettled([
+    campaigns.addRecipient(artistA.id, capacityCampaign.id, {
+      prospectId: capacityProspects[24].id
+    }),
+    campaigns.addRecipient(artistA.id, capacityCampaign.id, {
+      prospectId: capacityProspects[25].id
+    })
+  ]);
+  assert.equal(
+    concurrentCapacityAdds.filter(({ status }) => status === "fulfilled").length,
+    1
+  );
+  const rejectedCapacityAdd = concurrentCapacityAdds.find(
+    ({ status }) => status === "rejected"
+  );
+  assert.equal(rejectedCapacityAdd?.reason?.getStatus?.(), 400);
+  assert.equal(
+    rejectedCapacityAdd?.reason?.message,
+    "A campaign may contain at most 25 recipients"
+  );
+  assert.equal(
+    await client.bookingCampaignRecipient.count({
+      where: { campaignId: capacityCampaign.id }
+    }),
+    25
+  );
+  assert.equal(
+    await client.auditEvent.count({
+      where: {
+        artistId: artistA.id,
+        aggregateType: "BookingCampaignRecipient",
+        action: "booking_campaign.recipient_added",
+        metadata: { path: ["campaignId"], equals: capacityCampaign.id }
+      }
+    }),
+    1
+  );
   const campaign = await campaigns.create(artistA.id, {
     name: "Austin fall rooms",
     subjectTemplate: "Booking inquiry — {{artistName}}",
@@ -390,6 +886,145 @@ test("database integration: prospect conversion and approved campaign drafts sta
     where: { id: recipient.id }
   });
   assert.equal(finalRecipient.status, "replied");
+
+  const replacementCampaign = await campaigns.create(artistA.id, {
+    name: "Failure replacement guard",
+    subjectTemplate: "Booking inquiry — {{artistName}}",
+    bodyTemplate: "Hi {{contactName}}, {{bookingPitch}}",
+    defaultFollowUpDays: 7,
+    deliveryMode: "draft_only"
+  });
+  const replacementRecipient = await campaigns.addRecipient(artistA.id, replacementCampaign.id, {
+    prospectId: campaignLead.id
+  });
+  const firstReplacementAttempt = await campaigns.prepareApproval(
+    artistA.id,
+    replacementCampaign.id,
+    {},
+    operator.email,
+    operator.id
+  );
+  await client.approvalRequest.update({
+    where: { id: firstReplacementAttempt.approval.id },
+    data: { status: "failed", executionAttemptedAt: new Date() }
+  });
+  const quarantined = await campaigns.prepareApproval(
+    artistA.id,
+    replacementCampaign.id,
+    {},
+    operator.email,
+    operator.id
+  );
+  assert.equal(quarantined.reused, true);
+  assert.equal(quarantined.approval.id, firstReplacementAttempt.approval.id);
+  await approvals.recordReconciliation(
+    artistA.id,
+    firstReplacementAttempt.approval.id,
+    {
+      outcome: "no_external_effect_observed",
+      note: "Checked the connected Gmail drafts and found no draft created for this guarded campaign.",
+      checkedLocation: "Connected Gmail Drafts folder",
+      providerReference: null,
+      observedAt: new Date().toISOString(),
+      idempotencyKey: randomUUID()
+    },
+    operator.email,
+    operator.id
+  );
+  const concurrentReplacements = await Promise.all([
+    campaigns.prepareApproval(
+      artistA.id,
+      replacementCampaign.id,
+      {},
+      operator.email,
+      operator.id
+    ),
+    campaigns.prepareApproval(
+      artistA.id,
+      replacementCampaign.id,
+      {},
+      operator.email,
+      operator.id
+    )
+  ]);
+  const [freshApproval, reusedFreshApproval] = concurrentReplacements;
+  assert.notEqual(freshApproval.approval.id, firstReplacementAttempt.approval.id);
+  assert.equal(freshApproval.approval.status, "pending");
+  assert.equal(reusedFreshApproval.approval.id, freshApproval.approval.id);
+  assert.equal(
+    await client.approvalRequest.count({
+      where: {
+        artistId: artistA.id,
+        sourceKey: {
+          startsWith: `booking_campaign_approval_v2:${encodeURIComponent(replacementCampaign.id)}:`
+        }
+      }
+    }),
+    2
+  );
+  assert.equal(
+    await client.bookingCampaignDelivery.count({
+      where: { recipientId: replacementRecipient.id }
+    }),
+    2
+  );
+
+  const claimedCampaign = await campaigns.create(artistA.id, {
+    name: "Claimed execution replacement guard",
+    subjectTemplate: "Booking inquiry — {{artistName}}",
+    bodyTemplate: "Hi {{contactName}}, {{bookingPitch}}",
+    defaultFollowUpDays: 7,
+    deliveryMode: "draft_only"
+  });
+  const claimedRecipient = await campaigns.addRecipient(
+    artistA.id,
+    claimedCampaign.id,
+    { prospectId: campaignLead.id }
+  );
+  const claimedAttempt = await campaigns.prepareApproval(
+    artistA.id,
+    claimedCampaign.id,
+    {},
+    operator.email,
+    operator.id
+  );
+  await client.approvalRequest.update({
+    where: { id: claimedAttempt.approval.id },
+    data: {
+      status: "approved",
+      approvedAt: new Date(),
+      executionAttemptedAt: new Date(Date.now() - 2 * 60 * 60 * 1000)
+    }
+  });
+  await approvals.recordReconciliation(
+    artistA.id,
+    claimedAttempt.approval.id,
+    {
+      outcome: "no_external_effect_observed",
+      note: "Checked the connected Gmail drafts after the interrupted claim and found no matching provider draft.",
+      checkedLocation: "Connected Gmail Drafts folder",
+      providerReference: null,
+      observedAt: new Date().toISOString(),
+      idempotencyKey: randomUUID()
+    },
+    operator.email,
+    operator.id
+  );
+  const replacementAfterClaim = await campaigns.prepareApproval(
+    artistA.id,
+    claimedCampaign.id,
+    {},
+    operator.email,
+    operator.id
+  );
+  assert.notEqual(replacementAfterClaim.approval.id, claimedAttempt.approval.id);
+  assert.equal(replacementAfterClaim.approval.status, "pending");
+  assert.equal(
+    await client.bookingCampaignDelivery.count({
+      where: { recipientId: claimedRecipient.id }
+    }),
+    2
+  );
   const auditActions = await client.auditEvent.findMany({
     where: { artistId: artistA.id },
     select: { action: true }
@@ -418,7 +1053,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
     profile: { bandMode: "hybrid", homeCity: "Chicago", homeRegion: "IL", homeCountry: "US", genres: ["rock"], revenueSources: [], currentAssets: [], constraints: ["Weeknight work schedules"], educationTopics: [], currency: "USD", twelveMonthAmbition: "Release an EP and book six profitable shows", communicationCadence: "weekly", decisionStyle: "guided" },
     members: [{ name: "Alex", instruments: ["guitar"], roles: ["bandleader"], active: true }]
   }, operator.email, operator.id);
-  assert.equal(intake.cadence, "intake");
+  assert.equal(intake.cadence, "weekly");
   assert.equal(intake.trace.priorityRanking.policyVersion, "manager_priority_v1");
   assert.equal(intake.inputFacts.knowledgeHealth.policyVersion, "manager_knowledge_v1");
   assert.ok(intake.trace.priorityRanking.today.length <= 5);
@@ -1534,10 +2169,12 @@ test("database integration: manager follow-through reconciles durable work witho
       managerRecommendationId: recommendation.id,
       title: recommendation.title,
       status: approvalSpecs[index].status,
-      actionType: "google_calendar_create",
+      actionType: "calendar_hold_batch",
       payload: { fixture: true },
       approvedAt: approvalSpecs[index].status === "approved" ? new Date() : null,
-      executionAttemptedAt: approvalSpecs[index].attempted ? new Date() : null
+      executionAttemptedAt: approvalSpecs[index].attempted
+        ? new Date(Date.now() - 2 * 60 * 60 * 1000)
+        : null
     }
   })));
   const approvalProjection = await manager.followThrough(artist.id);
@@ -1590,7 +2227,7 @@ test("database integration: manager follow-through reconciles durable work witho
 
   await assert.rejects(
     () => manager.recommendation(artist.id, approvalRecommendations[2].id, "completed", { reason: "reconciled", note: "I cannot verify the claimed provider result" }, operator.email, operator.id),
-    /cannot be closed or retried/i
+    /must be reconciled in Approvals first/i
   );
   const reconciledSimulation = await manager.recommendation(
     artist.id,
@@ -1620,9 +2257,32 @@ test("database integration: manager follow-through reconciles durable work witho
       outcomeAt: new Date()
     }
   });
-  await client.approvalRequest.create({ data: { artistId: artist.id, managerRecommendationId: failedRecommendation.id, title: failedRecommendation.title, status: "failed", actionType: "google_calendar_create", payload: { fixture: true }, executionAttemptedAt: new Date() } });
-  const reconciledFailure = await manager.recommendation(artist.id, failedRecommendation.id, "completed", { reason: "reconciled", note: "Reviewed the failure and replaced it with a separately approved request" }, operator.email, operator.id);
-  assert.equal(reconciledFailure.followThrough?.stage, "reconciled");
+  const failedApproval = await client.approvalRequest.create({ data: { artistId: artist.id, managerRecommendationId: failedRecommendation.id, title: failedRecommendation.title, status: "failed", actionType: "google_calendar_create", payload: { fixture: true }, executionAttemptedAt: new Date() } });
+  await assert.rejects(
+    () => manager.recommendation(artist.id, failedRecommendation.id, "completed", { reason: "reconciled", note: "Reviewed the failure and replaced it with a separately approved request" }, operator.email, operator.id),
+    /must be reconciled in Approvals first/i
+  );
+  const failedReceipt = await managerApprovals.recordReconciliation(
+    artist.id,
+    failedApproval.id,
+    {
+      outcome: "no_external_effect_observed",
+      note: "Checked the exact provider account and date range; no matching external effect was found.",
+      checkedLocation: "Google Calendar for the follow-through integration fixture",
+      providerReference: null,
+      observedAt: new Date().toISOString(),
+      idempotencyKey: randomUUID()
+    },
+    operator.email,
+    operator.id
+  );
+  assert.equal(failedReceipt.receipt.outcome, "no_external_effect_observed");
+  const reconciledFailure = (await manager.followThrough(artist.id)).items.find(
+    (item) => item.recommendationId === failedRecommendation.id
+  );
+  assert.equal(reconciledFailure?.stage, "reconciled");
+  assert.equal(reconciledFailure?.state, "blocked");
+  assert.match(reconciledFailure?.nextAction ?? "", /separate, newly reviewed request/i);
 
   const orphanedRecommendation = await client.managerRecommendation.create({
     data: {
@@ -1646,8 +2306,18 @@ test("database integration: manager follow-through reconciles durable work witho
   assert.equal(reconciledOrphan.followThrough?.stage, "reconciled");
   const reconciliationAudits = await client.auditEvent.findMany({ where: { artistId: artist.id, aggregateType: "ManagerRecommendation", action: "manager.recommendation_completed" } });
   assert.ok(reconciliationAudits.some((event) => event.aggregateId === simulatedRecommendation.id && event.metadata?.reason === "reconciled"));
-  assert.ok(reconciliationAudits.some((event) => event.aggregateId === failedRecommendation.id && event.metadata?.reason === "reconciled"));
   assert.ok(reconciliationAudits.some((event) => event.aggregateId === orphanedRecommendation.id && event.metadata?.reason === "reconciled"));
+  assert.equal(
+    await client.auditEvent.count({
+      where: {
+        artistId: artist.id,
+        aggregateType: "ManagerRecommendation",
+        aggregateId: failedRecommendation.id,
+        action: "manager.recommendation_approval_reconciled"
+      }
+    }),
+    1
+  );
 
   const memoryValue = "Morgan uses the violet-room phrase for rehearsal access";
   const memoryChat = await manager.chat(

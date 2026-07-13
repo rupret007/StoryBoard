@@ -1,4 +1,5 @@
 import type { ManagerGoalTargetDirection, ManagerWorkstream } from "../generated/prisma/enums";
+import { approvalLifecycleStage, type ApprovalLifecycleStage } from "../approvals/approval-lifecycle";
 import type { ShowReadiness } from "../operations/event-readiness";
 import type { EventDayOfView } from "../operations/event-day-of";
 import type { ProjectReadiness } from "../operations/project-plan";
@@ -115,7 +116,7 @@ export type ManagerFacts = {
   deals: { id: string; title: string; status: string; expiresAt: Date | null; updatedAt?: Date }[];
   invoices: { id: string; number: string; status: string; currency: string; totalMinor: number; paidMinor: number; dueAt: Date | null; updatedAt?: Date }[];
   decisions: { id: string; workstream: ManagerWorkstream; title: string; context: string | null; options: unknown; choice: string | null; rationale: string | null; expectedOutcome: string | null; needsFraming?: boolean; evidence: unknown; status: string; reviewAt: Date | null; decidedAt: Date | null; reviewOutcome?: string | null; reviewNote?: string | null; reviewedAt?: Date | null }[];
-  approvals: { id: string; title: string; status: string; actionType: string; executionAttemptedAt?: Date | null; updatedAt: Date }[];
+  approvals: { id: string; title: string; status: string; actionType: string; executionAttemptedAt?: Date | null; updatedAt: Date; reconciliations?: { outcome: string; createdAt: Date }[] }[];
   bookingReplies: { id: string; subject: string | null; fromName: string | null; fromEmail: string; processingStatus: string; receivedAt: Date }[];
   campaignRecipients: { id: string; status: string; followUpDueAt: Date | null; followUpTaskId: string | null }[];
   prospects: { id: string; name: string; status: string; kind: string; city: string; updatedAt?: Date }[];
@@ -215,6 +216,20 @@ export type ManagerPriorityTrace = {
 
 const PRIORITY_BASE = { high: 300, med: 200, low: 100 } as const;
 
+function managerApprovalStage(
+  approval: ManagerFacts["approvals"][number],
+  observedAt: Date
+): ApprovalLifecycleStage | null {
+  return approvalLifecycleStage({
+    status: approval.status,
+    actionType: approval.actionType,
+    executionAttemptedAt: approval.executionAttemptedAt ?? null,
+    ...(approval.reconciliations
+      ? { reconciliations: approval.reconciliations }
+      : {})
+  }, observedAt);
+}
+
 function recommendationRank(
   item: ManagerRecommendationDraft,
   facts: ManagerFacts,
@@ -244,8 +259,11 @@ function recommendationRank(
   }
 
   const approval = facts.approvals.find((row) => evidence.has(row.id));
-  if (approval?.status === "approved") add("approved_action_waiting", 100, "approved work is waiting to execute");
-  else if (approval?.status === "pending") add("human_decision_waiting", 70, "a human decision is waiting");
+  const approvalStage = approval ? managerApprovalStage(approval, now) : null;
+  if (approvalStage === "execution_unknown") add("approval_execution_unknown", 145, "a provider attempt has no final result and requires reconciliation");
+  else if (approvalStage === "failed_needs_reconciliation") add("approval_failed", 120, "failed outside work requires reconciliation before replacement");
+  else if (approvalStage === "approved_ready") add("approved_action_waiting", 100, "approved work is waiting for explicit execution");
+  else if (approvalStage === "pending_decision") add("human_decision_waiting", 70, "a human decision is waiting");
 
   const reply = facts.bookingReplies.find((row) => evidence.has(row.id));
   if (reply) {
@@ -621,15 +639,33 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
     });
   }
 
-  const pendingApprovals = facts.approvals.filter((approval) => approval.status === "pending" || approval.status === "approved");
-  if (pendingApprovals[0]) {
-    const approval = pendingApprovals[0];
-    const executionUnknown = approval.status === "approved" && Boolean(approval.executionAttemptedAt);
+  const approvalWork = facts.approvals.flatMap((approval) => {
+    const stage = managerApprovalStage(approval, now);
+    return stage === "execution_unknown" ||
+      stage === "failed_needs_reconciliation" ||
+      stage === "approved_ready" ||
+      stage === "pending_decision"
+      ? [{ approval, stage }]
+      : [];
+  }).sort((left, right) => {
+    const priority: Partial<Record<ApprovalLifecycleStage, number>> = {
+      execution_unknown: 0,
+      failed_needs_reconciliation: 1,
+      approved_ready: 2,
+      pending_decision: 3
+    };
+    return priority[left.stage]! - priority[right.stage]! || left.approval.updatedAt.getTime() - right.approval.updatedAt.getTime();
+  });
+  if (approvalWork[0]) {
+    const { approval, stage } = approvalWork[0];
+    const executionUnknown = stage === "execution_unknown";
+    const failed = stage === "failed_needs_reconciliation";
+    const ready = stage === "approved_ready";
     addToday({
       stableKey: `approval-${approval.id}`,
-      title: executionUnknown ? `Reconcile uncertain execution: ${approval.title}` : approval.status === "approved" ? `Execute approved work: ${approval.title}` : `Review approval: ${approval.title}`,
-      reason: executionUnknown ? "An execution attempt was recorded without a final result. Retrying could duplicate an outside action." : approval.status === "approved" ? "A band-approved action is ready, but it has not been executed." : "External work is waiting for a human decision.",
-      nextAction: executionUnknown ? "Open Approvals and verify the provider outcome. Do not retry this action automatically." : "Open Approvals, inspect the exact payload, and approve, reject, or execute it there.",
+      title: executionUnknown ? `Reconcile uncertain execution: ${approval.title}` : failed ? `Reconcile failed work: ${approval.title}` : ready ? `Execute approved work: ${approval.title}` : `Review approval: ${approval.title}`,
+      reason: executionUnknown ? "An execution attempt was recorded without a final result. Retrying could duplicate an outside action." : failed ? "The outside action failed or ended ambiguously. A replacement must not be prepared until the saved result is reviewed." : ready ? "A band-approved executable action is ready, but it still requires a separate human execution step." : "External work is waiting for a human decision.",
+      nextAction: executionUnknown || failed ? "Open Approvals, verify the provider and delivery history, and do not retry this request automatically." : "Open Approvals, inspect the exact payload, and approve, reject, or execute it there.",
       workstream: "band_operations",
       priority: "high",
       evidenceIds: [approval.id],
@@ -887,7 +923,14 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
     });
   }
 
-  const openApprovals = facts.approvals.filter((approval) => approval.status === "pending");
+  const approvalStages = facts.approvals.map((approval) => ({
+    approval,
+    stage: managerApprovalStage(approval, now)
+  }));
+  const openApprovals = approvalStages.filter((item) => item.stage === "pending_decision").map((item) => item.approval);
+  const readyApprovals = approvalStages.filter((item) => item.stage === "approved_ready").map((item) => item.approval);
+  const inProgressApprovals = approvalStages.filter((item) => item.stage === "execution_in_progress").map((item) => item.approval);
+  const reconciliationApprovals = approvalStages.filter((item) => item.stage === "execution_unknown" || item.stage === "failed_needs_reconciliation");
   const proposedDeals = facts.deals.filter((deal) => deal.status === "proposed" || deal.status === "negotiating");
   const availabilityConflicts = facts.events.filter((event) => event.participants.some((participant) => participant.response === "unavailable"));
   const readinessRisks = facts.events.filter((event) => event.readiness && event.readiness.status !== "ready");
@@ -922,10 +965,16 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
       ...followThroughDecisions,
       ...facts.decisions.filter((decision) => decision.status === "open" && !followThroughDecisionTargetIds.has(decision.id)).map((decision) => ({ title: decision.title, explanation: decision.context ?? "A recorded decision is waiting for a choice.", evidenceIds: [decision.id] })),
       ...facts.decisions.filter((decision) => decision.status === "decided" && decision.reviewAt && decision.reviewAt <= now && !followThroughDecisionTargetIds.has(decision.id)).map((decision) => ({ title: `Review: ${decision.title}`, explanation: `The recorded choice was “${decision.choice}”. Compare the actual result with ${decision.expectedOutcome ? `the expected result: ${decision.expectedOutcome}` : "what the band expected"}.`, evidenceIds: [decision.id] })),
-      ...openApprovals.filter((approval) => !followThroughDecisionTargetIds.has(approval.id)).map((approval) => ({ title: approval.title, explanation: `This ${approval.actionType.replaceAll("_", " ")} is waiting for human approval.`, evidenceIds: [approval.id] }))
+      ...openApprovals.filter((approval) => !followThroughDecisionTargetIds.has(approval.id)).map((approval) => ({ title: approval.title, explanation: `This ${approval.actionType.replaceAll("_", " ")} is waiting for human approval.`, evidenceIds: [approval.id] })),
+      ...readyApprovals.filter((approval) => !followThroughDecisionTargetIds.has(approval.id)).map((approval) => ({ title: `Execute: ${approval.title}`, explanation: `This approved ${approval.actionType.replaceAll("_", " ")} still requires a separate human execution step.`, evidenceIds: [approval.id] }))
     ].slice(0, 8),
     waitingOn: [
       ...followThroughWaiting,
+      ...inProgressApprovals.map((approval) => ({
+        title: `${approval.title} — provider execution in progress`,
+        dueAt: null,
+        evidenceIds: [approval.id]
+      })),
       ...(facts.workSequence?.waiting.filter((item) => item.state === "waiting_on_prerequisites" && !followThroughWaitingTargetIds.has(item.taskId)).map((item) => ({ title: `${item.title} — ${item.reason}`, dueAt: item.dueAt, evidenceIds: item.evidenceIds.slice(0, 8) })) ?? []),
       ...(facts.commitmentHealth?.items.filter((item) => item.waitingOn && !followThroughWaitingTargetIds.has(item.taskId)).map((item) => ({ title: `${item.title} — waiting on ${item.waitingOn}`, dueAt: item.dueAt, evidenceIds: [item.taskId] })) ?? []),
       ...proposedDeals.map((deal) => ({ title: deal.title, dueAt: deal.expiresAt?.toISOString() ?? null, evidenceIds: [deal.id] })),
@@ -933,6 +982,7 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
     ].slice(0, 10),
     risksAndOpportunities: [
       ...followThroughRisks,
+      ...reconciliationApprovals.filter((item) => !followThroughBlockedTargetIds.has(item.approval.id)).map(({ approval, stage }) => ({ title: stage === "execution_unknown" ? `Execution outcome unknown: ${approval.title}` : `Approval failed: ${approval.title}`, detail: stage === "execution_unknown" ? "A provider attempt was claimed without a final result. Verify the outside system; StoryBoard will not retry it automatically." : "Review the saved provider and delivery result before preparing any replacement request. StoryBoard will not retry this approval.", confidence: 1, evidenceIds: [approval.id] })),
       ...(facts.knowledgeHealth && facts.knowledgeHealth.status !== "healthy" ? [{ title: facts.knowledgeHealth.status === "conflicted" ? "Conflicting manager knowledge" : "Band knowledge needs review", detail: facts.knowledgeHealth.summary, confidence: 1, evidenceIds: facts.knowledgeHealth.evidenceIds.slice(0, 8) }] : []),
       ...(facts.evidenceHealth && facts.evidenceHealth.status !== "strong" ? [{ title: "Operating evidence needs confirmation", detail: facts.evidenceHealth.summary, confidence: facts.evidenceHealth.confidence, evidenceIds: facts.evidenceHealth.evidenceIds.slice(0, 8) }] : []),
       ...(availabilityConflicts.length ? [{ title: "Member availability conflict", detail: `${availabilityConflicts.length} upcoming event${availabilityConflicts.length === 1 ? " has" : "s have"} an unavailable participant.`, confidence: 1, evidenceIds: availabilityConflicts.slice(0, 8).map((event) => event.id) }] : []),

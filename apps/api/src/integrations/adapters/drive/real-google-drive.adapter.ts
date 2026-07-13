@@ -1,6 +1,8 @@
 import { google } from "googleapis";
 import type { DriveFileRef, GoogleDriveAdapter } from "../adapter.types";
 
+const GOOGLE_REQUEST_TIMEOUT_MS = 30_000;
+
 function escapeDriveQueryName(name: string): string {
   return name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
@@ -24,14 +26,17 @@ export class RealGoogleDriveAdapter implements GoogleDriveAdapter {
 
   async uploadDraftMeta(input: DriveFileRef) {
     const drive = google.drive({ version: "v3", auth: this.auth() });
-    const res = await drive.files.create({
-      requestBody: {
-        name: input.name,
-        mimeType: input.mimeType,
-        ...(this.rootFolderId ? { parents: [this.rootFolderId] } : {})
+    const res = await drive.files.create(
+      {
+        requestBody: {
+          name: input.name,
+          mimeType: input.mimeType,
+          ...(this.rootFolderId ? { parents: [this.rootFolderId] } : {})
+        },
+        fields: "id, webViewLink"
       },
-      fields: "id, webViewLink"
-    });
+      { timeout: GOOGLE_REQUEST_TIMEOUT_MS }
+    );
     return {
       fileId: res.data.id ?? "unknown",
       viewUrl: res.data.webViewLink ?? `https://drive.google.com/file/d/${res.data.id}/view`
@@ -46,11 +51,14 @@ export class RealGoogleDriveAdapter implements GoogleDriveAdapter {
       ? `'${parent}' in parents and `
       : `'root' in parents and `;
     const q = `name='${safeName}' and ${parentClause}mimeType='application/vnd.google-apps.folder' and trashed=false`;
-    const existing = await drive.files.list({
-      q,
-      fields: "files(id, webViewLink)",
-      pageSize: 5
-    });
+    const existing = await drive.files.list(
+      {
+        q,
+        fields: "files(id, webViewLink)",
+        pageSize: 5
+      },
+      { timeout: GOOGLE_REQUEST_TIMEOUT_MS }
+    );
     const hit = existing.data.files?.[0];
     if (hit?.id) {
       return {
@@ -58,14 +66,17 @@ export class RealGoogleDriveAdapter implements GoogleDriveAdapter {
         webViewLink: hit.webViewLink ?? null
       };
     }
-    const created = await drive.files.create({
-      requestBody: {
-        name: folderName,
-        mimeType: "application/vnd.google-apps.folder",
-        ...(this.rootFolderId ? { parents: [this.rootFolderId] } : {})
+    const created = await drive.files.create(
+      {
+        requestBody: {
+          name: folderName,
+          mimeType: "application/vnd.google-apps.folder",
+          ...(this.rootFolderId ? { parents: [this.rootFolderId] } : {})
+        },
+        fields: "id, webViewLink"
       },
-      fields: "id, webViewLink"
-    });
+      { timeout: GOOGLE_REQUEST_TIMEOUT_MS }
+    );
     return {
       folderId: created.data.id ?? "unknown",
       webViewLink: created.data.webViewLink ?? null
@@ -74,11 +85,14 @@ export class RealGoogleDriveAdapter implements GoogleDriveAdapter {
 
   async listFolderFiles(folderId: string) {
     const drive = google.drive({ version: "v3", auth: this.auth() });
-    const res = await drive.files.list({
-      q: `'${folderId.replace(/'/g, "\\'")}' in parents and trashed=false`,
-      fields: "files(id, name, webViewLink)",
-      pageSize: 25
-    });
+    const res = await drive.files.list(
+      {
+        q: `'${folderId.replace(/'/g, "\\'")}' in parents and trashed=false`,
+        fields: "files(id, name, webViewLink)",
+        pageSize: 25
+      },
+      { timeout: GOOGLE_REQUEST_TIMEOUT_MS }
+    );
     return (res.data.files ?? []).map((f) => ({
       id: f.id ?? "",
       name: f.name ?? "",

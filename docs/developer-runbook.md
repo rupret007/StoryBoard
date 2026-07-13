@@ -277,7 +277,7 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 
 | Provider | Credentials | Behavior |
 | -------- | ----------- | -------- |
-| Gmail / Calendar / Drive | Per-artist DB connection **or** env `GOOGLE_*` trio (refresh optional if DB only) | Gmail: draft-only by default, or an explicitly selected approval-gated immediate-send batch of at most 25 recipients. Calendar: hold events via approval `calendar_hold_batch`. Drive: `drive_ensure_folder` approval. Connect flow: `docs/integrations-google-oauth.md` (`INTEGRATION_SECRETS_ENCRYPTION_KEY` required to persist). |
+| Gmail / Calendar / Drive | Per-artist DB connection **or** env `GOOGLE_*` trio (refresh optional if DB only) | Gmail: draft-only by default, or an explicitly selected approval-gated immediate-send batch of at most 25 recipients; draft batches have the same 25-recipient cap. Each real Google API request has a 30-second timeout. Calendar: hold events via approval `calendar_hold_batch`. Drive: `drive_ensure_folder` approval. Connect flow: `docs/integrations-google-oauth.md` (`INTEGRATION_SECRETS_ENCRYPTION_KEY` required to persist). |
 | Bandsintown | `BANDSINTOWN_APP_ID` | Artist-owned event context only; never market/competitor venue discovery. |
 | Ticketmaster | `TICKETMASTER_API_KEY` | Bounded city-first venue/event signals for Find shows; unavailable mode is manual, with no synthetic rows. |
 
@@ -299,6 +299,11 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 **Operational intelligence (phase 5A):**
 
 - `GET /dashboard/insights` — session + artist context; returns deterministic **booking health**, **opportunity risk** levels, **priority actions**, and **urgent signal** counts (used by the dashboard, booking pipeline badges, and weekly briefing snapshot).
+  Approval signals use `approval_lifecycle_v2`: pending decisions,
+  approved-ready execution, and unresolved unknown/failed outcomes are counted
+  separately rather than collapsed into one pending total. Fresh
+  `execution_in_progress` claims and conclusive provider checks remain
+  available as informational state but stay outside live attention.
 
 **Booking advisor:** `POST /booking-advisor/generate` creates a reviewable
 booking brief and `GET /booking-advisor/latest` returns it. Members can record
@@ -318,7 +323,9 @@ document templates.
 
 Manager routes:
 
-- `GET` / `PUT /manager/profile`; `POST /manager/intake/complete`
+- `GET` / `PUT /manager/profile`; `POST /manager/intake/complete`. Completing
+  intake generates the saved preferred daily or weekly cadence so the first
+  subsequent cache-only brief read has an immediate result.
 - `GET` / `POST /manager/members`, `/manager/goals`, and
   `/manager/initiatives`; `PATCH /manager/members/:id`,
   `/manager/goals/:id`, and `/manager/initiatives/:id`
@@ -356,6 +363,9 @@ Manager routes:
   `POST /manager/decisions/:id/review` records one immutable outcome lesson
 - `GET /manager/brief?cadence=daily|weekly` and
   `POST /manager/brief/generate`
+  `GET` is a cache-only read: it returns the latest current, shareable run or
+  `null` and never generates, calls a provider, or writes. The member/owner-only
+  `POST` is the explicit generation boundary.
   The Manager page requests the operating profile's saved cadence on first
   render and exposes both views. It renders every bounded output section:
   Today (maximum five), This week, Decisions needed, Waiting on, and Risks and
@@ -506,10 +516,11 @@ Manager routes:
   Accept requires a supported typed action. Advice without one uses reviewed
   completion (`reason=already_handled`) or dismissal; legacy accepted/unlinked
   rows remain visible until a member resolves them. `reason=reconciled` requires
-  a note of at least 10 characters and may close only a failed, simulated, or
-  typed-but-orphaned receipt. It records receipt closure without changing an
-  Approval or claiming that provider work succeeded. An `execution_unknown`
-  receipt cannot use this path.
+  a note of at least 10 characters and may close only a simulated or
+  typed-but-orphaned Manager receipt. It records receipt closure without
+  claiming that provider work succeeded. A receipt linked to a failed or
+  `execution_unknown` Approval cannot use this path and must be reconciled in
+  Approvals first.
 - `GET` / `PUT /manager/settings` (PUT owner-only)
 - `GET /manager/provider-context-policy` (owner-only; counts and active policy,
   never memory values)
@@ -608,22 +619,35 @@ path.
 
 Approval projection deliberately separates pending human review from an
 approved request that is ready for explicit execution. An approved request
-with `executionAttemptedAt` but no final result becomes `execution_unknown` and
-is blocked for read-only reconciliation; it is never represented as executable,
-safe to retry, or closable from Manager. This uncertain attempted state wins
+with a fresh `executionAttemptedAt` claim is `execution_in_progress` for one
+hour. It is excluded from live attention and cannot be reconciled, replaced, or
+closed from Manager while the original provider call may still be running. If
+no final result exists when that lease expires, it becomes `execution_unknown`
+and is blocked for append-only provider reconciliation; it is never represented
+as executable or safe to retry. This stale uncertain attempted state wins
 over failed, rejected, or expired sibling requests in a mixed approval batch,
 so a known sibling result cannot make the unknown provider write retryable.
 Failed, rejected, expired, and
 mock-simulated provider work also remain blocked. Rejected and expired receipts
-are terminal and cannot be reconciled from Manager. A member may use **Close after
-review** for a failed, simulated, or typed-but-orphaned receipt only after
-recording what was verified or replaced. The resulting `reconciled` stage says
-explicitly that closure is not evidence of provider execution or success and
-does not mutate the Approval. Only a recorded real executed result can become
-completed as execution. Viewer access is read-only. Members and owners may
-follow destinations, mark legacy actionless guidance handled, or perform the
-bounded receipt reconciliation above; external execution still happens only in
+are terminal and cannot be reconciled from Manager. A member may use **Close
+after review** only for a simulated or typed-but-orphaned Manager receipt after
+recording what was verified. Linked failed and uncertain Approvals instead use
+the Approval Center's immutable evidence history. `still_unknown` keeps the
+Manager item blocked. `no_external_effect_observed` keeps the original request
+closed and blocked but permits a separate newly reviewed request if the work is
+still needed. `external_effect_observed` also keeps linked Manager work blocked
+for manual repair; it is a human observation, not a recovered provider success
+response. Viewer access is read-only. External execution still happens only in
 Approvals.
+
+The global Approval Center, dashboard, desktop/mobile shell, Manager brief,
+weekly summary, and digests use the same `approval_lifecycle_v2` projection.
+They distinguish a decision waiting on a human from authorized work waiting on
+execution, a fresh leased execution, unresolved provider work, conclusive
+reconciliation history, and approved records with no provider step. Approval event notifications deep-link
+to the current Approval Center but remain historical until read. A failed
+work-queue read is displayed as unavailable; it must not be converted into a
+zero-count all-clear.
 
 `manager_evidence_v1` is a separate, non-persistent operating-coverage check.
 It composes the existing show/project readiness, goal measurement, booking
@@ -658,7 +682,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v33` with offline dataset `manager_evals_v37` retains the
+version `manager_os_v33` with offline dataset `manager_evals_v38` retains the
 current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
@@ -860,11 +884,20 @@ that its name contains `test`, then seeds it. Browser coverage therefore
 exercises first-time intake on every run instead of inheriting old test data.
 The runner forces its production build environment internally, so an unrelated
 shell-level `NODE_ENV` cannot invalidate Next.js prerendering.
-The 13 focused browser cases establish their own domain prerequisites and cover
+The 15 focused browser cases establish their own domain prerequisites and cover
 booking (including approved immediate-send execution and follow-up creation),
 Manager, operations, finance, tasks, and approval-gated event logistics without
-depending on a previous case's records. They still share the
-same reset database, and per-test retries remain intentionally disabled so a
+depending on a previous case's records. The approval lifecycle journey also
+invalidates prepared logistics by changing the event, verifies that execution
+fails closed, and confirms the quarantined result stays visible and
+non-retryable across Dashboard, Approvals, and Operations. That same existing
+journey now records an append-only no-effect provider check, verifies the
+reconciled history after reload, confirms live dashboard attention clears, and
+shows that Operations offers only a separate newly reviewed Calendar approval.
+The responsive-shell journey also verifies that crossing the desktop breakpoint
+closes the mobile navigation drawer and restores document scrolling.
+It never exposes Retry or re-executes the original request. The cases still
+share the same reset database, and per-test retries remain intentionally disabled so a
 retry cannot hide state leakage or an idempotency regression. Failed runs
 retain a Playwright trace and should restart from the database reset. If port
 3000 or 4000 is occupied locally, set `E2E_WEB_URL` and/or `E2E_API_URL` to an
@@ -885,8 +918,10 @@ Operations routes:
   exact start, end, and IANA timezone, create or reuse one pending approval for
   each missing Calendar and/or Drive channel. The route never calls Google.
   A rejected channel can use this explicit route to create a new reviewed
-  attempt. A failed provider attempt cannot: because the outside write may have
-  succeeded before its response was lost, check Google and reconcile manually.
+  attempt. A failed provider attempt cannot be prepared again until a member
+  checks the provider in Approvals. `still_unknown` remains quarantined;
+  no-effect evidence permits a separate newly reviewed attempt;
+  external-effect evidence blocks a duplicate and requires manual repair.
 - `GET /events/readiness?days=90` and `GET /events/:id/readiness` — bounded,
   tenant-scoped, read-only readiness signals with category scores, confidence,
   evidence IDs, and prioritized gaps; `days` accepts 1–365
@@ -953,7 +988,8 @@ a partial update. Every successful event or availability write is audited.
 The same editor shows the `event_logistics_v1` Calendar and Drive state. A gig
 must be `confirmed` and have `startsAt`, `endsAt`, and `timezone`; the end must
 follow the start. **Prepare approvals** creates or reuses only the one or two
-review records needed for the currently missing/retryable channels.
+review records needed for the currently missing or explicitly re-preparable
+channels.
 After a member approves and executes them from Approvals, the provider Calendar
 event ID and Drive folder URL appear on the event. Preparation is idempotent by
 artist/event/fingerprint/channel/attempt. Confirmed gigs create normal opaque
@@ -964,9 +1000,13 @@ If the event type/status, title,
 start, end, or timezone changes before execution, the approval fails closed and
 current gig data must be reviewed again. A rejected channel may be deliberately
 re-prepared. A failed provider attempt is quarantined because its remote outcome
-may be unknown; inspect Google and repair/link the result manually instead of
-creating a duplicate. If already-linked event details later change, update the
-existing Google record manually; StoryBoard does not create a replacement.
+may be unknown; inspect Google and append the checked result in Approvals.
+`still_unknown` remains blocked. A no-effect conclusion permits a separate new
+approval, never a retry of the original. An external-effect conclusion blocks
+duplicate preparation, does not auto-link a provider reference, and leaves the
+related Manager work blocked for manual repair. If already-linked event details
+later change, update the existing Google record manually; StoryBoard does not
+create a replacement.
 
 The outcome review is non-persistent derived data. It looks back 7–365 days at
 completed/cancelled gigs and projects, completed tasks, explicit campaign
@@ -1066,8 +1106,54 @@ enablement requires the applicable OAuth verification and security review.
 
 ## Approvals execution
 
+- `GET /approvals/work-queue` — tenant-scoped operator work projection with
+  `policyVersion`, `observedAt`, role-derived capabilities, counts, and six
+  mutually exclusive lists:
+  - `pendingDecision`: `proposed` or `pending` records awaiting approve/reject;
+  - `readyToExecute`: approved allowlisted actions with no execution claim;
+  - `executionInProgress`: approved claims younger than one hour with no final
+    result; this list is not live attention and every mutation capability is
+    false while the original provider call may still be running;
+  - `needsReconciliation`: either `execution_unknown` (an approved claim at
+    least one hour old with no final result) or
+    `failed_needs_reconciliation`;
+  - `reconciled`: conclusive `reconciled_external_effect` or
+    `reconciled_no_external_effect` provider checks retained as informational
+    history;
+  - `approvedNotExecutable`: approved records with no provider execution step.
+  `attentionTotal` includes `pendingDecision`, `readyToExecute`, and
+  `needsReconciliation`; it excludes `executionInProgress`, `reconciled`, and
+  `approvedNotExecutable`. Every item returns `canRetry=false`, plus source links
+  and campaign-delivery status counts when applicable. Viewers can read the
+  queue, but its approve/reject/execute/reconcile capabilities are all false.
 - `GET /approvals/pending` — needs review  
 - `GET /approvals/ready-to-execute` — **approved** rows with executable action types: `outbound_email_batch`, `outbound_email_send_batch`, `calendar_hold_batch`, `drive_ensure_folder`
+- `GET /approvals/:id/reconciliations` — bounded append-only history (at most
+  50 receipts), resolution state, and role-derived capabilities. Viewers may
+  read it.
+- `POST /approvals/:id/reconciliations` — owner/member-only provider check for a
+  failed Approval or an approved Approval with an `executionAttemptedAt` claim
+  whose one-hour lease has expired. A fresh claim returns conflict before any
+  receipt or audit row is written. The strict body is:
+
+  ```json
+  {
+    "outcome": "still_unknown",
+    "note": "Checked the connected Calendar and could not identify the event conclusively.",
+    "checkedLocation": "Google Calendar for the booking account",
+    "providerReference": null,
+    "observedAt": "2026-07-13T18:00:00-05:00",
+    "idempotencyKey": "8d5f0a0d-8f87-44fd-a963-6ecb38aef7e2"
+  }
+  ```
+
+  Outcomes are `still_unknown`, `external_effect_observed`, and
+  `no_external_effect_observed`. Notes are 10–2,000 characters, checked
+  locations are 2–300 characters, and provider references are at most 500
+  characters. `external_effect_observed` requires a provider reference;
+  `observedAt` must include an offset and cannot be more than five minutes in
+  the future; the idempotency key must be a UUID. Unknown fields and
+  credential-shaped evidence are rejected.
 - `POST /approvals/:id/approve` — moves pending/proposed → approved (audited)  
 - `POST /approvals/:id/reject` — moves pending/proposed → rejected with an optional reviewed reason (audited)
 - `POST /approvals/:id/execute` — body `{ "dryRun": true }` for preview only (no provider calls; stays **approved**), or omit/`false` to run provider work and set status **executed**/**failed**  
@@ -1076,16 +1162,39 @@ enablement requires the applicable OAuth verification and security review.
 
 Approve, reject, and execute use compare-and-set transitions. Non-dry execution
 claims `executionAttemptedAt` once before any provider call; a second request
-cannot execute the same approval again. Event-logistics approvals additionally
+cannot execute the same approval again. The fresh claim is projected as
+`execution_in_progress` for one hour and becomes `execution_unknown` only if it
+still lacks a final result at expiry. Real Google requests have a 30-second
+per-request timeout, and both Gmail draft and immediate-send batches are capped
+at 25 recipients; timeout or lease expiry never authorizes a retry.
+Event-logistics approvals additionally
 carry artist-scoped `sourceKey`, `eventId`, and optional
 `managerRecommendationId`. Execution verifies the current confirmed event and
 reviewed title/time/timezone fingerprint before resolving the side effect.
 Calendar success stores `BandEvent.calendarEventId`; Drive success stores
 `BandEvent.driveFolderUrl`. Linked Manager advice remains accepted while a
-request waits, completes after every channel executes, and becomes dismissed
-or blocked when a request is rejected or fails.
+request waits, completes after every channel has an authoritative executed
+result, and becomes dismissed or blocked when a request is rejected or fails.
 
-Audited actions include `approval.execution.started`, `approval.execution.dry_run`, `approval.execution.succeeded`, `approval.execution.failed`.
+`approval_reconciliation_v1` stores evidence without resolving an adapter or
+calling a provider. Multiple `still_unknown` checks may precede one terminal
+conclusion. Exact idempotent replay returns the same receipt; changed reuse or
+a second terminal conclusion returns conflict. The original Approval status and
+`executionAttemptedAt` never change. No-effect evidence permits only a separate
+newly reviewed request. External-effect evidence prevents duplicate work and
+keeps linked Manager follow-through blocked for manual repair; it does not
+auto-link an event, assert provider success, or make the original request
+executable. Work-queue items embed at most 20 recent receipts.
+
+The executable action list is centralized in
+`apps/api/src/approvals/approval-lifecycle.ts`; the compatibility
+`ready-to-execute` endpoint and the execution service both consume it. Do not
+add a browser-only allowlist or infer executability from `status=approved`.
+Unknown and failed rows are reconciliation evidence, not retry candidates; an
+in-progress row is not yet eligible even for reconciliation. The current
+interface intentionally provides no retry action or automated repair.
+
+Audited actions include `approval.execution.started`, `approval.execution.dry_run`, `approval.execution.succeeded`, `approval.execution.failed`, and `approval.reconciliation_recorded`. Reconciliation audit metadata stores outcome, observation time, evidence count, and policy version—not the reviewed note or provider reference. A linked Manager recommendation may be reprojected and audited in the same transaction, but the Approval remains immutable.
 
 ```bash
 curl -s -X POST http://localhost:4000/commands/execute \
@@ -1134,7 +1243,10 @@ pnpm build
 pnpm manager:eval
 ```
 
-**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The current baseline is 10 shared tests and 199 API tests across 194 top-level cases. The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing and relational follow-through, reload-safe receipts and capability controls, owner/member provider-context gating, durable/exact/legacy full-context turn projection including provider fallback, owner-only recommendation mutation/history/learning isolation, feedback authorization rechecks, exact-source memory visibility, rejection of archived/private memory re-acceptance with active-normal-only refresh, full-input credential rejection, legacy audit-key projection, mixed provider-state quarantine and reconciliation, rejected/expired receipt behavior, transaction-bound audit rollback, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
+**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The release-validated Approval receipt package passes 11/11 shared tests and 235/235 API assertions across 230 top-level tests. The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing and relational follow-through, reload-safe receipts and capability controls, owner/member provider-context gating, durable/exact/legacy full-context turn projection including provider fallback, owner-only recommendation mutation/history/learning isolation, feedback authorization rechecks, exact-source memory visibility, rejection of archived/private memory re-acceptance with active-normal-only refresh, full-input credential rejection, legacy audit-key projection, approval lifecycle classification/caller stitching, role capabilities, mixed provider-state quarantine and reconciliation, rejected/expired receipt behavior, one-shot execution safety, transaction-bound audit rollback, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The receipt package adds strict evidence, terminal-outcome, idempotency, tenant, unchanged-Approval, no-provider-call, event-logistics, campaign-replacement, and Manager-blocking regressions. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
+
+The complete root quality gate passes, including both production builds. The
+`manager_os_v33` / `manager_evals_v38` gate passes 82/82 checks at 100% safety.
 
 **Database integration tests:** Set `STORYBOARD_TEST_DATABASE_URL` to a disposable PostgreSQL database whose name contains `test`, then run:
 
@@ -1149,8 +1261,12 @@ tenant links (including custom event schedule ownership and event-bound
 approval ownership), role enforcement, Telegram registration binding, Manager
 follow-through task/approval/reconciliation lifecycle, current memory visibility
 inside conversation JSON, durable full-context message visibility, and
-transaction-bound audit rows. The
-current suite contains four top-level workflows across 39 forward migrations.
+transaction-bound audit rows. The release-validated package passes 5/5
+top-level workflows after deploying all 40 forward migrations. It exercises
+the real Approval workflow for artist
+isolation, owner/member writes, viewer read-only history, non-member rejection,
+exact replay, one-terminal concurrency, composite tenant ownership, unchanged
+original claims, no adapter call, and safe campaign replacement.
 Before a release, run the read-only relationship diagnostic against the target
 database; it exits non-zero if it finds a mismatch and never changes data:
 
@@ -1165,7 +1281,11 @@ and mock-safe providers, and verifies booking acquisition, Manager and band
 operations, practical setlists, and confirmed event → logistics approvals →
 approved mock Calendar/Drive execution → persisted event references. The
 Manager journey also covers accept → durable receipt → hard reload → linked Task
-destination → completion. It never falls back to `DATABASE_URL`.
+destination → completion. The approval journey covers both approved
+immediate-send execution and stale event-logistics failure quarantine, followed
+by append-only no-effect reconciliation, reload persistence, attention clearing,
+and a separately prepared replacement approval. It never retries the original
+request or falls back to `DATABASE_URL`.
 
 ```bash
 pnpm --filter @storyboard/web exec playwright install chromium
@@ -1175,6 +1295,13 @@ STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/
 
 On Linux CI images, use `playwright install --with-deps chromium` to install
 the operating-system packages as well. macOS needs only the command above.
+The release-validated package passes all 15 Chromium journeys. Prisma reports
+all 40 local migrations current with no schema diff, the read-only relationship
+diagnostic reports zero issues, and the rebuilt Compose bundle passes API/web
+health, dependency readiness, Dev-login session, and authenticated-Dashboard
+smoke. The database and browser suites emit a non-fatal `pg@8.14.1`
+concurrent-`client.query()` deprecation warning; remove its source before a
+future `pg@9` upgrade without weakening transaction ownership.
 
 Optional after infra and `.env` are up:
 
@@ -1198,3 +1325,7 @@ pnpm preflight
 - `20260714010000_event_logistics_approvals` adds nullable event/recommendation/
   source-key links and indexes to `ApprovalRequest`; deploy it before using the
   Manager or Operations event-logistics flow.
+- `20260714030000_approval_reconciliation_receipts` adds
+  `ApprovalReconciliation`, the composite Approval/artist ownership constraint,
+  artist-scoped idempotency, and the one-terminal-result invariant; deploy it
+  before recording provider checks.

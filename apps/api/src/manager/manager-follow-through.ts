@@ -1,3 +1,8 @@
+import {
+  approvalActionIsExecutable,
+  approvalExecutionLeaseIsActive
+} from "../approvals/approval-lifecycle";
+import { terminalApprovalReconciliation } from "../approvals/approval-reconciliation";
 import { managerRunUsesOwnerOnlyContext } from "./manager-provider-context";
 
 export const MANAGER_FOLLOW_THROUGH_POLICY_VERSION = "manager_follow_through_v1" as const;
@@ -14,6 +19,7 @@ export type ManagerFollowThroughStage =
   | "decision_needed"
   | "awaiting_approval"
   | "awaiting_execution"
+  | "execution_in_progress"
   | "execution_unknown"
   | "approval_failed"
   | "approval_rejected"
@@ -66,6 +72,7 @@ type FollowThroughApproval = {
   executionAttemptedAt: Date | null;
   approvedAt: Date | null;
   updatedAt: Date;
+  reconciliations?: { outcome: string; createdAt: Date }[];
 };
 
 export type ManagerFollowThroughSource = {
@@ -258,7 +265,7 @@ function base(
   const actionType = managerRecommendationActionType(source.proposedAction);
   const canMutate = source.mutationAllowed !== false;
   const canReconcile = canMutate && (
-    source.outcome === "blocked" && (stage === "approval_failed" || stage === "approval_simulated") ||
+    source.outcome === "blocked" && stage === "approval_simulated" ||
     source.outcome === "accepted" && stage === "needs_tracking" && Boolean(actionType)
   );
   return {
@@ -302,17 +309,119 @@ export function projectManagerFollowThrough(source: ManagerFollowThroughSource, 
   if (source.outcome === "completed" && source.outcomeReason === "reconciled") {
     return base(source, "completed", "reconciled", "Closed after human reconciliation", "A band member reviewed and closed this receipt. This records reconciliation only; it is not evidence that a provider action ran or succeeded.", "No automatic retry or execution will occur. Use the authoritative linked record if new work is needed.", null, recommendationTarget(source));
   }
+  const externalEffect = approvals.find(
+    (approval) =>
+      terminalApprovalReconciliation(approval.reconciliations)?.outcome ===
+      "external_effect_observed"
+  );
+  const remainingUnresolved = approvals.find(
+    (approval) =>
+      (approval.status === "failed" ||
+        (approval.status === "approved" && approval.executionAttemptedAt)) &&
+      !terminalApprovalReconciliation(approval.reconciliations)
+  );
+  if (externalEffect) {
+    const receipt = terminalApprovalReconciliation(
+      externalEffect.reconciliations
+    )!;
+    return base(
+      source,
+      "blocked",
+      "reconciled",
+      "External effect observed — repair required",
+      `A band member found an outside effect for “${externalEffect.title}”. This closes duplicate-risk review for that request, but it does not prove the full batch succeeded or repair StoryBoard's linked records.${remainingUnresolved ? ` “${remainingUnresolved.title}” still has an unresolved provider outcome.` : ""}`,
+      remainingUnresolved
+        ? "Open Approvals and reconcile every remaining provider outcome. Then record a task for any verified follow-up or CRM correction StoryBoard cannot link here. Do not run the original requests again."
+        : "Open the provider result and linked workflow. Record a task for any verified follow-up or CRM correction that StoryBoard cannot link here, and do not run the original request again.",
+      remainingUnresolved
+        ? {
+            href: "/approvals#needs-reconciliation",
+            label: "Reconcile remaining approvals"
+          }
+        : { href: "/approvals#reconciled", label: "View reconciliation" },
+      {
+        kind: "approval",
+        id: externalEffect.id,
+        label: externalEffect.title,
+        title: externalEffect.title,
+        status: "reconciled_external_effect"
+      },
+      null,
+      receipt.createdAt
+    );
+  }
+  const activeExecution = approvals.find((approval) =>
+    approvalExecutionLeaseIsActive(approval, observedAt)
+  );
+  if (activeExecution) {
+    return base(
+      source,
+      "in_motion",
+      "execution_in_progress",
+      "Provider execution in progress",
+      `StoryBoard claimed the one-shot execution for “${activeExecution.title}”. Its bounded provider call may still be running.`,
+      "Wait for the final result. StoryBoard will not offer reconciliation or a replacement while the execution lease is active.",
+      { href: "/approvals#execution-in-progress", label: "View execution" },
+      {
+        kind: "approval",
+        id: activeExecution.id,
+        label: activeExecution.title,
+        title: activeExecution.title,
+        status: "execution_in_progress"
+      },
+      null,
+      activeExecution.updatedAt
+    );
+  }
   // An attempted provider write with no final result quarantines the whole
   // batch. A clean failure/rejection on a sibling request cannot make the
   // ambiguous write safe to reconcile or retry.
-  const unknownExecution = approvals.find((approval) => approval.status === "approved" && approval.executionAttemptedAt);
+  const unknownExecution = approvals.find(
+    (approval) =>
+      approval.status === "approved" &&
+      approval.executionAttemptedAt &&
+      !terminalApprovalReconciliation(approval.reconciliations)
+  );
   if (unknownExecution) {
     return base(source, "blocked", "execution_unknown", "Execution outcome unknown", `StoryBoard recorded an execution attempt for “${unknownExecution.title}” but no final result. It is not safe to call this executable or retry it automatically.`, "Open Approvals and reconcile the provider result before taking another action.", { href: "/approvals", label: "Reconcile approval" }, { kind: "approval", id: unknownExecution.id, label: unknownExecution.title, title: unknownExecution.title, status: "execution_unknown" }, null, unknownExecution.updatedAt);
   }
 
-  const approvalFailure = approvals.find((approval) => approval.status === "failed");
+  const approvalFailure = approvals.find(
+    (approval) =>
+      approval.status === "failed" &&
+      !terminalApprovalReconciliation(approval.reconciliations)
+  );
   if (approvalFailure) {
     return base(source, "blocked", "approval_failed", "Approval failed", `“${approvalFailure.title}” failed. This outside action is stopped; review the saved approval history before preparing any replacement.`, "Open Approvals and reconcile the failed request. Do not retry an uncertain provider action.", { href: "/approvals", label: "Open approvals" }, { kind: "approval", id: approvalFailure.id, label: approvalFailure.title, title: approvalFailure.title, status: approvalFailure.status }, null, approvalFailure.updatedAt);
+  }
+
+  const noExternalEffect = approvals.find(
+    (approval) =>
+      terminalApprovalReconciliation(approval.reconciliations)?.outcome ===
+      "no_external_effect_observed"
+  );
+  if (noExternalEffect) {
+    const receipt = terminalApprovalReconciliation(
+      noExternalEffect.reconciliations
+    )!;
+    return base(
+      source,
+      "blocked",
+      "reconciled",
+      "No external effect found",
+      `A band member checked “${noExternalEffect.title}” and recorded that no outside effect was found. The original request remains closed and was not retried.`,
+      "Prepare a separate, newly reviewed request if this work is still needed.",
+      { href: "/approvals#reconciled", label: "View reconciliation" },
+      {
+        kind: "approval",
+        id: noExternalEffect.id,
+        label: noExternalEffect.title,
+        title: noExternalEffect.title,
+        status: "reconciled_no_external_effect"
+      },
+      null,
+      receipt.createdAt
+    );
   }
 
   const stoppedApproval = approvals.find((approval) => approval.status === "rejected" || approval.status === "expired");
@@ -328,7 +437,24 @@ export function projectManagerFollowThrough(source: ManagerFollowThroughSource, 
 
   if (approvals.length && approvals.every((approval) => approval.status === "executed")) {
     const latest = approvals[0]!;
-    return base(source, "completed", "internal_change_complete", "Approved work executed", `All ${approvals.length} linked approval${approvals.length === 1 ? " has" : "s have"} a recorded executed result.`, "No execution step remains. Review the real-world outcome when it is available.", { href: "/approvals", label: "View approval history" }, { kind: "approval", id: latest.id, label: latest.title, title: latest.title, status: "executed" }, null, latest.updatedAt);
+    return base(
+      source,
+      "completed",
+      "internal_change_complete",
+      "Approved work executed",
+      `All ${approvals.length} linked approval${approvals.length === 1 ? " has" : "s have"} a recorded executed result.`,
+      "No execution step remains. Review the real-world outcome when it is available.",
+      { href: "/approvals", label: "View approval history" },
+      {
+        kind: "approval",
+        id: latest.id,
+        label: latest.title,
+        title: latest.title,
+        status: "executed"
+      },
+      null,
+      latest.updatedAt
+    );
   }
 
   const awaitingApproval = approvals.find((approval) => approval.status === "pending" || approval.status === "proposed");
@@ -336,9 +462,14 @@ export function projectManagerFollowThrough(source: ManagerFollowThroughSource, 
     return base(source, "needs_action", "awaiting_approval", "Waiting for human approval", `“${awaitingApproval.title}” is prepared but has not been approved. No provider write has been authorized.`, "Open Approvals, inspect the exact request, and approve or reject it.", { href: "/approvals", label: "Review approval" }, { kind: "approval", id: awaitingApproval.id, label: awaitingApproval.title, title: awaitingApproval.title, status: awaitingApproval.status }, null, awaitingApproval.updatedAt);
   }
 
-  const awaitingExecution = approvals.find((approval) => approval.status === "approved" && !approval.executionAttemptedAt);
+  const awaitingExecution = approvals.find((approval) => approval.status === "approved" && !approval.executionAttemptedAt && approvalActionIsExecutable(approval.actionType));
   if (awaitingExecution) {
     return base(source, "needs_action", "awaiting_execution", "Approved and awaiting execution", `“${awaitingExecution.title}” is approved and has no recorded execution attempt. Execution remains a separate human action.`, "Open Approvals, recheck the request, and explicitly execute it when ready.", { href: "/approvals", label: "Open approved request" }, { kind: "approval", id: awaitingExecution.id, label: awaitingExecution.title, title: awaitingExecution.title, status: awaitingExecution.status }, null, awaitingExecution.updatedAt);
+  }
+
+  const approvedRecord = approvals.find((approval) => approval.status === "approved" && !approval.executionAttemptedAt);
+  if (approvedRecord) {
+    return base(source, "completed", "internal_change_complete", "Approval recorded — no execution step", `“${approvedRecord.title}” was approved, and its action type does not call a provider. StoryBoard will not present it as executable.`, "No provider action remains for this approval. Review the linked internal record if more work is needed.", { href: "/approvals", label: "View approval record" }, { kind: "approval", id: approvedRecord.id, label: approvedRecord.title, title: approvedRecord.title, status: approvedRecord.status }, null, approvedRecord.updatedAt);
   }
 
   if (source.outcome === "blocked") {

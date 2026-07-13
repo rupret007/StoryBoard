@@ -24,10 +24,11 @@ the implementation layout rather than repeating setup or product guidance.
 
 The Next.js operator interface. Current responsibilities:
 
-- Dashboard shell with StoryBoard navigation and pending-approval indicator
+- Dashboard shell with StoryBoard navigation and approval-attention indicator
 - Command bar (`POST /commands/execute`) with structured JSON output
 - Venue and contact CRM, booking pipeline, Find shows, market sprints, pitch
-  campaigns/replies, tasks, and approval center
+  campaigns/replies, tasks, and an Approval Center with append-only provider
+  reconciliation history
 - Manager OS intake, briefs, conversation, goals/initiatives/decisions, team
   context, reviewed actions, durable accepted-work follow-through, and
   evaluation controls
@@ -53,10 +54,21 @@ The NestJS orchestration backend. Current responsibilities:
 - **`AuditService`** on important actions; approval execution paths
 - **Approval lifecycle:** artist/source-key idempotent preparation, tenant-bound
   event and Manager links, compare-and-set approve/reject/execute, and
-  `event_logistics_v1` result reconciliation in `src/approvals/`; an unknown
-  attempted write takes precedence over known failed/rejected/expired siblings
-  in Manager receipt projection, while rejected/expired receipts expose no
-  reconciliation action
+  `event_logistics_v1` result reconciliation in `src/approvals/`;
+  `approval-lifecycle.ts` owns the `approval_lifecycle_v2` executable allowlist
+  and tenant-facing work projection, while `approval-reconciliation.ts` owns
+  strict `approval_reconciliation_v1` evidence. Pending decisions,
+  approved-ready work, fresh one-hour `execution_in_progress` claims,
+  unresolved provider outcomes, conclusive history, and approved non-provider
+  records remain distinct. A fresh claim is neither attention nor reconcilable;
+  an unfinished claim becomes `execution_unknown` at lease expiry. Real Google
+  requests have 30-second timeouts and Gmail draft/send approval batches are
+  capped at 25. A stale unknown attempted write takes precedence over known
+  failed/rejected/expired siblings in Manager receipt projection, while
+  rejected/expired receipts expose no reconciliation action. No-effect
+  evidence permits a separate newly
+  reviewed request; external-effect evidence blocks duplicate work and keeps
+  linked Manager follow-through blocked for manual repair
 - **Integrations:** adapter registry, Google OAuth, **Telegram** real/mock adapters
 - **Workflow automation:** BullMQ jobs (`workflow-automation/`, `queue/`), in-app notifications, email drafts, digests, opt-in **Manager cadence**, **Telegram urgent scan**
 - **Manager OS:** tenant snapshots, deterministic briefs/chat, post-show outcome
@@ -116,6 +128,9 @@ Further responsibilities remain product-driven (more adapters, richer tests, etc
 **Validation:** venue and contact PATCH bodies use strict Zod schemas
 (`venue-patch.schema.ts`, `contact-patch.schema.ts`). Commands use
 `execute-command.schema.ts` for `POST /commands/execute`.
+`approvalReconciliationInputSchema` rejects unknown fields, incomplete
+evidence, invalid timestamps/UUIDs, and credential-shaped values before an
+Approval reconciliation write.
 
 ## Packages
 
@@ -133,16 +148,20 @@ Reusable React UI components intended for the web app.
 **`Operator`**, **`Artist`**, **`ArtistMembership`**, manager runs/messages and
 **`ManagerMessageFeedback`**, reviewable **`ManagerDecision`** outcomes,
 **`WorkflowNotification`**,
-**`TelegramUrgentDedupe`**, and **`TelegramRegistrationToken`**.
+**`TelegramUrgentDedupe`**, **`TelegramRegistrationToken`**, and append-only
+**`ApprovalReconciliation`** evidence.
 `ApprovalRequest` may link a `BandEvent` and `ManagerRecommendation`; its
 artist-scoped nullable `sourceKey` makes event-logistics preparation idempotent.
+Reconciliation uses a composite Approval/artist relation, artist-scoped
+idempotency, and one terminal conclusion without mutating that request.
 
 Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run **`pnpm db:generate`** after clone or schema change.
 
 ## Scripts
 
 - `scripts/preflight.mjs` — infra smoke
-- `scripts/audit-artist-references.mjs` — read-only tenant relationship diagnostic
+- `scripts/audit-artist-references.mjs` — read-only tenant relationship
+  diagnostic, including `ApprovalReconciliation → ApprovalRequest`
 - `scripts/prepare-test-database.mjs` / `scripts/reset-test-database.mjs` —
   explicit disposable-database migration and reset; never fall back to the app DB
 - `scripts/run-e2e.mjs` — orchestrates the mock-provider browser environment
@@ -153,6 +172,12 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
 - **`packages/shared/test/`** — Node test runner for shared schemas and derived
   policies, including setlist timing and Telegram helpers
 - **`apps/api/test/`** — compiled API regressions (the API package **`test`** script runs **`nest build`** first, then `node --test`)
+- **`apps/api/test/approval-lifecycle.test.mjs`** and
+  **`approval-lifecycle-callers.test.mjs`** — shared stage/partition policy and
+  caller stitching
+- **`apps/api/test/approval-reconciliation.test.mjs`** — strict evidence,
+  idempotency, tenant/state boundaries, immutable Approval behavior, and
+  Manager wording
 - **`apps/api/test/task-audit-atomicity.test.mjs`** — focused transaction/audit
   rollback and duplicate-completion regression coverage
 - **`apps/api/test/manager-follow-through.test.mjs`** — relational receipts,
@@ -167,8 +192,11 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
 - **`apps/api/test/memory-privacy.test.mjs`** — complete-input credential
   rejection, opaque fact keys, and legacy audit-key read projection coverage
 - **`apps/api/test/integration/`** — opt-in Postgres workflows using only
-  `STORYBOARD_TEST_DATABASE_URL`
-- **`apps/web/e2e/`** — production-build Playwright journeys with mock providers
+  `STORYBOARD_TEST_DATABASE_URL`, including one-terminal concurrency, composite
+  ownership, role capabilities, and safe campaign replacement
+- **`apps/web/e2e/`** — production-build Playwright journeys with mock providers,
+  including append-only stale-logistics reconciliation and live-attention
+  clearing
 
 ## Tooling docs
 

@@ -1,5 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import {
+  APPROVAL_EXECUTABLE_ACTION_TYPES,
+  APPROVAL_EXECUTION_LEASE_MS
+} from "../approvals/approval-lifecycle";
+import { APPROVAL_RECONCILIATION_CONCLUSIVE_OUTCOMES } from "../approvals/approval-reconciliation";
 import { ApprovalStatus, BookingStage, TaskStatus } from "../generated/prisma/enums";
 import { PrismaService } from "../prisma/prisma.service";
 import { TasksService } from "../tasks/tasks.service";
@@ -11,6 +16,8 @@ export type OpportunityRiskLevel = "low" | "med" | "high";
 export type BookingHealthFactorCode =
   | "overdue_tasks"
   | "stale_followups"
+  | "approval_reconciliation"
+  | "approved_execution_waiting"
   | "pending_approvals"
   | "early_stage_backlog";
 
@@ -34,6 +41,10 @@ export type DashboardInsights = {
     staleFollowUpCount: number;
     dueCampaignFollowUpCount: number;
     unreadBookingReplyCount: number;
+    approvalPendingDecisionCount: number;
+    approvalReadyToExecuteCount: number;
+    approvalExecutionInProgressCount: number;
+    approvalNeedsReconciliationCount: number;
     pendingApprovalAgingCount: number;
     approvalAgingThresholdDays: number;
     overdueClusterThreshold: number;
@@ -49,6 +60,16 @@ export type DashboardInsights = {
     href: string;
     severity: "low" | "med" | "high";
   }[];
+};
+
+export type ApprovalAttention = {
+  pendingDecision: number;
+  readyToExecute: number;
+  executionInProgress: number;
+  needsReconciliation: number;
+  reconciled: number;
+  approvedNotExecutable: number;
+  attentionTotal: number;
 };
 
 function utcDayKey(d: Date): string {
@@ -76,6 +97,104 @@ export class OperationalIntelligenceService {
     private readonly config: ConfigService
   ) {}
 
+  async getApprovalAttention(artistId: string): Promise<ApprovalAttention> {
+    const executableActions = [...APPROVAL_EXECUTABLE_ACTION_TYPES];
+    const leaseCutoff = new Date(Date.now() - APPROVAL_EXECUTION_LEASE_MS);
+    const [
+      pendingDecision,
+      readyToExecute,
+      executionInProgress,
+      needsReconciliation,
+      reconciled,
+      approvedNotExecutable
+    ] = await Promise.all([
+        this.prisma.client.approvalRequest.count({
+          where: {
+            artistId,
+            status: { in: [ApprovalStatus.proposed, ApprovalStatus.pending] }
+          }
+        }),
+        this.prisma.client.approvalRequest.count({
+          where: {
+            artistId,
+            status: ApprovalStatus.approved,
+            executionAttemptedAt: null,
+            actionType: { in: executableActions }
+          }
+        }),
+        this.prisma.client.approvalRequest.count({
+          where: {
+            artistId,
+            status: ApprovalStatus.approved,
+            executionAttemptedAt: { gt: leaseCutoff },
+            reconciliations: {
+              none: {
+                outcome: {
+                  in: [...APPROVAL_RECONCILIATION_CONCLUSIVE_OUTCOMES]
+                }
+              }
+            }
+          }
+        }),
+        this.prisma.client.approvalRequest.count({
+          where: {
+            artistId,
+            OR: [
+              { status: ApprovalStatus.failed },
+              {
+                status: ApprovalStatus.approved,
+                executionAttemptedAt: { not: null, lte: leaseCutoff }
+              }
+            ],
+            reconciliations: {
+              none: {
+                outcome: {
+                  in: [...APPROVAL_RECONCILIATION_CONCLUSIVE_OUTCOMES]
+                }
+              }
+            }
+          }
+        }),
+        this.prisma.client.approvalRequest.count({
+          where: {
+            artistId,
+            OR: [
+              { status: ApprovalStatus.failed },
+              {
+                status: ApprovalStatus.approved,
+                executionAttemptedAt: { not: null }
+              }
+            ],
+            reconciliations: {
+              some: {
+                outcome: {
+                  in: [...APPROVAL_RECONCILIATION_CONCLUSIVE_OUTCOMES]
+                }
+              }
+            }
+          }
+        }),
+        this.prisma.client.approvalRequest.count({
+          where: {
+            artistId,
+            status: ApprovalStatus.approved,
+            executionAttemptedAt: null,
+            actionType: { notIn: executableActions }
+          }
+        })
+      ]);
+    return {
+      pendingDecision,
+      readyToExecute,
+      executionInProgress,
+      needsReconciliation,
+      reconciled,
+      approvedNotExecutable,
+      attentionTotal:
+        pendingDecision + readyToExecute + needsReconciliation
+    };
+  }
+
   async runUrgentTelegramScan(telegram: WorkflowTelegramService): Promise<{
     artists: number;
     sends: number;
@@ -102,22 +221,42 @@ export class OperationalIntelligenceService {
       const staleDays =
         artist.workflowStaleFollowupDays ?? globalStale;
       const grace = artist.workflowOverdueGraceDays ?? null;
-      const [overdue, stale, openTaskCount, agedApprovals] = await Promise.all([
-        this.tasks.overdueByDueDate(artist.id, grace),
-        this.tasks.followUpsOlderThan(artist.id, staleDays),
-        this.prisma.client.task.count({
-          where: { artistId: artist.id, status: { not: TaskStatus.done } }
-        }),
-        this.agedPendingApprovals(
-          artist.id,
-          pendingApprovalUrgentAgeDays(artist.workflowPendingApprovalDays)
-        )
-      ]);
+      const [overdue, stale, openTaskCount, agedApprovals, approvalAttention] =
+        await Promise.all([
+          this.tasks.overdueByDueDate(artist.id, grace),
+          this.tasks.followUpsOlderThan(artist.id, staleDays),
+          this.prisma.client.task.count({
+            where: { artistId: artist.id, status: { not: TaskStatus.done } }
+          }),
+          this.agedPendingApprovals(
+            artist.id,
+            pendingApprovalUrgentAgeDays(artist.workflowPendingApprovalDays)
+          ),
+          this.getApprovalAttention(artist.id)
+        ]);
 
       const overdueTh =
         openTaskCount <= URGENT_TELEGRAM_RULES.SMALL_ROSTER_MAX_OPEN_TASKS
           ? URGENT_TELEGRAM_RULES.OVERDUE_CLUSTER_MIN_SMALL
           : URGENT_TELEGRAM_RULES.OVERDUE_CLUSTER_MIN;
+
+      if (approvalAttention.needsReconciliation > 0) {
+        const r = await telegram.sendUrgent({
+          artistId: artist.id,
+          category: "approvals",
+          dedupeKey: `approval_reconciliation:${dayKey}`,
+          text: buildApprovalReconciliationText(
+            approvalAttention.needsReconciliation,
+            artist.name
+          ),
+          metadata: {
+            reconciliationCount: approvalAttention.needsReconciliation
+          }
+        });
+        if (r.ok && r.delivered) {
+          sends += 1;
+        }
+      }
 
       if (agedApprovals.length > 0) {
         const r = await telegram.sendUrgent({
@@ -199,7 +338,7 @@ export class OperationalIntelligenceService {
       opportunities,
       overdue,
       stale,
-      pendingApprovals,
+      approvalAttention,
       pendingAged,
       openTasks,
       dueCampaignFollowUps,
@@ -218,12 +357,7 @@ export class OperationalIntelligenceService {
       }),
       this.tasks.overdueByDueDate(artistId, grace),
       this.tasks.followUpsOlderThan(artistId, staleDays),
-      this.prisma.client.approvalRequest.count({
-        where: {
-          artistId,
-          status: { in: [ApprovalStatus.proposed, ApprovalStatus.pending] }
-        }
-      }),
+      this.getApprovalAttention(artistId),
       this.agedPendingApprovals(artistId, urgentAgeDays),
       this.prisma.client.task.findMany({
         where: { artistId, status: { not: TaskStatus.done } }
@@ -273,13 +407,40 @@ export class OperationalIntelligenceService {
         detail: `${stale.length} incomplete task(s) stale (${staleDays}+ days without update).`
       });
     }
-    if (pendingApprovals > 0) {
-      const impact = Math.min(8 + pendingApprovals * 3, 30);
+    if (approvalAttention.needsReconciliation > 0) {
+      const impact = Math.min(
+        25 + approvalAttention.needsReconciliation * 5,
+        50
+      );
+      score -= impact;
+      factors.push({
+        code: "approval_reconciliation",
+        impact,
+        detail: `${approvalAttention.needsReconciliation} approval outcome(s) require provider reconciliation.`
+      });
+    }
+    if (approvalAttention.readyToExecute > 0) {
+      const impact = Math.min(
+        5 + approvalAttention.readyToExecute * 2,
+        15
+      );
+      score -= impact;
+      factors.push({
+        code: "approved_execution_waiting",
+        impact,
+        detail: `${approvalAttention.readyToExecute} approved request(s) await explicit execution.`
+      });
+    }
+    if (approvalAttention.pendingDecision > 0) {
+      const impact = Math.min(
+        8 + approvalAttention.pendingDecision * 3,
+        30
+      );
       score -= impact;
       factors.push({
         code: "pending_approvals",
         impact,
-        detail: `${pendingApprovals} approval(s) waiting.`
+        detail: `${approvalAttention.pendingDecision} approval decision(s) waiting.`
       });
     }
     const earlyStages: BookingStage[] = [
@@ -311,7 +472,10 @@ export class OperationalIntelligenceService {
       staleCount: stale.length,
       dueCampaignFollowUpCount: dueCampaignFollowUps,
       unreadBookingReplyCount: unreadBookingReplies,
-      pendingApprovals,
+      approvalPendingDecisionCount: approvalAttention.pendingDecision,
+      approvalReadyToExecuteCount: approvalAttention.readyToExecute,
+      approvalNeedsReconciliationCount:
+        approvalAttention.needsReconciliation,
       pendingAgedCount: pendingAged.length,
       meetsApprovalAgingUrgent,
       meetsOverdueClusterUrgent,
@@ -330,6 +494,12 @@ export class OperationalIntelligenceService {
         staleFollowUpCount: stale.length,
         dueCampaignFollowUpCount: dueCampaignFollowUps,
         unreadBookingReplyCount: unreadBookingReplies,
+        approvalPendingDecisionCount: approvalAttention.pendingDecision,
+        approvalReadyToExecuteCount: approvalAttention.readyToExecute,
+        approvalExecutionInProgressCount:
+          approvalAttention.executionInProgress,
+        approvalNeedsReconciliationCount:
+          approvalAttention.needsReconciliation,
         pendingApprovalAgingCount: pendingAged.length,
         approvalAgingThresholdDays: urgentAgeDays,
         overdueClusterThreshold: overdueTh,
@@ -387,7 +557,9 @@ export class OperationalIntelligenceService {
     staleCount: number;
     dueCampaignFollowUpCount: number;
     unreadBookingReplyCount: number;
-    pendingApprovals: number;
+    approvalPendingDecisionCount: number;
+    approvalReadyToExecuteCount: number;
+    approvalNeedsReconciliationCount: number;
     pendingAgedCount: number;
     meetsApprovalAgingUrgent: boolean;
     meetsOverdueClusterUrgent: boolean;
@@ -398,22 +570,43 @@ export class OperationalIntelligenceService {
     overdueProjectCount: number;
   }): DashboardInsights["priorityActions"] {
     const actions: DashboardInsights["priorityActions"] = [];
-    if (input.eventReadinessRiskCount > 0) actions.push({ id: "event-readiness", title: "Resolve upcoming show readiness", reason: `${input.eventReadinessRiskCount} confirmed event(s) in the next 14 days have unknown/unavailable people or no advance work.`, href: "/operations", severity: "high" });
-    if (input.overdueInvoiceCount > 0) actions.push({ id: "invoice-overdue", title: "Collect overdue balances", reason: `${input.overdueInvoiceCount} invoice(s) are overdue with money still outstanding.`, href: "/operations", severity: "high" });
-    if (input.overdueProjectCount > 0) actions.push({ id: "projects-overdue", title: "Re-plan overdue projects", reason: `${input.overdueProjectCount} active project(s) passed their deadline.`, href: "/operations", severity: "med" });
-    if (input.unreadBookingReplyCount > 0) actions.push({ id: "booking-replies-unread", title: "Review new booking replies", reason: `${input.unreadBookingReplyCount} tracked campaign repl${input.unreadBookingReplyCount === 1 ? "y is" : "ies are"} waiting for a response.`, href: "/booking-inbox", severity: "high" });
-    if (input.pendingAgedCount > 0 || input.pendingApprovals > 0) {
+    if (input.approvalNeedsReconciliationCount > 0) {
       actions.push({
-        id: "approvals-queue",
-        title: "Review pending approvals",
+        id: "approvals-reconciliation",
+        title: "Reconcile uncertain approval outcomes",
+        reason: `${input.approvalNeedsReconciliationCount} approval request(s) failed or have a recorded provider attempt without a final result. Verify the outside system before preparing any replacement; never retry an uncertain write blindly.`,
+        href: "/approvals",
+        severity: "high"
+      });
+    }
+    if (input.approvalReadyToExecuteCount > 0) {
+      actions.push({
+        id: "approvals-ready",
+        title: "Execute approved work",
+        reason: `${input.approvalReadyToExecuteCount} approved request(s) are ready for the separate, explicit execution step.`,
+        href: "/approvals",
+        severity: "med"
+      });
+    }
+    if (
+      input.pendingAgedCount > 0 ||
+      input.approvalPendingDecisionCount > 0
+    ) {
+      actions.push({
+        id: "approvals-pending",
+        title: "Review pending approval decisions",
         reason:
           input.pendingAgedCount > 0
-            ? `${input.pendingAgedCount} approval(s) have aged past the urgent window — unblocks execution.`
-            : `${input.pendingApprovals} approval(s) need a decision before outbound work ships.`,
+            ? `${input.pendingAgedCount} pending approval decision(s) have aged past the urgent window.`
+            : `${input.approvalPendingDecisionCount} approval request(s) need a human decision before outbound work is authorized.`,
         href: "/approvals",
         severity: input.meetsApprovalAgingUrgent ? "high" : "med"
       });
     }
+    if (input.eventReadinessRiskCount > 0) actions.push({ id: "event-readiness", title: "Resolve upcoming show readiness", reason: `${input.eventReadinessRiskCount} confirmed event(s) in the next 14 days have unknown/unavailable people or no advance work.`, href: "/operations", severity: "high" });
+    if (input.overdueInvoiceCount > 0) actions.push({ id: "invoice-overdue", title: "Collect overdue balances", reason: `${input.overdueInvoiceCount} invoice(s) are overdue with money still outstanding.`, href: "/operations", severity: "high" });
+    if (input.overdueProjectCount > 0) actions.push({ id: "projects-overdue", title: "Re-plan overdue projects", reason: `${input.overdueProjectCount} active project(s) passed their deadline.`, href: "/operations", severity: "med" });
+    if (input.unreadBookingReplyCount > 0) actions.push({ id: "booking-replies-unread", title: "Review new booking replies", reason: `${input.unreadBookingReplyCount} tracked campaign repl${input.unreadBookingReplyCount === 1 ? "y is" : "ies are"} waiting for a response.`, href: "/booking-inbox", severity: "high" });
     if (input.overdueCount > 0) {
       actions.push({
         id: "tasks-overdue",
@@ -461,6 +654,17 @@ export class OperationalIntelligenceService {
     });
     return actions.slice(0, 8);
   }
+}
+
+function buildApprovalReconciliationText(
+  count: number,
+  artistName: string
+): string {
+  return [
+    `Why: ${count} approval outcome(s) require reconciliation for ${artistName}.`,
+    "",
+    "Verify the provider and saved delivery history before preparing replacement work. StoryBoard will not retry an uncertain outside write automatically."
+  ].join("\n");
 }
 
 function buildApprovalAgingText(count: number, artistName: string): string {

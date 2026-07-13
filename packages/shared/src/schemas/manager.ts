@@ -12,7 +12,11 @@ export const managerProfileSchema = z.object({
   availabilityExpectations: z.string().trim().max(1000).nullable().optional(), budgetToleranceMinor: z.number().int().nonnegative().nullable().optional(), currency: z.string().trim().length(3).default("USD"), twelveMonthAmbition: z.string().trim().max(2000).nullable().optional(), communicationCadence: z.enum(["daily", "weekly"]).default("daily"), decisionStyle: z.enum(["guided", "concise", "detailed"]).default("guided")
 }).strict();
 export const bandMemberCreateSchema = z.object({ name: z.string().trim().min(1).max(160), linkedOperatorId: z.string().trim().min(1).nullable().optional(), email: z.string().email().nullable().optional(), phone: z.string().trim().max(40).nullable().optional(), instruments: z.array(z.string().trim().min(1).max(80)).max(20).default([]), roles: z.array(z.string().trim().min(1).max(80)).max(20).default([]), defaultSplitBasisPoints: z.number().int().min(0).max(10000).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional(), active: z.boolean().default(true) }).strict();
-export const bandMemberPatchSchema = bandMemberCreateSchema.partial().strict();
+export const bandMemberPatchSchema = bandMemberCreateSchema.partial().extend({
+  instruments: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+  roles: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
+  active: z.boolean().optional()
+}).strict();
 export const bandMemberCheckInStatuses = ["available", "limited", "unavailable"] as const;
 export const bandMemberCheckInCreateSchema = z.object({
   status: z.enum(bandMemberCheckInStatuses),
@@ -29,7 +33,9 @@ export const managerGoalProgressSchema = z.object({
 }).strict().refine((input) => (input.value === undefined) !== (input.delta === undefined), { message: "Provide exactly one of value or delta" });
 export const managerGoalProgressSyncSchema = z.object({ observedValue: z.number().int().nonnegative() }).strict();
 export const managerInitiativeCreateSchema = z.object({ goalId: z.string().trim().min(1).nullable().optional(), workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), description: z.string().trim().max(2000).nullable().optional(), status: z.enum(["proposed","active","completed","blocked","abandoned"]).default("proposed"), startsAt: z.string().datetime({ offset: true }).nullable().optional(), dueAt: z.string().datetime({ offset: true }).nullable().optional(), successMetric: z.string().trim().max(500).nullable().optional() }).strict();
-export const managerInitiativePatchSchema = managerInitiativeCreateSchema.partial().strict();
+export const managerInitiativePatchSchema = managerInitiativeCreateSchema.partial().extend({
+  status: z.enum(["proposed","active","completed","blocked","abandoned"]).optional()
+}).strict();
 const managerDecisionOptionSchema = z.object({ label: z.string().trim().min(1).max(200), tradeoff: z.string().trim().min(1).max(1000) }).strict();
 const managerDecisionFields = {
   workstream: z.enum(managerWorkstreams), title: z.string().trim().min(1).max(200), context: z.string().trim().max(3000).nullable().optional(),

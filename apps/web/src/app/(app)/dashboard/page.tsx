@@ -77,6 +77,7 @@ export default async function DashboardPage() {
   }
 
   const s = stats!;
+  const approvalAttention = s.approvalAttention;
   const statCards = [
     { label: "Venues", value: s.venues, href: "/venues" },
     { label: "Contacts", value: s.contacts, href: "/contacts" },
@@ -84,7 +85,10 @@ export default async function DashboardPage() {
     { label: "Active pipeline", value: s.activeOpportunities, href: "/booking" },
     { label: "Tasks", value: s.tasks, href: "/tasks" },
     { label: "Overdue", value: s.overdueTasks, href: "/tasks" },
-    { label: "Pending approvals", value: s.pendingApprovals, href: "/approvals" }
+    { label: "Approval decisions", value: approvalAttention.pendingDecision, href: "/approvals#pending-decisions" },
+    { label: "Ready to execute", value: approvalAttention.readyToExecute, href: "/approvals#ready-to-execute" },
+    { label: "Execution in progress", value: approvalAttention.executionInProgress, href: "/approvals#execution-in-progress" },
+    { label: "Needs reconciliation", value: approvalAttention.needsReconciliation, href: "/approvals#needs-reconciliation" }
   ];
   const isNewWorkspace = s.venues === 0 && s.contacts === 0 && s.bookingOpportunities === 0;
 
@@ -122,6 +126,26 @@ export default async function DashboardPage() {
           ))}
         </div>
       </section>
+
+      {approvalAttention.needsReconciliation > 0 ? (
+        <SurfaceCard elevated className="border-red-500/30 bg-red-500/5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-3">
+              <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-300" aria-hidden />
+              <div>
+                <h2 className="font-semibold text-red-100">Provider work needs reconciliation</h2>
+                <p className="mt-1 max-w-2xl text-sm leading-relaxed text-red-200/80">
+                  {approvalAttention.needsReconciliation} failed or unresolved one-shot execution {approvalAttention.needsReconciliation === 1 ? "claim requires" : "claims require"} human review. StoryBoard will not retry this work automatically.
+                </p>
+              </div>
+            </div>
+            <Link href="/approvals#needs-reconciliation" className="sb-btn-secondary min-h-11 shrink-0 border-red-500/30">
+              Review safely
+              <ArrowRight className="h-4 w-4" aria-hidden />
+            </Link>
+          </div>
+        </SurfaceCard>
+      ) : null}
 
       {isNewWorkspace ? (
         <SurfaceCard elevated className="border-[var(--accent)]/20 bg-[var(--accent-muted)]/30">
@@ -316,7 +340,7 @@ export default async function DashboardPage() {
               </Link>
               <span className="text-[var(--text-muted)]">
                 {" "}
-                — {s.pendingApprovals} pending
+                — {approvalAttention.pendingDecision} decide · {approvalAttention.readyToExecute} execute · {approvalAttention.needsReconciliation} reconcile
               </span>
             </li>
             <li>

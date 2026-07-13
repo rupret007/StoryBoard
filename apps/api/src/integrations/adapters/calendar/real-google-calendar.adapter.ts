@@ -1,6 +1,8 @@
 import { google } from "googleapis";
 import type { CalendarHoldRequest, GoogleCalendarAdapter } from "../adapter.types";
 
+const GOOGLE_REQUEST_TIMEOUT_MS = 30_000;
+
 export function googleCalendarEventBody(input: CalendarHoldRequest) {
   const confirmed = input.kind === "confirmed";
   const timeZone = input.timeZone ?? "UTC";
@@ -27,10 +29,13 @@ export class RealGoogleCalendarAdapter implements GoogleCalendarAdapter {
     const oauth2 = new google.auth.OAuth2(this.clientId, this.clientSecret);
     oauth2.setCredentials({ refresh_token: this.refreshToken });
     const calendar = google.calendar({ version: "v3", auth: oauth2 });
-    const res = await calendar.events.insert({
-      calendarId: this.calendarId,
-      requestBody: googleCalendarEventBody(input)
-    });
+    const res = await calendar.events.insert(
+      {
+        calendarId: this.calendarId,
+        requestBody: googleCalendarEventBody(input)
+      },
+      { timeout: GOOGLE_REQUEST_TIMEOUT_MS }
+    );
     return {
       eventId: res.data.id ?? "unknown",
       htmlLink: res.data.htmlLink ?? null

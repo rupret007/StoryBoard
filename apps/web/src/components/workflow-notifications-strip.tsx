@@ -64,8 +64,21 @@ export function WorkflowNotificationsStrip({ artistId }: { artistId: string }) {
 
   async function openNotification(item: NotificationItem) {
     await markRead(item.id);
-    const href = typeof item.metadata?.href === "string" ? item.metadata.href : null;
-    if (href?.startsWith("/") && !href.startsWith("//")) router.push(href);
+    const metadataHref =
+      typeof item.metadata?.href === "string" ? item.metadata.href : null;
+    const safeMetadataHref =
+      metadataHref?.startsWith("/") && !metadataHref.startsWith("//")
+        ? metadataHref
+        : null;
+    const historicalApprovalHref = item.kind.startsWith("approval_")
+      ? item.kind === "approval_failed"
+        ? "/approvals#needs-reconciliation"
+        : item.kind === "approval_created"
+          ? "/approvals#pending-decisions"
+          : "/approvals"
+      : null;
+    const href = safeMetadataHref ?? historicalApprovalHref;
+    if (href) router.push(href);
   }
 
   if (err) {

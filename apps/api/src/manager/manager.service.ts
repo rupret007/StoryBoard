@@ -185,7 +185,7 @@ const chatOutputSchema = z.object({
   citations: z.array(z.string()).max(10),
   recommendation: itemSchema.nullable()
 }).strict();
-const managerFollowThroughRecommendationSelect = {
+const managerFollowThroughRecommendationSelect = (artistId: string) => ({
   id: true,
   title: true,
   workstream: true,
@@ -202,9 +202,9 @@ const managerFollowThroughRecommendationSelect = {
   project: { select: { id: true, name: true, status: true, dueAt: true, updatedAt: true } },
   event: { select: { id: true, title: true, status: true, startsAt: true, updatedAt: true } },
   memoryFact: { select: { id: true, key: true, sensitivity: true, archivedAt: true, updatedAt: true } },
-  approvals: { select: { id: true, title: true, status: true, actionType: true, executionAttemptedAt: true, approvedAt: true, updatedAt: true }, orderBy: { updatedAt: "desc" as const } },
+  approvals: { where: { artistId }, select: { id: true, title: true, status: true, actionType: true, executionAttemptedAt: true, approvedAt: true, updatedAt: true, reconciliations: { select: { outcome: true, createdAt: true } } }, orderBy: { updatedAt: "desc" as const } },
   managerRun: { select: { trace: true, message: { select: { visibility: true } } } }
-} as const;
+} as const);
 type Brief = z.infer<typeof briefSchema>;
 type ScheduledBriefPersistence = {
   settingsId: string;
@@ -532,7 +532,7 @@ export class ManagerService {
           { outcome: ManagerRecommendationOutcome.dismissed, outcomeReason: "approval_rejected", OR: recentlyResolved }
         ]
       },
-      select: managerFollowThroughRecommendationSelect,
+      select: managerFollowThroughRecommendationSelect(artistId),
       orderBy: { updatedAt: "desc" },
       take: 200
     });
@@ -1098,7 +1098,8 @@ export class ManagerService {
     await this.putProfile(artistId, input.profile, actorLabel, actorOperatorId, true);
     for (const member of input.members) await this.createMember(artistId, member, actorLabel, actorOperatorId);
     await this.ensurePlan(artistId, actorLabel, actorOperatorId);
-    return this.generateBrief(artistId, "intake", actorLabel, actorOperatorId);
+    const cadence = input.profile.communicationCadence === "weekly" ? "weekly" : "daily";
+    return this.generateBrief(artistId, cadence, actorLabel, actorOperatorId);
   }
 
   private async facts(artistId: string) {
@@ -1132,13 +1133,13 @@ export class ManagerService {
       this.prisma.client.managerInitiative.findMany({ where: { artistId, status: { in: [ManagerInitiativeStatus.proposed, ManagerInitiativeStatus.active, ManagerInitiativeStatus.blocked] } }, take: 30 }),
       this.prisma.client.task.findMany({ where: { artistId, OR: [{ status: { not: "done" } }, { initiativeId: { not: null } }] }, include: { bandMember: { select: { id: true, name: true } }, prerequisites: { select: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } } }, dependents: { select: { task: { select: { id: true, title: true, status: true, dueAt: true } } } } }, orderBy: { dueAt: "asc" }, take: 100 }),
       this.prisma.client.bookingOpportunity.findMany({ where: { artistId, stage: { not: "closed" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
-      this.prisma.client.bandEvent.findMany({ where: { artistId, status: { in: ["draft", "hold", "confirmed"] } }, include: { participants: true, tasks: true, schedule: { orderBy: { sortOrder: "asc" } }, setlist: { include: { items: { select: { id: true, itemType: true, label: true, song: { select: { id: true, title: true, durationSeconds: true } } } } } }, deals: { include: { agreements: { select: { id: true, status: true } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } }, approvals: { where: { sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, select: { id: true, eventId: true, sourceKey: true, actionType: true, status: true, payload: true, createdAt: true, updatedAt: true } } }, orderBy: { startsAt: "asc" }, take: 30 }),
+      this.prisma.client.bandEvent.findMany({ where: { artistId, status: { in: ["draft", "hold", "confirmed"] } }, include: { participants: true, tasks: true, schedule: { orderBy: { sortOrder: "asc" } }, setlist: { include: { items: { select: { id: true, itemType: true, label: true, song: { select: { id: true, title: true, durationSeconds: true } } } } } }, deals: { include: { agreements: { select: { id: true, status: true } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } }, approvals: { where: { artistId, sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, select: { id: true, eventId: true, sourceKey: true, actionType: true, status: true, executionAttemptedAt: true, payload: true, createdAt: true, updatedAt: true, reconciliations: { select: { outcome: true, createdAt: true } } } } }, orderBy: { startsAt: "asc" }, take: 30 }),
       this.prisma.client.artistProject.findMany({ where: { artistId, status: { in: ["draft", "active", "paused"] } }, include: { tasks: true, expenses: true, events: { select: { id: true } } }, orderBy: { dueAt: "asc" }, take: 30 }),
       this.prisma.client.dealOffer.findMany({ where: { artistId, status: { in: ["draft", "proposed", "negotiating", "accepted"] } }, orderBy: { updatedAt: "desc" }, take: 30 }),
       this.prisma.client.invoice.findMany({ where: { artistId, status: { in: ["issued", "partially_paid", "overdue"] } }, orderBy: { dueAt: "asc" }, take: 30 }),
       this.prisma.client.managerDecision.findMany({ where: { artistId, status: { in: ["open", "decided", "reviewed"] } }, orderBy: [{ status: "asc" }, { reviewAt: "asc" }, { updatedAt: "desc" }], take: 30 }),
       this.prisma.client.managerMemoryFact.findMany({ where: { artistId, archivedAt: null }, select: { id: true, key: true, value: true, sourceType: true, sourceId: true, confidence: true, sensitivity: true, confirmedAt: true, updatedAt: true } }),
-      this.prisma.client.approvalRequest.findMany({ where: { artistId, status: { in: ["pending", "approved"] } }, select: { id: true, title: true, status: true, actionType: true, executionAttemptedAt: true, updatedAt: true }, orderBy: { updatedAt: "asc" }, take: 30 }),
+      this.prisma.client.approvalRequest.findMany({ where: { artistId, status: { in: ["proposed", "pending", "approved", "failed"] } }, select: { id: true, title: true, status: true, actionType: true, executionAttemptedAt: true, updatedAt: true, reconciliations: { select: { outcome: true, createdAt: true } } }, orderBy: { updatedAt: "asc" }, take: 30 }),
       this.prisma.client.bookingReply.findMany({ where: { artistId, processingStatus: "unread" }, select: { id: true, subject: true, fromName: true, fromEmail: true, processingStatus: true, receivedAt: true }, orderBy: { receivedAt: "desc" }, take: 20 }),
       this.prisma.client.bookingCampaignRecipient.findMany({ where: { campaign: { artistId }, status: { in: ["drafted", "sent"] } }, select: { id: true, status: true, followUpDueAt: true, followUpTaskId: true }, orderBy: { followUpDueAt: "asc" }, take: 30 }),
       this.prisma.client.bookingProspect.findMany({ where: { artistId, status: "qualified" }, select: { id: true, name: true, status: true, kind: true, city: true, updatedAt: true }, orderBy: { updatedAt: "asc" }, take: 30 }),
@@ -1441,7 +1442,7 @@ export class ManagerService {
       orderBy: { createdAt: "desc" }
     });
   }
-  async currentBrief(artistId: string, cadence: "daily" | "weekly", actorLabel: string, actorOperatorId: string) {
+  async currentBrief(artistId: string, cadence: "daily" | "weekly") {
     const [latest, profile, latestTask, latestFactChange] = await Promise.all([
       this.latestBrief(artistId, cadence),
       this.profile(artistId),
@@ -1455,7 +1456,7 @@ export class ManagerService {
     const usesCurrentPolicy = latest?.promptVersion === PROMPT_VERSION;
     const usesShareableProviderContext = !managerRunFullContextSourceBinding(latest);
     if (latest && usesCurrentPolicy && usesShareableProviderContext && !predatesCompletedIntake && !predatesTaskChange && !predatesFactChange && latest.createdAt.getTime() >= Date.now() - maxAge) return latest;
-    return this.generateBrief(artistId, cadence, actorLabel, actorOperatorId);
+    return null;
   }
   async runScheduledBriefScan(now = new Date()) {
     const rows = await this.prisma.client.managerSettings.findMany({
@@ -1540,12 +1541,12 @@ export class ManagerService {
     return { ok: failed === 0, scanned: rows.length, generated: results.length, failed, notDue, runs: results };
   }
   async recommendation(artistId: string, id: string, outcome: "accepted" | "dismissed" | "completed", feedback: ManagerRecommendationFeedbackInput, actorLabel: string, actorOperatorId: string, actorIsOwner = false) {
-    const rec = await this.prisma.client.managerRecommendation.findFirst({ where: { id, managerRun: { artistId } }, include: { task: true, decision: true, memoryFact: true, project: true, event: true, approvals: true, managerRun: { select: { trace: true, message: { select: { id: true, conversationId: true, visibility: true, createdAt: true } } } } } });
+    const rec = await this.prisma.client.managerRecommendation.findFirst({ where: { id, managerRun: { artistId } }, include: { task: true, decision: true, memoryFact: true, project: true, event: true, approvals: { where: { artistId }, include: { reconciliations: { select: { outcome: true, createdAt: true } } } }, managerRun: { select: { trace: true, message: { select: { id: true, conversationId: true, visibility: true, createdAt: true } } } } } });
     if (!rec) throw new NotFoundException("Manager recommendation not found");
     if (!managerRunIsVisible(rec.managerRun, actorIsOwner ? "owner" : "normal")) throw new NotFoundException("Manager recommendation not found");
     const requestedReconciliation = outcome === "completed" && feedback.reason === "reconciled";
     const currentFollowThrough = requestedReconciliation ? projectManagerFollowThrough({ ...rec, approvals: rec.approvals ?? [] }) : null;
-    const reconcilableStages = ["approval_failed", "approval_simulated", "needs_tracking"];
+    const reconcilableStages = ["approval_simulated", "needs_tracking"];
     const mayReconcile = Boolean(currentFollowThrough && reconcilableStages.includes(currentFollowThrough.stage) && (
       rec.outcome === ManagerRecommendationOutcome.blocked ||
       (rec.outcome === ManagerRecommendationOutcome.accepted && currentFollowThrough.stage === "needs_tracking" && Boolean(currentFollowThrough.actionType))
@@ -1553,8 +1554,18 @@ export class ManagerService {
     const allowed: ManagerRecommendationOutcome[] = outcome === "completed"
       ? [ManagerRecommendationOutcome.suggested, ManagerRecommendationOutcome.accepted, ...(requestedReconciliation && mayReconcile ? [ManagerRecommendationOutcome.blocked] : [])]
       : [ManagerRecommendationOutcome.suggested];
+    if (
+      requestedReconciliation &&
+      (currentFollowThrough?.stage === "execution_in_progress" ||
+        currentFollowThrough?.stage === "execution_unknown" ||
+        currentFollowThrough?.stage === "approval_failed")
+    ) {
+      throw new BadRequestException(
+        "A linked uncertain or failed provider attempt must be reconciled in Approvals first"
+      );
+    }
     if (!allowed.includes(rec.outcome)) throw new BadRequestException("Recommendation has already been decided");
-    if (requestedReconciliation && !mayReconcile) throw new BadRequestException(currentFollowThrough?.stage === "execution_unknown" ? "An uncertain provider attempt cannot be closed or retried; reconcile it in Approvals first" : "This recommendation does not need receipt reconciliation");
+    if (requestedReconciliation && !mayReconcile) throw new BadRequestException("This recommendation does not need receipt reconciliation");
     if (requestedReconciliation && (!feedback.note || feedback.note.trim().length < 10)) throw new BadRequestException("Describe how this receipt was reconciled");
     if (outcome === "completed" && rec.task && rec.task.status !== "done") throw new BadRequestException("Complete the linked task before completing this recommendation");
     if (outcome === "completed" && rec.decision && !["reviewed", "superseded"].includes(rec.decision.status)) throw new BadRequestException("Review or supersede the linked decision before completing this recommendation");
@@ -2196,7 +2207,7 @@ export class ManagerService {
     });
     const current = await this.prisma.client.managerRecommendation.findFirst({
       where: { id, managerRun: { artistId } },
-      select: managerFollowThroughRecommendationSelect
+      select: managerFollowThroughRecommendationSelect(artistId)
     });
     if (!current) throw new NotFoundException("Manager recommendation not found");
     const canonical = {
@@ -2559,7 +2570,7 @@ export class ManagerService {
         where: { conversationId: id },
         include: {
           feedback: { where: { operatorId }, take: 1 },
-          managerRun: { select: { trace: true, recommendations: { select: managerFollowThroughRecommendationSelect } } }
+          managerRun: { select: { trace: true, recommendations: { select: managerFollowThroughRecommendationSelect(artistId) } } }
         },
         orderBy: { createdAt: "desc" },
         take: 50
@@ -2736,7 +2747,7 @@ export class ManagerService {
   private eventLogisticsTarget(client: Pick<Prisma.TransactionClient, "bandEvent">, artistId: string, eventId: string) {
     return client.bandEvent.findFirst({
       where: { id: eventId, artistId },
-      include: { approvals: { where: { sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, orderBy: { createdAt: "asc" } } }
+      include: { approvals: { where: { artistId, sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, include: { reconciliations: { select: { outcome: true, createdAt: true } } }, orderBy: { createdAt: "asc" } } }
     });
   }
   private async owned(model: "bandMember" | "managerGoal" | "managerInitiative", artistId: string, id: string) { const where = { id, artistId }; const row = model === "bandMember" ? await this.prisma.client.bandMember.findFirst({ where, select: { id: true } }) : model === "managerGoal" ? await this.prisma.client.managerGoal.findFirst({ where, select: { id: true } }) : await this.prisma.client.managerInitiative.findFirst({ where, select: { id: true } }); if (!row) throw new NotFoundException("Record not found"); return row; }

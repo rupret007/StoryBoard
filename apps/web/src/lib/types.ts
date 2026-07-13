@@ -7,6 +7,17 @@ export type DashboardStats = {
   tasks: number;
   overdueTasks: number;
   pendingApprovals: number;
+  approvalAttention: ApprovalLifecycleCounts;
+};
+
+export type ApprovalLifecycleCounts = {
+  pendingDecision: number;
+  readyToExecute: number;
+  executionInProgress: number;
+  needsReconciliation: number;
+  reconciled: number;
+  approvedNotExecutable: number;
+  attentionTotal: number;
 };
 
 export type DashboardInsights = {
@@ -25,6 +36,10 @@ export type DashboardInsights = {
     staleFollowUpCount: number;
     dueCampaignFollowUpCount: number;
     unreadBookingReplyCount: number;
+    approvalPendingDecisionCount: number;
+    approvalReadyToExecuteCount: number;
+    approvalExecutionInProgressCount: number;
+    approvalNeedsReconciliationCount: number;
     pendingApprovalAgingCount: number;
     approvalAgingThresholdDays: number;
     overdueClusterThreshold: number;
@@ -149,6 +164,13 @@ export type BookingCampaign = {
   deliveryMode: "draft_only" | "send_on_execution";
   marketSprintId?: string | null;
   approvalRequestId?: string | null;
+  approvalState?: {
+    approvalId: string;
+    status: string;
+    lifecycleStage: ApprovalLifecycleStage | null;
+    canPrepareReplacement: boolean;
+    requiresRepair: boolean;
+  } | null;
   recipients: BookingCampaignRecipient[];
 };
 
@@ -225,11 +247,98 @@ export type ApprovalRequest = {
   title: string;
   status: string;
   actionType: string;
+  opportunityId?: string | null;
   eventId?: string | null;
   managerRecommendationId?: string | null;
   proposedBy?: string | null;
   approvedBy?: string | null;
+  approvedAt?: string | null;
+  executionAttemptedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
   payload: unknown;
+};
+
+export type ApprovalLifecycleStage =
+  | "pending_decision"
+  | "approved_ready"
+  | "execution_in_progress"
+  | "failed_needs_reconciliation"
+  | "execution_unknown"
+  | "reconciled_external_effect"
+  | "reconciled_no_external_effect"
+  | "approved_not_executable";
+
+export type ApprovalReconciliationOutcome =
+  | "still_unknown"
+  | "external_effect_observed"
+  | "no_external_effect_observed";
+
+export type ApprovalReconciliationEvidence = {
+  checkedLocation: string;
+  providerReference: string | null;
+};
+
+export type ApprovalReconciliation = {
+  id: string;
+  outcome: ApprovalReconciliationOutcome;
+  note: string;
+  evidence: unknown;
+  policyVersion: "approval_reconciliation_v1";
+  observedAt: string;
+  actorLabel: string | null;
+  createdAt: string;
+};
+
+export type ApprovalLifecycleItem = ApprovalRequest & {
+  lifecycleStage: ApprovalLifecycleStage;
+  sourceKey: string | null;
+  opportunityId: string | null;
+  eventId: string | null;
+  managerRecommendationId: string | null;
+  campaignId: string | null;
+  proposedBy: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  executionAttemptedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deliverySummary: {
+    total: number;
+    pending: number;
+    drafted: number;
+    sending: number;
+    sent: number;
+    failed: number;
+    unknown: number;
+  } | null;
+  reconciliations: ApprovalReconciliation[];
+  latestReconciliation: ApprovalReconciliation | null;
+  terminalReconciliation: ApprovalReconciliation | null;
+  capabilities: {
+    canApprove: boolean;
+    canReject: boolean;
+    canExecute: boolean;
+    canReconcile: boolean;
+    canRetry: false;
+  };
+};
+
+export type ApprovalWorkQueue = {
+  policyVersion: "approval_lifecycle_v2";
+  observedAt: string;
+  capabilities: {
+    canDecide: boolean;
+    canExecute: boolean;
+    canReconcile: boolean;
+  };
+  counts: ApprovalLifecycleCounts;
+  pendingDecision: ApprovalLifecycleItem[];
+  readyToExecute: ApprovalLifecycleItem[];
+  executionInProgress: ApprovalLifecycleItem[];
+  needsReconciliation: ApprovalLifecycleItem[];
+  reconciled: ApprovalLifecycleItem[];
+  approvedNotExecutable: ApprovalLifecycleItem[];
 };
 
 export type ManagerProfile = {
@@ -322,7 +431,7 @@ export type ManagerOutcomeReview = { windowDays: number; from: string; through: 
 export type ShowReadinessGap = { code: string; category: "people" | "schedule" | "contacts" | "deal" | "advance" | "performance"; severity: "low" | "med" | "high"; title: string; detail: string; nextAction: string; evidenceIds: string[] };
 export type ShowReadiness = { eventId: string; title: string; startsAt?: string | null; daysUntil?: number | null; score: number; status: "ready" | "attention" | "not_ready" | "blocked"; confidence: number; confidenceLabel: "low" | "medium" | "high"; observedAt: string; headline: string; nextAction?: string | null; categories: { category: ShowReadinessGap["category"]; score: number; maxScore: number; detail: string }[]; gaps: ShowReadinessGap[]; evidenceIds: string[] };
 export type EventLogisticsChannel = "calendar" | "drive";
-export type EventLogisticsChannelState = "complete" | "simulated" | "not_prepared" | "pending" | "approved" | "rejected" | "failed" | "expired" | "stale" | "executed_unlinked";
+export type EventLogisticsChannelState = "complete" | "simulated" | "not_prepared" | "pending" | "approved" | "execution_in_progress" | "execution_unknown" | "rejected" | "failed" | "expired" | "stale" | "executed_unlinked" | "reconciled_external_effect" | "reconciled_no_external_effect";
 export type EventLogisticsAssessment = {
   policyVersion: "event_logistics_v1";
   eventId: string;
@@ -378,6 +487,16 @@ export type WeeklySummary = {
   overdueTasks: Task[];
   staleFollowUpsOlderThan7d: Task[];
   pendingApprovals: ApprovalRequest[];
+  approvalWorkQueue: {
+    policyVersion: "approval_lifecycle_v2";
+    counts: ApprovalLifecycleCounts;
+    pendingDecision: ApprovalRequest[];
+    readyToExecute: ApprovalRequest[];
+    executionInProgress: ApprovalRequest[];
+    needsReconciliation: ApprovalRequest[];
+    reconciled: ApprovalRequest[];
+    approvedNotExecutable: ApprovalRequest[];
+  };
   recentAudit: AuditEvent[];
   recentCommands: CommandRun[];
   recommendations: string[];

@@ -8,6 +8,10 @@ const apiPort = new URL(apiUrl).port || (apiUrl.startsWith("https:") ? "443" : "
 
 export default defineConfig({
   testDir: "./e2e",
+  // Manager journeys deliberately exercise several audited API transitions.
+  // Keep one real attempt, but allow slower developer and shared CI machines
+  // enough time to finish the workflow instead of failing mid-assertion.
+  timeout: 60_000,
   reporter: [["list"], ["json", { outputFile: "test-results/results.json" }]],
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),

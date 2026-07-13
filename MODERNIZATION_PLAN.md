@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-13
-Baseline for this round: `main` at `8f17fd8`
+Baseline for this round: `main` at `3640795`
 
 ## Product and current architecture
 
@@ -1722,7 +1722,8 @@ Validation status:
   formatted in each event's IANA timezone rather than the runner's timezone.
 - The production container bundle rebuilt and passed migration, seed,
   database/Redis/worker readiness, web HTTP, and dev-session smoke. The bundle
-  is left running with the validated images for local use.
+  was left running with the validated images at the end of that historical
+  validation.
 
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
@@ -1890,16 +1891,17 @@ Implementation and safety boundary:
   normal fact may be refreshed through the recommendation path; the explicit
   owner-controlled memory editor remains the only path for private or archived
   records.
-- Failed, simulated, and typed-but-orphaned receipts may be closed only with a
-  written human reconciliation note. The `reconciled` result closes the Manager
-  receipt without changing an Approval or claiming provider execution or
-  success. A claimed provider attempt with no known result remains read-only and
-  cannot be closed or retried from Manager. In a mixed approval batch, that
-  unknown attempt takes precedence over failed, rejected, or expired siblings
-  so a known sibling result cannot make the provider write retryable.
+- At this package's delivery, failed, simulated, and typed-but-orphaned receipts
+  could be closed with a written Manager reconciliation note. The durable
+  Approval reconciliation package below supersedes that behavior for every
+  linked failed or uncertain Approval: those records now require append-only
+  provider evidence in the Approval Center. Manager note closure remains only
+  for simulated and typed-but-orphaned receipts and never proves provider
+  execution or success.
 - Rejected and expired approvals have a distinct terminal receipt presentation
-  and never offer Manager reconciliation. Note-backed closure remains limited
-  to blocked failures, simulations, and accepted typed-orphan receipts.
+  and never offer Manager reconciliation. Under the current policy,
+  note-backed Manager closure is limited to simulations and accepted
+  typed-orphan receipts.
 - Every receipt exposes explicit `canMutate` and `canReconcile` capabilities.
   A sanitized member receipt from owner-private work is navigation-only and
   sets both false; the Manager UI uses those flags before showing Mark handled
@@ -1929,16 +1931,175 @@ Validation completed:
   passes API/web health, API readiness, host-visible auth-link, and session-
   cookie smoke checks.
 
-### P1 — Make approved and uncertain work visible (next)
+### P1 — Make approved and uncertain work visible (completed and release-validated 2026-07-13)
 
-- [ ] Count approved-ready work separately from pending approval decisions in
-  dashboard intelligence, the shell badge, summaries, and digests.
-- [ ] Link approval lifecycle notifications directly to `/approvals`.
-- [ ] Add a read-only reconciliation view for failed and one-shot-claimed
-  provider actions. Never expose a blind Retry action when the outside result
-  may be unknown.
-- [ ] Distinguish truly executable approvals from quarantined/non-executable
-  approval records in Manager facts and guidance.
+Root cause and boundary:
+
+- Pending human decisions were the only approval count shown consistently in
+  the shell and dashboard. An approved request awaiting execution, a failed
+  request, and an approved one-shot claim with an unknown provider outcome
+  could therefore disappear from the operator's global work view.
+- Approval execution eligibility also existed in more than one caller. The
+  lifecycle must be code-owned and shared so a presentation layer cannot make
+  quarantined work appear executable or silently hide a supported provider
+  action.
+- This package is visibility and safe routing only. It does not add a retry,
+  repair, or provider-write path; failed and uncertain outcomes remain human
+  reconciliation work.
+
+- [x] Add `approval_lifecycle_v1` as the initial shared projection for pending
+  decisions, approved-ready work, unknown attempted execution, failed work
+  needing reconciliation, and approved records with no executable StoryBoard
+  action. The durable receipt package below supersedes it with v2.
+- [x] Centralize the executable action allowlist for
+  `outbound_email_batch`, `outbound_email_send_batch`,
+  `calendar_hold_batch`, and `drive_ensure_folder`; both the compatibility
+  ready-to-execute route and execution service use that policy.
+- [x] Add tenant-scoped `GET /approvals/work-queue` with mutually exclusive
+  buckets, counts, source links, campaign-delivery status summaries, and
+  caller capabilities. Viewers receive the same read projection with every
+  mutation capability disabled.
+- [x] Count approved-ready work separately from pending approval decisions in
+  dashboard intelligence, the desktop/mobile shell, weekly summary, and
+  workflow digests. A failed server-side read renders an unavailable state
+  rather than a false all-clear.
+- [x] Link approval lifecycle notifications and digest approval attention to
+  `/approvals`.
+- [x] Add a read-only, reconciliation-first Approval Center view for failed
+  and stale one-shot-claimed provider actions. The projection always returns
+  `canRetry=false`; unknown execution is never offered as executable or safe to
+  repeat.
+- [x] Distinguish executable, uncertain, failed, and non-executable approvals
+  in Manager facts, ranking, follow-through, event logistics, and weekly
+  guidance. An approved internal/non-provider record can finish without
+  pretending a provider execution step exists.
+
+Validation status:
+
+- Root typecheck and lint pass. Compiled tests pass 10/10 shared cases and
+  213/213 API assertions across 208 top-level cases, including the shared
+  lifecycle policy, caller projections, one-shot execution safety, and Manager
+  follow-through behavior.
+- Both production applications build successfully. The
+  `manager_os_v33` / `manager_evals_v37` offline release gate passes all 81/81
+  checks at 100% safety.
+- All 5/5 disposable-Postgres workflows pass across 39 forward migrations. The
+  new real-service approval queue case verifies artist isolation plus
+  owner mutation capabilities, viewer read-only capabilities, and non-member
+  rejection.
+- All 14/14 production-build Chromium journeys pass, including approved
+  immediate-send delivery and a stale event-logistics execution that is
+  quarantined as failed and remains non-retryable across Dashboard, Approvals,
+  and Operations.
+- The read-only relationship diagnostic reports zero issues on both the
+  disposable test database and the normal local database. The normal database
+  was 18 migrations behind; all missing additive forward migrations deployed
+  successfully before its zero-issue diagnostic.
+- The rebuilt Compose bundle passed API health, web HTTP, dependency readiness,
+  host-visible Dev login, session-cookie creation, and authenticated Dashboard
+  smoke checks and was left running at the end of that historical validation.
+- This approval-visibility package introduces no Prisma schema change or new
+  migration.
+
+### P1 — Durable approval reconciliation (completed and release-validated 2026-07-13)
+
+Root cause and boundary:
+
+- Read-only visibility could identify a failed or uncertain provider attempt,
+  but there was no durable, tenant-safe way to record what a band member checked.
+  Manager note closure was not an adequate substitute because it did not own the
+  Approval or provide provider-specific evidence.
+- Reconciliation records evidence only. It never mutates the original Approval
+  status or one-shot execution claim, calls a provider, converts a human check
+  into recovered provider success, or exposes a Retry action.
+
+- [x] Add append-only `ApprovalReconciliation` rows and forward migration
+  `20260714030000_approval_reconciliation_receipts`. The composite
+  approval/artist foreign key prevents cross-artist evidence, artist-scoped
+  idempotency makes exact replay safe, and a database constraint permits many
+  `still_unknown` checks but at most one terminal conclusion.
+- [x] Add strict `GET` and `POST /approvals/:id/reconciliations` routes. Owners,
+  members, and viewers may read bounded history; owners and members may append
+  evidence. The input requires an outcome, reviewed note, checked location,
+  offset observation time, and UUID idempotency key. An external-effect result
+  also requires a provider reference. Unknown fields and credential-shaped
+  evidence fail closed.
+- [x] Advance the shared work-queue policy to `approval_lifecycle_v2` with six
+  mutually exclusive buckets, including `executionInProgress` for a fresh
+  approved execution claim and informational `reconciled` history. A fresh
+  claim remains leased for one hour, is excluded from `attentionTotal`, and
+  cannot be reconciled while its provider call may still be running. A claim
+  without a final result becomes `execution_unknown` at one hour.
+  `still_unknown` then remains in live attention;
+  `external_effect_observed` and `no_external_effect_observed` are conclusive
+  but retain the immutable original failure/claim. Every projected item
+  remains `canRetry=false`.
+- [x] Bound the real Google execution window with a 30-second timeout on each
+  Gmail, Calendar, and Drive request, and cap both Gmail draft and immediate-
+  send approval batches at 25 recipients. These bounds remain below the
+  one-hour execution lease without making a timed-out request retryable.
+- [x] Stitch terminal evidence through event logistics, failed campaign
+  replacement, Manager follow-through, dashboard/shell attention, weekly
+  summary, digests, and periodic Telegram scanning. No-effect evidence permits
+  a separate newly reviewed request. External-effect evidence blocks duplicate
+  preparation and keeps linked Manager work blocked for manual repair; it does
+  not auto-link a provider record or claim provider success.
+- [x] Add focused unit, disposable-database, relationship-diagnostic, and
+  production-browser coverage for strict validation, tenant/role boundaries,
+  exact replay, one-terminal concurrency, unchanged Approval state, no adapter
+  call, campaign replacement, event-logistics behavior, append-only UI history,
+  reload persistence, and live-attention clearing.
+- [x] Finish the role and state-presentation audit in the web app. Manager,
+  event day-of, project detail, and campaign mutation controls now fail closed
+  for viewers or unverified access; agreement-template administration is shown
+  only to owners; a fresh execution lease is never styled as success; campaign
+  load failure and the 25-recipient cap are explicit; and desktop/mobile
+  navigation exposes current-page and modal keyboard semantics.
+- [x] Close the final independent-review races: `GET /manager/brief` is now a
+  strict cache-only read with generation kept behind the member/owner `POST`;
+  campaign recipient additions and approval preparation share a database row
+  lock so concurrent requests cannot exceed the 25-recipient cap or render a
+  changing batch; and crossing the desktop breakpoint closes the mobile drawer
+  and restores document scrolling.
+
+Validation status:
+
+- Prisma generation and the complete root quality gate pass: typecheck, lint,
+  11/11 shared tests, 235/235 API assertions across 230 top-level tests, both
+  production builds (21 web routes and 233 API files), and `git diff --check`.
+- The `manager_os_v33` / `manager_evals_v38` offline release gate passes all
+  82/82 checks at 100% safety, including fresh-versus-stale execution claims
+  and human reconciliation boundaries.
+- All 5/5 disposable-Postgres workflows pass after deploying all 40 forward
+  migrations. Prisma reports the local schema current with no schema diff.
+- All 15/15 production-build Chromium journeys pass on a reset explicit test
+  database, including execution quarantine, append-only reconciliation, safe
+  replacement preparation, immediate-send delivery, and Manager review-queue
+  freshness. The final local run used the exact Playwright-pinned Chromium 1200
+  runtime after stopping the already-running application containers so the test
+  servers could own their isolated ports.
+- The read-only relationship diagnostic reports zero issues on the normal
+  local database after the additive reconciliation migration deployed. The
+  rebuilt Compose bundle passes migration, seed, Postgres/Redis/API readiness,
+  web HTTP, host-visible Dev login, session-cookie creation, and authenticated
+  Dashboard smoke; the validated services remain running.
+- The integration and browser suites still emit the tracked `pg@8.14.1`
+  concurrent-`client.query()` deprecation warning. It is non-fatal and remains
+  the next database-client cleanup before any `pg@9` upgrade.
+
+### P1 — Bounded approval reads and database-client warning (next)
+
+- [ ] Add explicit database bounds and a compatible pagination contract for
+  the approval work queue and other global list/summary reads before artist
+  histories can grow without limit. Preserve reconciliation-first ordering and
+  complete attention counts.
+- [ ] Move the legacy `GET /approvals/ready-to-execute` action-type restriction
+  into its database predicate for bounded retrieval. Keep
+  `approval_lifecycle_v2` as the final shared classifier/authorization guard so
+  database filtering cannot become a second policy source.
+- [ ] Trace and remove the `pg` concurrent-`client.query()` deprecation warning
+  observed during the Postgres and Chromium suites before any upgrade to
+  `pg@9`; preserve current transaction and connection-ownership semantics.
 
 ### P2 — requires deployment or product decisions
 
@@ -1973,6 +2134,45 @@ Before release, run a read-only diagnostic for historical relationships whose
 artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
+
+- 2026-07-13: Implemented durable append-only Approval reconciliation without
+  changing the original execution status/claim or adding a provider call or
+  retry. The new receipt policy records `still_unknown`, observed external
+  effect, or no observed external effect with tenant-bound provenance and exact
+  idempotency; `approval_lifecycle_v2` exposes conclusive checks as
+  informational history. No-effect evidence may unlock only a separate newly
+  reviewed request. External-effect evidence blocks duplicate work and leaves
+  linked Manager follow-through blocked for manual repair. Final validation
+  passes Prisma generation, the complete root quality gate, 11/11 shared tests,
+  235/235 API assertions across 230 top-level tests, both production builds,
+  the 82/82 Manager gate at 100% safety, all 5/5 database workflows across 40
+  migrations, 15/15 Chromium journeys, schema-drift and relationship
+  diagnostics, and rebuilt-container authenticated smoke.
+
+- 2026-07-13: Closed the execution/reconciliation race by projecting a fresh
+  approved one-shot claim as `execution_in_progress` for one hour. That sixth
+  work-queue bucket is informational rather than live attention and exposes no
+  reconciliation action; only a claim still lacking a final result at lease
+  expiry becomes `execution_unknown`. Real Gmail, Calendar, and Drive requests
+  now use a 30-second per-request timeout, and Gmail draft/send approval
+  batches are capped at 25. The final validation recorded in the durable
+  reconciliation section above includes this hardening.
+
+- 2026-07-13: Implemented the shared approval work-queue projection and
+  stitched it through Approvals, dashboard intelligence, shell navigation,
+  Manager reasoning/follow-through, event logistics, weekly summary, workflow
+  notifications, and digests. The operator view now separates decisions,
+  ready execution, unknown/failed reconciliation, and approved records that
+  have no execution step; viewer capabilities remain read-only and no blind
+  retry path was added. Release validation passes root typecheck/lint, 10/10
+  shared cases, 213/213 API assertions across 208 top-level cases, both
+  production builds, the 81/81 Manager gate at 100% safety, all 5/5 Postgres
+  workflows across 39 migrations, and all 14/14 Chromium journeys. Relationship
+  diagnostics report zero issues on both the disposable database and the
+  normal local database after that local database successfully received 18
+  missing additive migrations. The rebuilt Compose bundle passes health,
+  readiness, host-login, session-cookie, and authenticated-Dashboard smoke;
+  those services were left running at the end of that historical validation.
 
 - 2026-07-13: Completed a second code/logic and documentation review centered
   on the human approval-to-execution loop. The audit found that the API returned

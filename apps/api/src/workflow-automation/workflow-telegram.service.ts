@@ -220,7 +220,7 @@ export class WorkflowTelegramService {
       "",
       `Approval: ${input.title}`,
       `Action: ${input.actionType}`,
-      `Open StoryBoard to retry or fix.`
+      `Open StoryBoard to inspect and reconcile it. Check the provider before preparing any replacement; do not retry an uncertain write.`
     ].join("\n");
     await this.sendUrgent({
       artistId: input.artistId,

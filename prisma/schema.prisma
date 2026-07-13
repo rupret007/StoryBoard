@@ -114,6 +114,12 @@ enum ApprovalStatus {
   failed
 }
 
+enum ApprovalReconciliationOutcome {
+  still_unknown
+  external_effect_observed
+  no_external_effect_observed
+}
+
 enum AuditSeverity {
   info
   warning
@@ -364,6 +370,7 @@ model Operator {
   managerGoalProgressRecorded       ManagerGoalProgressEvent[]   @relation("ManagerGoalProgressRecorder")
   managerEvaluationRunsCreated      ManagerEvaluationRun[]       @relation("ManagerEvaluationRunner")
   bandMemberCheckInsRecorded        BandMemberCheckIn[]          @relation("BandMemberCheckInRecorder")
+  approvalReconciliationsRecorded   ApprovalReconciliation[]     @relation("ApprovalReconciliationRecorder")
 }
 
 model ArtistMembership {
@@ -398,6 +405,7 @@ model Artist {
   tasks                       Task[]
   taskDependencies            TaskDependency[]
   approvals                   ApprovalRequest[]
+  approvalReconciliations     ApprovalReconciliation[]
   commandRuns                 CommandRun[]
   integrations                IntegrationConnection[]
   memberships                 ArtistMembership[]
@@ -1283,11 +1291,37 @@ model ApprovalRequest {
   managerRecommendation   ManagerRecommendation?    @relation(fields: [managerRecommendationId], references: [id], onDelete: SetNull)
   bookingCampaign         BookingCampaign?          @relation("CampaignApproval")
   campaignDeliveries      BookingCampaignDelivery[]
+  reconciliations         ApprovalReconciliation[]
 
   @@unique([artistId, sourceKey])
+  @@unique([id, artistId])
   @@index([artistId, status, createdAt])
   @@index([eventId, actionType, status])
   @@index([managerRecommendationId])
+}
+
+model ApprovalReconciliation {
+  id                String                        @id @default(cuid())
+  artistId          String
+  approvalId        String
+  outcome           ApprovalReconciliationOutcome
+  resolutionKey     String?
+  note              String
+  evidence          Json
+  idempotencyKey    String
+  policyVersion     String                        @default("approval_reconciliation_v1")
+  observedAt        DateTime
+  actorLabel        String?
+  actorOperatorId   String?
+  createdAt         DateTime                      @default(now())
+  artist            Artist                        @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  approval          ApprovalRequest               @relation(fields: [approvalId, artistId], references: [id, artistId], onDelete: Cascade, map: "ApprovalReconciliation_approvalId_fkey")
+  actorOperator     Operator?                      @relation("ApprovalReconciliationRecorder", fields: [actorOperatorId], references: [id], onDelete: SetNull)
+
+  @@unique([artistId, idempotencyKey])
+  @@unique([approvalId, resolutionKey])
+  @@index([approvalId, createdAt])
+  @@index([artistId, outcome, createdAt])
 }
 
 model AuditEvent {

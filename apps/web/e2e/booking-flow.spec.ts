@@ -87,6 +87,9 @@ async function ensureManagerFoundation(page: Page, checkIns = false) {
   } else {
     await artistApi(page, artistId, "/manager/profile", "PUT", managerFoundationProfile);
   }
+  await artistApi(page, artistId, "/manager/settings", "PUT", {
+    timezone: "America/Chicago"
+  });
 
   const existingMembers = await artistApi<BrowserTestMember[]>(page, artistId, "/manager/members");
   const members: BrowserTestMember[] = [];
@@ -118,6 +121,20 @@ async function ensureQualifiedProspect(page: Page, artistId: string) {
     city: "Chicago"
   });
 }
+
+test("mobile navigation closes and unlocks scrolling at the desktop breakpoint", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signInForBrowserTest(page);
+
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(page.getByRole("dialog", { name: "Navigation" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(page.getByRole("dialog", { name: "Navigation" })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+  await expect(page.getByRole("navigation", { name: "Main" }).first()).toBeVisible();
+});
 
 test("manual prospect can gain a buyer and enter an approval-ready campaign", async ({ page }) => {
   const suffix = Date.now().toString(36);
@@ -925,6 +942,8 @@ test("confirmed event logistics move through approvals before provider execution
   await expect(logistics.getByText("No Drive folder is linked yet.", { exact: true })).toBeVisible();
 
   await page.goto("/manager");
+  await page.getByTestId("manager-brief-priorities").getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText(/manager brief refreshed\./i)).toBeVisible();
   const recommendationTitle = `Prepare ${eventTitle} logistics`;
   const logisticsRecommendation = page.getByText(recommendationTitle, { exact: true }).locator("xpath=ancestor::div[contains(@class,'sm:flex-row')][1]");
   await expect(logisticsRecommendation).toContainText(/Nothing is written to Google until/i);
@@ -940,8 +959,12 @@ test("confirmed event logistics move through approvals before provider execution
   await page.goto("/approvals");
   const calendarTitle = `Add ${eventTitle} to Google Calendar`;
   const driveTitle = `Create Drive folder for ${eventTitle}`;
-  const pendingCard = (title: string) => page.getByRole("heading", { name: title }).locator("xpath=ancestor::*[contains(@class,'border-violet-500')][1]");
-  const readyCard = (title: string) => page.getByRole("heading", { name: title }).locator("xpath=ancestor::*[contains(@class,'border-cyan-500')][1]");
+  const pendingCard = (title: string) => page
+    .getByRole("region", { name: "Pending decisions" })
+    .getByRole("article", { name: title });
+  const readyCard = (title: string) => page
+    .getByRole("region", { name: "Approved — ready to execute" })
+    .getByRole("article", { name: title });
   for (const title of [calendarTitle, driveTitle]) {
     const card = pendingCard(title);
     await expect(card.getByRole("link", { name: "Open event" })).toHaveAttribute("href", /\/operations\/events\//);
@@ -989,6 +1012,125 @@ test("confirmed event logistics move through approvals before provider execution
   await expect(logisticsFollowThrough).toContainText(/not evidence that a provider action ran or succeeded/i);
 });
 
+test("stale event logistics execution is quarantined, reconciled append-only, and never retried", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  const eventTitle = `E2E stale logistics ${suffix}`;
+  const eventStart = new Date(Date.now() + 12 * 86400000);
+  eventStart.setMinutes(0, 0, 0);
+  const eventEnd = new Date(eventStart.getTime() + 3 * 3600000);
+
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const event = await artistApi<{ id: string }>(page, artistId, "/events", "POST", {
+    type: "gig",
+    status: "confirmed",
+    title: eventTitle,
+    startsAt: eventStart.toISOString(),
+    endsAt: eventEnd.toISOString(),
+    timezone: "America/Chicago"
+  });
+  await artistApi(page, artistId, `/events/${event.id}/prepare-logistics-approvals`, "POST", {});
+
+  const approvalTitle = `Add ${eventTitle} to Google Calendar`;
+  const queue = await artistApi<{
+    pendingDecision: Array<{ id: string; title: string }>;
+  }>(page, artistId, "/approvals/work-queue");
+  const calendarApproval = queue.pendingDecision.find((approval) => approval.title === approvalTitle);
+  expect(calendarApproval, "Preparing event logistics must create a Calendar approval").toBeTruthy();
+  await artistApi(page, artistId, `/approvals/${calendarApproval!.id}/approve`, "POST", {});
+
+  // Change an authoritative provider-write input after approval. The approved
+  // fingerprint is now stale, so execution must fail before the mock/real
+  // Calendar adapter is called and the one-shot claim must stay quarantined.
+  await artistApi(page, artistId, `/events/${event.id}`, "PATCH", {
+    endsAt: new Date(eventEnd.getTime() + 30 * 60000).toISOString()
+  });
+  const failed = await artistApi<{ status: string; executionAttemptedAt: string | null }>(
+    page,
+    artistId,
+    `/approvals/${calendarApproval!.id}/execute`,
+    "POST",
+    {}
+  );
+  expect(failed.status).toBe("failed");
+  expect(failed.executionAttemptedAt).toBeTruthy();
+
+  await page.goto("/dashboard");
+  await expect(page.getByRole("heading", { name: "Provider work needs reconciliation" })).toBeVisible();
+  await expect(page.getByText(/StoryBoard will not retry this work automatically/i)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Review safely" })).toHaveAttribute("href", "/approvals#needs-reconciliation");
+
+  await page.goto("/approvals");
+  await expect(page.getByRole("heading", { name: "Needs reconciliation" })).toBeVisible();
+  const approvalCard = page.getByRole("article", { name: approvalTitle });
+  await expect(approvalCard).toContainText("Execution failed");
+  await expect(approvalCard).toContainText("This request cannot run again");
+  await expect(approvalCard.getByRole("button", { name: /^Execute$/ })).toHaveCount(0);
+  await expect(approvalCard.getByRole("button", { name: /Dry run|Retry/i })).toHaveCount(0);
+
+  const reconciliationNote =
+    "Searched the provider calendar by title and date; no matching event exists.";
+  await approvalCard.getByLabel("What did you find?").selectOption("no_external_effect_observed");
+  await approvalCard.getByLabel("Where did you check?").fill("Google Calendar event search");
+  await approvalCard.getByLabel("Review note").fill(reconciliationNote);
+  const reconciliationRecorded = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith(`/approvals/${calendarApproval!.id}/reconciliations`) &&
+      response.ok()
+  );
+  await approvalCard.getByRole("button", { name: "Record provider check" }).click();
+  await reconciliationRecorded;
+
+  const needsReconciliation = page.getByRole("region", { name: "Needs reconciliation" });
+  await expect(needsReconciliation.getByRole("article", { name: approvalTitle })).toHaveCount(0);
+  const reconciledChecks = page.getByRole("region", { name: "Reconciled provider checks" });
+  await expect(reconciledChecks).toBeVisible();
+  let reconciledCard = reconciledChecks.getByRole("article", { name: approvalTitle });
+  await expect(reconciledCard).toContainText("No external effect found");
+  await expect(reconciledCard.getByRole("region", { name: "Append-only reconciliation history" })).toContainText("append-only · 1");
+  await expect(reconciledCard).toContainText(reconciliationNote);
+  await expect(reconciledCard).toContainText("Google Calendar event search");
+  await expect(reconciledCard.getByRole("button", { name: /^Execute$/ })).toHaveCount(0);
+  await expect(reconciledCard.getByRole("button", { name: /Dry run|Retry|Record provider check/i })).toHaveCount(0);
+
+  await page.reload();
+  reconciledCard = page.getByRole("region", { name: "Reconciled provider checks" }).getByRole("article", { name: approvalTitle });
+  await expect(reconciledCard).toContainText("No external effect found");
+  await expect(reconciledCard).toContainText(reconciliationNote);
+  await expect(reconciledCard.getByRole("button", { name: /Execute|Dry run|Retry|Record provider check/i })).toHaveCount(0);
+
+  await page.goto("/dashboard");
+  await expect(page.getByRole("heading", { name: "Provider work needs reconciliation" })).toHaveCount(0);
+
+  const reconciledQueue = await artistApi<{
+    needsReconciliation: Array<{ id: string }>;
+    reconciled: Array<{ id: string; lifecycleStage: string }>;
+  }>(page, artistId, "/approvals/work-queue");
+  expect(reconciledQueue.needsReconciliation.some((approval) => approval.id === calendarApproval!.id)).toBe(false);
+  expect(
+    reconciledQueue.reconciled.some(
+      (approval) =>
+        approval.id === calendarApproval!.id &&
+        approval.lifecycleStage === "reconciled_no_external_effect"
+    )
+  ).toBe(true);
+
+  await page.goto("/operations");
+  const eventCard = page.locator("article").filter({ hasText: eventTitle });
+  await expect(eventCard).toBeVisible();
+  await eventCard.getByText("Manage readiness details", { exact: true }).click();
+  const logistics = eventCard.locator(`[data-testid="event-logistics-${event.id}"]`);
+  await expect(logistics.getByText("no external effect found", { exact: true })).toBeVisible();
+  await expect(logistics.getByRole("status")).toContainText(/separate new approval can be prepared safely/i);
+  await expect(logistics.getByRole("button", { name: /Retry|Execute/i })).toHaveCount(0);
+  await expect(
+    logistics.getByRole("button", {
+      name: /Prepare (?:Drive and )?Calendar approval/
+    })
+  ).toBeVisible();
+});
+
 test("approved immediate-send campaigns remain executable and create follow-up work", async ({ page }) => {
   const suffix = Date.now().toString(36);
   const prospectName = `E2E immediate buyer ${suffix}`;
@@ -1032,24 +1174,28 @@ test("approved immediate-send campaigns remain executable and create follow-up w
 
   await page.goto("/approvals");
   const approvalTitle = `Send 1 pitch email(s) — ${campaignName}`;
-  const pendingCard = page.getByRole("heading", { name: approvalTitle }).locator("xpath=ancestor::*[contains(@class,'border-violet-500')][1]");
+  const pendingCard = page
+    .getByRole("region", { name: "Pending decisions" })
+    .getByRole("article", { name: approvalTitle });
   await expect(pendingCard).toBeVisible();
   const approved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/approve") && response.ok());
   await pendingCard.getByRole("button", { name: "Approve" }).click();
   await approved;
 
-  const readyCard = page.getByRole("heading", { name: approvalTitle }).locator("xpath=ancestor::*[contains(@class,'border-cyan-500')][1]");
+  const readyCard = page
+    .getByRole("region", { name: "Approved — ready to execute" })
+    .getByRole("article", { name: approvalTitle });
   await expect(readyCard).toBeVisible();
-  await expect(readyCard.getByText("outbound_email_send_batch", { exact: true })).toBeVisible();
+  await expect(readyCard.getByText("outbound email send batch", { exact: true })).toBeVisible();
   const executed = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/execute") && response.ok());
   await readyCard.getByRole("button", { name: "Execute", exact: true }).click();
   await executed;
   await expect(readyCard).toHaveCount(0);
 
   await page.goto("/booking-campaigns");
-  const campaignCard = page.getByRole("heading", { name: campaignName }).locator("xpath=ancestor::div[contains(@class,'shadow-[var(--shadow-sm)]')][1]");
+  const campaignCard = page.getByRole("article", { name: campaignName });
   await expect(campaignCard).toContainText("sent");
-  await expect(campaignCard.getByRole("button", { name: "Replied", exact: true })).toBeVisible();
+  await expect(campaignCard.getByRole("button", { name: `Mark ${prospectName} as replied`, exact: true })).toBeVisible();
   await page.goto("/tasks");
   await expect(page.getByRole("cell", { name: `Follow up with ${prospectName}`, exact: true })).toBeVisible();
 });

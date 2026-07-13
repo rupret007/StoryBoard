@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import type { GmailAdapter, GmailDraft, GmailThreadMessage } from "../adapter.types";
 
 type GmailPart = { mimeType?: string | null; body?: { data?: string | null } | null; parts?: GmailPart[] | null };
+const GOOGLE_REQUEST_TIMEOUT_MS = 30_000;
 
 function rfc822(draft: GmailDraft): string {
   const subject = draft.subject.replace(/\r?\n/g, " ").trim();
@@ -32,10 +33,13 @@ export class RealGmailAdapter implements GmailAdapter {
     oauth2.setCredentials({ refresh_token: this.refreshToken });
     const gmail = google.gmail({ version: "v1", auth: oauth2 });
     const raw = Buffer.from(rfc822(input), "utf8").toString("base64url");
-    const res = await gmail.users.drafts.create({
-      userId: "me",
-      requestBody: { message: { raw, ...(input.threadId ? { threadId: input.threadId } : {}) } }
-    });
+    const res = await gmail.users.drafts.create(
+      {
+        userId: "me",
+        requestBody: { message: { raw, ...(input.threadId ? { threadId: input.threadId } : {}) } }
+      },
+      { timeout: GOOGLE_REQUEST_TIMEOUT_MS }
+    );
     const draftId = res.data.id ?? "unknown";
     const preview = `To: ${input.to}\nSubject: ${input.subject}\n\n${input.body}`;
     return { draftId, messageId: res.data.message?.id ?? undefined, threadId: res.data.message?.threadId ?? undefined, preview };
@@ -46,7 +50,10 @@ export class RealGmailAdapter implements GmailAdapter {
     oauth2.setCredentials({ refresh_token: this.refreshToken });
     const gmail = google.gmail({ version: "v1", auth: oauth2 });
     const raw = Buffer.from(rfc822(input), "utf8").toString("base64url");
-    const res = await gmail.users.messages.send({ userId: "me", requestBody: { raw, ...(input.threadId ? { threadId: input.threadId } : {}) } });
+    const res = await gmail.users.messages.send(
+      { userId: "me", requestBody: { raw, ...(input.threadId ? { threadId: input.threadId } : {}) } },
+      { timeout: GOOGLE_REQUEST_TIMEOUT_MS }
+    );
     return {
       messageId: res.data.id ?? "unknown",
       threadId: res.data.threadId ?? undefined,
@@ -58,9 +65,15 @@ export class RealGmailAdapter implements GmailAdapter {
     const oauth2 = new google.auth.OAuth2(this.clientId, this.clientSecret);
     oauth2.setCredentials({ refresh_token: this.refreshToken });
     const gmail = google.gmail({ version: "v1", auth: oauth2 });
-    const profile = await gmail.users.getProfile({ userId: "me" });
+    const profile = await gmail.users.getProfile(
+      { userId: "me" },
+      { timeout: GOOGLE_REQUEST_TIMEOUT_MS }
+    );
     const userEmail = profile.data.emailAddress?.toLowerCase();
-    const result = await gmail.users.threads.get({ userId: "me", id: threadId, format: "full" });
+    const result = await gmail.users.threads.get(
+      { userId: "me", id: threadId, format: "full" },
+      { timeout: GOOGLE_REQUEST_TIMEOUT_MS }
+    );
     const header = (headers: { name?: string | null; value?: string | null }[] | undefined, name: string) =>
       headers?.find((item) => item.name?.toLowerCase() === name.toLowerCase())?.value ?? undefined;
     const bodyText = (part: GmailPart | null | undefined): string | undefined => {

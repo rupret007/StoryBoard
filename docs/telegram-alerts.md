@@ -46,12 +46,22 @@ These flags are **independent** of per-operator **`workflowNotifyPrefs`** (in-ap
 
 | Signal | Category key | Dedupe (examples) |
 | ------ | -------------| ----------------- |
+| Unresolved failed or stale one-shot-claimed approval outcomes needing provider reconciliation | `approvals` | `approval_reconciliation:<UTC-date>` |
 | Pending approvals older than the **urgent** aging window (derived from **`workflowPendingApprovalDays`**) | `approvals` | `approval_aging:<UTC-date>` |
 | Overdue task **cluster** (threshold depends on open-task roster size) | `overdueTasks` | `overdue_cluster:<UTC-date>` |
 | Stale follow-up **cluster** | `staleFollowUps` | `stale_cluster:<UTC-date>` |
 | Approval execution **failed** | `approvals` | `approval_failed:<approvalId>` |
 
 Exact numeric rules live in **`apps/api/src/workflow-automation/urgent-channel.constants.ts`** and match the **urgent** thresholds described in **`docs/architecture.md`** / **`GET /dashboard/insights`**.
+
+A fresh approved execution claim is `execution_in_progress` for one hour and
+does not generate this reconciliation alert while the provider call may still
+be running. If it still has no result when the lease expires, it becomes
+`execution_unknown` and enters the signal. A `still_unknown` Approval receipt
+keeps the reconciliation signal active. Either conclusive outcome removes it
+from subsequent periodic scans without changing the original Approval.
+Existing Telegram messages, one-shot failure alerts, notification rows, dedupe
+rows, and audits are historical and are not deleted.
 
 ## Intentionally unsupported (Phase 5B)
 

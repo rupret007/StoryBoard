@@ -1,33 +1,28 @@
 import { PageHeader } from "@storyboard/ui";
 import { ApprovalsClient } from "./approvals-client";
 import { serverApiFetch } from "@/lib/api-server";
-import type { ApprovalRequest } from "@/lib/types";
+import type { ApprovalWorkQueue } from "@/lib/types";
 
 export default async function ApprovalsPage() {
-  let pending: ApprovalRequest[] = [];
-  let readyToExecute: ApprovalRequest[] = [];
+  let queue: ApprovalWorkQueue | null = null;
+  let loadError: string | null = null;
+
   try {
-    [pending, readyToExecute] = await Promise.all([
-      serverApiFetch<ApprovalRequest[]>("/approvals/pending", { cache: "no-store" }),
-      serverApiFetch<ApprovalRequest[]>("/approvals/ready-to-execute", {
-        cache: "no-store"
-      })
-    ]);
+    queue = await serverApiFetch<ApprovalWorkQueue>("/approvals/work-queue", {
+      cache: "no-store"
+    });
   } catch {
-    pending = [];
-    readyToExecute = [];
+    loadError =
+      "StoryBoard could not load the approval queue. Its status is unknown; refresh after the API is available.";
   }
 
   return (
     <div className="space-y-8">
       <PageHeader
         title="Approval center"
-        description="Review structured actions before any outbound or risky work. Decisions are audited."
+        description="Decide what may proceed, run approved work deliberately, and preserve append-only evidence when a provider outcome must be checked."
       />
-      <ApprovalsClient
-        initialPending={pending}
-        initialReadyToExecute={readyToExecute}
-      />
+      <ApprovalsClient initialQueue={queue} loadError={loadError} />
     </div>
   );
 }

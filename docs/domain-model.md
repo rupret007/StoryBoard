@@ -75,15 +75,17 @@ linked work may surface only as a sanitized receipt rebuilt from its
 authoritative shared record. Such a receipt is explicitly navigation-only:
 `canMutate` and `canReconcile` are false, while owner-visible receipts expose
 only the operations valid for their current projected state. Pending approval,
-approved-ready execution, attempted/unknown
-execution, failure/rejection/expiry, simulated execution, and recorded real
-execution remain distinct states. In a mixed batch, any attempted provider
-write without a final result takes precedence over a known failed, rejected, or
-expired sibling. Rejected/expired receipts are terminal and do not offer
-reconciliation. A note-backed `reconciled`
-outcome may close a failed, simulated, or orphaned recommendation receipt, but
-it does not change the linked Approval or prove provider success. An uncertain
-attempted provider result cannot be closed or retried from Manager.
+approved-ready execution, fresh `execution_in_progress`, stale
+`execution_unknown`, failure/rejection/expiry, simulated execution, and
+recorded real execution remain distinct states. A claimed provider write stays
+in progress and cannot be reconciled for one hour; only an unfinished claim
+older than that lease becomes unknown. In a mixed batch, either claimed state
+takes precedence over a known failed, rejected, or expired sibling.
+Rejected/expired receipts are terminal and do not offer reconciliation. A
+note-backed Manager `reconciled` outcome may close only a simulated or
+typed-but-orphaned recommendation receipt. A linked failed or uncertain
+Approval must instead use append-only Approval reconciliation. It cannot be
+closed or retried from Manager.
 Recommendation acceptance and linked Task or Decision completion update the
 recommendation and write the corresponding audit rows in the same database
 transaction as the authoritative change. Acceptance and Task completion retain
@@ -368,9 +370,11 @@ unrecorded payment, agreement, contact, or schedule fact exists.
 `EventLogisticsAssessment` is the non-persistent `event_logistics_v1` view over
 one `BandEvent` and its event-bound approval history. A gig is eligible only
 when it is confirmed and has a valid start, end, and IANA timezone. The
-assessment reports Calendar and Drive independently as not prepared, pending,
-approved, rejected, failed, expired, stale, executed-but-unlinked, simulated,
-or complete.
+assessment reports Calendar and Drive independently as `not_prepared`,
+`pending`, `approved`, `execution_in_progress`, `execution_unknown`, `rejected`,
+`failed`, `expired`,
+`stale`, `executed_unlinked`, `simulated`, `reconciled_external_effect`,
+`reconciled_no_external_effect`, or `complete`.
 Its SHA-256 fingerprint covers
 only the title, start, end, and timezone that will be sent to providers; event
 status is checked separately. Artist-scoped source keys include the policy,
@@ -382,7 +386,11 @@ Calendar event; legacy hold batches retain transparent `HOLD:` behavior.
 Changed facts require reviewed current data. Rejected and mock-simulated
 channels can be explicitly prepared again. Failed or executed-but-unlinked
 provider attempts require manual Google reconciliation because their remote
-outcome may be unknown.
+outcome may be unknown. `still_unknown` evidence leaves the channel
+quarantined. A no-effect conclusion permits a separate new source-keyed
+approval, never re-execution of the original. An external-effect conclusion
+blocks duplicate preparation, does not populate the event's provider link, and
+keeps linked Manager work blocked for manual repair.
 
 `Song` and `Setlist` provide a practical artist-owned library with duration,
 key, BPM, lead vocalist, ordered songs/breaks/notes, and event linkage.
@@ -454,7 +462,10 @@ drafts after approval execution. Campaigns may explicitly choose an immediate
 send batch, capped at 25 ready recipients, but it still requires separate human
 approval and execution. Confirmed delivery creates one linked follow-up task per
 recipient; unknown delivery is not retried automatically, and no mode advances
-the booking stage automatically.
+the booking stage automatically. A failed campaign Approval remains linked and
+cannot be replaced while its outside result is unknown. Only a terminal
+`no_external_effect_observed` receipt permits a separate newly reviewed batch;
+`still_unknown` and `external_effect_observed` continue to block duplication.
 
 ### Task
 
@@ -500,19 +511,53 @@ status transitions, and approver metadata. Optional `eventId` and
 lifecycle for Manager-prepared show logistics. Nullable `sourceKey` is unique
 per artist and makes prepared work idempotent without constraining ordinary
 approvals. `executionAttemptedAt` is the compare-and-set claim for the single
-provider attempt; replay does not perform a second external write. Successful
+provider attempt; replay does not perform a second external write. A fresh
+approved claim is projected as `execution_in_progress` for one hour. It is not
+live attention and cannot accept reconciliation evidence while the original
+provider call may still be running. If it still has no final result at lease
+expiry, it becomes `execution_unknown`. Real Google requests have a 30-second
+per-request timeout, and Gmail draft/send batches are capped at 25 recipients,
+keeping supported execution bounded inside that lease without creating a
+retry path. Successful
 event-logistics execution also records the provider reference on the related
 `BandEvent`; rejection, failure, expiry, stale payloads, and executed-but-
 unlinked results are never auto-retried. If authoritative event details change
 after execution, the saved link is shown as stale and is not automatically
 re-prepared, avoiding an accidental duplicate provider resource. Rejection and
 mock simulation can be explicitly prepared again; failed or unlinked provider
-outcomes require manual reconciliation.
+outcomes require manual reconciliation. The original status and
+`executionAttemptedAt` remain immutable during that review.
+
+### ApprovalReconciliation
+
+An append-only, artist-scoped human check of one failed or stale one-shot-
+claimed `ApprovalRequest`. A fresh claim inside its one-hour execution lease
+cannot receive a reconciliation row. The record stores `outcome`, actor/time,
+a reviewed note, bounded
+JSON evidence (`checkedLocation` and optional `providerReference`), an
+artist-scoped idempotency key, and `approval_reconciliation_v1`. The composite
+`(approvalId, artistId)` relation prevents evidence from crossing artists.
+
+Outcomes are `still_unknown`, `external_effect_observed`, and
+`no_external_effect_observed`. PostgreSQL permits multiple null
+`resolutionKey` values for ongoing unknown checks but only one literal
+`terminal` key per Approval; a check constraint ties that key to the two
+conclusive outcomes. Exact replay is idempotent. There is no update/delete
+route, a second terminal conclusion conflicts, and recording evidence never
+changes the original Approval or calls a provider.
+
+`still_unknown` remains live attention. A no-effect conclusion may permit only
+a separate newly reviewed request. An external-effect conclusion prevents
+duplicate work and keeps linked Manager follow-through blocked for manual
+repair; it is not a recovered provider success response and does not create a
+missing Calendar/Drive link.
 
 ### AuditEvent
 
 Represents immutable operational history. Stores action, severity, aggregate
-metadata, and actor context.
+metadata, and actor context. `approval.reconciliation_recorded` stores the
+outcome, observation time, evidence count, and policy version, but not the
+reviewed note or provider reference.
 
 ### CommandRun
 
@@ -542,7 +587,7 @@ system can reason about next steps, deadlines, and approvals.
 
 - An `Artist` has one optional `ArtistBookingProfile` and many `Venue`,
   `Contact`, `BookingProspect`, `BookingOpportunity`, `BookingCampaign`, `Task`,
-  `ApprovalRequest`, and `CommandRun` records.
+  `ApprovalRequest`, `ApprovalReconciliation`, and `CommandRun` records.
 - A `Venue` may have many `Contact` and `BookingOpportunity` records.
 - A `BookingOpportunity` may generate many `Task`, `ApprovalRequest`, and
   `CommandRun` records.
@@ -552,6 +597,9 @@ system can reason about next steps, deadlines, and approvals.
   `ManagerRecommendation` links. An event-logistics approval may also point to
   the recommendation that prepared it; all three records remain owned by the
   same artist and are checked in the service layer.
+- An `ApprovalRequest` may have many append-only uncertainty checks and at most
+  one terminal `ApprovalReconciliation`; the database also enforces matching
+  artist ownership.
 - `AuditEvent` links to aggregate types and IDs generically rather than through
   deep relational coupling.
 

@@ -3,6 +3,10 @@ import { ModuleRef } from "@nestjs/core";
 import { ConfigService } from "@nestjs/config";
 import type { Job } from "bullmq";
 import { AuditService } from "../audit/audit.service";
+import {
+  approvalLifecycleStage,
+  partitionApprovalLifecycle
+} from "../approvals/approval-lifecycle";
 import type { Prisma } from "../generated/prisma/client";
 import {
   ApprovalStatus,
@@ -283,7 +287,13 @@ export class WorkflowJobProcessorService {
         kind,
         title,
         body,
-        metadata: { approvalId, event, status: row.status, actionType: row.actionType }
+        metadata: {
+          approvalId,
+          event,
+          status: row.status,
+          actionType: row.actionType,
+          href: "/approvals"
+        }
       });
     }
     for (const r of recipients) {
@@ -348,7 +358,7 @@ export class WorkflowJobProcessorService {
         return {
           kind: WorkflowNotificationKind.approval_approved,
           title: `Approval approved: ${title}`,
-          body: `"${title}" (${actionType}) was approved. Review in StoryBoard when ready to execute.`
+          body: `"${title}" (${actionType}) was approved. Review its current status in StoryBoard.`
         };
       case "rejected":
         return {
@@ -710,22 +720,31 @@ export class WorkflowJobProcessorService {
       const stale = await this.tasks.followUpsOlderThan(artist.id, staleDays);
 
       const pendingCutoffDays = artist.workflowPendingApprovalDays ?? 0;
-      const pendingWhere: Prisma.ApprovalRequestWhereInput = {
-        artistId: artist.id,
+      const pendingBranch: Prisma.ApprovalRequestWhereInput = {
         status: { in: [ApprovalStatus.proposed, ApprovalStatus.pending] }
       };
       if (pendingCutoffDays > 0) {
-        pendingWhere.createdAt = {
+        pendingBranch.createdAt = {
           lt: new Date(Date.now() - pendingCutoffDays * 86400000)
         };
       }
-      const pendingApprovals = await this.prisma.client.approvalRequest.findMany(
-        {
-          where: pendingWhere,
-          take: 20,
-          orderBy: { createdAt: "asc" }
-        }
-      );
+      const approvalRows = await this.prisma.client.approvalRequest.findMany({
+        where: {
+          artistId: artist.id,
+          OR: [
+            pendingBranch,
+            { status: ApprovalStatus.approved },
+            { status: ApprovalStatus.failed }
+          ]
+        },
+        include: {
+          reconciliations: {
+            select: { outcome: true, createdAt: true }
+          }
+        },
+        orderBy: { updatedAt: "asc" }
+      });
+      const approvalWorkQueue = partitionApprovalLifecycle(approvalRows);
 
       const weekAgo = new Date(now.getTime() - 7 * 86400000);
       const recentInvites =
@@ -790,16 +809,53 @@ export class WorkflowJobProcessorService {
             ...(stale.length > 8 ? [`… and ${stale.length - 8} more`] : [])
           );
         }
+        const includeApprovals = this.prefs.includeDigestSection(
+          p,
+          "approvals"
+        );
+        let hasApprovalSection = false;
         if (
-          this.prefs.includeDigestSection(p, "approvals") &&
-          pendingApprovals.length > 0
+          includeApprovals &&
+          approvalWorkQueue.needsReconciliation.length > 0
         ) {
-          const lines = pendingApprovals
-            .slice(0, 8)
-            .map((a) => `- ${a.title} (${a.status})`);
+          hasApprovalSection = true;
           sections.push(
-            `Pending approvals (${pendingApprovals.length})`,
-            ...lines
+            `Approval outcomes needing reconciliation (${approvalWorkQueue.needsReconciliation.length})`,
+            ...approvalWorkQueue.needsReconciliation.slice(0, 8).map((a) =>
+              approvalLifecycleStage(a) === "execution_unknown"
+                ? `- ${a.title} (provider outcome unknown; do not retry)`
+                : `- ${a.title} (failed; verify before any replacement)`
+            )
+          );
+        }
+        if (includeApprovals && approvalWorkQueue.readyToExecute.length > 0) {
+          hasApprovalSection = true;
+          sections.push(
+            `Approved and ready for execution (${approvalWorkQueue.readyToExecute.length})`,
+            ...approvalWorkQueue.readyToExecute
+              .slice(0, 8)
+              .map((a) => `- ${a.title}`)
+          );
+        }
+        if (includeApprovals && approvalWorkQueue.pendingDecision.length > 0) {
+          hasApprovalSection = true;
+          sections.push(
+            `Pending approval decisions (${approvalWorkQueue.pendingDecision.length})`,
+            ...approvalWorkQueue.pendingDecision
+              .slice(0, 8)
+              .map((a) => `- ${a.title} (${a.status})`)
+          );
+        }
+        if (
+          includeApprovals &&
+          approvalWorkQueue.approvedNotExecutable.length > 0
+        ) {
+          hasApprovalSection = true;
+          sections.push(
+            `Approved status to review (${approvalWorkQueue.approvedNotExecutable.length})`,
+            ...approvalWorkQueue.approvedNotExecutable
+              .slice(0, 8)
+              .map((a) => `- ${a.title} (no executable StoryBoard action)`)
           );
         }
         if (
@@ -835,7 +891,11 @@ export class WorkflowJobProcessorService {
           kind,
           title,
           body,
-          metadata: { cadence, sectionBlocks: sections.length }
+          metadata: {
+            cadence,
+            sectionBlocks: sections.length,
+            href: hasApprovalSection ? "/approvals" : "/dashboard"
+          }
         });
         try {
           await this.email.draftForOperatorIfEnabled({

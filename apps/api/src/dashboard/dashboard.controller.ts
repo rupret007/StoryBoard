@@ -5,7 +5,7 @@ import { MembershipService } from "../auth/membership.service";
 import type { RequestOperator } from "../auth/request-operator";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import type { BookingOpportunity, Task } from "../generated/prisma/client";
-import { ApprovalStatus, BookingStage, TaskStatus } from "../generated/prisma/enums";
+import { BookingStage, TaskStatus } from "../generated/prisma/enums";
 import { OperationalIntelligenceService } from "../operational-intelligence/operational-intelligence.service";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -30,20 +30,13 @@ export class DashboardController {
       artistHeader
     );
     const now = new Date();
-    const [venues, contacts, opportunities, tasks, pendingApprovals] =
+    const [venues, contacts, opportunities, tasks, approvalAttention] =
       await Promise.all([
         this.prisma.client.venue.count({ where: { artistId } }),
         this.prisma.client.contact.count({ where: { artistId } }),
         this.prisma.client.bookingOpportunity.findMany({ where: { artistId } }),
         this.prisma.client.task.findMany({ where: { artistId } }),
-        this.prisma.client.approvalRequest.count({
-          where: {
-            artistId,
-            status: {
-              in: [ApprovalStatus.proposed, ApprovalStatus.pending]
-            }
-          }
-        })
+        this.intelligence.getApprovalAttention(artistId)
       ]);
     const activeOpps = opportunities.filter(
       (o: BookingOpportunity) => o.stage !== BookingStage.closed
@@ -62,7 +55,8 @@ export class DashboardController {
       activeOpportunities: activeOpps,
       tasks: tasks.length,
       overdueTasks: overdue,
-      pendingApprovals
+      pendingApprovals: approvalAttention.pendingDecision,
+      approvalAttention
     };
   }
 

@@ -34,6 +34,15 @@ Each **operator + artist** membership may store `workflowNotifyPrefs` (JSON). Nu
 
 **Digest toggles:** `digest.daily` / `digest.weekly`. When enabled, scheduled jobs create one `digest_daily` / `digest_weekly` in-app row per recipient **per UTC day** or **per ISO week (Monday UTC)** if none exists yet in that window. Digest **body sections** only include categories where the operator has **in-app or email** enabled for that category. Email drafts for digests use the same Gmail path; **`Operator.workflowEmailEnabled`** still applies.
 
+Approval digest sections use `approval_lifecycle_v2`. They include pending
+decisions, approved-ready work, and unresolved failed/stale one-shot-claimed
+results. Fresh claims inside the one-hour `execution_in_progress` lease are not
+attention and are omitted while the original provider call may still be
+running; an unfinished claim enters attention as `execution_unknown` at lease
+expiry. Conclusive reconciliation history is informational and is omitted from
+future attention sections. Previously created notification or draft history is
+not deleted.
+
 **API (session + artist context):** `GET` / `PATCH /workflow/preferences` — any member. `GET` / `PATCH /workflow/escalation` — any member can read; **only owners** may patch thresholds.
 
 ## Escalation thresholds (phase 4B, owner-only)
@@ -66,8 +75,8 @@ On **`Artist`**:
 
 - **Separate from 4B prefs:** Membership **`workflowNotifyPrefs`** still controls **in-app** and **Gmail draft** only. **Telegram** uses **`Artist.telegramUrgentEnabled`**, **`telegramChatId`**, and **`telegramNotifyCategories`** (JSON: approvals, overdueTasks, staleFollowUps). **Owners** set these via `GET` / `PATCH /workflow/telegram`.
 - **Server env:** **`TELEGRAM_BOT_TOKEN`** (optional). If unset, **`WorkflowTelegramService`** uses a **mock** adapter: no HTTP to Telegram, but **`telegram.urgent.sent`** is still audited with `mode: mock` when delivery would have occurred — safe for local dev.
-- **Triggers:** (1) **`urgent.telegram.scan`** evaluates aged pending approvals, overdue clusters, and stale clusters (deterministic thresholds in `urgent-channel.constants.ts`, aligned with `GET /dashboard/insights`). (2) **`approval.notify`** with `event: failed` calls **`trySendApprovalFailed`** (dedupe per approval id).
-- **Dedupe:** **`TelegramUrgentDedupe`** unique on **`(artistId, dedupeKey)`** — e.g. `approval_aging:<UTC-date>`, `overdue_cluster:<UTC-date>`, `stale_cluster:<UTC-date>`, `approval_failed:<approvalId>`. Prevents repeated Telegram spam; failed API sends do **not** insert a row (retries allowed on next scan).
+- **Triggers:** (1) **`urgent.telegram.scan`** evaluates unresolved provider outcomes, aged pending approvals, overdue clusters, and stale clusters (deterministic thresholds in `urgent-channel.constants.ts`, aligned with `GET /dashboard/insights`). A `still_unknown` receipt keeps the provider signal active; either terminal outcome removes it from later scans. Already sent Telegram messages, notification rows, dedupe rows, and audits remain historical. (2) **`approval.notify`** with `event: failed` calls **`trySendApprovalFailed`** (dedupe per approval id).
+- **Dedupe:** **`TelegramUrgentDedupe`** unique on **`(artistId, dedupeKey)`** — e.g. `approval_reconciliation:<UTC-date>`, `approval_aging:<UTC-date>`, `overdue_cluster:<UTC-date>`, `stale_cluster:<UTC-date>`, `approval_failed:<approvalId>`. Prevents repeated Telegram spam; failed API sends do **not** insert a row (retries allowed on next scan).
 - **Docs:** `docs/telegram-alerts.md` (bot setup, chat id, owner opt-in).
 
 ## Phase 5B — Telegram inbound registration

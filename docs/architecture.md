@@ -76,7 +76,7 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
 4. If the action is risky, StoryBoard creates an approval request before any
    external or destructive write.
 5. The action runs in dry-run mode when practical to preview changes (`CommandRun.dryRun`, default true on commands).
-6. **Approved** requests with executable action types run via `POST /approvals/:id/execute`, which atomically claims one execution attempt, performs provider work (e.g. Gmail draft creation), records **executed**/**failed** on `ApprovalRequest`, and writes audit events — never executing unapproved rows or replaying a claimed request.
+6. **Approved** requests with executable action types run via `POST /approvals/:id/execute`, which atomically claims one execution attempt, performs provider work (e.g. Gmail draft creation), records **executed**/**failed** on `ApprovalRequest`, and writes audit events — never executing unapproved rows or replaying a claimed request. While an approved claim is younger than one hour it is `execution_in_progress`, not reconcilable; only an unfinished stale claim becomes `execution_unknown`.
 7. Async work is coordinated through BullMQ when off the request path.
 8. The system returns a clear result to the operator and stores the run record (including `providerModes` when relevant).
 
@@ -122,11 +122,13 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   facts and stale saved-value previews fail closed. Explicit remember requests are classified
   locally before provider routing; refused sensitive values are replaced with
   a fixed redaction before persistence and never reach OpenAI. Pending approval,
-  approved-ready execution, uncertain claimed execution, failure, simulation,
-  human receipt reconciliation, and real recorded completion remain distinct.
-  Reconciliation closes only a failed, simulated, or orphaned Manager receipt
-  with a note and never asserts provider success. Uncertain provider results
-  remain read-only and are never closed or automatically retried by Manager;
+  approved-ready execution, a fresh leased execution, stale uncertain claimed
+  execution, failure, simulation, human receipt reconciliation, and real
+  recorded completion remain distinct.
+  Note-backed Manager reconciliation closes only a simulated or typed-orphaned
+  receipt and never asserts provider success. Linked failed or uncertain
+  Approvals route to append-only provider evidence in the Approval Center and
+  are never closed or automatically retried by Manager;
   in a mixed batch they take precedence over failed, rejected, or expired
   siblings. Rejected and expired receipts are terminal and expose no Manager
   reconciliation action.
@@ -431,8 +433,11 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   path checks the current confirmed-gig boundary and fingerprint again after its
   one-shot claim and before the provider call. Failed or executed-but-unlinked
   provider attempts are quarantined for manual reconciliation because their
-  remote outcome may be unknown. StoryBoard never silently rewrites a reviewed
-  payload or automatically retries outside work.
+  remote outcome may be unknown. A no-effect receipt permits a separate new
+  reviewed attempt. An external-effect receipt blocks duplicate preparation and
+  keeps linked Manager work blocked for manual repair; it does not create the
+  missing provider link or claim success. StoryBoard never silently rewrites a
+  reviewed payload or automatically retries outside work.
 - Custom `EventScheduleItem` writes resolve ownership through the parent event,
   require an exact event/item pair, validate the merged start/end range, and
   audit only bounded operational metadata. The rows feed the existing timeline
@@ -510,7 +515,36 @@ compare-and-set guards. For event logistics, the provider result and
 the same application lifecycle. Rejected and mock-simulated requests may be
 explicitly prepared again. Failed or executed-but-unlinked provider attempts
 remain quarantined for manual reconciliation because the outside result may be
-unknown.
+unknown. A conclusive no-effect check may unlock only a separate reviewed
+request; an observed external effect blocks duplicate preparation and requires
+manual repair.
+
+`ApprovalReconciliation` is append-only evidence tied to both the Approval and
+its artist through a composite foreign key. Each row stores actor/time,
+reviewed note, bounded checked-location/provider evidence, an artist-scoped
+idempotency key, and `approval_reconciliation_v1`. Multiple `still_unknown`
+rows may precede at most one terminal `external_effect_observed` or
+`no_external_effect_observed` row. There is no update/delete route. Recording a
+receipt neither changes `ApprovalRequest.status` or `executionAttemptedAt` nor
+resolves an adapter or calls a provider. Exact replay returns the same receipt;
+changed reuse and a second terminal conclusion fail closed.
+
+`approval_lifecycle_v2` is the code-owned read and execution-eligibility
+policy. It projects six mutually exclusive buckets: pending decisions,
+approved allowlisted work ready for a separate execution step, fresh
+`execution_in_progress` claims, unresolved failed/stale one-shot-claimed work,
+conclusive reconciliation history, and approved records with no provider step.
+A fresh approved claim remains leased for one hour, is excluded from live
+attention, and cannot accept reconciliation evidence while the original call
+may still be running. An unfinished claim becomes `execution_unknown` when the
+lease expires. Real Gmail, Calendar, and Drive adapter requests use a 30-second
+timeout, and Gmail draft/send approval batches are capped at 25 recipients, so
+the supported provider work is bounded well inside the lease. The
+Approval Center, dashboard, shell, Manager, summaries, and digests consume this
+live-attention distinction; approval event notifications deep-link to it but
+remain historical until read. Viewers receive read-only capabilities, members
+and owners may append reconciliation evidence, and no projected item is
+retryable.
 
 ## Queue and Background Work
 
@@ -533,7 +567,12 @@ adapter; **mock** when **`TELEGRAM_BOT_TOKEN`** is unset). Per-artist settings
 **owner-only** via HTTP; delivery attempts use **`TelegramUrgentDedupe`**
 (`artistId` + `dedupeKey`) for idempotency. **Approval `failed`** events also
 attempt a one-shot Telegram alert (category **approvals**, dedupe
-`approval_failed:<id>`). Audit actions include `telegram.urgent.skipped`,
+`approval_failed:<id>`), while the periodic scan sends a daily-deduped warning
+when failed or stale one-shot-claimed outcomes remain unresolved (dedupe
+`approval_reconciliation:<UTC-date>`). A `still_unknown` receipt keeps that
+signal active; either terminal receipt removes it from later scans. Already
+sent Telegram messages, notification rows, dedupe rows, and audits remain
+historical. Audit actions include `telegram.urgent.skipped`,
 `telegram.urgent.sent`, `telegram.urgent.failed`, `automation.telegram.scan`,
 `workflow.telegram.settings.updated`.
 
@@ -552,9 +591,11 @@ returns deterministic **booking health** (score 0–100), **opportunity risk**
 levels, **priority actions**, and **signal** counts aligned with Telegram
 thresholds (`apps/api/src/operational-intelligence/operational-intelligence.service.ts`,
 constants in `urgent-channel.constants.ts`). Scoring starts at 100 and subtracts
-capped impact for: overdue tasks (after grace), stale follow-ups, pending
-approvals, and large early-stage (target/outreach) backlog — see this file and
-`docs/telegram-alerts.md` for rule references.
+capped impact for: overdue tasks (after grace), stale follow-ups, unresolved
+approval outcomes, approved-ready execution, pending approval decisions, and
+large early-stage (target/outreach) backlog — see this file and
+`docs/telegram-alerts.md` for rule references. Conclusive reconciliation
+history is informational and does not lower health.
 
 Commands intent `enqueue_research_refresh` still enqueues
 `research.refresh`.

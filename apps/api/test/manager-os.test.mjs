@@ -871,6 +871,38 @@ test("Manager chat and recommendation routes forward owner scope and reject view
   assert.deepEqual(feedbackOwnerFlags, [false, true]);
 });
 
+test("Manager brief GET is read-only while explicit generation remains role-protected", async () => {
+  const calls = [];
+  const controller = new managerControllerMod.ManagerController(
+    {
+      currentBrief: async (...args) => { calls.push({ route: "read", args }); return { id: "brief-a" }; },
+      generateBrief: async (...args) => { calls.push({ route: "generate", args }); return { id: "brief-b" }; }
+    },
+    { resolveArtistId: async () => "artist-a" },
+    {
+      assertCanMutateWorkflow: async (operatorId) => {
+        calls.push({ route: "authorize", operatorId });
+        if (operatorId === "viewer-a") throw new Error("viewer cannot mutate workflow");
+      }
+    }
+  );
+
+  const cached = await controller.brief("weekly", { id: "viewer-a", email: "viewer@test" }, {}, "artist-a");
+  assert.equal(cached.id, "brief-a");
+  assert.deepEqual(calls, [{ route: "read", args: ["artist-a", "weekly"] }]);
+
+  await assert.rejects(
+    () => controller.generate({ cadence: "weekly" }, { id: "viewer-a", email: "viewer@test" }, {}, "artist-a"),
+    /viewer cannot mutate workflow/
+  );
+  await controller.generate({ cadence: "weekly" }, { id: "member-a", email: "member@test" }, {}, "artist-a");
+  assert.deepEqual(calls.slice(1), [
+    { route: "authorize", operatorId: "viewer-a" },
+    { route: "authorize", operatorId: "member-a" },
+    { route: "generate", args: ["artist-a", "weekly", "member@test", "member-a"] }
+  ]);
+});
+
 test("the queue dispatches the Manager schedule scan through the registered service", async () => {
   let scans = 0;
   const moduleRef = { get: (token) => {
@@ -2197,43 +2229,56 @@ test("brief and plan conversation advance an existing linked step instead of inv
   assert.ok(answer.citations.includes("task-a"));
 });
 
-test("a pre-intake cached brief is invalidated when setup completes", async () => {
+test("brief reads return a fresh shareable cached run without generating", async () => {
+  const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => assert.fail("Brief reads must not audit") }, { get: () => false });
+  const cached = { id: "current-brief", promptVersion: evaluation.MANAGER_PROMPT_VERSION, createdAt: new Date(), trace: { providerContext: { fullContextEnabled: false, outputUsed: false } } };
+  let generations = 0;
+  service.latestBrief = async () => cached;
+  service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
+  service.latestManagerFactChange = async () => null;
+  service.generateBrief = async () => { generations += 1; return { id: "unexpected" }; };
+  const result = await service.currentBrief("artist-a", "daily");
+  assert.equal(result, cached);
+  assert.equal(generations, 0);
+});
+
+test("brief reads return null without generating when setup invalidates the cached run", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v16", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-12T11:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
-  const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
-  assert.equal(result.id, "new-brief");
-  assert.equal(generations, 1);
+  const result = await service.currentBrief("artist-a", "daily");
+  assert.equal(result, null);
+  assert.equal(generations, 0);
 });
 
-test("a cached brief is invalidated when commitment facts change", async () => {
+test("brief reads return null without generating when commitment facts change", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => ({ updatedAt: new Date("2026-07-12T11:00:00.000Z") }) } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   service.latestBrief = async () => ({ id: "old-brief", promptVersion: "manager_os_v16", createdAt: new Date("2026-07-12T10:00:00.000Z") });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-07-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "new-brief" }; };
-  const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
-  assert.equal(result.id, "new-brief");
-  assert.equal(generations, 1);
+  const result = await service.currentBrief("artist-a", "daily");
+  assert.equal(result, null);
+  assert.equal(generations, 0);
 });
 
-test("a cached brief is invalidated when the Manager priority policy changes", async () => {
+test("brief reads return null without generating when the Manager priority policy changes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   service.latestBrief = async () => ({ id: "v13-brief", promptVersion: "manager_os_v13", createdAt: new Date() });
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "v14-brief" }; };
-  const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
-  assert.equal(result.id, "v14-brief");
-  assert.equal(generations, 1);
+  const result = await service.currentBrief("artist-a", "daily");
+  assert.equal(result, null);
+  assert.equal(generations, 0);
 });
 
-test("a cached brief is invalidated when an audited operating fact changes", async () => {
+test("brief reads return null without generating when an audited operating fact changes", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   const createdAt = new Date(Date.now() - 60_000);
@@ -2241,12 +2286,12 @@ test("a cached brief is invalidated when an audited operating fact changes", asy
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => ({ createdAt: new Date(createdAt.getTime() + 1_000) });
   service.generateBrief = async () => { generations += 1; return { id: "fresh-brief" }; };
-  const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
-  assert.equal(result.id, "fresh-brief");
-  assert.equal(generations, 1);
+  const result = await service.currentBrief("artist-a", "daily");
+  assert.equal(result, null);
+  assert.equal(generations, 0);
 });
 
-test("a cached full-context brief is replaced before the shared brief is returned", async () => {
+test("brief reads hide a cached full-context run without generating a replacement", async () => {
   const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
   let generations = 0;
   service.latestBrief = async () => ({
@@ -2258,9 +2303,9 @@ test("a cached full-context brief is replaced before the shared brief is returne
   service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
   service.latestManagerFactChange = async () => null;
   service.generateBrief = async () => { generations += 1; return { id: "redacted-brief" }; };
-  const result = await service.currentBrief("artist-a", "daily", "viewer@test", "operator-viewer");
-  assert.equal(result.id, "redacted-brief");
-  assert.equal(generations, 1);
+  const result = await service.currentBrief("artist-a", "daily");
+  assert.equal(result, null);
+  assert.equal(generations, 0);
 });
 
 test("goal progress is append-only, artist-scoped, and audited", async () => {
@@ -2423,6 +2468,34 @@ test("deterministic manager brief ranks real workflow pressure and keeps evidenc
   assert.equal(merged.today.find((item) => item.evidenceIds.includes("event-a")).stableKey, "event-event-a");
   assert.equal(merged.today.find((item) => item.evidenceIds.includes("event-a")).priority, "high");
   assert.ok(brief.risksAndOpportunities.some((item) => item.title === "Member availability conflict"));
+});
+
+test("manager global briefs separate approval decisions, execution, and reconciliation", () => {
+  const approvals = [
+    { id: "approval-pending", title: "Review buyer draft", status: "pending", actionType: "outbound_email_batch", executionAttemptedAt: null, updatedAt: new Date("2026-07-12T08:00:00.000Z") },
+    { id: "approval-ready", title: "Create show folder", status: "approved", actionType: "drive_ensure_folder", executionAttemptedAt: null, updatedAt: new Date("2026-07-12T09:00:00.000Z") },
+    { id: "approval-active", title: "Create active Calendar hold", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: now, updatedAt: now },
+    { id: "approval-failed", title: "Create Calendar hold", status: "failed", actionType: "calendar_hold_batch", executionAttemptedAt: now, updatedAt: new Date("2026-07-12T10:00:00.000Z") },
+    { id: "approval-unknown", title: "Send pitch batch", status: "approved", actionType: "outbound_email_send_batch", executionAttemptedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000), updatedAt: new Date("2026-07-12T11:00:00.000Z") },
+    { id: "approval-recorded", title: "Release checklist", status: "approved", actionType: "release_checklist_draft", executionAttemptedAt: null, updatedAt: now }
+  ];
+  const facts = managerFacts({ approvals, opportunities: [] });
+  const candidates = intelligence.deterministicManagerBriefCandidates(facts, now);
+
+  const approvalFocus = candidates.today.find((item) => item.stableKey.startsWith("approval-"));
+  assert.equal(approvalFocus.stableKey, "approval-approval-unknown");
+  assert.match(approvalFocus.title, /uncertain execution/i);
+  assert.match(approvalFocus.nextAction, /do not retry/i);
+  assert.ok(candidates.decisionsNeeded.some((item) => item.evidenceIds.includes("approval-pending") && /waiting for human approval/i.test(item.explanation)));
+  assert.ok(candidates.decisionsNeeded.some((item) => item.evidenceIds.includes("approval-ready") && /separate human execution/i.test(item.explanation)));
+  assert.ok(candidates.waitingOn.some((item) => item.evidenceIds.includes("approval-active") && /execution in progress/i.test(item.title)));
+  assert.ok(candidates.risksAndOpportunities.some((item) => item.evidenceIds.includes("approval-unknown") && /will not retry/i.test(item.detail)));
+  assert.ok(candidates.risksAndOpportunities.some((item) => item.evidenceIds.includes("approval-failed") && /replacement/i.test(item.detail)));
+  assert.equal(JSON.stringify(candidates).includes("approval-recorded"), false);
+
+  const ranked = intelligence.rankManagerRecommendations(candidates.today, facts, now);
+  const unknownRank = ranked.find((item) => item.item.evidenceIds.includes("approval-unknown"));
+  assert.ok(unknownRank.factors.some((factor) => factor.code === "approval_execution_unknown"));
 });
 
 test("manager preserves logistics beside readiness and scans past earlier events", () => {
@@ -3071,11 +3144,16 @@ test("manager follow-through is relational, reload-safe, and quarantines uncerta
   const pending = followThrough.projectManagerFollowThrough(source({ approvals: [{ id: "approval-pending", title: "Add show to Calendar", status: "pending", actionType: "calendar_hold_batch", executionAttemptedAt: null, approvedAt: null, updatedAt: now }] }));
   const executable = followThrough.projectManagerFollowThrough(source({ approvals: [{ id: "approval-executable", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: null, approvedAt: now, updatedAt: now }] }));
   const unknown = followThrough.projectManagerFollowThrough(source({ approvals: [{ id: "approval-unknown", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: now, approvedAt: now, updatedAt: now }] }));
+  const active = followThrough.projectManagerFollowThrough(source({ approvals: [{ id: "approval-active", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: now, approvedAt: now, updatedAt: now }] }), now);
   assert.equal(pending.stage, "awaiting_approval");
   assert.equal(executable.stage, "awaiting_execution");
   assert.equal(unknown.stage, "execution_unknown");
   assert.equal(unknown.state, "blocked");
   assert.match(unknown.detail, /not safe/i);
+  assert.equal(active.stage, "execution_in_progress");
+  assert.equal(active.state, "in_motion");
+  assert.equal(active.canReconcile, false);
+  assert.match(active.nextAction, /wait for the final result/i);
 
   const simulated = followThrough.projectManagerFollowThrough(source({
     outcome: "blocked",
@@ -3172,7 +3250,8 @@ test("owner full-context recommendation prose never enters shared receipts or pr
   assert.equal(memberFailureReceipt.canMutate, false);
   assert.equal(memberFailureReceipt.canReconcile, false);
   assert.equal(ownerFailureReceipt.canMutate, true);
-  assert.equal(ownerFailureReceipt.canReconcile, true);
+  assert.equal(ownerFailureReceipt.canReconcile, false);
+  assert.equal(ownerFailureReceipt.destination.href, "/approvals");
 
   const completed = followThrough.summarizeManagerFollowThrough([source({ outcome: "completed", outcomeAt: now, task: { ...sharedTask, status: "done" } })], now);
   assert.equal(completed.items[0].title, sharedTask.title);
@@ -3373,7 +3452,7 @@ test("follow-through questions and pronoun follow-ups use the code-owned relatio
   assert.ok(answer.citations.includes("task-blocked"));
   assert.equal(intelligence.managerQuestionAsksAboutFollowThrough("What accepted work is in motion?"), true);
 
-  const unknownSource = { ...source, id: "recommendation-unknown", task: null, approvals: [{ id: "approval-unknown", title: "Add show to Calendar", status: "approved", actionType: "google_calendar_create", executionAttemptedAt: now, approvedAt: now, updatedAt: now }] };
+  const unknownSource = { ...source, id: "recommendation-unknown", task: null, approvals: [{ id: "approval-unknown", title: "Add show to Calendar", status: "approved", actionType: "google_calendar_create", executionAttemptedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000), approvedAt: now, updatedAt: now }] };
   const unknownProjection = followThrough.summarizeManagerFollowThrough([unknownSource], now);
   const unknownAnswer = intelligence.deterministicManagerChat(managerFacts({ followThrough: unknownProjection }), "What is the status of the recommendation?", now);
   assert.match(unknownAnswer.answer, /execution outcome unknown/i);
@@ -3854,6 +3933,89 @@ test("event logistics retries rejection but quarantines ambiguous provider failu
   assert.equal(failedAssessment.channels.calendar.state, "failed");
   assert.deepEqual(failedAssessment.retryableChannels, []);
   assert.deepEqual(eventLogistics.planEventLogisticsApprovals(event, failed, { allowRetryChannels: ["calendar"] }).specs, []);
+  const changedAfterFailure = { ...event, title: "Saturday show — updated" };
+  const staleFailedAssessment = eventLogistics.assessEventLogistics(changedAfterFailure, failed);
+  assert.equal(staleFailedAssessment.channels.calendar.state, "failed");
+  assert.deepEqual(staleFailedAssessment.preparableChannels, []);
+  assert.deepEqual(eventLogistics.planEventLogisticsApprovals(changedAfterFailure, failed).specs, []);
+  const executionUnknown = [{ ...rejected[0], status: "approved", executionAttemptedAt: now }];
+  const unknownAssessment = eventLogistics.assessEventLogistics(event, executionUnknown);
+  assert.equal(unknownAssessment.channels.calendar.state, "execution_unknown");
+  assert.deepEqual(unknownAssessment.retryableChannels, []);
+  assert.deepEqual(eventLogistics.planEventLogisticsApprovals(event, executionUnknown, { allowRetryChannels: ["calendar"] }).specs, []);
+  const staleUnknownAssessment = eventLogistics.assessEventLogistics(changedAfterFailure, executionUnknown);
+  assert.equal(staleUnknownAssessment.channels.calendar.state, "execution_unknown");
+  assert.deepEqual(staleUnknownAssessment.preparableChannels, []);
+  assert.deepEqual(eventLogistics.planEventLogisticsApprovals(changedAfterFailure, executionUnknown).specs, []);
+  const stillUnknown = [{
+    ...failed[0],
+    reconciliations: [{ outcome: "still_unknown", createdAt: new Date("2026-07-14T10:05:00.000Z") }]
+  }];
+  assert.equal(
+    eventLogistics.assessEventLogistics(event, stillUnknown).channels.calendar.state,
+    "failed"
+  );
+  const noExternalEffect = [{
+    ...failed[0],
+    reconciliations: [{ outcome: "no_external_effect_observed", createdAt: new Date("2026-07-14T10:10:00.000Z") }]
+  }];
+  const noEffectAssessment = eventLogistics.assessEventLogistics(event, noExternalEffect);
+  assert.equal(noEffectAssessment.channels.calendar.state, "reconciled_no_external_effect");
+  assert.deepEqual(noEffectAssessment.retryableChannels, ["calendar"]);
+  assert.deepEqual(eventLogistics.planEventLogisticsApprovals(event, noExternalEffect).specs, []);
+  const replacement = eventLogistics.planEventLogisticsApprovals(event, noExternalEffect, { allowRetryChannels: ["calendar"] });
+  assert.equal(replacement.specs.length, 1);
+  assert.equal(replacement.specs[0].attempt, 2);
+  const externalEffect = [{
+    ...failed[0],
+    reconciliations: [{ outcome: "external_effect_observed", createdAt: new Date("2026-07-14T10:15:00.000Z") }]
+  }];
+  const observedAssessment = eventLogistics.assessEventLogistics(event, externalEffect);
+  assert.equal(observedAssessment.channels.calendar.state, "reconciled_external_effect");
+  assert.deepEqual(observedAssessment.retryableChannels, []);
+  assert.deepEqual(eventLogistics.planEventLogisticsApprovals(event, externalEffect, { allowRetryChannels: ["calendar"] }).specs, []);
+  const changedObservedAssessment = eventLogistics.assessEventLogistics(changedAfterFailure, externalEffect);
+  assert.equal(changedObservedAssessment.channels.calendar.state, "reconciled_external_effect");
+  assert.deepEqual(changedObservedAssessment.preparableChannels, []);
+  const olderFailure = [{
+    ...failed[0],
+    updatedAt: new Date("2026-07-14T10:00:00.000Z")
+  }];
+  const completedAfterFailure = {
+    ...rejected[0],
+    id: "approval-calendar-2",
+    sourceKey: eventLogistics.eventLogisticsApprovalSourceKey(event.id, fingerprint, "calendar", 2),
+    status: "executed",
+    payload: {
+      executionResult: {
+        calendarMode: "real",
+        holds: [{ eventId: "calendar-live-1" }]
+      }
+    },
+    updatedAt: new Date("2026-07-14T11:00:00.000Z")
+  };
+  const completedEvent = { ...event, calendarEventId: "calendar-live-1" };
+  const completedAssessment = eventLogistics.assessEventLogistics(
+    completedEvent,
+    [...olderFailure, completedAfterFailure]
+  );
+  assert.equal(completedAssessment.channels.calendar.state, "complete");
+  assert.equal(completedAssessment.channels.calendar.approvalId, completedAfterFailure.id);
+  assert.deepEqual(completedAssessment.preparableChannels, []);
+  assert.deepEqual(completedAssessment.retryableChannels, []);
+  const failedAfterCompletion = {
+    ...failed[0],
+    id: "approval-calendar-3",
+    sourceKey: eventLogistics.eventLogisticsApprovalSourceKey(event.id, fingerprint, "calendar", 3),
+    updatedAt: new Date("2026-07-14T12:00:00.000Z")
+  };
+  const failedAfterCompletionAssessment = eventLogistics.assessEventLogistics(
+    completedEvent,
+    [completedAfterFailure, failedAfterCompletion]
+  );
+  assert.equal(failedAfterCompletionAssessment.channels.calendar.state, "failed");
+  assert.deepEqual(failedAfterCompletionAssessment.preparableChannels, []);
+  assert.deepEqual(failedAfterCompletionAssessment.retryableChannels, []);
   const simulated = [{
     ...rejected[0],
     status: "executed",

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -15,8 +16,12 @@ import { MembershipService } from "../auth/membership.service";
 import { RolePolicyService } from "../auth/role-policy.service";
 import type { RequestOperator } from "../auth/request-operator";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
-import { ApprovalStatus } from "../generated/prisma/enums";
+import {
+  ApprovalStatus,
+  ArtistMembershipRole
+} from "../generated/prisma/enums";
 import { ApprovalsService } from "./approvals.service";
+import { approvalReconciliationInputSchema } from "./approval-reconciliation";
 
 @Controller("approvals")
 @UseGuards(SessionAuthGuard)
@@ -70,6 +75,20 @@ export class ApprovalsController {
     return this.approvals.readyToExecute(artistId);
   }
 
+  @Get("work-queue")
+  async workQueue(
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator.id, req, artistHeader);
+    const role = await this.roles.getRole(operator.id, artistId);
+    return this.approvals.workQueue(
+      artistId,
+      role !== ArtistMembershipRole.viewer
+    );
+  }
+
   @Get(":id")
   async get(
     @Param("id") id: string,
@@ -79,6 +98,45 @@ export class ApprovalsController {
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     return this.approvals.get(artistId, id);
+  }
+
+  @Get(":id/reconciliations")
+  async reconciliations(
+    @Param("id") id: string,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator.id, req, artistHeader);
+    const role = await this.roles.getRole(operator.id, artistId);
+    return this.approvals.reconciliations(
+      artistId,
+      id,
+      role !== ArtistMembershipRole.viewer
+    );
+  }
+
+  @Post(":id/reconciliations")
+  async recordReconciliation(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator.id, req, artistHeader);
+    await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    const parsed = approvalReconciliationInputSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    return this.approvals.recordReconciliation(
+      artistId,
+      id,
+      parsed.data,
+      operator.email,
+      operator.id
+    );
   }
 
   @Post(":id/approve")

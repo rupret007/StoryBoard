@@ -12,12 +12,17 @@ function time(value: string) { return new Date(value).toLocaleTimeString([], { h
 function relative(minutes: number) { if (minutes === 0) return "now"; if (minutes > 0) return minutes < 60 ? `in ${minutes}m` : `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`; const elapsed = Math.abs(minutes); return elapsed < 60 ? `${elapsed}m ago` : `${Math.floor(elapsed / 60)}h ${elapsed % 60}m ago`; }
 function localDateTime(value?: string | null) { if (!value) return ""; const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
 
-export function DayOfClient({ initialData }: { initialData: EventDayOfResponse }) {
+export function DayOfClient({ initialData, accessState }: { initialData: EventDayOfResponse; accessState: "manage" | "read_only" | "unavailable" }) {
   const { event, activeMembers, readiness, dayOf } = initialData;
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const router = useRouter();
+  const canManage = accessState === "manage";
   async function mutate(key: string, path: string, json?: unknown, method = "POST") {
+    if (!canManage) {
+      setError("Show changes are disabled until StoryBoard can verify member or owner access.");
+      return;
+    }
     setBusy(key); setError("");
     try { await apiFetch(path, { method, ...(json === undefined ? {} : { json }) }); router.refresh(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "The update failed"); }
@@ -27,7 +32,9 @@ export function DayOfClient({ initialData }: { initialData: EventDayOfResponse }
   const location = event.address ?? event.venue?.addressLine ?? event.locationName ?? event.venue?.name;
   return <div className="space-y-5 pb-16">
     <div className="flex flex-wrap items-center justify-between gap-3"><a href="/operations" className="sb-btn-ghost"><ArrowLeft className="h-4 w-4" /> Band operations</a><button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}><RefreshCw className="h-4 w-4" /> Refresh now</button></div>
+    {accessState === "read_only" ? <p role="status" className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 text-sm text-[var(--text-muted)]">You have read-only access to this show. An owner or member can change availability, tasks, and the run of show.</p> : accessState === "unavailable" ? <p role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">Your show permissions could not be verified. Changes are disabled until you refresh.</p> : null}
     {error ? <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{error}</p> : null}
+    <fieldset className="m-0 min-w-0 space-y-5 border-0 p-0" disabled={!canManage} aria-disabled={!canManage}>
     <SurfaceCard className="border-[var(--accent)]/30"><div className="flex flex-wrap items-center gap-2"><Badge variant={readiness.status === "ready" ? "success" : readiness.status === "attention" ? "warning" : "danger"}>{readiness.status.replaceAll("_", " ")}</Badge><span className="text-lg font-semibold">{readiness.score}/100</span><span className="text-xs text-[var(--text-muted)]">{readiness.confidenceLabel} confidence · updated {new Date(dayOf.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></div><h2 className="mt-4 text-xl font-semibold">{dayOf.headline}</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">{dayOf.nextAction}</p>{readiness.gaps[0] ? <p className="mt-3 text-xs text-[var(--text-muted)]">Highest gap: {readiness.gaps[0].title} — {readiness.gaps[0].detail}</p> : null}</SurfaceCard>
 
     <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
@@ -42,6 +49,7 @@ export function DayOfClient({ initialData }: { initialData: EventDayOfResponse }
 
     <div className="grid gap-5 lg:grid-cols-2"><SurfaceCard><h2 className="font-semibold">Setlist</h2>{event.setlist ? <><div className="mt-2 flex items-center justify-between"><p className="text-sm text-[var(--text-muted)]">{event.setlist.name}</p><p className="text-xs text-[var(--text-muted)]">{setlistSeconds ? `${Math.floor(setlistSeconds / 60)} min` : "duration unknown"}</p></div><ol className="mt-4 space-y-2">{event.setlist.items.map((item, index) => <li key={item.id} className="flex gap-3 rounded-lg border border-[var(--border)] p-3"><span className="text-xs text-[var(--text-muted)]">{index + 1}</span><div><p className="text-sm font-medium">{item.song?.title ?? item.label ?? item.itemType}</p>{item.transitionNotes ? <p className="mt-1 text-xs text-[var(--text-muted)]">{item.transitionNotes}</p> : null}</div></li>)}</ol></> : <p className="mt-3 text-sm text-[var(--text-muted)]">No setlist is attached.</p>}</SurfaceCard>
       <SurfaceCard><h2 className="font-semibold">Production and logistics</h2><div className="mt-4 space-y-3 text-sm">{event.productionNotes ? <p>{event.productionNotes}</p> : <p className="text-[var(--text-muted)]">No production notes are recorded.</p>}{event.parkingNotes ? <p><span className="font-medium">Parking:</span> {event.parkingNotes}</p> : null}{event.hospitalityNotes ? <p><span className="font-medium">Hospitality:</span> {event.hospitalityNotes}</p> : null}{event.travelNotes ? <p><span className="font-medium">Travel:</span> {event.travelNotes}</p> : null}<div className="flex flex-wrap gap-2">{[["Stage plot", event.stagePlotUrl], ["Input list", event.inputListUrl], ["Tech rider", event.techRiderUrl], ["Hospitality rider", event.hospitalityRiderUrl], ["Drive folder", event.driveFolderUrl]].filter((item): item is [string, string] => Boolean(item[1])).map(([label, url]) => <a key={label} className="sb-btn-secondary" target="_blank" rel="noreferrer" href={url}>{label}</a>)}</div></div></SurfaceCard></div>
+    </fieldset>
   </div>;
 }
 

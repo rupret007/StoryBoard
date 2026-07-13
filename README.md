@@ -101,6 +101,11 @@ host-published Postgres and Redis ports.
 
 **Phase 3B:** Membership **invitations** (hashed tokens, audit), **`viewer`** role with a small capability map, **Team** admin UI (owners), **first-artist onboarding** without requiring seed, and minimal **Origin / Referer** checks on mutating requests (`docs/invitations.md`, `docs/auth-operators.md`).
 
+The web experience mirrors those server permissions: viewers retain readable
+Manager, event, project, campaign, and deal views while mutation controls fail
+closed; agreement-template creation and activation remain owner-only. API role
+guards and audited writes are still the authoritative security boundary.
+
 **Phase 2B:** Per-artist Google connections (encrypted in Postgres), real Calendar/Drive adapters when scoped, minimal OAuth routes (`docs/integrations-google-oauth.md`), a two-job BullMQ worker in the API process, and shared Zod payloads in `@storyboard/shared` for key approval types.
 
 **Phase 4A:** Workflow automation and notifications on the existing queue: invite email drafts (Gmail real or mock), approval and integration connection notifications, overdue task and stale follow-up digests (repeatable jobs), minimal in-app `WorkflowNotification` rows + optional operator **`workflowEmailEnabled`**, and auditable automation actions. See `docs/workflow-automation.md`.
@@ -112,6 +117,29 @@ host-published Postgres and Redis ports.
 **Phase 5B:** **Telegram inbound registration** — owners issue short-lived **`POST /workflow/telegram/registration-token`** links; **`POST /integrations/telegram/webhook`** handles **`/start`** payloads only, binds **`telegramChatId`** with one-time **`TelegramRegistrationToken`** rows, full audit trail, optional **`TELEGRAM_WEBHOOK_SECRET`**, and minimal Notifications UI (deep link / copy / manual chat id fallback). Expanded **`pnpm test`** coverage (shared + API). See `docs/telegram-alerts.md`.
 
 **Booking acquisition:** A quick, artist-scoped booking profile unlocks market prospecting and pitch campaigns. **Find shows** searches one city at a time through Ticketmaster Discovery when configured, otherwise states that manual mode is active rather than inventing leads. It stores venue, festival, private-event, and corporate-event prospects; only physical-room prospects create a `Venue` on conversion. **Pitch campaigns** render only a small allowlist of variables and show every personalized email before approval. Draft-only delivery is the default; a campaign may explicitly choose an approval-gated immediate-send batch of at most 25 recipients. Every provider action still requires separate human approval and execution, and unknown delivery is never retried automatically. Successful delivery creates a follow-up task seven days later by default. See `docs/domain-model.md` and `docs/developer-runbook.md`.
+
+**Approval lifecycle:** `approval_lifecycle_v2` is the shared source for the
+operator work queue. `GET /approvals/work-queue` and the Approval Center
+separate pending human decisions, approved requests ready for their explicit
+execution step, fresh executions still inside their one-hour lease, stale
+unknown or failed provider outcomes needing reconciliation, conclusively
+reviewed provider checks, and approved records that have no executable
+StoryBoard action. A fresh `executionAttemptedAt` claim is
+`execution_in_progress`: it is neither live attention nor reconcilable while
+the original provider call may still be running. At one hour without a final
+result it becomes `execution_unknown` and enters reconciliation attention.
+Dashboard, desktop/mobile navigation, Manager, weekly summary, and digests use
+the same distinction; approval event notifications deep-link to the Approval
+Center and remain historical until read. Only Gmail batch, Calendar hold, and
+Drive-folder actions in the code-owned allowlist are executable. Real Google
+requests have a 30-second per-request timeout, and Gmail draft/send approval
+batches are capped at 25 recipients, keeping provider work bounded inside the
+lease. Viewers can inspect the artist-scoped queue and append-only
+reconciliation history but cannot approve, reject, execute, or record a
+provider check. Members and owners may record a checked result through
+`approval_reconciliation_v1`; every item reports `canRetry=false`, and
+StoryBoard never presents the original one-shot provider attempt as safe to
+repeat.
 
 **Booking advisor:** The Booking advisor turns sprint, campaign, delivery, outcome, and feedback into reviewable next steps. It remains deterministic when `OPENAI_ENABLED=false`. When enabled, `OPENAI_ADVISOR_CONTEXT=aggregate` (default) sends counts only; the explicit global `full` mode sends artist CRM context to the configured provider. It never sends messages or mutates booking records.
 
@@ -126,6 +154,8 @@ Today, This week, Decisions needed, Waiting on, and Risks and opportunities.
 It opens the band's saved daily/weekly preference, lets the operator switch
 views deliberately, and refreshes the cadence currently on screen. A confidence
 label describes StoryBoard record coverage, not the probability of success.
+Reading a brief is cache-only and never invokes a model or writes records;
+member/owner Refresh uses the separately guarded generation endpoint.
 Manager conversations retain bounded recent threads,
 resume after reload, and can be revisited from the conversation-history picker
 without mixing context between threads. They answer common questions about
@@ -174,10 +204,13 @@ failed, rejected, or expired sibling so the batch cannot become retryable.
 Resolved memory receipts inherit the current memory record's access boundary:
 archived or missing facts disappear, non-owners see only normal facts, and a
 saved value is never replayed from stale conversation preview JSON. A member
-may close a failed, simulated, or orphaned receipt only with a written
-reconciliation note. That closes the Manager receipt without claiming provider
-success; an uncertain attempted provider action remains read-only and cannot be
-closed or retried from Manager.
+may close a simulated or typed-but-orphaned Manager receipt only with a written
+reconciliation note. A Manager receipt linked to a failed or uncertain
+Approval cannot be closed there; it routes to the Approval Center for
+append-only provider evidence. A `still_unknown` check keeps the work blocked.
+A conclusive external-effect check also keeps linked Manager work blocked for
+manual repair, while a no-effect check permits only a separate newly reviewed
+request. None of these paths retries or mutates the original Approval.
 Every receipt also carries code-owned `canMutate` and `canReconcile` flags.
 Owner-private work projected as a sanitized shared-record receipt sets both to
 false, and the web client renders no mutation or reconciliation control for it.
@@ -217,7 +250,7 @@ to deterministic and provider-backed answers through
 action explicit, simplify tone, or ask one evidence-backed missing-premise
 question. Raw correction notes never become instructions, and adaptation cannot
 change facts, citations, recommendations, tools, permissions, or writes.
-Prompt/policy version `manager_os_v33` and its `manager_evals_v37` offline eval
+Prompt/policy version `manager_os_v33` and its `manager_evals_v38` offline eval
 suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -357,8 +390,10 @@ caution. Relevant artist records are cited when they exist. These code-owned
 answers are read-only and cannot send, pay, sign, publish, or create work.
 “Learn as you go” prompts use the band's saved **Topics to explain**.
 Brief cache reuse is also evidence-aware: a newer audited change to relevant
-band operations, booking, money, approvals, decisions, or Manager work forces a
-fresh brief instead of waiting for the daily/weekly age limit.
+band operations, booking, money, approvals, decisions, or Manager work
+invalidates cache reuse instead of waiting for the daily/weekly age limit. A
+cache-only read then returns no brief until a member or owner refreshes it, or a
+scheduled generation creates the next brief.
 The Manager also has one shared, deterministic 90-day outcome review. Completed
 shows, projects, tasks, campaign results, attendance, post-show notes,
 relationship outcomes, invoices, expenses, and finalized settlements are
@@ -409,8 +444,9 @@ It derives four 25-point dimensions—identity, people, business, and current
 execution—from artist-owned structured records, then asks the highest-value
 missing question. The score measures recorded coverage, never artistic quality
 or potential. Members can edit the full operating profile and working-lineup
-responsibilities after intake; updates immediately change the shared brief,
-conversation, and model snapshot without turning unknowns into guesses.
+responsibilities after intake; updates immediately affect conversation and
+model snapshots, and invalidate the cached brief so the next explicit or
+scheduled generation reflects them without turning unknowns into guesses.
 The **What your manager remembers** panel now distinguishes canonical
 operating-profile facts from other saved memory. Profile-backed band mode,
 home market, ambition, and constraints synchronize atomically on every profile
@@ -515,7 +551,12 @@ fails closed and the current details must be prepared again. Mock execution is
 clearly labeled **simulated** because no Google account changed; it can be
 replaced after Google is connected. A failed real-provider attempt is never
 blindly retried because the outside write may have succeeded—check Google and
-reconcile manually to avoid a duplicate.
+record the result in the Approval Center. `still_unknown` remains quarantined.
+If no external effect was found, StoryBoard may prepare a separate newly
+reviewed approval; it never reruns the original request. If an external effect
+was observed, StoryBoard blocks a duplicate and leaves linked Manager work
+blocked for manual repair rather than auto-linking a provider reference or
+claiming recovered provider success.
 When the show is over, the same event editor records attendance, gross revenue,
 what worked or failed, and the buyer/venue relationship outcome. Settlement
 math includes only expenses in the settlement currency; other-currency costs
@@ -583,7 +624,7 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm lint` | ESLint (API + web) |
 | `pnpm test` | Unit tests (`@storyboard/shared` + compiled API tests); does not require a database |
 | `pnpm test:integration` | Migrates and tests a dedicated DB named by `STORYBOARD_TEST_DATABASE_URL` (must contain `test`) |
-| `pnpm test:e2e` | Resets an explicit `STORYBOARD_TEST_DATABASE_URL`, builds production artifacts, and runs 13 focused Chromium workflows |
+| `pnpm test:e2e` | Resets an explicit `STORYBOARD_TEST_DATABASE_URL`, builds production artifacts, and runs 15 focused Chromium workflows |
 | `pnpm manager:eval` | Build the API and run the current offline Manager safety/usefulness gate |
 | `pnpm infra:up` / `infra:down` | Docker Postgres + Redis |
 | `pnpm container:up` / `container:down` | Build/start or stop the complete local container bundle |
@@ -593,6 +634,15 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm db:studio` | Prisma Studio |
 | `pnpm db:audit-relationships` | Read-only check for historical cross-artist record links |
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
+
+Release validation snapshot (2026-07-13): root typecheck/lint, 11/11 shared
+tests, 235/235 API assertions across 230 top-level tests, both production
+builds, 82/82 Manager checks at 100% safety, 5/5 database workflows across all
+40 migrations, and 15/15 Chromium workflows pass. Prisma reports no schema
+drift, the relationship diagnostic reports zero integrity issues, and the
+rebuilt local container bundle passes health, readiness, Dev-login session,
+and authenticated-Dashboard smoke. One non-fatal `pg@8.14.1` concurrent-query
+deprecation warning remains tracked before any `pg@9` upgrade.
 
 ## Phase 2A providers
 
@@ -612,10 +662,11 @@ Gmail (OAuth compose/send), Bandsintown (the artist's own event context only), a
   reviewed document snapshots, invoices/manual payments, expenses, and
   settlements.
 - **Connected work:** an approval center with explicit post-approval execution,
-  audit history, notifications, and mock-safe adapters. Scoped Google accounts
-  can use real Gmail, Calendar, and Drive; Ticketmaster supplies optional market
-  signals, Bandsintown is limited to the artist's own event context, and
-  YouTube/Spotify remain mock-only.
+  separate decision/execute/reconciliation queues, audit history,
+  notifications, and mock-safe adapters. Scoped Google accounts can use real
+  Gmail, Calendar, and Drive; Ticketmaster supplies optional market signals,
+  Bandsintown is limited to the artist's own event context, and YouTube/Spotify
+  remain mock-only.
 
 ## Commands API
 

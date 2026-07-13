@@ -2,7 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { OnboardingGate } from "@/components/onboarding-gate";
 import { SignInGate } from "@/components/sign-in-gate";
 import { ApiHttpError, serverApiFetch } from "@/lib/api-server";
-import type { DashboardStats } from "@/lib/types";
+import type { ApprovalLifecycleCounts, DashboardStats } from "@/lib/types";
 import type { ReactNode } from "react";
 
 type AuthMeResponse = {
@@ -57,15 +57,15 @@ export default async function AppLayout({
   )?.role;
   const showTeamLink = currentRole === "owner";
 
-  let pendingApprovals = 0;
+  let approvalAttention: ApprovalLifecycleCounts | null = null;
   try {
     const stats = await serverApiFetch<DashboardStats>("/dashboard/stats", {
       cache: "no-store",
       artistId: activeArtistId
     });
-    pendingApprovals = stats.pendingApprovals;
+    approvalAttention = stats.approvalAttention;
   } catch {
-    pendingApprovals = 0;
+    approvalAttention = null;
   }
 
   const memberships = me.memberships.map((m) => ({
@@ -81,7 +81,7 @@ export default async function AppLayout({
 
   return (
     <AppShell
-      pendingApprovals={pendingApprovals}
+      approvalAttention={approvalAttention}
       artistId={activeArtistId}
       {...(me.operator.email ? { operatorEmail: me.operator.email } : {})}
       memberships={memberships}

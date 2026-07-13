@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException
 } from "@nestjs/common";
@@ -10,6 +11,7 @@ import {
   outboundEmailBatchPayloadSchema
 } from "@storyboard/shared";
 import {
+  ApprovalReconciliationOutcome,
   ApprovalStatus,
   AuditSeverity,
   BookingCampaignDeliveryStatus,
@@ -30,13 +32,23 @@ import {
 } from "../operations/event-logistics";
 import { PrismaService } from "../prisma/prisma.service";
 import { StoryboardQueueService } from "../queue/storyboard-queue.service";
-
-const EXECUTABLE_ACTIONS = new Set([
-  "outbound_email_batch",
-  "outbound_email_send_batch",
-  "calendar_hold_batch",
-  "drive_ensure_folder"
-]);
+import {
+  APPROVAL_EXECUTION_LEASE_MS,
+  APPROVAL_LIFECYCLE_POLICY_VERSION,
+  APPROVAL_LIFECYCLE_RELEVANT_STATUSES,
+  approvalActionIsExecutable,
+  approvalExecutionLeaseIsActive,
+  partitionApprovalLifecycle,
+  projectApprovalLifecycleItem
+} from "./approval-lifecycle";
+import {
+  APPROVAL_RECONCILIATION_POLICY_VERSION,
+  approvalReconciliationEvidence,
+  approvalReconciliationHasKnownExternalEffect,
+  approvalReconciliationIntentMatches,
+  approvalReconciliationIsConclusive,
+  type ApprovalReconciliationInput
+} from "./approval-reconciliation";
 
 type OutboundDraftPayload = {
   venueId?: string;
@@ -59,6 +71,7 @@ export type ApprovalCreateSpec = {
 type ApprovalTransactionClient = Pick<
   Prisma.TransactionClient,
   | "approvalRequest"
+  | "approvalReconciliation"
   | "auditEvent"
   | "bandEvent"
   | "bookingOpportunity"
@@ -71,6 +84,34 @@ type EventLogisticsSource = NonNullable<
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function prismaErrorCode(error: unknown) {
+  return isRecord(error) && typeof error.code === "string"
+    ? error.code
+    : null;
+}
+
+function projectReconciliationReceipt(row: {
+  id: string;
+  outcome: ApprovalReconciliationOutcome;
+  note: string;
+  evidence: unknown;
+  policyVersion: string;
+  observedAt: Date;
+  actorLabel: string | null;
+  createdAt: Date;
+}) {
+  return {
+    id: row.id,
+    outcome: row.outcome,
+    note: row.note,
+    evidence: row.evidence,
+    policyVersion: row.policyVersion,
+    observedAt: row.observedAt,
+    actorLabel: row.actorLabel,
+    createdAt: row.createdAt
+  };
 }
 
 function stableJson(value: unknown): string {
@@ -203,16 +244,66 @@ export class ApprovalsService {
     }
     const approvals = await tx.approvalRequest.findMany({
       where: { artistId, managerRecommendationId },
-      select: { id: true, eventId: true, sourceKey: true, actionType: true, status: true, payload: true }
+      select: {
+        id: true,
+        eventId: true,
+        sourceKey: true,
+        actionType: true,
+        status: true,
+        executionAttemptedAt: true,
+        payload: true,
+        reconciliations: {
+          where: {
+            outcome: {
+              in: [
+                ApprovalReconciliationOutcome.external_effect_observed,
+                ApprovalReconciliationOutcome.no_external_effect_observed
+              ]
+            }
+          },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: { outcome: true, createdAt: true }
+        }
+      }
     });
     if (approvals.length === 0) return;
 
     let outcome: ManagerRecommendationOutcome =
       ManagerRecommendationOutcome.accepted;
     let outcomeReason = "approval_prepared";
-    if (approvals.some((row) => row.status === ApprovalStatus.failed)) {
+    const unresolvedApproval = approvals.find((row) => {
+      const needsReconciliation =
+        row.status === ApprovalStatus.failed ||
+        (row.status === ApprovalStatus.approved &&
+          Boolean(row.executionAttemptedAt));
+      return (
+        needsReconciliation &&
+        !approvalReconciliationIsConclusive(row.reconciliations[0]?.outcome)
+      );
+    });
+    const noExternalEffect = approvals.find(
+      (row) =>
+        row.reconciliations[0]?.outcome ===
+        ApprovalReconciliationOutcome.no_external_effect_observed
+    );
+    const externalEffect = approvals.find(
+      (row) =>
+        row.reconciliations[0]?.outcome ===
+        ApprovalReconciliationOutcome.external_effect_observed
+    );
+    if (externalEffect) {
       outcome = ManagerRecommendationOutcome.blocked;
-      outcomeReason = "approval_failed";
+      outcomeReason = "approval_reconciled_external_effect_needs_repair";
+    } else if (unresolvedApproval) {
+      outcome = ManagerRecommendationOutcome.blocked;
+      outcomeReason =
+        unresolvedApproval.status === ApprovalStatus.failed
+          ? "approval_failed"
+          : "approval_execution_unknown";
+    } else if (noExternalEffect) {
+      outcome = ManagerRecommendationOutcome.blocked;
+      outcomeReason = "approval_reconciled_no_external_effect";
     } else if (
       approvals.some(
         (row) =>
@@ -261,7 +352,10 @@ export class ApprovalsService {
           outcome,
           outcomeReason,
           approvalIds: approvals.map((row) => row.id),
-          approvalStatuses: approvals.map((row) => row.status)
+          approvalStatuses: approvals.map((row) => row.status),
+          reconciliationOutcomes: approvals.map(
+            (row) => row.reconciliations[0]?.outcome ?? null
+          )
         }
       }
     });
@@ -822,6 +916,74 @@ export class ApprovalsService {
     });
   }
 
+  async workQueue(artistId: string, canMutate: boolean) {
+    const observedAt = new Date();
+    const capabilities = {
+      canDecide: canMutate,
+      canExecute: canMutate,
+      canReconcile: canMutate
+    };
+    const rows = await this.prisma.client.approvalRequest.findMany({
+      where: {
+        artistId,
+        status: { in: [...APPROVAL_LIFECYCLE_RELEVANT_STATUSES] }
+      },
+      include: {
+        bookingCampaign: {
+          select: { id: true, artistId: true }
+        },
+        campaignDeliveries: {
+          where: { artistId },
+          select: { status: true }
+        },
+        reconciliations: {
+          where: { artistId },
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          select: {
+            id: true,
+            outcome: true,
+            resolutionKey: true,
+            note: true,
+            evidence: true,
+            idempotencyKey: true,
+            policyVersion: true,
+            observedAt: true,
+            actorLabel: true,
+            actorOperatorId: true,
+            createdAt: true
+          }
+        }
+      },
+      orderBy: { createdAt: "asc" }
+    });
+    const items = rows.flatMap((row) => {
+      const item = projectApprovalLifecycleItem(row, capabilities, observedAt);
+      return item ? [item] : [];
+    });
+    const {
+      pendingDecision,
+      readyToExecute,
+      executionInProgress,
+      needsReconciliation,
+      reconciled,
+      approvedNotExecutable,
+      counts
+    } = partitionApprovalLifecycle(items, observedAt);
+    return {
+      policyVersion: APPROVAL_LIFECYCLE_POLICY_VERSION,
+      observedAt: observedAt.toISOString(),
+      capabilities,
+      counts,
+      pendingDecision,
+      readyToExecute,
+      executionInProgress,
+      needsReconciliation,
+      reconciled,
+      approvedNotExecutable
+    };
+  }
+
   pending(artistId: string) {
     return this.prisma.client.approvalRequest.findMany({
       where: {
@@ -833,16 +995,16 @@ export class ApprovalsService {
   }
 
   /** Approved items that can still be executed */
-  readyToExecute(artistId: string) {
-    return this.prisma.client.approvalRequest.findMany({
+  async readyToExecute(artistId: string) {
+    const rows = await this.prisma.client.approvalRequest.findMany({
       where: {
         artistId,
         status: ApprovalStatus.approved,
-        executionAttemptedAt: null,
-        actionType: { in: [...EXECUTABLE_ACTIONS] }
+        executionAttemptedAt: null
       },
       orderBy: { approvedAt: "asc" }
     });
+    return rows.filter((row) => approvalActionIsExecutable(row.actionType));
   }
 
   async get(artistId: string, id: string) {
@@ -853,6 +1015,286 @@ export class ApprovalsService {
       throw new NotFoundException("Approval not found");
     }
     return row;
+  }
+
+  async reconciliations(
+    artistId: string,
+    approvalId: string,
+    canMutate: boolean
+  ) {
+    const approval = await this.prisma.client.approvalRequest.findFirst({
+      where: { id: approvalId, artistId },
+      select: { id: true, status: true, executionAttemptedAt: true }
+    });
+    if (!approval) throw new NotFoundException("Approval not found");
+    const [rows, terminal] = await Promise.all([
+      this.prisma.client.approvalReconciliation.findMany({
+        where: { artistId, approvalId },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 50
+      }),
+      this.prisma.client.approvalReconciliation.findFirst({
+        where: {
+          artistId,
+          approvalId,
+          outcome: {
+            in: [
+              ApprovalReconciliationOutcome.external_effect_observed,
+              ApprovalReconciliationOutcome.no_external_effect_observed
+            ]
+          }
+        },
+        orderBy: { createdAt: "desc" }
+      })
+    ]);
+    const executionLeaseActive = approvalExecutionLeaseIsActive(approval);
+    const needsReconciliation =
+      approval.status === ApprovalStatus.failed ||
+      (approval.status === ApprovalStatus.approved &&
+        Boolean(approval.executionAttemptedAt));
+    return {
+      policyVersion: APPROVAL_RECONCILIATION_POLICY_VERSION,
+      approvalId,
+      resolved: Boolean(terminal),
+      resolutionOutcome: terminal?.outcome ?? null,
+      capabilities: {
+        canReconcile:
+          canMutate &&
+          needsReconciliation &&
+          !executionLeaseActive &&
+          !terminal,
+        canRetry: false as const
+      },
+      receipts: rows.map(projectReconciliationReceipt)
+    };
+  }
+
+  private async recordReconciliationOnce(
+    artistId: string,
+    approvalId: string,
+    input: ApprovalReconciliationInput,
+    actorLabel: string,
+    actorOperatorId: string
+  ) {
+    return this.prisma.client.$transaction(
+      async (tx) => {
+        const approval = await tx.approvalRequest.findFirst({
+          where: { id: approvalId, artistId },
+          select: {
+            id: true,
+            status: true,
+            actionType: true,
+            payload: true,
+            executionAttemptedAt: true,
+            managerRecommendationId: true,
+            campaignDeliveries: {
+              where: { artistId },
+              select: {
+                status: true,
+                providerDraftId: true,
+                providerMessageId: true,
+                providerThreadId: true
+              }
+            },
+            reconciliations: {
+              where: {
+                outcome: {
+                  in: [
+                    ApprovalReconciliationOutcome.external_effect_observed,
+                    ApprovalReconciliationOutcome.no_external_effect_observed
+                  ]
+                }
+              },
+              orderBy: { createdAt: "desc" },
+              take: 1
+            }
+          }
+        });
+        if (!approval) throw new NotFoundException("Approval not found");
+
+        const existing = await tx.approvalReconciliation.findUnique({
+          where: {
+            artistId_idempotencyKey: {
+              artistId,
+              idempotencyKey: input.idempotencyKey
+            }
+          }
+        });
+        if (existing) {
+          if (
+            existing.approvalId !== approvalId ||
+            !approvalReconciliationIntentMatches(existing, input)
+          ) {
+            throw new ConflictException(
+              "Reconciliation idempotency key is already used for different evidence"
+            );
+          }
+          return { created: false, receipt: existing };
+        }
+
+        const needsReconciliation =
+          approval.status === ApprovalStatus.failed ||
+          (approval.status === ApprovalStatus.approved &&
+            Boolean(approval.executionAttemptedAt));
+        if (!needsReconciliation) {
+          throw new BadRequestException(
+            "Approval does not have an uncertain or failed execution to reconcile"
+          );
+        }
+        if (approvalExecutionLeaseIsActive(approval)) {
+          throw new ConflictException(
+            "Approval execution is still in progress; wait for it to finish before reconciling"
+          );
+        }
+        if (
+          approvalReconciliationIsConclusive(
+            approval.reconciliations[0]?.outcome
+          )
+        ) {
+          throw new ConflictException("Approval reconciliation is already final");
+        }
+
+        const observedAt = new Date(input.observedAt);
+        if (observedAt.getTime() > Date.now() + 5 * 60 * 1000) {
+          throw new BadRequestException(
+            "Reconciliation observation time cannot be in the future"
+          );
+        }
+        if (
+          approval.executionAttemptedAt &&
+          observedAt.getTime() < approval.executionAttemptedAt.getTime()
+        ) {
+          throw new BadRequestException(
+            "Reconciliation evidence must be observed after the execution attempt"
+          );
+        }
+        if (
+          approval.status === ApprovalStatus.approved &&
+          approval.executionAttemptedAt &&
+          observedAt.getTime() <
+            approval.executionAttemptedAt.getTime() +
+              APPROVAL_EXECUTION_LEASE_MS
+        ) {
+          throw new BadRequestException(
+            "Reconciliation evidence must be collected after the execution lease ends"
+          );
+        }
+        if (
+          input.outcome === "no_external_effect_observed" &&
+          approvalReconciliationHasKnownExternalEffect(approval)
+        ) {
+          throw new ConflictException(
+            "StoryBoard already has a recorded external effect; review and repair the saved provider result"
+          );
+        }
+        const conclusive = approvalReconciliationIsConclusive(input.outcome);
+        const receipt = await tx.approvalReconciliation.create({
+          data: {
+            artistId,
+            approvalId,
+            outcome: ApprovalReconciliationOutcome[input.outcome],
+            resolutionKey: conclusive ? "terminal" : null,
+            note: input.note,
+            evidence: approvalReconciliationEvidence(input),
+            idempotencyKey: input.idempotencyKey,
+            policyVersion: APPROVAL_RECONCILIATION_POLICY_VERSION,
+            observedAt,
+            actorLabel,
+            actorOperatorId
+          }
+        });
+        await tx.auditEvent.create({
+          data: {
+            artistId,
+            severity: conclusive ? AuditSeverity.warning : AuditSeverity.info,
+            aggregateType: "ApprovalReconciliation",
+            aggregateId: receipt.id,
+            action: "approval.reconciliation_recorded",
+            actorLabel,
+            actorOperatorId,
+            metadata: {
+              approvalId,
+              outcome: receipt.outcome,
+              observedAt: receipt.observedAt.toISOString(),
+              evidenceCount:
+                input.providerReference == null ? 1 : 2,
+              policyVersion: APPROVAL_RECONCILIATION_POLICY_VERSION
+            }
+          }
+        });
+        if (approval.managerRecommendationId) {
+          await this.reconcileManagerRecommendation(
+            tx,
+            artistId,
+            approval.managerRecommendationId,
+            actorLabel,
+            actorOperatorId
+          );
+        }
+        return { created: true, receipt };
+      },
+      { isolationLevel: "Serializable" }
+    );
+  }
+
+  async recordReconciliation(
+    artistId: string,
+    approvalId: string,
+    input: ApprovalReconciliationInput,
+    actorLabel: string,
+    actorOperatorId: string
+  ) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const result = await this.recordReconciliationOnce(
+          artistId,
+          approvalId,
+          input,
+          actorLabel,
+          actorOperatorId
+        );
+        return {
+          policyVersion: APPROVAL_RECONCILIATION_POLICY_VERSION,
+          approvalId,
+          created: result.created,
+          receipt: projectReconciliationReceipt(result.receipt)
+        };
+      } catch (error) {
+        if (prismaErrorCode(error) === "P2034") {
+          if (attempt < 2) continue;
+          throw new ConflictException(
+            "Approval reconciliation changed; try again"
+          );
+        }
+        if (prismaErrorCode(error) === "P2002") {
+          const replay =
+            await this.prisma.client.approvalReconciliation.findUnique({
+              where: {
+                artistId_idempotencyKey: {
+                  artistId,
+                  idempotencyKey: input.idempotencyKey
+                }
+              }
+            });
+          if (
+            replay?.approvalId === approvalId &&
+            approvalReconciliationIntentMatches(replay, input)
+          ) {
+            return {
+              policyVersion: APPROVAL_RECONCILIATION_POLICY_VERSION,
+              approvalId,
+              created: false,
+              receipt: projectReconciliationReceipt(replay)
+            };
+          }
+          throw new ConflictException(
+            "Approval reconciliation is already final"
+          );
+        }
+        throw error;
+      }
+    }
+    throw new ConflictException("Approval reconciliation changed; try again");
   }
 
   async create(
@@ -987,7 +1429,7 @@ export class ApprovalsService {
     if (approvalRow.status !== ApprovalStatus.approved) {
       throw new BadRequestException("Only approved requests can be executed");
     }
-    if (!EXECUTABLE_ACTIONS.has(approvalRow.actionType)) {
+    if (!approvalActionIsExecutable(approvalRow.actionType)) {
       throw new BadRequestException(
         `Execution not enabled for action type: ${approvalRow.actionType}`
       );
@@ -1148,6 +1590,11 @@ export class ApprovalsService {
       if (approvalRow.actionType === "outbound_email_batch") {
         const outbound = parseOutboundPayload(approvalRow.payload);
         const draftsSpec = outbound.drafts;
+        if (draftsSpec.length > 25) {
+          throw new BadRequestException(
+            "A Gmail draft batch may contain at most 25 recipients"
+          );
+        }
         type CreatedDraft = {
           venueId?: string;
           draftId: string;

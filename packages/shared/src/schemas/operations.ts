@@ -14,7 +14,10 @@ function isIanaTimezone(value: string) {
 const eventTimezone = z.string().trim().min(1).max(80).refine(isIanaTimezone, "Use a valid IANA timezone such as America/Chicago").nullable().optional();
 export const eventTypes = ["gig","rehearsal","studio","release","promotion","travel","meeting"] as const;
 export const eventCreateSchema = z.object({ type: z.enum(eventTypes), status: z.enum(["draft","hold","confirmed","completed","cancelled"]).default("draft"), title: z.string().trim().min(1).max(240), opportunityId: nullableId, venueId: nullableId, contactId: nullableId, projectId: nullableId, setlistId: nullableId, startsAt: nullableDate, endsAt: nullableDate, timezone: eventTimezone, locationName: z.string().trim().max(240).nullable().optional(), address: z.string().trim().max(500).nullable().optional(), loadInAt: nullableDate, soundcheckAt: nullableDate, doorsAt: nullableDate, setAt: nullableDate, curfewAt: nullableDate, travelNotes: z.string().trim().max(3000).nullable().optional(), hospitalityNotes: z.string().trim().max(3000).nullable().optional(), productionNotes: z.string().trim().max(3000).nullable().optional(), cancellationTerms: z.string().trim().max(3000).nullable().optional(), guaranteeMinor: money, depositMinor: money, depositDueAt: nullableDate, balanceDueAt: nullableDate, currency: z.string().trim().length(3).default("USD"), stagePlotUrl: z.string().url().nullable().optional(), inputListUrl: z.string().url().nullable().optional(), techRiderUrl: z.string().url().nullable().optional(), hospitalityRiderUrl: z.string().url().nullable().optional(), parkingNotes: z.string().trim().max(2000).nullable().optional(), guestListNotes: z.string().trim().max(2000).nullable().optional(), attendance: z.number().int().nonnegative().nullable().optional(), grossRevenueMinor: money, postShowNotes: z.string().trim().max(5000).nullable().optional(), relationshipOutcome: z.string().trim().max(1000).nullable().optional() }).strict();
-export const eventPatchSchema = eventCreateSchema.partial().strict();
+export const eventPatchSchema = eventCreateSchema.partial().extend({
+  status: z.enum(["draft","hold","confirmed","completed","cancelled"]).optional(),
+  currency: z.string().trim().length(3).optional()
+}).strict();
 export const eventParticipantSchema = z.object({ bandMemberId: z.string().trim().min(1), response: z.enum(["unknown","available","tentative","unavailable"]).default("unknown"), assignment: z.string().trim().max(300).nullable().optional(), notes: z.string().trim().max(1000).nullable().optional() }).strict();
 const eventScheduleFields = {
   title: z.string().trim().min(1).max(160),
@@ -33,7 +36,7 @@ export const eventScheduleItemPatchSchema = z.object(eventScheduleFields).partia
   validateScheduleRange(value, context);
 });
 export const songCreateSchema = z.object({ title: z.string().trim().min(1).max(240), durationSeconds: z.number().int().positive().max(7200).nullable().optional(), musicalKey: z.string().trim().max(30).nullable().optional(), bpm: z.number().int().min(20).max(400).nullable().optional(), leadVocalist: z.string().trim().max(160).nullable().optional(), genre: z.string().trim().max(100).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional(), lyricsUrl: z.string().url().nullable().optional(), chartUrl: z.string().url().nullable().optional(), active: z.boolean().default(true) }).strict();
-export const songPatchSchema = songCreateSchema.partial().strict();
+export const songPatchSchema = songCreateSchema.partial().extend({ active: z.boolean().optional() }).strict();
 const setlistItemSchema = z.object({ songId: z.string().trim().min(1).nullable().optional(), itemType: z.enum(["song","break","note"]).default("song"), label: z.string().trim().max(240).nullable().optional(), transitionNotes: z.string().trim().max(1000).nullable().optional() }).strict().superRefine((value, context) => {
   if (value.itemType === "song" && !value.songId && !value.label) context.addIssue({ code: "custom", path: ["songId"], message: "A setlist song needs a saved song or a label" });
   if (value.itemType !== "song" && value.songId) context.addIssue({ code: "custom", path: ["songId"], message: "Breaks and notes cannot link a song" });
@@ -43,11 +46,23 @@ const setlistFields = { name: z.string().trim().min(1).max(240), status: z.enum(
 export const setlistCreateSchema = z.object({ ...setlistFields, status: setlistFields.status.default("draft"), items: setlistFields.items.default([]) }).strict();
 export const setlistPatchSchema = z.object(setlistFields).partial().strict();
 export const projectCreateSchema = z.object({ type: z.enum(["release","content_campaign","tour","business"]), status: z.enum(["draft","active","completed","paused","cancelled"]).default("draft"), goalId: nullableId, name: z.string().trim().min(1).max(240), description: z.string().trim().max(3000).nullable().optional(), startsAt: nullableDate, dueAt: nullableDate, budgetMinor: money, currency: z.string().trim().length(3).default("USD"), successMetrics: z.array(z.string().trim().min(1).max(300)).max(20).default([]), assets: z.array(z.object({ label: z.string().max(200), url: z.string().url() }).strict()).max(50).default([]) }).strict();
-export const projectPatchSchema = projectCreateSchema.partial().strict();
+export const projectPatchSchema = projectCreateSchema.partial().extend({
+  status: z.enum(["draft","active","completed","paused","cancelled"]).optional(),
+  currency: z.string().trim().length(3).optional(),
+  successMetrics: z.array(z.string().trim().min(1).max(300)).max(20).optional(),
+  assets: z.array(z.object({ label: z.string().max(200), url: z.string().url() }).strict()).max(50).optional()
+}).strict();
 export const dealCreateSchema = z.object({ eventId: nullableId, opportunityId: nullableId, contactId: nullableId, status: z.enum(["draft","proposed","negotiating","accepted","declined","cancelled","completed"]).default("draft"), title: z.string().trim().min(1).max(240), offerAmountMinor: money, currency: z.string().trim().length(3).default("USD"), depositMinor: money, depositDueAt: nullableDate, balanceDueAt: nullableDate, performanceDate: nullableDate, terms: z.string().trim().max(10000).nullable().optional(), cancellationTerms: z.string().trim().max(5000).nullable().optional(), buyerName: z.string().trim().max(240).nullable().optional(), buyerEmail: z.string().email().nullable().optional(), expiresAt: nullableDate }).strict();
-export const dealPatchSchema = dealCreateSchema.partial().strict();
+export const dealPatchSchema = dealCreateSchema.partial().extend({
+  status: z.enum(["draft","proposed","negotiating","accepted","declined","cancelled","completed"]).optional(),
+  currency: z.string().trim().length(3).optional()
+}).strict();
 export const invoiceCreateSchema = z.object({ dealOfferId: nullableId, eventId: nullableId, number: z.string().trim().min(1).max(80), recipientName: z.string().trim().min(1).max(240), recipientEmail: z.string().email().nullable().optional(), currency: z.string().trim().length(3).default("USD"), subtotalMinor: z.number().int().nonnegative(), taxMinor: z.number().int().nonnegative().default(0), dueAt: nullableDate, notes: z.string().trim().max(3000).nullable().optional() }).strict();
-export const invoicePatchSchema = invoiceCreateSchema.partial().extend({ status: z.enum(["draft","issued","partially_paid","paid","overdue","voided"]).optional() }).strict();
+export const invoicePatchSchema = invoiceCreateSchema.partial().extend({
+  currency: z.string().trim().length(3).optional(),
+  taxMinor: z.number().int().nonnegative().optional(),
+  status: z.enum(["draft","issued","partially_paid","paid","overdue","voided"]).optional()
+}).strict();
 export const paymentRecordSchema = z.object({ idempotencyKey: z.string().trim().min(1).max(200), amountMinor: z.number().int().positive(), currency: z.string().trim().length(3).default("USD"), method: z.string().trim().min(1).max(80), reference: z.string().trim().max(200).nullable().optional(), evidenceUrl: z.string().url().nullable().optional(), receivedAt: z.string().datetime({ offset: true }) }).strict();
 export const expenseCreateSchema = z.object({ eventId: nullableId, projectId: nullableId, category: z.string().trim().min(1).max(100), description: z.string().trim().min(1).max(500), amountMinor: z.number().int().positive(), currency: z.string().trim().length(3).default("USD"), incurredAt: z.string().datetime({ offset: true }), receiptUrl: z.string().url().nullable().optional() }).strict().superRefine((value, ctx) => { if (!value.eventId && !value.projectId) ctx.addIssue({ code: "custom", path: ["eventId"], message: "An event or project is required." }); });
 export const expensePatchSchema = z.object({ eventId: nullableId, projectId: nullableId, category: z.string().trim().min(1).max(100).optional(), description: z.string().trim().min(1).max(500).optional(), amountMinor: z.number().int().positive().optional(), currency: z.string().trim().length(3).optional(), incurredAt: z.string().datetime({ offset: true }).optional(), receiptUrl: z.string().url().nullable().optional() }).strict();

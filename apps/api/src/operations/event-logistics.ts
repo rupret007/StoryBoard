@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
+import { approvalExecutionLeaseIsActive } from "../approvals/approval-lifecycle";
+import {
+  terminalApprovalReconciliation,
+  type ApprovalReconciliationSource
+} from "../approvals/approval-reconciliation";
 
 export const EVENT_LOGISTICS_POLICY_VERSION = "event_logistics_v1" as const;
 export const EVENT_LOGISTICS_CHANNELS = ["calendar", "drive"] as const;
 
 export type EventLogisticsChannel = typeof EVENT_LOGISTICS_CHANNELS[number];
 export type EventLogisticsBlockingReason = "type_not_gig" | "status_not_confirmed" | "start_missing" | "end_missing" | "timezone_missing" | "timezone_invalid" | "invalid_time_range";
-export type EventLogisticsChannelState = "complete" | "simulated" | "not_prepared" | "pending" | "approved" | "rejected" | "failed" | "expired" | "stale" | "executed_unlinked";
+export type EventLogisticsChannelState = "complete" | "simulated" | "not_prepared" | "pending" | "approved" | "execution_in_progress" | "execution_unknown" | "rejected" | "failed" | "expired" | "stale" | "executed_unlinked" | "reconciled_external_effect" | "reconciled_no_external_effect";
 
 export type EventLogisticsEvent = {
   id: string;
@@ -26,9 +31,13 @@ export type EventLogisticsApproval = {
   sourceKey?: string | null;
   actionType: string;
   status: string;
+  executionAttemptedAt?: Date | null;
   payload?: unknown;
   createdAt?: Date;
   updatedAt?: Date;
+  reconciliations?: Array<
+    Pick<ApprovalReconciliationSource, "outcome" | "createdAt">
+  >;
 };
 
 export type EventLogisticsSourceKey = {
@@ -162,12 +171,23 @@ function orderedApprovals(approvals: EventLogisticsApproval[]) {
   });
 }
 
-function approvalState(status: string): EventLogisticsChannelState {
-  if (status === "proposed" || status === "pending") return "pending";
-  if (status === "approved") return "approved";
-  if (status === "rejected") return "rejected";
-  if (status === "failed") return "failed";
-  if (status === "expired") return "expired";
+function approvalState(approval: EventLogisticsApproval): EventLogisticsChannelState {
+  const terminal = terminalApprovalReconciliation(approval.reconciliations);
+  const requiresReconciliation =
+    approval.status === "failed" ||
+    (approval.status === "approved" && Boolean(approval.executionAttemptedAt));
+  if (requiresReconciliation && terminal) {
+    return terminal.outcome === "external_effect_observed"
+      ? "reconciled_external_effect"
+      : "reconciled_no_external_effect";
+  }
+  if (approval.status === "proposed" || approval.status === "pending") return "pending";
+  if (approvalExecutionLeaseIsActive(approval)) return "execution_in_progress";
+  if (approval.status === "approved" && approval.executionAttemptedAt) return "execution_unknown";
+  if (approval.status === "approved") return "approved";
+  if (approval.status === "rejected") return "rejected";
+  if (approval.status === "failed") return "failed";
+  if (approval.status === "expired") return "expired";
   return "executed_unlinked";
 }
 
@@ -184,9 +204,9 @@ export function eventLogisticsApprovalIsSimulated(approval: EventLogisticsApprov
   return approval.status === "executed" && Boolean(source) && approvalProviderMode(approval, source!.channel) === "mock";
 }
 
-export function eventLogisticsSimulatedLinkedValue(approval: EventLogisticsApproval) {
+function eventLogisticsApprovalLinkedValue(approval: EventLogisticsApproval) {
   const source = parseEventLogisticsApprovalSourceKey(approval.sourceKey);
-  if (!source || !eventLogisticsApprovalIsSimulated(approval) || !approval.payload || typeof approval.payload !== "object" || Array.isArray(approval.payload)) return null;
+  if (!source || approval.status !== "executed" || !approval.payload || typeof approval.payload !== "object" || Array.isArray(approval.payload)) return null;
   const result = (approval.payload as Record<string, unknown>).executionResult;
   if (!result || typeof result !== "object" || Array.isArray(result)) return null;
   if (source.channel === "calendar") {
@@ -201,15 +221,87 @@ export function eventLogisticsSimulatedLinkedValue(approval: EventLogisticsAppro
   return typeof folderId === "string" && folderId ? `https://drive.google.com/drive/folders/${encodeURIComponent(folderId)}` : null;
 }
 
+export function eventLogisticsSimulatedLinkedValue(approval: EventLogisticsApproval) {
+  return eventLogisticsApprovalIsSimulated(approval)
+    ? eventLogisticsApprovalLinkedValue(approval)
+    : null;
+}
+
+function approvalActivityTime(approval: EventLogisticsApproval) {
+  const approvalTime =
+    (approval.updatedAt ?? approval.createdAt)?.getTime() ?? null;
+  const reconciliationTime = terminalApprovalReconciliation(
+    approval.reconciliations
+  )?.createdAt.getTime();
+  if (approvalTime === null) return reconciliationTime ?? null;
+  return reconciliationTime === undefined
+    ? approvalTime
+    : Math.max(approvalTime, reconciliationTime);
+}
+
+function mostRecentApproval(approvals: EventLogisticsApproval[]) {
+  return [...approvals].sort((left, right) => {
+    const leftTime = approvalActivityTime(left);
+    const rightTime = approvalActivityTime(right);
+    if (leftTime === null || rightTime === null || leftTime === rightTime) return 0;
+    return rightTime - leftTime;
+  })[0] ?? null;
+}
+
+function approvalIsAtLeastAsRecent(
+  candidate: EventLogisticsApproval,
+  comparison: EventLogisticsApproval
+) {
+  const candidateTime = approvalActivityTime(candidate);
+  const comparisonTime = approvalActivityTime(comparison);
+  return candidateTime !== null &&
+    comparisonTime !== null &&
+    candidateTime >= comparisonTime;
+}
+
 function channelAssessment(event: EventLogisticsEvent, approvals: EventLogisticsApproval[], fingerprint: string, channel: EventLogisticsChannel): EventLogisticsChannelAssessment {
   const related = orderedApprovals(approvals.filter((approval) => {
     const parsed = parseEventLogisticsApprovalSourceKey(approval.sourceKey);
     return approvalChannelMatches(approval, channel) && parsed?.eventId === event.id && parsed.channel === channel;
   }));
   const current = related.find((approval) => parseEventLogisticsApprovalSourceKey(approval.sourceKey)?.eventFingerprint === fingerprint);
-  const source = current ?? related[0] ?? null;
+  // A claimed or failed provider write must remain quarantined even when the
+  // event inputs later change. Treating it as merely stale would make the
+  // channel preparable again and could create a duplicate external resource.
+  // A later, atomically persisted successful execution is authoritative and
+  // may resolve an older failed attempt. A newer ambiguous attempt still wins.
+  const reconciliationCandidate = mostRecentApproval(
+    related.filter((approval) => {
+      const state = approvalState(approval);
+      return (
+        state === "execution_in_progress" ||
+        state === "execution_unknown" ||
+        state === "failed" ||
+        state === "reconciled_external_effect"
+      );
+    })
+  );
+  const persistedValue = channel === "calendar"
+    ? event.calendarEventId ?? null
+    : event.driveFolderUrl ?? null;
+  const persisted = Boolean(persistedValue);
+  const completedSource = persistedValue
+    ? current?.status === "executed"
+      ? current
+      : mostRecentApproval(
+          related.filter(
+            (approval) =>
+              approval.status === "executed" &&
+              eventLogisticsApprovalLinkedValue(approval) === persistedValue
+          )
+        )
+    : null;
+  const reconciliationSource = reconciliationCandidate &&
+    (!completedSource || !approvalIsAtLeastAsRecent(completedSource, reconciliationCandidate))
+    ? reconciliationCandidate
+    : null;
+  const source = reconciliationSource ?? current ?? completedSource ?? related[0] ?? null;
   const parsed = parseEventLogisticsApprovalSourceKey(source?.sourceKey);
-  const persisted = channel === "calendar" ? Boolean(event.calendarEventId) : Boolean(event.driveFolderUrl);
   const simulated = persisted && current?.status === "executed" && approvalProviderMode(current, channel) === "mock";
   const linkedSourceIsStale = persisted && related.some((approval) => {
     const approvalSource = parseEventLogisticsApprovalSourceKey(approval.sourceKey);
@@ -218,7 +310,23 @@ function channelAssessment(event: EventLogisticsEvent, approvals: EventLogistics
     const approvalSource = parseEventLogisticsApprovalSourceKey(approval.sourceKey);
     return approval.status === "executed" && approvalSource?.eventFingerprint === fingerprint;
   });
-  const state = linkedSourceIsStale ? "stale" : persisted ? simulated ? "simulated" : "complete" : current ? approvalState(current.status) : source ? "stale" : "not_prepared";
+  const sourceState = source ? approvalState(source) : null;
+  const state = reconciliationSource
+    ? approvalState(reconciliationSource)
+    : linkedSourceIsStale
+      ? "stale"
+      : persisted
+        ? simulated
+          ? "simulated"
+          : "complete"
+        : current
+          ? approvalState(current)
+          : sourceState === "reconciled_no_external_effect" ||
+              sourceState === "reconciled_external_effect"
+            ? sourceState
+            : source
+              ? "stale"
+              : "not_prepared";
   return { channel, state, approvalId: source?.id ?? null, approvalStatus: source?.status ?? null, attempt: parsed?.attempt ?? null };
 }
 
@@ -247,7 +355,7 @@ export function assessEventLogistics(event: EventLogisticsEvent, approvals: Even
   // A provider failure is ambiguous: the remote write may have succeeded even
   // when its response was lost, so it requires manual reconciliation rather
   // than another automatic insert.
-  const retryableChannels = eligible ? EVENT_LOGISTICS_CHANNELS.filter((channel) => channels[channel].state === "rejected" || channels[channel].state === "simulated") : [];
+  const retryableChannels = eligible ? EVENT_LOGISTICS_CHANNELS.filter((channel) => channels[channel].state === "rejected" || channels[channel].state === "simulated" || channels[channel].state === "reconciled_no_external_effect") : [];
   const sourceApprovalIds = [...new Set(EVENT_LOGISTICS_CHANNELS.flatMap((channel) => channels[channel].approvalId ? [channels[channel].approvalId!] : []))];
   return {
     policyVersion: EVENT_LOGISTICS_POLICY_VERSION,

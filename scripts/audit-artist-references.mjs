@@ -219,6 +219,17 @@ const checks = [
     `
   },
   {
+    relation: "ApprovalReconciliation → ApprovalRequest",
+    query: `
+      SELECT r."id" AS "recordId", r."artistId" AS "recordArtistId",
+             r."approvalId" AS "relatedId", a."artistId" AS "relatedArtistId"
+      FROM "ApprovalReconciliation" r
+      INNER JOIN "ApprovalRequest" a ON a."id" = r."approvalId"
+      WHERE r."artistId" <> a."artistId"
+      ORDER BY r."id";
+    `
+  },
+  {
     relation: "BookingCampaignRecipient → Prospect",
     query: `
       SELECT r."id" AS "recordId", k."artistId" AS "recordArtistId",
