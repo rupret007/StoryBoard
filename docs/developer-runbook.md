@@ -899,10 +899,10 @@ closes the mobile navigation drawer and restores document scrolling.
 It never exposes Retry or re-executes the original request. The cases still
 share the same reset database, and per-test retries remain intentionally disabled so a
 retry cannot hide state leakage or an idempotency regression. Failed runs
-retain a Playwright trace and should restart from the database reset. If port
-3000 or 4000 is occupied locally, set `E2E_WEB_URL` and/or `E2E_API_URL` to an
-available loopback URL; the runner uses those values consistently for its
-build, servers, redirects, and browser requests.
+retain a Playwright trace and should restart from the database reset. If
+`3000` or `4000` is occupied locally, the runner now auto-picks nearby free
+ports (and logs the fallback). You can still set `E2E_WEB_URL` and/or
+`E2E_API_URL` explicitly when you need fixed endpoints.
 The CI container smoke waits for API and web readiness independently, verifies
 that the landing page renders a host-resolvable Dev login URL rather than the
 internal Compose hostname, and then verifies that dev login writes an

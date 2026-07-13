@@ -1,8 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const root = "../..";
-const webUrl = process.env.E2E_WEB_URL ?? "http://127.0.0.1:3000";
-const apiUrl = process.env.E2E_API_URL ?? "http://127.0.0.1:4000";
+const normalizeUrl = (value: string) => value.replace(/\/$/, "");
+const webUrl = normalizeUrl(process.env.E2E_WEB_URL ?? "http://127.0.0.1:3000");
+const apiUrl = normalizeUrl(process.env.E2E_API_URL ?? "http://127.0.0.1:4000");
 const webPort = new URL(webUrl).port || (webUrl.startsWith("https:") ? "443" : "80");
 const apiPort = new URL(apiUrl).port || (apiUrl.startsWith("https:") ? "443" : "80");
 
