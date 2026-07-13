@@ -293,6 +293,20 @@ const checks = [
     `
   },
   {
+    relation: "SetlistItem → Setlist and Song",
+    query: `
+      SELECT i."id" AS "recordId", l."artistId" AS "recordArtistId",
+             COALESCE(i."songId", i."setlistId") AS "relatedId",
+             COALESCE(s."artistId", l."artistId") AS "relatedArtistId"
+      FROM "SetlistItem" i
+      INNER JOIN "Setlist" l ON l."id" = i."setlistId"
+      LEFT JOIN "Song" s ON s."id" = i."songId"
+      WHERE i."songId" IS NOT NULL
+        AND (s."id" IS NULL OR l."artistId" <> s."artistId")
+      ORDER BY i."id";
+    `
+  },
+  {
     relation: "Task → event, project, and initiative",
     query: `
       SELECT t."id" AS "recordId", t."artistId" AS "recordArtistId",

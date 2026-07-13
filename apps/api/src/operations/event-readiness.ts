@@ -1,3 +1,5 @@
+import { summarizeSetlist } from "@storyboard/shared";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type ShowReadinessGap = {
@@ -48,7 +50,7 @@ export type ShowReadinessInput = {
   currency?: string;
   participants: { id: string; bandMemberId: string; response: string }[];
   tasks: { id: string; title: string; status: string; dueAt: Date | null; ownerLabel?: string | null }[];
-  setlist?: { id: string; items: { id: string }[] } | null;
+  setlist?: { id: string; items: { id: string; itemType?: string; label?: string | null; song?: { id?: string; title?: string; durationSeconds?: number | null } | null }[] } | null;
   deals: {
     id: string;
     status: string;
@@ -136,11 +138,15 @@ export function deterministicShowReadiness(event: ShowReadinessInput, activeMemb
   categories.push({ category: "advance", score: advanceScore, maxScore: 15, detail: `${completedAdvance.length}/${advanceTasks.length} advance tasks are complete.` });
 
   let performanceScore = 0;
-  if (event.setlist?.items.length) performanceScore += 5;
-  else addGap({ code: "setlist_missing", category: "performance", title: "Setlist missing", detail: "No populated setlist is linked to the show.", nextAction: "Attach a practical setlist and confirm its total duration.", evidenceIds: unique([event.id, ...(event.setlist ? [event.setlist.id] : [])]) });
+  const setlistSummary = event.setlist ? summarizeSetlist(event.setlist.items) : null;
+  if (setlistSummary?.songCount) {
+    performanceScore += 3;
+    if (setlistSummary.timingStatus === "timed") performanceScore += 2;
+    else addGap({ code: "setlist_duration_incomplete", category: "performance", title: "Setlist duration incomplete", detail: `${setlistSummary.unknownDurationSongCount} setlist song duration${setlistSummary.unknownDurationSongCount === 1 ? " is" : "s are"} unknown; ${setlistSummary.durationLabel}. Breaks are not included in song time.`, nextAction: "Record every song duration before relying on the set length.", evidenceIds: unique([event.id, event.setlist!.id, ...event.setlist!.items.map((item) => item.id)]) });
+  } else addGap({ code: "setlist_missing", category: "performance", title: "Setlist missing", detail: "No populated setlist is linked to the show.", nextAction: "Attach a practical setlist and confirm its total duration.", evidenceIds: unique([event.id, ...(event.setlist ? [event.setlist.id] : [])]) });
   if (event.productionNotes || event.stagePlotUrl || event.inputListUrl || event.techRiderUrl) performanceScore += 5;
   else addGap({ code: "production_details_missing", category: "performance", title: "Production details missing", detail: "No production notes, stage plot, input list, or technical rider is recorded.", nextAction: "Record the production requirements appropriate for this show.", evidenceIds: [event.id] });
-  categories.push({ category: "performance", score: performanceScore, maxScore: 10, detail: `${performanceScore}/10 setlist and production points are recorded.` });
+  categories.push({ category: "performance", score: performanceScore, maxScore: 10, detail: setlistSummary?.songCount ? `${performanceScore}/10 performance points are recorded; ${setlistSummary.durationLabel}.` : `${performanceScore}/10 setlist and production points are recorded.` });
 
   const score = categories.reduce((sum, category) => sum + category.score, 0);
   const blocked = !event.startsAt || unavailable.length > 0;
@@ -157,7 +163,7 @@ export function deterministicShowReadiness(event: ShowReadinessInput, activeMemb
     Boolean(event.contactId || buyerEvidence),
     Boolean(event.deals.length || event.guaranteeMinor != null),
     advanceTasks.length > 0,
-    Boolean(event.setlist?.items.length),
+    Boolean(setlistSummary?.songCount),
     Boolean(event.productionNotes || event.stagePlotUrl || event.inputListUrl || event.techRiderUrl)
   ];
   const confidence = Number((coverageSignals.filter(Boolean).length / coverageSignals.length).toFixed(2));

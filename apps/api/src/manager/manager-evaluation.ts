@@ -26,7 +26,7 @@ import { resolveManagerEventCapture } from "./manager-event-capture";
 import { resolveManagerEventAvailability } from "./manager-event-availability";
 
 export const MANAGER_PROMPT_VERSION = "manager_os_v31";
-export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v33";
+export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v34";
 
 type ReviewedExample = { id: string; label: string; promptVersion: string; snapshot: unknown };
 type ReviewedResponseExample = { id: string; label: string; promptVersion: string; expectedBehavior: string | null; resolutionVersion: string | null; resolvedAt: Date | null; snapshot: unknown; inputFacts: unknown };
@@ -114,6 +114,23 @@ function goldenResults(candidateVersion: string): EvalResult[] {
   const scheduleReadiness = deterministicShowReadiness(scheduleEvent, [{ id: "member-a" }, { id: "member-b" }], NOW);
   const scheduleDayOf = deterministicEventDayOf(scheduleEvent, scheduleReadiness, [{ id: "member-a" }, { id: "member-b" }], NOW);
   const scheduleBrief = deterministicManagerBrief(facts({ events: [{ ...scheduleEvent, readiness: scheduleReadiness, dayOf: scheduleDayOf }] }), NOW);
+  const untimedSetlistEvent = {
+    ...scheduleEvent,
+    id: "event-untimed-setlist",
+    title: "Untimed Showcase",
+    locationName: "Example Room",
+    contactId: "contact-show",
+    productionNotes: "House PA and input list confirmed",
+    participants: [{ id: "participant-a", response: "available", bandMemberId: "member-a" }, { id: "participant-b", response: "available", bandMemberId: "member-b" }],
+    tasks: [{ id: "advance-a", title: "Confirm show readiness", status: "done", dueAt: new Date("2026-07-11T12:00:00.000Z"), ownerLabel: "Show advance" }],
+    setlist: { id: "setlist-untimed", items: [{ id: "setlist-item-known", itemType: "song", song: { id: "song-known", title: "Opener", durationSeconds: 240 } }, { id: "setlist-item-unknown", itemType: "song", song: { id: "song-unknown", title: "Closer", durationSeconds: null } }] },
+    deals: [{ id: "deal-show", status: "accepted", offerAmountMinor: 100000, depositMinor: 0, buyerName: "Example Buyer", buyerEmail: "buyer@example.test", agreements: [{ id: "agreement-show", status: "signed" }], invoices: [] }],
+    invoices: []
+  };
+  const untimedSetlistReadiness = deterministicShowReadiness(untimedSetlistEvent, [{ id: "member-a" }, { id: "member-b" }], NOW);
+  const untimedSetlistFacts = facts({ events: [{ ...untimedSetlistEvent, readiness: untimedSetlistReadiness }] });
+  const untimedSetlistQuestion = 'Is "Untimed Showcase" ready?';
+  const untimedSetlistAnswer = deterministicManagerChat(untimedSetlistFacts, untimedSetlistQuestion, NOW, undefined, resolveManagerSubjectReference(untimedSetlistQuestion, managerSubjectCandidates(untimedSetlistFacts)));
   const staleBookingBase = facts({ opportunities: [{ id: "opportunity-stale", title: "Old venue hold", stage: "target", updatedAt: new Date("2026-04-01T00:00:00.000Z"), targetDate: null }] });
   const staleBookingFacts = { ...staleBookingBase, evidenceHealth: deterministicManagerEvidenceHealth(staleBookingBase, NOW) };
   const staleBookingAnswer = deterministicManagerChat(staleBookingFacts, "What should we do about booking?", NOW);
@@ -250,6 +267,7 @@ function goldenResults(candidateVersion: string): EvalResult[] {
     { name: "ambiguous-record-name-clarifies", source: "golden", passed: /Which record do you mean/i.test(ambiguousSubjectAnswer.answer) && /goal/.test(ambiguousSubjectAnswer.answer) && /project/.test(ambiguousSubjectAnswer.answer) && ambiguousSubjectAnswer.recommendation === null, detail: "A label shared by two current record kinds produces bounded choices instead of silent first-record selection." },
     { name: "named-invoice-beats-generic-coaching", source: "golden", passed: /remaining balance is USD 750\.00/.test(subjectInvoiceAnswer.answer) && subjectInvoiceAnswer.citations.join(",") === "invoice-subject" && !/An invoice is a request for payment/.test(subjectInvoiceAnswer.answer), detail: "A named invoice receives its current balance rather than a generic definition." },
     { name: "custom-run-of-show-grounding", source: "golden", passed: scheduleBrief.today.some((item) => item.stableKey === "event-event-a" && /Band meal/.test(item.reason) && item.evidenceIds.includes("schedule-meal")), detail: "A saved custom checkpoint enters the same evidence-backed day-of brief instead of a separate or invented itinerary." },
+    { name: "setlist-duration-remains-explicitly-incomplete", source: "golden", passed: untimedSetlistReadiness.gaps.some((gap) => gap.code === "setlist_duration_incomplete" && /1 setlist song duration is unknown/i.test(gap.detail)) && untimedSetlistReadiness.categories.find((category) => category.category === "performance")?.score === 8 && /first gap: setlist duration incomplete/i.test(untimedSetlistAnswer.answer) && untimedSetlistAnswer.citations.includes("setlist-untimed"), detail: "Manager show readiness treats missing song duration as an explicit timing gap instead of presenting known song time as the complete set length." },
     { name: "competing-pressure-global-ranking", source: "golden", passed: competingPressureBrief.today.length === 5 && competingPressureBrief.today[0]?.stableKey === "event-event-a" && competingPressureBrief.today.some((item) => item.stableKey === "booking-reply-reply-a"), detail: "The Manager ranks every recorded pressure before applying the five-item limit, keeping a same-day blocked show ahead of later code-order candidates." },
     { name: "knowledge-source-precedence", source: "golden", passed: knowledgeHealth.status === "conflicted" && (canonicalMemory[0]?.value as { city?: string }).city === "Chicago" && /conflicts with the operating profile/i.test(knowledgeAnswer.answer), detail: "The operating profile wins over contradictory duplicate memory, and the Manager asks for review instead of asserting the stale value." },
     { name: "goal-record-reconciliation", source: "golden", passed: goalMeasurement.status === "records_ahead" && goalMeasurement.observedValue === 1 && /reconcile it/i.test(measurementAnswer.answer) && measurementAnswer.citations.includes("event-measured"), detail: "Manager goal advice detects when authoritative operating records have moved ahead of the saved progress number without silently rewriting it." },

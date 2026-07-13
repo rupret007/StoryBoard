@@ -745,7 +745,10 @@ Operations routes:
 - `POST /events/:id/schedule`, `PATCH /events/:id/schedule/:itemId`, and
   `DELETE /events/:id/schedule/:itemId` — strict, tenant-scoped custom
   run-of-show checkpoints; owner/member writes only
-- `GET` / `POST` / `PATCH /songs`, `/setlists`, and `/projects`
+- `GET` / `POST` / `PATCH /songs`, `/setlists`, and `/projects`. Setlist reads
+  include the derived `setlist_summary_v1` timing summary; writes replace the
+  submitted ordered item list atomically after validating every song belongs
+  to the active artist.
 - `GET /projects/readiness`, `GET /projects/:id/readiness`, and
   `POST /projects/:id/generate-plan` — explainable active-project health plus
   idempotent type-specific milestone generation
@@ -774,6 +777,17 @@ contacts (10), deal/payment (20), advance (15), and performance preparation
 (10). A missing date or unavailable active performer blocks readiness. Missing
 premises lower confidence, and proximity raises unresolved gaps to higher
 urgency. Manager briefs and chat consume this same result.
+
+Open **Music & setlists** in Band operations to maintain the canonical song
+library and running orders. Song duration uses `m:ss` in the UI and remains
+nullable. A setlist may contain up to 100 ordered songs, breaks, and notes;
+every break/note requires a label, and only song rows may reference a saved
+song. Reorder controls, transition cues, set notes, and draft/active/archive
+status are persisted through `PATCH /setlists/:id`. The displayed duration is
+song time only. Breaks are excluded because their duration is not modeled, and
+missing song durations remain explicit. Show readiness awards full setlist
+timing credit only when at least one song is present and every song duration is
+known.
 
 In Band operations, expand **Manage readiness details** on an event to record
 each active member's availability, attach an artist-owned venue/contact/setlist,

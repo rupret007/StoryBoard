@@ -37,6 +37,13 @@ and `dashboard` (stats/intelligence). Global
 audit. External systems are accessed only via adapter interfaces; mocked
 implementations live under `apps/api/src/integrations/adapters/mock/`.
 
+Setlist timing is derived once through the shared `setlist_summary_v1`
+projection used by the API, web builder, show readiness, and Manager evidence.
+The projection sums only known Song durations, keeps missing durations
+explicit, and excludes breaks rather than guessing. Setlist item replacement
+remains an audited API write after artist ownership validation; the projection
+itself is read-only and non-persistent.
+
 **Adapter registry (phase 2B):** `IntegrationsModule` still exposes the
 `MOCK_ADAPTERS` token (env-only registry for compatibility). **Request paths**
 that need artist context resolve adapters via `AdapterRegistryResolver

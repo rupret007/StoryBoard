@@ -68,7 +68,8 @@ The NestJS orchestration backend. Current responsibilities:
   `manager_response_adaptation_v1`, and owner-reviewed response release gates
   in `src/manager/`
 - **Band operations:** tenant-safe events, editable custom run-of-show
-  checkpoints, availability, readiness/day-of projections, songs/setlists,
+  checkpoints, availability, readiness/day-of projections, practical
+  song/setlist editing with shared `setlist_summary_v1` timing truth,
   projects, deal documents, invoices, expenses, and settlements in
   `src/operations/`
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
@@ -107,7 +108,8 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
 
 ## Tests
 
-- **`packages/shared/test/`** — Node test runner (e.g. Telegram Zod helpers)
+- **`packages/shared/test/`** — Node test runner for shared schemas and derived
+  policies, including setlist timing and Telegram helpers
 - **`apps/api/test/`** — compiled API regressions (the API package **`test`** script runs **`nest build`** first, then `node --test`)
 
 ## Tooling docs

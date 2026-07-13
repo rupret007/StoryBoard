@@ -59,6 +59,54 @@ test("booking advisor produces reviewable, non-automated guidance", async ({ pag
   await page.getByRole("button", { name: "Helpful", exact: true }).click();
 });
 
+test("band can build, time, annotate, and reorder a practical setlist", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  const firstSong = `E2E opener ${suffix}`;
+  const secondSong = `E2E closer ${suffix}`;
+  const setName = `E2E running order ${suffix}`;
+  await signInForBrowserTest(page);
+  await page.goto("/operations");
+  await page.getByRole("tab", { name: "Music & setlists" }).click();
+
+  await page.getByPlaceholder("Song title").fill(firstSong);
+  await page.getByLabel("New song duration in minutes and seconds").fill("4:05");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.locator('[data-testid^="song-"]').filter({ hasText: firstSong })).toBeVisible();
+  await page.getByPlaceholder("Song title").fill(secondSong);
+  await page.getByLabel("New song duration in minutes and seconds").fill("");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.locator('[data-testid^="song-"]').filter({ hasText: secondSong })).toBeVisible();
+
+  await page.getByPlaceholder("Friday headline set").fill(setName);
+  await page.getByRole("button", { name: "Create setlist" }).click();
+  const builder = page.locator('details[data-testid^="setlist-"]').filter({ hasText: setName });
+  await expect(builder).toBeVisible();
+  await builder.locator("summary").click();
+  await builder.getByLabel(`Song to add to ${setName}`).selectOption({ label: `${firstSong} · 4:05` });
+  await builder.getByLabel(`Add song to ${setName}`).click();
+  await builder.getByLabel(`Song to add to ${setName}`).selectOption({ label: `${secondSong} · duration unknown` });
+  await builder.getByLabel(`Add song to ${setName}`).click();
+  await builder.getByLabel(`Add break to ${setName}`).click();
+  await expect(builder.getByText("4:05 known + 1 song duration missing", { exact: true })).toBeVisible();
+  await builder.getByLabel(`Move position 2 up in ${setName}`).click();
+  await expect(builder.getByLabel(`Song at position 1 in ${setName}`)).toHaveValue(await builder.getByLabel(`Song to add to ${setName}`).inputValue());
+  await builder.getByLabel(`Transition after position 1 in ${setName}`).fill("Hold for count-in, then segue");
+  await builder.getByLabel(`Status for setlist ${setName}`).selectOption("active");
+  const saved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/setlists/") && response.ok());
+  await builder.getByRole("button", { name: "Save running order" }).click();
+  await saved;
+  await expect(builder.locator("summary").getByText("active", { exact: true })).toBeVisible();
+
+  await page.getByLabel(`Edit song ${secondSong}`).click();
+  await page.getByLabel(`Duration for ${secondSong}`).fill("3:30");
+  const songSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/songs/") && response.ok());
+  await page.getByRole("button", { name: "Save song" }).click();
+  await songSaved;
+  await expect(builder.locator("summary").getByText(/7:35 song time/)).toBeVisible();
+  if ((await builder.getAttribute("open")) === null) await builder.locator("summary").click();
+  await expect(builder.getByLabel(`Transition after position 1 in ${setName}`)).toHaveValue("Hold for count-in, then segue");
+});
+
 test("novice manager intake produces grounded work and band operations records", async ({ page }) => {
   const suffix = Date.now().toString(36);
   await signInForBrowserTest(page);
@@ -510,7 +558,7 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByRole("tab", { name: "Music & setlists" }).click();
   await page.getByPlaceholder("Song title").fill(`E2E song ${suffix}`);
   await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(page.getByText(`E2E song ${suffix}`)).toBeVisible();
+  await expect(page.locator('[data-testid^="song-"]').filter({ hasText: `E2E song ${suffix}` })).toBeVisible();
   await page.getByRole("tab", { name: "Projects" }).click();
   await expect(page.getByText(`E2E release ${suffix}`, { exact: true })).toBeVisible();
   const openProject = page.getByRole("link", { name: "Open project" });

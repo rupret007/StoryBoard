@@ -296,6 +296,12 @@ unrecorded payment, agreement, contact, or schedule fact exists.
 
 `Song` and `Setlist` provide a practical artist-owned library with duration,
 key, BPM, lead vocalist, ordered songs/breaks/notes, and event linkage.
+`setlist_summary_v1` is a non-persistent projection over the ordered items and
+their current Song rows. It reports song/break/note counts, known song time,
+missing-duration count, and `empty` / `incomplete` / `timed` status. It never
+assigns duration to a break or treats a known subtotal as the full set. Setlist
+writes validate every linked Song against the same artist before replacing the
+ordered item rows transactionally.
 `ArtistProject` groups release, content, tour, and business work with goals,
 assets, metrics, budget, events, tasks, and expenses.
 Project-linked `Task` rows are the executable milestones; template-created

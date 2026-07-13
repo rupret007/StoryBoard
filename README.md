@@ -14,7 +14,7 @@ business follow-through.
 - `packages/ui`: reusable React UI primitives
 - PostgreSQL `16` as the source of truth
 - Redis `7` for queues and coordination
-- Prisma ORM `7.6.0` (`prisma.config.ts` + driver adapter in API when you wire Prisma)
+- Prisma ORM `7.6.0` (`prisma.config.ts` + PostgreSQL driver adapter through the API `PrismaService`)
 - BullMQ `5.73.0` for background jobs
 - Zod `4.3.6` for validation
 - Docker Compose for local infrastructure
@@ -397,8 +397,15 @@ remain separately visible rather than being silently mixed into net income.
 Draft finalization rechecks current matching expenses, attaches them to the
 settlement, and freezes the recalculated split and PDF together.
 Manager uses that same day-of signal inside 24 hours of a show instead of
-falling back to generic advice. It also includes a shared song library and
-release/content/tour/business projects. Project workspaces generate idempotent,
+falling back to generic advice. It also includes a shared song library and a
+practical setlist builder for ordered songs, breaks, notes, transition cues,
+status, and reusable set notes. `setlist_summary_v1` derives song count and
+known performance time from the canonical library; break time is never guessed,
+and any song without a duration remains a visible readiness gap rather than
+turning the known subtotal into a false set length. Song title, duration, key,
+BPM, lead vocalist, and active-library status can be corrected inline.
+Band operations also includes release/content/tour/business projects. Project
+workspaces generate idempotent,
 type-specific milestones backward from the target date; track real owners,
 progress, blockers, metrics, assets, budget, spend, and linked events; and feed
 the same explainable readiness signal into Manager conversation and briefs. The

@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `408d48d`
+Baseline for this round: `main` at `1336997`
 
 ## Product and current architecture
 
@@ -1607,6 +1607,44 @@ Implementation:
   container reports healthy database/Redis/worker dependencies and HTTP 200
   web, and the relationship diagnostic found zero integrity issues.
 
+### P0 — Practical setlist execution and honest timing (completed 2026-07-12)
+
+Root cause and boundary:
+
+- StoryBoard already stored Songs, Setlists, ordered items, and event links, but
+  Band operations could only create an empty setlist. A band could not build,
+  reorder, annotate, time, or revise the running order that show readiness and
+  the day-of view expect.
+- A known song subtotal is not the complete set length when another song has no
+  duration, and break length is not modeled. The product must preserve those
+  unknowns rather than inventing timing to make the readiness score look full.
+
+Implementation and validation:
+
+- Added shared, non-persistent `setlist_summary_v1` with song/break/note counts,
+  known song time, missing-duration count, and explicit `empty`, `incomplete`,
+  or `timed` state. The API returns it on setlist create/PATCH/list; the web
+  builder and show-readiness policy use the same calculation.
+- Added a responsive setlist builder for ordered saved songs, breaks, notes,
+  transition cues, set notes, reordering/removal, and draft/active/archive
+  status. Song duration, key, BPM, lead vocalist, and active-library state are
+  editable inline. The UI labels duration as song time and excludes breaks.
+- Tightened setlist item schemas so a song has a saved Song or explicit label,
+  breaks/notes have labels, and non-song items cannot smuggle a Song relation.
+  Service validation rejects foreign Song IDs before item replacement or audit.
+- Show readiness now awards partial setlist credit for a populated but untimed
+  set and adds `setlist_duration_incomplete`; full timing credit requires every
+  song duration. Manager consumes and cites the same gap. No Prisma migration
+  was required.
+- Validation passed 143 API + 5 shared tests, all three disposable-Postgres
+  workflows across the existing 37 migrations, four production Chromium
+  journeys, typecheck, lint, both production builds, and the 67/67
+  `manager_os_v31` / `manager_evals_v34` gate at 100% safety. The relationship
+  diagnostic reports zero integrity issues. A container image containing the
+  exact current application code rebuilt successfully, found no pending
+  migration, reports ready database, Redis, and worker dependencies, and serves
+  the web app with HTTP 200.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,
@@ -1632,9 +1670,11 @@ Implementation:
   snapshot, and requires the human to attach it. Do not claim automatic
   attachment until binary Drive upload and Gmail attachment adapters pass real
   provider acceptance tests.
-- [ ] Rich schedule-item editing, project budget line-item UI,
-  technician public setlist pages, and evidence-file upload are follow-on UX
-  packages; their underlying event/project/document boundaries are in place.
+- [x] Rich custom schedule-item editing and the practical internal setlist
+  builder are shipped.
+- [ ] Project budget line-item UI, technician public setlist pages, and
+  evidence-file upload are follow-on UX packages; their underlying
+  event/project/document boundaries are in place.
 
 ### P0 — Executable release and project management (completed 2026-07-12)
 
@@ -1684,6 +1724,16 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Closed the empty-setlist product gap with an editable running-order
+  builder and shared `setlist_summary_v1`. Bands can maintain song timing/key/
+  BPM/lead metadata; assemble, reorder, annotate, and activate sets; and see
+  known song time without guessed breaks or hidden missing durations. Setlist
+  writes reject incoherent items and cross-artist Songs before replacement or
+  audit. Show readiness and Manager now treat an untimed song as an explicit
+  performance gap. Validation passed 143 API + 5 shared tests, three database
+  workflows over 37 migrations, four production Chromium journeys, production
+  builds, 67/67 golden Manager checks at 100% safety, zero relationship-audit
+  issues, and the rebuilt local container health/readiness smoke.
 - 2026-07-12: Closed the event-availability conversation gap with
   `manager_event_availability_v1`. An explicit response now resolves one active
   member and one current event, previews previous → next state, and performs a

@@ -2731,7 +2731,7 @@ test("show readiness blocks on an unavailable performer and becomes ready only f
     currency: "USD",
     participants: [{ id: "participant-a", bandMemberId: "member-a", response: "unavailable" }],
     tasks: [{ id: "task-a", title: "Confirm production", status: "done", dueAt: new Date("2026-08-01T00:00:00.000Z"), ownerLabel: "Show advance" }],
-    setlist: { id: "setlist-a", items: [{ id: "item-a" }] },
+    setlist: { id: "setlist-a", items: [{ id: "item-a", itemType: "song", song: { id: "song-a", title: "Festival opener", durationSeconds: 300 } }] },
     deals: [{ id: "deal-a", status: "accepted", offerAmountMinor: 100000, depositMinor: 25000, agreements: [{ id: "agreement-a", status: "signed" }], invoices: [{ id: "invoice-a", totalMinor: 25000, paidMinor: 25000, status: "paid" }] }],
     invoices: []
   };
@@ -2744,6 +2744,37 @@ test("show readiness blocks on an unavailable performer and becomes ready only f
   assert.equal(ready.score, 100);
   assert.equal(ready.confidenceLabel, "high");
   assert.deepEqual(ready.gaps, []);
+});
+
+test("show readiness never presents a known song subtotal as the complete set length", () => {
+  const event = {
+    id: "event-set-time",
+    title: "Untimed set",
+    startsAt: new Date("2026-08-15T01:00:00.000Z"),
+    venueId: "venue-a",
+    contactId: "contact-a",
+    loadInAt: new Date("2026-08-14T22:00:00.000Z"),
+    soundcheckAt: new Date("2026-08-14T23:00:00.000Z"),
+    doorsAt: new Date("2026-08-15T00:00:00.000Z"),
+    setAt: new Date("2026-08-15T01:00:00.000Z"),
+    curfewAt: new Date("2026-08-15T03:00:00.000Z"),
+    productionNotes: "Production confirmed",
+    guaranteeMinor: 100000,
+    depositMinor: 0,
+    currency: "USD",
+    participants: [{ id: "participant-a", bandMemberId: "member-a", response: "available" }],
+    tasks: [{ id: "task-a", title: "Confirm production", status: "done", dueAt: new Date("2026-08-01T00:00:00.000Z"), ownerLabel: "Show advance" }],
+    setlist: { id: "setlist-a", items: [{ id: "item-a", itemType: "song", song: { id: "song-a", title: "Opener", durationSeconds: 240 } }, { id: "item-break", itemType: "break", label: "Set break" }, { id: "item-b", itemType: "song", song: { id: "song-b", title: "Closer", durationSeconds: null } }] },
+    deals: [{ id: "deal-a", status: "accepted", offerAmountMinor: 100000, depositMinor: 0, agreements: [{ id: "agreement-a", status: "signed" }], invoices: [] }],
+    invoices: []
+  };
+  const result = eventReadiness.deterministicShowReadiness(event, [{ id: "member-a" }], now);
+  const durationGap = result.gaps.find((gap) => gap.code === "setlist_duration_incomplete");
+  assert.ok(durationGap);
+  assert.match(durationGap.detail, /4:00 known \+ 1 song duration missing/i);
+  assert.match(durationGap.detail, /Breaks are not included/i);
+  assert.equal(result.categories.find((category) => category.category === "performance")?.score, 8);
+  assert.equal(result.status, "attention");
 });
 
 test("day-of intelligence identifies the next checkpoint, work pressure, and recorded money", () => {

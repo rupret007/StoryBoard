@@ -1020,7 +1020,23 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   await assert.rejects(() => operations.createEvent(artist.id, { type: "gig", status: "draft", title: "Unsafe", venueId: foreignVenue.id, currency: "USD" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const dayOfContact = await client.contact.create({ data: { artistId: artist.id, venueId: venue.id, fullName: "Sam Stage", contactKind: "promoter", email: "sam-stage@test.invalid" } });
   const song = await operations.createSong(artist.id, { title: "Ready Song", durationSeconds: 240, active: true }, operator.email, operator.id);
-  const setlist = await operations.createSetlist(artist.id, { name: "Friday set", status: "active", items: [{ songId: song.id, itemType: "song" }] }, operator.email, operator.id);
+  const untimedSong = await operations.createSong(artist.id, { title: "Untimed Closer", durationSeconds: null, active: true }, operator.email, operator.id);
+  const initialSetlist = await operations.createSetlist(artist.id, { name: "Friday set", status: "draft", items: [{ songId: song.id, itemType: "song" }] }, operator.email, operator.id);
+  assert.equal(initialSetlist.summary.timingStatus, "timed");
+  const setlist = await operations.patchSetlist(artist.id, initialSetlist.id, { status: "active", notes: "Keep the changeover tight", items: [{ songId: song.id, itemType: "song", transitionNotes: "Count the next song in" }, { itemType: "break", label: "Set break" }, { songId: untimedSong.id, itemType: "song" }] }, operator.email, operator.id);
+  assert.equal(setlist.summary.timingStatus, "incomplete");
+  assert.equal(setlist.summary.totalSongDurationSeconds, 240);
+  assert.equal(setlist.summary.unknownDurationSongCount, 1);
+  const foreignSong = await operations.createSong(foreignArtist.id, { title: "Foreign Song", durationSeconds: 180, active: true }, operator.email, operator.id);
+  const setlistAuditCount = await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: setlist.id, action: "setlist.updated" } });
+  await assert.rejects(() => operations.patchSetlist(artist.id, setlist.id, { items: [{ songId: foreignSong.id, itemType: "song" }] }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  assert.equal(await client.setlistItem.count({ where: { setlistId: setlist.id } }), 3);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: setlist.id, action: "setlist.updated" } }), setlistAuditCount);
+  await operations.patchSong(artist.id, untimedSong.id, { durationSeconds: 210 }, operator.email, operator.id);
+  const timedSetlist = (await operations.setlists(artist.id)).find((candidate) => candidate.id === setlist.id);
+  assert.ok(timedSetlist);
+  assert.equal(timedSetlist.summary.timingStatus, "timed");
+  assert.equal(timedSetlist.summary.totalSongDurationSeconds, 450);
   await operations.patchEvent(artist.id, event.id, {
     status: "confirmed", venueId: venue.id, contactId: dayOfContact.id, setlistId: setlist.id,
     locationName: "Owned Room", loadInAt: "2026-09-18T17:00:00.000Z",
@@ -1051,7 +1067,14 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(readiness.categories.find((category) => category.category === "people")?.score, 25);
   assert.equal(readiness.categories.find((category) => category.category === "contacts")?.score, 10);
   assert.equal(readiness.categories.find((category) => category.category === "schedule")?.score, 20);
+  assert.equal(readiness.categories.find((category) => category.category === "performance")?.score, 10);
+  assert.equal(readiness.gaps.some((gap) => gap.code === "setlist_duration_incomplete"), false);
   assert.ok(readiness.evidenceIds.includes(event.id));
+  const managerFactsWithTimedSetlist = await manager.facts(artist.id);
+  const managerEventWithTimedSetlist = managerFactsWithTimedSetlist.events.find((candidate) => candidate.id === event.id);
+  assert.ok(managerEventWithTimedSetlist?.readiness);
+  assert.equal(managerEventWithTimedSetlist.readiness.categories.find((category) => category.category === "performance")?.score, 10);
+  assert.equal(managerEventWithTimedSetlist.readiness.gaps.some((gap) => gap.code === "setlist_duration_incomplete"), false);
   const dayOf = await operations.eventDayOf(artist.id, event.id, new Date("2026-09-18T16:00:00.000Z"));
   assert.equal(dayOf.dayOf.mode, "pre_show");
   assert.equal(dayOf.dayOf.nextCheckpoint.label, "Band meal");

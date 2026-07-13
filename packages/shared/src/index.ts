@@ -8,3 +8,4 @@ export * from "./schemas/telegram-notify-settings";
 export * from "./schemas/booking-acquisition";
 export * from "./schemas/manager";
 export * from "./schemas/operations";
+export * from "./setlist-summary";
