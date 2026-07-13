@@ -120,6 +120,7 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
       setMessages((current) => current.map((message) => ({ ...message, proposedActions: message.proposedActions.map((action) => action.recommendationId === recommendationId ? { ...action, outcome: recommendation.outcome } : action) })));
       if (actionType === "create_conversation_project") setNotice("Project and milestone plan created.");
       if (actionType === "create_conversation_event") setNotice("Event and availability list created.");
+      if (actionType === "update_conversation_event_availability") setNotice("Member availability updated.");
       router.refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
@@ -217,7 +218,7 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
   }
   async function runEvaluation() {
     setBusy(true); setError("");
-    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v30" } })); }
+    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v31" } })); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function submitMessageFeedback(messageId: string, payload: { helpful: boolean; reason?: string | null; note?: string | null }) {
@@ -706,6 +707,7 @@ function managerActionLabel(actionType?: string | null) {
   if (actionType === "assign_conversation_task") return "Suggested task owner";
   if (actionType === "create_conversation_project") return "Suggested band project";
   if (actionType === "create_conversation_event") return "Suggested band event";
+  if (actionType === "update_conversation_event_availability") return "Suggested availability update";
   if (actionType === "remember_fact") return "Suggested band memory";
   if (actionType === "update_profile_context") return "Suggested band context";
   if (actionType === "create_decision") return "Suggested open decision";
@@ -723,6 +725,7 @@ function managerActionButton(actionType?: string | null) {
   if (actionType === "generate_project_plan") return "Build milestone plan";
   if (actionType === "create_conversation_project") return "Create project and plan";
   if (actionType === "create_conversation_event") return "Create event";
+  if (actionType === "update_conversation_event_availability") return "Update availability";
   if (actionType === "assign_task") return "Assign task";
   if (actionType === "create_task" || actionType === "create_conversation_task") return "Add task";
   if (actionType === "update_conversation_task") return "Update task";

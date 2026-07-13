@@ -401,6 +401,16 @@ Manager routes:
   local times, multiple/implicit events, questions, secrets, stale lineups, and
   duplicate type/title/start combinations are refused. Provider output cannot
   emit this action, and acceptance never contacts anyone or writes Calendar.
+  One-person event responses route separately through
+  `manager_event_availability_v1`. Supported examples include `Mark Morgan
+  available for "Album run-through"`, `Morgan can't make "Bluebird show"`,
+  and explicit tentative/unknown changes. The preview shows the exact event,
+  active member, and previous → next response. Acceptance reloads and re-parses
+  the source, rechecks event/member resolution plus the current participant
+  response/timestamp, and compare-and-sets or creates one `EventParticipant`
+  inside the recommendation transaction. No-op, ambiguous, multi-member,
+  sensitive, stale, and provider-generated changes are refused. It does not
+  notify the member and does not copy a personal explanation into notes.
 - `POST /manager/messages/:id/feedback` with `{ "helpful": true }` or
   `{ "helpful": false, "reason": "too_vague", "note": "..." }`
 - `GET /manager/conversations?limit=1..20` — newest-first summaries with the
@@ -449,7 +459,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v30`)
+  (owner-only; currently accepts only the code-registered `manager_os_v31`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -524,7 +534,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v30` retains the current operator question and at most 12
+version `manager_os_v31` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.

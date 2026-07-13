@@ -329,7 +329,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v30", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v31", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -424,6 +424,18 @@ test("novice manager intake produces grounded work and band operations records",
   await eventCreated;
   await expect(eventProposal.getByText("completed", { exact: true })).toBeVisible();
   await expect(page.getByText("Event and availability list created.", { exact: true })).toBeVisible();
+  await blockedQuestion.fill(`Mark Morgan available for "${eventTitle}"`);
+  await page.getByRole("button", { name: "Send message" }).click();
+  const availabilityProposal = page.getByText("Suggested availability update", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await expect(availabilityProposal).toContainText(`Event: ${eventTitle}`);
+  await expect(availabilityProposal).toContainText("Member: Morgan");
+  await expect(availabilityProposal).toContainText("Unknown → Available");
+  await expect(availabilityProposal).toContainText("does not notify the member or save a private explanation");
+  const availabilityUpdated = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/accept") && response.ok());
+  await availabilityProposal.getByRole("button", { name: "Update availability" }).click();
+  await availabilityUpdated;
+  await expect(availabilityProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Member availability updated.", { exact: true })).toBeVisible();
 
   await page.goto("/operations");
   const eventStart = new Date("2026-09-16T00:00:00.000Z");
@@ -436,7 +448,7 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByText("Manage readiness details", { exact: true }).click();
   await page.getByLabel(`Availability for Alex at E2E rehearsal ${suffix}`).selectOption("available");
   await expect(page.getByLabel(`Availability for Alex at E2E rehearsal ${suffix}`)).toHaveValue("available");
-  await page.getByLabel(`Availability for Morgan at E2E rehearsal ${suffix}`).selectOption("available");
+  await expect(page.getByLabel(`Availability for Morgan at E2E rehearsal ${suffix}`)).toHaveValue("available");
   await page.getByLabel(`Location name for E2E rehearsal ${suffix}`).fill("E2E Working Room");
   const localTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   await page.getByLabel(`Load-in for E2E rehearsal ${suffix}`).fill(localTime(new Date(eventStart.getTime() - 3 * 3600000)));

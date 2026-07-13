@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `9963ccd`
+Baseline for this round: `main` at `408d48d`
 
 ## Product and current architecture
 
@@ -1562,6 +1562,51 @@ Implementation:
   dependencies and HTTP 200 web, and the expanded relationship diagnostic
   found zero integrity issues.
 
+### P0 — Reviewed conversational event availability (completed 2026-07-12)
+
+Root cause and boundary:
+
+- StoryBoard could create an event and correctly identify unknown or conflicting
+  availability, but an operator still had to leave Manager conversation and
+  manually find the event/member control to record an explicit response.
+- Availability is a shared operational fact, not general member capacity and
+  not a private explanation. One response may update the internal lineup after
+  review, but it must not notify a person, infer why they are unavailable, or
+  turn a question or tentative statement into a write.
+
+Implementation:
+
+- Added `manager_event_availability_v1` for one explicit active member, one
+  current event, and one `available`, `tentative`, `unavailable`, or `unknown`
+  response. It supports direct instructions and bounded natural statements,
+  resolves exact full names or a unique first name plus one tenant event, and
+  previews the previous → next response.
+- The action snapshots the exact source message, event ID/title/version/start,
+  member ID/name, participant ID, previous response, and prior response time.
+  Acceptance reloads and re-parses the source, rechecks entity ambiguity and
+  the complete current premise, then compare-and-sets or creates exactly one
+  `EventParticipant` inside the serializable recommendation transaction. The
+  completed recommendation links the event.
+- Questions remain read-only. Ambiguous people/events, multiple responses,
+  completed/cancelled events, no-ops, credential values, stale event/member or
+  participant state, cross-artist access, and replay fail closed. Provider
+  output cannot emit the action. Audit metadata records IDs and the response
+  transition, never raw chat or a private reason.
+- Fixed the route collision found by the disposable-database workflow so an
+  explicit `mark [member] unavailable for [event]` statement reaches this
+  policy before the older general Task-update carrier.
+- The design clean-rooms Andrea_NanoBot's narrowest-capability routing,
+  review-before-durable-action, and persisted-outcome truth principles. No
+  Andrea code, dependency, runtime, or data was copied. No Prisma migration is
+  required because the workflow reuses `EventParticipant` and the existing
+  `ManagerRecommendation.eventId` link.
+- Validation passed 142 API + 2 shared tests, all three disposable-Postgres
+  workflows across the existing 37 forward migrations, all three production
+  Chromium journeys, typecheck, lint, both production builds, and the 66/66
+  `manager_os_v31` / `manager_evals_v33` gate at 100% safety. The rebuilt
+  container reports healthy database/Redis/worker dependencies and HTTP 200
+  web, and the relationship diagnostic found zero integrity issues.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,
@@ -1639,6 +1684,18 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Closed the event-availability conversation gap with
+  `manager_event_availability_v1`. An explicit response now resolves one active
+  member and one current event, previews previous → next state, and performs a
+  source-bound optimistic participant update only after review. Questions,
+  ambiguity, multi-person updates, secrets, no-ops, stale state, tenant
+  violations, replay, provider output, notifications, and private-reason
+  capture all fail closed. The disposable database exposed and verified a
+  routing-precedence correction against the older Task carrier. Validation
+  passed 142 API + 2 shared tests, three database workflows over 37 migrations,
+  three production Chromium journeys, typecheck, lint, production builds,
+  66/66 golden Manager checks at 100% safety, rebuilt container health, and a
+  zero-issue relationship audit.
 - 2026-07-12: Connected explicit Manager chat requests to StoryBoard's event
   operating spine through the reviewed `manager_event_capture_v1` policy.
   Exact local dates/times now require the saved IANA timezone and reject DST

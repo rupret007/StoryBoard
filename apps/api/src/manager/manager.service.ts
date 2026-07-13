@@ -52,6 +52,7 @@ import { managerConversationTaskUpdateActionMatchesMessage, managerConversationT
 import { managerConversationTaskAssignmentActionMatchesMessage, managerConversationTaskAssignmentRecommendation, managerTaskAssignmentPreview, MANAGER_TASK_ASSIGNMENT_POLICY_VERSION, resolveManagerTaskAssignment, type ManagerConversationTaskAssignmentAction, type ManagerTaskAssignmentMember, type ManagerTaskAssignmentTask } from "./manager-task-assignment";
 import { managerConversationProjectActionMatchesMessage, managerConversationProjectDueAt, managerConversationProjectRecommendation, managerConversationProjectTypes, managerProjectCapturePreview, MANAGER_PROJECT_CAPTURE_POLICY_VERSION, normalizeManagerProjectName, resolveManagerProjectCapture, type ManagerConversationProjectAction } from "./manager-project-capture";
 import { managerConversationEventActionMatchesMessage, managerConversationEventRecommendation, managerConversationEventStatuses, managerConversationEventTypes, managerEventCapturePreview, MANAGER_EVENT_CAPTURE_POLICY_VERSION, normalizeManagerEventTitle, resolveManagerEventCapture, type ManagerConversationEventAction } from "./manager-event-capture";
+import { managerConversationEventAvailabilityActionMatchesMessage, managerConversationEventAvailabilityRecommendation, managerEventAvailabilityPreview, managerEventAvailabilityResponses, managerMessageIsEventAvailabilityIntent, MANAGER_EVENT_AVAILABILITY_POLICY_VERSION, resolveManagerEventAvailability, type ManagerConversationEventAvailabilityAction, type ManagerEventAvailabilityEvent, type ManagerEventAvailabilityMember } from "./manager-event-availability";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const MANAGER_FACT_AGGREGATES = [
@@ -140,7 +141,22 @@ const conversationEventActionSchema = z.object({
   locationName: z.string().max(240).nullable(),
   bandMemberIds: z.array(z.string().min(1).max(128)).max(100)
 }).strict();
-const proposedActionSchema = z.union([taskActionSchema, conversationTaskActionSchema, conversationTaskUpdateActionSchema, conversationTaskAssignmentActionSchema, conversationProjectActionSchema, conversationEventActionSchema, decisionActionSchema, eventAdvanceActionSchema, projectPlanActionSchema, rememberFactActionSchema, assignTaskActionSchema, profileContextActionSchema]);
+const conversationEventAvailabilityActionSchema = z.object({
+  type: z.literal("update_conversation_event_availability"),
+  sourceMessageId: z.string().min(1).max(128),
+  sourceMessageCreatedAt: z.string().datetime({ offset: true }),
+  eventId: z.string().min(1).max(128),
+  eventUpdatedAt: z.string().datetime({ offset: true }),
+  eventTitle: z.string().min(1).max(240),
+  eventStartsAt: z.string().datetime({ offset: true }).nullable(),
+  bandMemberId: z.string().min(1).max(128),
+  bandMemberName: z.string().min(1).max(200),
+  participantId: z.string().min(1).max(128).nullable(),
+  previousResponse: z.enum(managerEventAvailabilityResponses),
+  previousRespondedAt: z.string().datetime({ offset: true }).nullable(),
+  response: z.enum(managerEventAvailabilityResponses)
+}).strict().refine((value) => value.previousResponse !== value.response, { path: ["response"], message: "Availability must change" });
+const proposedActionSchema = z.union([taskActionSchema, conversationTaskActionSchema, conversationTaskUpdateActionSchema, conversationTaskAssignmentActionSchema, conversationProjectActionSchema, conversationEventActionSchema, conversationEventAvailabilityActionSchema, decisionActionSchema, eventAdvanceActionSchema, projectPlanActionSchema, rememberFactActionSchema, assignTaskActionSchema, profileContextActionSchema]);
 const itemSchema = z.object({ stableKey: z.string().regex(/^[a-z0-9_-]{1,80}$/), title: z.string().min(1).max(200), reason: z.string().min(1).max(800), nextAction: z.string().min(1).max(500), workstream: z.nativeEnum(ManagerWorkstream), priority: z.enum(["low","med","high"]), evidenceIds: z.array(z.string()).max(8), proposedAction: proposedActionSchema.nullable() }).strict();
 const briefSchema = z.object({ summary: z.string().min(1).max(1200), today: z.array(itemSchema).max(5), thisWeek: z.array(itemSchema).max(10), decisionsNeeded: z.array(z.object({ title: z.string(), explanation: z.string(), evidenceIds: z.array(z.string()).max(8) }).strict()).max(8), waitingOn: z.array(z.object({ title: z.string(), dueAt: z.string().nullable(), evidenceIds: z.array(z.string()).max(8) }).strict()).max(10), risksAndOpportunities: z.array(z.object({ title: z.string(), detail: z.string(), confidence: z.number().min(0).max(1), evidenceIds: z.array(z.string()).max(8) }).strict()).max(10) }).strict();
 const chatOutputSchema = z.object({
@@ -1296,6 +1312,9 @@ export class ManagerService {
     let conversationProjectSource: { id: string; content: string; createdAt: Date } | null = null;
     let conversationEventAction: ManagerConversationEventAction | null = null;
     let conversationEventSource: { id: string; content: string; createdAt: Date } | null = null;
+    let conversationEventAvailabilityAction: ManagerConversationEventAvailabilityAction | null = null;
+    let conversationEventAvailabilitySource: { id: string; content: string; createdAt: Date } | null = null;
+    let conversationEventAvailabilityTarget: { event: ManagerEventAvailabilityEvent; member: ManagerEventAvailabilityMember } | null = null;
     let decisionAction: z.infer<typeof decisionActionSchema> | null = null;
     let eventAdvanceAction: z.infer<typeof eventAdvanceActionSchema> | null = null;
     let projectPlanAction: z.infer<typeof projectPlanActionSchema> | null = null;
@@ -1394,6 +1413,29 @@ export class ManagerService {
         ]);
         if (!source || !managerConversationEventActionMatchesMessage(conversationEventAction, source, events, activeMembers)) throw new BadRequestException("The proposed event no longer matches the reviewed request, current events, timezone, or active lineup");
         conversationEventSource = source;
+      } else if (parsed.data.type === "update_conversation_event_availability") {
+        conversationEventAvailabilityAction = parsed.data;
+        const responseMessage = rec.managerRun.message;
+        if (!responseMessage) throw new BadRequestException("The availability request is no longer available");
+        const [source, events, activeMembers] = await Promise.all([
+          this.prisma.client.managerMessage.findFirst({
+            where: { id: conversationEventAvailabilityAction.sourceMessageId, conversationId: responseMessage.conversationId, role: "user", createdAt: { lte: responseMessage.createdAt } },
+            select: { id: true, content: true, createdAt: true }
+          }),
+          this.prisma.client.bandEvent.findMany({
+            where: { artistId, status: { in: ["draft", "hold", "confirmed"] } },
+            select: { id: true, title: true, status: true, startsAt: true, updatedAt: true, participants: { select: { id: true, bandMemberId: true, response: true, respondedAt: true } } },
+            orderBy: { startsAt: "asc" },
+            take: 200
+          }),
+          this.prisma.client.bandMember.findMany({ where: { artistId, active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } })
+        ]);
+        const event = events.find((candidate) => candidate.id === conversationEventAvailabilityAction!.eventId);
+        const member = activeMembers.find((candidate) => candidate.id === conversationEventAvailabilityAction!.bandMemberId);
+        if (!event || !member) throw new NotFoundException("Record not found");
+        if (!source || !managerConversationEventAvailabilityActionMatchesMessage(conversationEventAvailabilityAction, source, events, activeMembers)) throw new BadRequestException("The proposed availability no longer matches the reviewed request, event, member, or current response");
+        conversationEventAvailabilitySource = source;
+        conversationEventAvailabilityTarget = { event, member };
       } else if (parsed.data.type === "create_decision") {
         decisionAction = parsed.data;
       } else if (parsed.data.type === "generate_event_advance") {
@@ -1448,10 +1490,11 @@ export class ManagerService {
       if (!currentPath || currentPath.status !== "missing_task") throw new BadRequestException("This goal path changed; refresh before creating more work");
     }
 
-    const immediateAction = eventAdvanceAction ?? projectPlanAction ?? rememberFactAction ?? assignTaskAction ?? profileContextAction ?? conversationTaskUpdateAction ?? conversationTaskAssignmentAction ?? conversationProjectAction ?? conversationEventAction;
+    const immediateAction = eventAdvanceAction ?? projectPlanAction ?? rememberFactAction ?? assignTaskAction ?? profileContextAction ?? conversationTaskUpdateAction ?? conversationTaskAssignmentAction ?? conversationProjectAction ?? conversationEventAction ?? conversationEventAvailabilityAction;
     const finalOutcome = immediateAction ? ManagerRecommendationOutcome.completed : outcome as ManagerRecommendationOutcome;
     const reason = immediateAction ? "action_executed" : feedback.reason ?? (outcome === "accepted" ? "accepted" : outcome === "completed" ? (rec.task ? "task_completed" : rec.decision ? "decision_reviewed" : "already_handled") : "not_relevant");
     let createdCount = 0;
+    let eventAvailabilityParticipantId: string | null = null;
     const row = await this.prisma.client.$transaction(async (tx) => {
       const claimed = await tx.managerRecommendation.updateMany({
         where: { id, outcome: { in: allowed } },
@@ -1670,6 +1713,44 @@ export class ManagerService {
         eventId = event.id;
         createdCount = participants.count;
       }
+      if (conversationEventAvailabilityAction && conversationEventAvailabilitySource && conversationEventAvailabilityTarget) {
+        const [freshEvents, freshMembers] = await Promise.all([
+          tx.bandEvent.findMany({
+            where: { artistId, status: { in: ["draft", "hold", "confirmed"] } },
+            select: { id: true, title: true, status: true, startsAt: true, updatedAt: true, participants: { select: { id: true, bandMemberId: true, response: true, respondedAt: true } } },
+            orderBy: { startsAt: "asc" },
+            take: 200
+          }),
+          tx.bandMember.findMany({ where: { artistId, active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } })
+        ]);
+        const freshEvent = freshEvents.find((candidate) => candidate.id === conversationEventAvailabilityAction!.eventId);
+        const freshMember = freshMembers.find((candidate) => candidate.id === conversationEventAvailabilityAction!.bandMemberId);
+        if (!freshEvent || !freshMember) throw new NotFoundException("Record not found");
+        if (!managerConversationEventAvailabilityActionMatchesMessage(conversationEventAvailabilityAction, conversationEventAvailabilitySource, freshEvents, freshMembers)) throw new BadRequestException("The event, member, or availability response changed before the reviewed update was saved; refresh and review it again");
+        const currentParticipant = freshEvent.participants.find((participant) => participant.bandMemberId === freshMember.id) ?? null;
+        const respondedAt = conversationEventAvailabilityAction.response === "unknown" ? null : new Date();
+        if (conversationEventAvailabilityAction.participantId) {
+          if (!currentParticipant || currentParticipant.id !== conversationEventAvailabilityAction.participantId) throw new BadRequestException("The availability response changed before the reviewed update was saved; refresh and review it again");
+          const updated = await tx.eventParticipant.updateMany({
+            where: {
+              id: currentParticipant.id,
+              eventId: freshEvent.id,
+              bandMemberId: freshMember.id,
+              response: conversationEventAvailabilityAction.previousResponse,
+              respondedAt: conversationEventAvailabilityAction.previousRespondedAt ? new Date(conversationEventAvailabilityAction.previousRespondedAt) : null
+            },
+            data: { response: conversationEventAvailabilityAction.response, respondedAt }
+          });
+          if (updated.count !== 1) throw new BadRequestException("The availability response changed before the reviewed update was saved; refresh and review it again");
+          eventAvailabilityParticipantId = currentParticipant.id;
+        } else {
+          if (currentParticipant) throw new BadRequestException("The availability response changed before the reviewed update was saved; refresh and review it again");
+          const participant = await tx.eventParticipant.create({ data: { eventId: freshEvent.id, bandMemberId: freshMember.id, response: conversationEventAvailabilityAction.response, respondedAt } });
+          eventAvailabilityParticipantId = participant.id;
+        }
+        eventId = freshEvent.id;
+        createdCount = 1;
+      }
       if (assignTaskAction && assignmentTarget) {
         const latestCheckIn = await tx.bandMemberCheckIn.findFirst({ where: { artistId, bandMemberId: assignmentTarget.member.id }, orderBy: { createdAt: "desc" }, select: { id: true, status: true, note: true, effectiveUntil: true, createdAt: true } });
         const availability = currentManagerMemberCheckIn({ ...assignmentTarget.member, checkIn: latestCheckIn });
@@ -1686,9 +1767,9 @@ export class ManagerService {
     }, { isolationLevel: "Serializable" });
     const taskUpdatePrevious = conversationTaskUpdatePrevious as { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null;
     const taskUpdateCurrent = conversationTaskUpdateCurrent as { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null;
-    const actionType = eventAdvanceAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? profileContextAction?.type ?? conversationTaskUpdateAction?.type ?? conversationTaskAssignmentAction?.type ?? conversationProjectAction?.type ?? conversationEventAction?.type ?? conversationTaskAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
+    const actionType = eventAdvanceAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? profileContextAction?.type ?? conversationTaskUpdateAction?.type ?? conversationTaskAssignmentAction?.type ?? conversationProjectAction?.type ?? conversationEventAction?.type ?? conversationEventAvailabilityAction?.type ?? conversationTaskAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
     const targetId = eventTarget?.id ?? projectTarget?.id ?? row.eventId ?? row.projectId ?? assignmentTarget?.task.id ?? profileContextTarget?.id ?? conversationTaskUpdateTarget?.id ?? conversationTaskAssignmentTarget?.task.id ?? row.taskId ?? row.memoryFactId ?? null;
-    await this.audit.log({ artistId, aggregateType: "ManagerRecommendation", aggregateId: id, action: `manager.recommendation_${finalOutcome}`, actorLabel, actorOperatorId, metadata: { taskId: row.taskId ?? null, decisionId: row.decisionId ?? null, memoryFactId: row.memoryFactId ?? null, projectId: row.projectId ?? null, eventId: row.eventId ?? null, bandMemberId: assignmentTarget?.member.id ?? null, reason, actionType, targetId, createdCount } });
+    await this.audit.log({ artistId, aggregateType: "ManagerRecommendation", aggregateId: id, action: `manager.recommendation_${finalOutcome}`, actorLabel, actorOperatorId, metadata: { taskId: row.taskId ?? null, decisionId: row.decisionId ?? null, memoryFactId: row.memoryFactId ?? null, projectId: row.projectId ?? null, eventId: row.eventId ?? null, bandMemberId: conversationEventAvailabilityAction?.bandMemberId ?? assignmentTarget?.member.id ?? null, reason, actionType, targetId, createdCount } });
     if (outcome === "accepted" && row.decisionId) await this.audit.log({ artistId, aggregateType: "ManagerDecision", aggregateId: row.decisionId, action: "manager.decision_draft_created", actorLabel, actorOperatorId, metadata: { recommendationId: id } });
     if (eventTarget) await this.audit.log({ artistId, aggregateType: "BandEvent", aggregateId: eventTarget.id, action: "event.advance_generated", actorLabel, actorOperatorId, metadata: { version: SHOW_ADVANCE_VERSION, createdCount, recommendationId: id } });
     if (projectTarget) await this.audit.log({ artistId, aggregateType: "ArtistProject", aggregateId: projectTarget.id, action: "project.plan_generated", actorLabel, actorOperatorId, metadata: { version: PROJECT_PLAN_VERSION, createdCount, recommendationId: id } });
@@ -1767,6 +1848,24 @@ export class ManagerService {
         locationPresent: Boolean(conversationEventAction.locationName)
       }
     });
+    if (conversationEventAvailabilityAction && row.eventId) await this.audit.log({
+      artistId,
+      aggregateType: "EventParticipant",
+      aggregateId: eventAvailabilityParticipantId ?? conversationEventAvailabilityAction.participantId ?? row.eventId,
+      action: "event.availability_recorded_from_manager_chat",
+      actorLabel,
+      actorOperatorId,
+      metadata: {
+        recommendationId: id,
+        sourceMessageId: conversationEventAvailabilityAction.sourceMessageId,
+        policyVersion: MANAGER_EVENT_AVAILABILITY_POLICY_VERSION,
+        eventId: row.eventId,
+        bandMemberId: conversationEventAvailabilityAction.bandMemberId,
+        previousResponse: conversationEventAvailabilityAction.previousResponse,
+        response: conversationEventAvailabilityAction.response,
+        participantExisted: Boolean(conversationEventAvailabilityAction.participantId)
+      }
+    });
     return row;
   }
 
@@ -1813,14 +1912,24 @@ export class ManagerService {
     const taskCapture = resolveManagerTaskCapture({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, timezone: settings.timezone, openTasks: facts.tasks });
     const taskCaptureRoute = naturalFeedback.status === "not_feedback" && taskCapture.status !== "not_task";
     const taskUpdate = resolveManagerTaskUpdate({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, timezone: settings.timezone, tasks: facts.tasks });
-    const taskUpdateRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && taskUpdate.status !== "not_update";
     const taskAssignment = resolveManagerTaskAssignment({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, tasks: facts.tasks, members: managerTaskAssignmentMembers(facts.members) });
-    const taskAssignmentRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !taskUpdateRoute && taskAssignment.status !== "not_assignment";
     const projectCapture = resolveManagerProjectCapture({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, projects: facts.projects });
-    const projectCaptureRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && projectCapture.status !== "not_project";
+    const eventAvailabilityEvents: ManagerEventAvailabilityEvent[] = facts.events.flatMap((event) => event.updatedAt ? [{
+      id: event.id,
+      title: event.title,
+      status: event.status,
+      startsAt: event.startsAt,
+      updatedAt: event.updatedAt,
+      participants: event.participants.flatMap((participant) => participant.id ? [{ id: participant.id, bandMemberId: participant.bandMemberId, response: participant.response, respondedAt: participant.respondedAt ?? null }] : [])
+    }] : []);
+    const eventAvailability = resolveManagerEventAvailability({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, events: eventAvailabilityEvents, members: facts.members });
     const eventCapture = resolveManagerEventCapture({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, timezone: settings.timezone, events: facts.events, members: facts.members });
-    const eventCaptureRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && eventCapture.status !== "not_event";
-    const contextCaptureRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventCaptureRoute && contextCapture.status !== "not_answer";
+    const eventAvailabilityRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && managerMessageIsEventAvailabilityIntent(input.message) && eventAvailability.status !== "not_availability";
+    const taskUpdateRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !eventAvailabilityRoute && taskUpdate.status !== "not_update";
+    const taskAssignmentRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !eventAvailabilityRoute && !taskUpdateRoute && taskAssignment.status !== "not_assignment";
+    const projectCaptureRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !eventAvailabilityRoute && !taskUpdateRoute && !taskAssignmentRoute && projectCapture.status !== "not_project";
+    const eventCaptureRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventAvailabilityRoute && eventCapture.status !== "not_event";
+    const contextCaptureRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventAvailabilityRoute && !eventCaptureRoute && contextCapture.status !== "not_answer";
     const safeFacts = this.safeFacts(facts);
     const now = new Date();
     const continuity = resolveManagerConversationContinuity(input.message, history);
@@ -1839,6 +1948,8 @@ export class ManagerService {
         ? { answer: taskAssignment.message, citations: [taskAssignment.taskId, taskAssignment.memberId].filter((value): value is string => Boolean(value)), recommendation: taskAssignment.action ? managerConversationTaskAssignmentRecommendation(taskAssignment.action) : null }
       : projectCaptureRoute
         ? { answer: projectCapture.message, citations: projectCapture.duplicateProjectId ? [projectCapture.duplicateProjectId] : [], recommendation: projectCapture.action ? managerConversationProjectRecommendation(projectCapture.action) : null }
+      : eventAvailabilityRoute
+        ? { answer: eventAvailability.message, citations: [eventAvailability.eventId, eventAvailability.memberId].filter((value): value is string => Boolean(value)), recommendation: eventAvailability.action ? managerConversationEventAvailabilityRecommendation(eventAvailability.action) : null }
       : eventCaptureRoute
         ? { answer: eventCapture.message, citations: eventCapture.duplicateEventId ? [eventCapture.duplicateEventId] : eventCapture.action?.bandMemberIds.slice(0, 8) ?? [], recommendation: eventCapture.action ? managerConversationEventRecommendation(eventCapture.action) : null }
       : deterministicManagerChat(facts, input.message, now, continuity, subjectReference, responseAdaptation);
@@ -1854,7 +1965,7 @@ export class ManagerService {
     let content = fallback.answer;
     let citations = fallback.citations;
     let recommendation: ManagerRecommendationDraft | null = fallback.recommendation;
-    let mode = naturalFeedbackRoute ? "deterministic_feedback" : contextCaptureRoute ? "deterministic_context_capture" : taskCaptureRoute ? "deterministic_task_capture" : taskUpdateRoute ? "deterministic_task_update" : taskAssignmentRoute ? "deterministic_task_assignment" : projectCaptureRoute ? "deterministic_project_capture" : eventCaptureRoute ? "deterministic_event_capture" : "deterministic";
+    let mode = naturalFeedbackRoute ? "deterministic_feedback" : contextCaptureRoute ? "deterministic_context_capture" : taskCaptureRoute ? "deterministic_task_capture" : taskUpdateRoute ? "deterministic_task_update" : taskAssignmentRoute ? "deterministic_task_assignment" : projectCaptureRoute ? "deterministic_project_capture" : eventAvailabilityRoute ? "deterministic_event_availability" : eventCaptureRoute ? "deterministic_event_capture" : "deterministic";
     let model: string | null = null;
     let inputTokens: number | null = null;
     let outputTokens: number | null = null;
@@ -1862,7 +1973,7 @@ export class ManagerService {
     const started = Date.now();
     const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, settings);
     let providerAttempted = false;
-    if (!naturalFeedbackRoute && !contextCaptureRoute && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventCaptureRoute && !continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
+    if (!naturalFeedbackRoute && !contextCaptureRoute && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventAvailabilityRoute && !eventCaptureRoute && !continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       try {
         model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
@@ -1898,7 +2009,7 @@ export class ManagerService {
         }
       } catch { mode = "deterministic_fallback"; }
     }
-    const calibrated = naturalFeedbackRoute || contextCaptureRoute || taskCaptureRoute || taskUpdateRoute || taskAssignmentRoute || projectCaptureRoute || eventCaptureRoute
+    const calibrated = naturalFeedbackRoute || contextCaptureRoute || taskCaptureRoute || taskUpdateRoute || taskAssignmentRoute || projectCaptureRoute || eventAvailabilityRoute || eventCaptureRoute
       ? { answer: content, citations, recommendation }
       : calibrateManagerChatResult({ answer: content, citations, recommendation }, facts, input.message);
     const evidenceArea = managerEvidenceAreaForQuestion(input.message);
@@ -1923,7 +2034,7 @@ export class ManagerService {
           factsRead: [...this.knownIds(facts)],
           conversationMessageIds: history.map((message) => message.id),
           toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
-          guardrails: ["known-evidence", "bounded-history", "structured-conversation-continuity", "tenant-subject-resolution", "explicit-natural-feedback", "reviewed-context-capture", "reviewed-task-capture", "reviewed-task-update", "reviewed-task-assignment", "reviewed-project-capture", "reviewed-event-capture", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", "code-owned-manager-coaching", "team-load-premise-check"],
+          guardrails: ["known-evidence", "bounded-history", "structured-conversation-continuity", "tenant-subject-resolution", "explicit-natural-feedback", "reviewed-context-capture", "reviewed-task-capture", "reviewed-task-update", "reviewed-task-assignment", "reviewed-project-capture", "reviewed-event-capture", "reviewed-event-availability", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", "code-owned-manager-coaching", "team-load-premise-check"],
           providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
           coaching: { policyVersion: MANAGER_COACHING_POLICY_VERSION, topicIds: coachingTopics, unrecognized: Boolean(unknownCoachingTopic), providerBypassed: coachingRoute },
           teamLoad: { policyVersion: facts.teamLoad.policyVersion, status: facts.teamLoad.status, confidence: facts.teamLoad.confidence, suggestionCount: facts.teamLoad.suggestions.length },
@@ -1939,6 +2050,7 @@ export class ManagerService {
           taskUpdate: { policyVersion: MANAGER_TASK_UPDATE_POLICY_VERSION, status: taskUpdate.status, sourceMessageId: taskUpdate.action?.sourceMessageId ?? null, taskId: taskUpdate.taskId, operation: taskUpdate.action?.operation ?? null, providerBypassed: taskUpdateRoute },
           taskAssignment: { policyVersion: MANAGER_TASK_ASSIGNMENT_POLICY_VERSION, status: taskAssignment.status, sourceMessageId: taskAssignment.action?.sourceMessageId ?? null, taskId: taskAssignment.taskId, memberId: taskAssignment.memberId, availability: taskAssignment.action?.availability ?? null, checkInId: taskAssignment.action?.checkInId ?? null, providerBypassed: taskAssignmentRoute },
           projectCapture: { policyVersion: MANAGER_PROJECT_CAPTURE_POLICY_VERSION, status: projectCapture.status, sourceMessageId: projectCapture.action?.sourceMessageId ?? null, projectType: projectCapture.action?.projectType ?? null, dueDatePresent: Boolean(projectCapture.action?.dueDate), duplicateProjectId: projectCapture.duplicateProjectId, providerBypassed: projectCaptureRoute },
+          eventAvailability: { policyVersion: MANAGER_EVENT_AVAILABILITY_POLICY_VERSION, status: eventAvailability.status, sourceMessageId: eventAvailability.action?.sourceMessageId ?? null, eventId: eventAvailability.eventId, memberId: eventAvailability.memberId, previousResponse: eventAvailability.action?.previousResponse ?? null, response: eventAvailability.action?.response ?? null, providerBypassed: eventAvailabilityRoute },
           eventCapture: { policyVersion: MANAGER_EVENT_CAPTURE_POLICY_VERSION, status: eventCapture.status, sourceMessageId: eventCapture.action?.sourceMessageId ?? null, eventType: eventCapture.action?.eventType ?? null, eventStatus: eventCapture.action?.status ?? null, startsAtPresent: Boolean(eventCapture.action?.startsAt), participantCount: eventCapture.action?.bandMemberIds.length ?? 0, duplicateEventId: eventCapture.duplicateEventId, providerBypassed: eventCaptureRoute },
           responseAdaptation: responseAdaptation,
           responseQuality,
@@ -1979,6 +2091,8 @@ export class ManagerService {
           ? managerTaskAssignmentPreview(taskAssignment.action)
         : recommendationActionType === "create_conversation_project" && projectCapture.status === "ready" && projectCapture.action
           ? managerProjectCapturePreview(projectCapture.action, currentUserMessage.createdAt)
+        : recommendationActionType === "update_conversation_event_availability" && eventAvailability.status === "ready" && eventAvailability.action
+          ? managerEventAvailabilityPreview(eventAvailability.action)
         : recommendationActionType === "create_conversation_event" && eventCapture.status === "ready" && eventCapture.action
           ? managerEventCapturePreview(eventCapture.action)
         : null;
@@ -1993,7 +2107,7 @@ export class ManagerService {
       }
     });
     await this.prisma.client.managerConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
-    await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, feedbackTargetMessageId: naturalFeedback.targetMessageId, naturalFeedbackApplied: Boolean(appliedFeedback), contextGapCode: contextCapture.gap?.code ?? null, contextCaptureProposed: contextCapture.status === "ready", taskCaptureStatus: taskCapture.status, taskCaptureProposed: taskCapture.status === "ready", taskSourceMessageId: taskCapture.action?.sourceMessageId ?? null, taskUpdateStatus: taskUpdate.status, taskUpdateProposed: taskUpdate.status === "ready", taskUpdateSourceMessageId: taskUpdate.action?.sourceMessageId ?? null, taskUpdateTaskId: taskUpdate.taskId, taskAssignmentStatus: taskAssignment.status, taskAssignmentProposed: taskAssignment.status === "ready", taskAssignmentSourceMessageId: taskAssignment.action?.sourceMessageId ?? null, taskAssignmentTaskId: taskAssignment.taskId, taskAssignmentMemberId: taskAssignment.memberId, projectCaptureStatus: projectCapture.status, projectCaptureProposed: projectCapture.status === "ready", projectSourceMessageId: projectCapture.action?.sourceMessageId ?? null, projectType: projectCapture.action?.projectType ?? null, eventCaptureStatus: eventCapture.status, eventCaptureProposed: eventCapture.status === "ready", eventSourceMessageId: eventCapture.action?.sourceMessageId ?? null, eventType: eventCapture.action?.eventType ?? null, eventStatus: eventCapture.action?.status ?? null, tool: providerAttempted ? "read_manager_snapshot" : null, providerOutputUsed: mode === "openai" } });
+    await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, feedbackTargetMessageId: naturalFeedback.targetMessageId, naturalFeedbackApplied: Boolean(appliedFeedback), contextGapCode: contextCapture.gap?.code ?? null, contextCaptureProposed: contextCapture.status === "ready", taskCaptureStatus: taskCapture.status, taskCaptureProposed: taskCapture.status === "ready", taskSourceMessageId: taskCapture.action?.sourceMessageId ?? null, taskUpdateStatus: taskUpdate.status, taskUpdateProposed: taskUpdate.status === "ready", taskUpdateSourceMessageId: taskUpdate.action?.sourceMessageId ?? null, taskUpdateTaskId: taskUpdate.taskId, taskAssignmentStatus: taskAssignment.status, taskAssignmentProposed: taskAssignment.status === "ready", taskAssignmentSourceMessageId: taskAssignment.action?.sourceMessageId ?? null, taskAssignmentTaskId: taskAssignment.taskId, taskAssignmentMemberId: taskAssignment.memberId, projectCaptureStatus: projectCapture.status, projectCaptureProposed: projectCapture.status === "ready", projectSourceMessageId: projectCapture.action?.sourceMessageId ?? null, projectType: projectCapture.action?.projectType ?? null, eventAvailabilityStatus: eventAvailability.status, eventAvailabilityProposed: eventAvailability.status === "ready", eventAvailabilitySourceMessageId: eventAvailability.action?.sourceMessageId ?? null, eventAvailabilityEventId: eventAvailability.eventId, eventAvailabilityMemberId: eventAvailability.memberId, eventCaptureStatus: eventCapture.status, eventCaptureProposed: eventCapture.status === "ready", eventSourceMessageId: eventCapture.action?.sourceMessageId ?? null, eventType: eventCapture.action?.eventType ?? null, eventStatus: eventCapture.action?.status ?? null, tool: providerAttempted ? "read_manager_snapshot" : null, providerOutputUsed: mode === "openai" } });
     return {
       conversationId: conversation.id,
       message: { ...message, feedback: null },
@@ -2055,6 +2169,7 @@ export class ManagerService {
     if (parsed.data.type === "assign_conversation_task") return false;
     if (parsed.data.type === "create_conversation_project") return false;
     if (parsed.data.type === "create_conversation_event") return false;
+    if (parsed.data.type === "update_conversation_event_availability") return false;
     if (parsed.data.type === "create_decision") return allowDecision;
     if (parsed.data.type === "remember_fact") return Boolean(question) && managerMemoryCaptureMatches(question, parsed.data);
     if (parsed.data.type === "update_profile_context") return false;

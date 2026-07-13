@@ -154,6 +154,14 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   the lineup, claims the recommendation, and atomically creates the event plus
   unknown availability rows. It links the completed recommendation but creates
   no provider, calendar, message, advance, deal, or payment side effect.
+  `manager_event_availability_v1` is the reviewed response companion. It
+  resolves one current artist event and one active band member from an explicit
+  source statement, snapshots the event version and prior participant
+  response/timestamp, and previews one change. Acceptance repeats entity and
+  source resolution inside the serializable recommendation transaction, then
+  compare-and-sets or creates exactly one `EventParticipant`. The resulting
+  recommendation links the event. Provider output cannot emit the action, and
+  the flow neither notifies the person nor persists their private explanation.
   A deterministic response-quality gate rejects canned/meta prose, excessive
   presentation, and unverified claims of completed outside actions before a
   model answer can replace the safe fallback. Feedback may shape reviewed evals,

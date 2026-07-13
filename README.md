@@ -151,7 +151,7 @@ to deterministic and provider-backed answers through
 action explicit, simplify tone, or ask one evidence-backed missing-premise
 question. Raw correction notes never become instructions, and adaptation cannot
 change facts, citations, recommendations, tools, permissions, or writes.
-Prompt/policy version `manager_os_v30`
+Prompt/policy version `manager_os_v31`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -216,6 +216,17 @@ acceptance. `draft` is the default; `hold` or `confirmed` must be stated. DST
 gaps/overlaps, missing timezones, ambiguous or duplicate events, secrets, stale
 lineups, and provider-generated event actions fail closed. This flow never
 contacts anyone, generates an advance, or writes to an external calendar.
+Availability can then be maintained without leaving the conversation. `Mark
+Morgan available for "Album run-through"`, `Morgan can't make "Bluebird
+show"`, and the explicit tentative/unknown variants route through
+`manager_event_availability_v1`. StoryBoard resolves one active member and one
+current event, previews the old and new response, and writes only after review.
+Acceptance re-parses the exact tenant message and rechecks the event version,
+member identity, participant row, previous response, and response timestamp in
+the recommendation transaction. Questions stay read-only; ambiguous people or
+events, no-ops, multiple responses, secrets, stale state, and provider-emitted
+actions fail closed. The update never notifies a member or stores a private
+reason from chat.
 `manager_work_sequence_v1` projection makes task order explicit. Members can
 record one Task as another Task's prerequisite; the API rejects cross-artist
 links, self-links, cycles, impossible date order, and completion that skips

@@ -22,6 +22,7 @@ import type { ManagerConversationTaskUpdateAction } from "./manager-task-update"
 import type { ManagerConversationTaskAssignmentAction } from "./manager-task-assignment";
 import type { ManagerConversationProjectAction } from "./manager-project-capture";
 import type { ManagerConversationEventAction } from "./manager-event-capture";
+import type { ManagerConversationEventAvailabilityAction } from "./manager-event-availability";
 import { applyManagerResponseAdaptation, managerResponseAdaptationPolicy, type ManagerResponseAdaptationPolicy } from "./manager-response-quality";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -54,7 +55,7 @@ export type ManagerProposedAction = {
   bandMemberId: string;
   checkInId: string | null;
   availability: "available" | "limited" | "unknown";
-} | ManagerProfileContextAction | ManagerConversationTaskAction | ManagerConversationTaskUpdateAction | ManagerConversationTaskAssignmentAction | ManagerConversationProjectAction | ManagerConversationEventAction;
+} | ManagerProfileContextAction | ManagerConversationTaskAction | ManagerConversationTaskUpdateAction | ManagerConversationTaskAssignmentAction | ManagerConversationProjectAction | ManagerConversationEventAction | ManagerConversationEventAvailabilityAction;
 
 export type ManagerRecommendationDraft = {
   stableKey: string;
@@ -96,7 +97,8 @@ export type ManagerFacts = {
     type: string;
     status: string;
     startsAt: Date | null;
-    participants: { response: string; bandMemberId: string }[];
+    updatedAt?: Date;
+    participants: { id?: string; response: string; bandMemberId: string; respondedAt?: Date | null }[];
     readiness?: ShowReadiness | null;
     dayOf?: EventDayOfView | null;
   }[];

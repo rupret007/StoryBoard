@@ -106,6 +106,16 @@ that lineup inside a serializable transaction, then atomically creates the
 be explicit. DST gaps/overlaps, stale lineups, secrets, ambiguity, and replay
 fail closed. The action is absent from provider output and never writes an
 external calendar or sends a message.
+`manager_event_availability_v1` stages
+`update_conversation_event_availability` only from one explicit response for
+one active `BandMember` and one open `BandEvent`. The proposed action snapshots
+the source message, event ID/title/version/start, member ID/name, participant
+ID, prior response, and prior response timestamp. Acceptance re-resolves the
+same tenant records and source under serializable isolation, refuses stale or
+ambiguous state, and updates or creates one `EventParticipant`. The completed
+recommendation links `eventId`; audit metadata retains IDs, policy, and the
+response transition without raw chat or a reason. This is an internal lineup
+record only—no member notification or provider/calendar action occurs.
 Conversation list reads are a non-persistent summary projection: newest first,
 at most 20, with the latest message and `_count.messages` mapped to
 `messageCount`. Conversation detail remains the message source of truth, reads
