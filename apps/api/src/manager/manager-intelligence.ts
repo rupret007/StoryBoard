@@ -18,6 +18,8 @@ import { managerConversationRecommendationMatchesCurrent, type ManagerConversati
 import type { ManagerSubjectReference } from "./manager-subject-reference";
 import type { ManagerProfileContextAction } from "./manager-context-capture";
 import type { ManagerConversationTaskAction } from "./manager-task-capture";
+import type { ManagerConversationTaskUpdateAction } from "./manager-task-update";
+import type { ManagerConversationTaskAssignmentAction } from "./manager-task-assignment";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -49,7 +51,7 @@ export type ManagerProposedAction = {
   bandMemberId: string;
   checkInId: string | null;
   availability: "available" | "limited" | "unknown";
-} | ManagerProfileContextAction | ManagerConversationTaskAction;
+} | ManagerProfileContextAction | ManagerConversationTaskAction | ManagerConversationTaskUpdateAction | ManagerConversationTaskAssignmentAction;
 
 export type ManagerRecommendationDraft = {
   stableKey: string;
@@ -83,7 +85,7 @@ export type ManagerFacts = {
   goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; targetUnit?: string | null; targetDirection?: ManagerGoalTargetDirection; measurementKind?: string; createdAt?: Date; updatedAt?: Date }[];
   goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
-  tasks: { id: string; title: string; status: string; dueAt: Date | null; initiativeId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null; prerequisites?: { prerequisiteTask: { id: string; title: string; status: string; dueAt: Date | null } }[] }[];
+  tasks: { id: string; title: string; status: string; dueAt: Date | null; updatedAt?: Date; initiativeId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null; prerequisites?: { prerequisiteTask: { id: string; title: string; status: string; dueAt: Date | null } }[]; dependents?: { task: { id: string; title: string; status: string; dueAt: Date | null } }[] }[];
   opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null }[];
   events: {
     id: string;

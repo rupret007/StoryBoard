@@ -115,6 +115,23 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   The provider schema cannot emit this action. Conversation summary refreshes
   merge by ID and timestamp so a late server render cannot erase a just-created
   local thread, and reset completely when the active artist changes.
+  `manager_task_update_v1` closes that Task loop for explicit changes to one
+  current commitment. The code-owned resolver binds the source message to the
+  artist Task ID and `updatedAt`, previews the requested status/date/blocker or
+  waiting change, and bypasses provider output. Acceptance re-parses the source
+  and compare-and-sets the Task within the same serializable transaction that
+  claims the recommendation. Existing prerequisite, due-order, deferral, and
+  completion-attribution rules remain authoritative; audit metadata omits raw
+  chat, blocker, and waiting-party text.
+  `manager_task_assignment_v1` handles an operator's explicit ownership choice
+  separately from inference-based role suggestions. It binds one source message
+  to an exact current Task, active `BandMember`, previous owner, Task version,
+  and current voluntary availability check-in. Acceptance re-parses and
+  revalidates every premise inside the serializable recommendation transaction,
+  then compare-and-sets the owner. Ambiguous or implicit requests, unavailable
+  members, completed work, and no-ops fail closed. Check-in notes are excluded
+  from model context and audit metadata, and provider output cannot emit the
+  action.
   A deterministic response-quality gate rejects canned/meta prose, excessive
   presentation, and unverified claims of completed outside actions before a
   model answer can replace the safe fallback. Feedback may shape reviewed evals,

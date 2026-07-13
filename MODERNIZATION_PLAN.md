@@ -1326,6 +1326,96 @@ Implementation and validation:
   web/API containers, the suite exposed the summary-refresh race and a broad
   task-row locator, both of which were corrected before the clean rerun.
 
+### P0 — Reviewed conversational task follow-through (completed 2026-07-12)
+
+- [x] Recognize only explicit, bounded requests to complete, start, resume,
+  block, reschedule, clear the date on, or record/clear the waiting party for
+  one existing shared Task. Ordinary plans and unsupported compound changes do
+  not become writes.
+- [x] Resolve the task only from the active artist's current bounded records.
+  Full titles, quoted titles, and conservative unique tokens are allowed;
+  collisions, pronouns, missing records, and already-applied changes ask for
+  clarification or refuse the no-op rather than guessing.
+- [x] Stage a typed `update_conversation_task` recommendation with the exact
+  source message, Task ID/title/version, operation, and human-readable preview.
+  The initial chat turn never mutates the Task and provider output cannot emit
+  the action.
+- [x] Re-parse the exact tenant message and compare-and-set the current Task in
+  the same serializable transaction that claims the recommendation. Preserve
+  prerequisite completion and date ordering, blocker/waiting semantics,
+  deferral history, linked recommendation completion, and redacted audits.
+- [x] Cover exact/ambiguous resolution, date semantics, sensitive-value
+  refusal, no-ops, stale writes, dependency guards, tenant isolation, UI
+  review, database behavior, and browser follow-through in the versioned gate.
+
+Root cause and design evidence:
+
+- Manager could create a shared Task from conversation but could not maintain
+  it. A band member had to leave the thread and re-find the Task to record the
+  result, blocker, waiting party, or revised date, breaking the manager loop at
+  the point where follow-through becomes authoritative.
+- Andrea_NanoBot's current follow-through and autonomy documentation reinforces
+  three clean-room principles used here: explicit carrier phrases, a visible
+  pending action, and outcome provenance. StoryBoard copied no Andrea code,
+  schema, parser, runtime, or task model; it uses its own artist boundary,
+  Task invariants, Manager recommendation transaction, and audits.
+
+Implementation and validation:
+
+- Added the pure `manager_task_update_v1` resolver and review preview. It
+  supports one exact status/date/blocker/waiting change, uses the saved Manager
+  timezone only for bounded relative dates, and refuses credential values,
+  implicit language, multi-task requests, unsupported dates, completed-task
+  reopening, and dependency violations.
+- Acceptance binds the original user message to the exact Task `updatedAt`,
+  revalidates the same artist and dependency graph inside serializable
+  isolation, performs one compare-and-set update, and completes other accepted
+  recommendations when the Task is actually finished. Audit metadata records
+  policy, operation, IDs, state presence, dates, and deferral counts without
+  raw chat, blocker, or waiting-party text. No Prisma migration was required.
+- Promoted the reviewed contract to `manager_os_v26` / `manager_evals_v28`;
+  56/56 golden checks pass at 100% safety. The focused 103-case Manager suite
+  and all three disposable-Postgres workflows pass, including real chat
+  rescheduling and completion, tenant rejection, Task deferral attribution,
+  recommendation outcome attribution, and audit rows. The complete gate passed
+  128 API + 2 shared tests, typecheck, lint, and both production builds. All
+  three production-mode Chromium journeys passed after correcting one test-only
+  case mismatch (`done`, not `Done`); the relationship diagnostic found zero
+  integrity issues, `git diff --check` passed, and the rebuilt local container
+  stack reports healthy API/Postgres/Redis, a running worker, and HTTP 200 web.
+
+### P0 — Reviewed conversational task assignment (completed 2026-07-12)
+
+Root cause and boundary:
+
+- The Manager could infer one uniquely role-matched owner for an unassigned
+  task, but a band member's direct choice in conversation was not executable.
+  Treating a direct instruction as another inference would discard human
+  authority and could miss a changed owner or capacity premise.
+- Direct assignment therefore has its own code-owned policy and reviewed action.
+  It does not expand provider authority or reuse untrusted model output.
+
+Implementation and validation:
+
+- Added `manager_task_assignment_v1` for explicit requests naming one current
+  Task and one active band member. Exact full names and unambiguous first names
+  are supported; implicit ownership, task/member collisions, completed work,
+  no-ops, and currently unavailable members fail closed. Limited and unknown
+  capacity remain visible rather than overruling a human choice.
+- The proposal binds the source message, Task ID/version/previous owner, member,
+  and current voluntary check-in. Acceptance repeats resolution inside a
+  serializable transaction and compare-and-sets ownership. Audit metadata is
+  bounded and excludes raw chat and check-in notes. No Prisma migration was
+  required.
+- Promoted the reviewed contract to `manager_os_v27` / `manager_evals_v29`.
+  The 58-check golden gate and focused 106-case Manager suite pass with 100%
+  safety. The complete gate passed 131 API + 2 shared tests, typecheck, lint,
+  and both production builds. All three disposable-Postgres workflows and all
+  three production-mode Chromium journeys pass, including reviewed direct
+  assignment and later completion. The relationship diagnostic found zero
+  integrity issues, `git diff --check` passed, and the rebuilt local container
+  stack reports ready Postgres/Redis/worker dependencies plus HTTP 200 web.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,

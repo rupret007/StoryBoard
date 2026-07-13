@@ -57,6 +57,26 @@ rejects equivalent open work, and creates one unassigned Task with source key
 the same serializable transaction; only later Task completion may mark its work
 completed. Audit metadata stores the source ID, due date, and policy version—not
 raw chat text or a credential value.
+`manager_task_update_v1` is the reviewed mutation companion. Its
+`update_conversation_task` action carries the exact source message, artist Task
+ID/title/version, and one allowlisted operation: complete, start, resume, block,
+reschedule, clear due date, set waiting party, or clear waiting party. A proposal
+does not change the Task. Acceptance resolves the same current artist record,
+re-parses the original message, enforces prerequisite completion and date order,
+and compare-and-sets `updatedAt` in the recommendation transaction. Completing
+a Task also attributes completion to its other accepted recommendations. Audit
+history retains IDs, operation, policy, dates, presence flags, and deferral
+counts—not raw conversation, blocker, or waiting-party content.
+`manager_task_assignment_v1` stages `assign_conversation_task` only when the
+operator explicitly names one current Task and one active `BandMember`. The
+action stores the source message, Task ID/title/version, previous owner, member
+ID/name, and the ID/status of the current voluntary capacity signal; it does
+not change ownership during chat. Acceptance repeats source resolution and
+checks the current artist, owner, active-member state, and latest check-in in
+the same serializable transaction before a compare-and-set. An unavailable
+member is refused; limited or unknown capacity is displayed for human review.
+Audit history stores bounded IDs and state labels, never raw chat or a check-in
+note.
 Conversation list reads are a non-persistent summary projection: newest first,
 at most 20, with the latest message and `_count.messages` mapped to
 `messageCount`. Conversation detail remains the message source of truth, reads

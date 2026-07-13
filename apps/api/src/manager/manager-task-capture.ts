@@ -26,6 +26,10 @@ export type ManagerTaskCaptureResult = {
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
 const SENSITIVE_VALUE = /\b(?:password|passcode|pin|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token|social security|ssn|tax id|routing number|bank account|credit card)\b\s*(?:is|=|:|#)\s*[a-z0-9/+_.-]{4,}/i;
 
+export function managerTextContainsSensitiveValue(value: string) {
+  return SENSITIVE_VALUE.test(value);
+}
+
 function result(status: ManagerTaskCaptureResult["status"], message: string, extra: Partial<ManagerTaskCaptureResult> = {}): ManagerTaskCaptureResult {
   return { status, message, action: null, duplicateTaskId: null, preview: null, ...extra };
 }
@@ -93,6 +97,10 @@ function relativeCalendarDate(value: string, now: Date, timezone: string | null)
   return { dueDate: null, error: "Use today, tomorrow, this weekday, or an exact YYYY-MM-DD date." };
 }
 
+export function resolveManagerTaskDate(value: string, now: Date, timezone: string | null) {
+  return relativeCalendarDate(value.trim().toLocaleLowerCase(), now, timezone);
+}
+
 function extractRequestedTask(message: string) {
   const source = compact(message);
   const sharedReminder = /^(?:please\s+)?remind\s+(?:us|the band|everyone)\s+to\s+(.+)$/i.exec(source);
@@ -135,7 +143,7 @@ export function resolveManagerTaskCapture(input: {
   if (input.message.includes("\n") || /(?:^|\s)(?:and also|plus another|second task|two tasks)\b/i.test(requested.titleAndDate)) {
     return result("needs_clarification", "Please give me one task at a time so each title, date, and review stays exact.");
   }
-  if (SENSITIVE_VALUE.test(requested.titleAndDate)) return result("blocked_sensitive", "That looks like a credential or sensitive identifier. Keep the secret out of StoryBoard chat and name only the safe work item.");
+  if (managerTextContainsSensitiveValue(requested.titleAndDate)) return result("blocked_sensitive", "That looks like a credential or sensitive identifier. Keep the secret out of StoryBoard chat and name only the safe work item.");
   if (/\?\s*$/.test(requested.titleAndDate)) return result("needs_clarification", "That reads like a question. State the concrete band task you want recorded.");
   const parsed = splitDueDate(requested.titleAndDate, input.sourceMessageCreatedAt, input.timezone);
   if (parsed.error) return result("needs_clarification", parsed.error);

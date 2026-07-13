@@ -48,6 +48,8 @@ import { selectManagerRecommendationEvalReviewQueue, summarizeManagerRecommendat
 import { managerNaturalFeedbackAcknowledgement, MANAGER_NATURAL_FEEDBACK_POLICY_VERSION, resolveManagerNaturalFeedback } from "./manager-natural-feedback";
 import { managerContextActionIsValid, managerContextActionMatchesAnswer, managerContextActionStillNeeded, managerContextCaptureRecommendation, managerContextProfileUpdateData, MANAGER_CONTEXT_CAPTURE_POLICY_VERSION, resolveManagerContextCapture, type ManagerContextCaptureProfile, type ManagerProfileContextAction } from "./manager-context-capture";
 import { managerConversationTaskActionMatchesMessage, managerConversationTaskDueAt, managerConversationTaskRecommendation, managerTaskCapturePreview, MANAGER_TASK_CAPTURE_POLICY_VERSION, normalizeManagerTaskTitle, resolveManagerTaskCapture, type ManagerConversationTaskAction } from "./manager-task-capture";
+import { managerConversationTaskUpdateActionMatchesMessage, managerConversationTaskUpdateDueAt, managerConversationTaskUpdateOperations, managerConversationTaskUpdateRecommendation, managerTaskUpdatePreview, MANAGER_TASK_UPDATE_POLICY_VERSION, resolveManagerTaskUpdate, type ManagerConversationTaskUpdateAction, type ManagerTaskUpdateTask } from "./manager-task-update";
+import { managerConversationTaskAssignmentActionMatchesMessage, managerConversationTaskAssignmentRecommendation, managerTaskAssignmentPreview, MANAGER_TASK_ASSIGNMENT_POLICY_VERSION, resolveManagerTaskAssignment, type ManagerConversationTaskAssignmentAction, type ManagerTaskAssignmentMember, type ManagerTaskAssignmentTask } from "./manager-task-assignment";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const MANAGER_FACT_AGGREGATES = [
@@ -83,7 +85,39 @@ const conversationTaskActionSchema = z.object({
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
   dateBasisTimezone: z.string().min(1).max(80).nullable()
 }).strict();
-const proposedActionSchema = z.union([taskActionSchema, conversationTaskActionSchema, decisionActionSchema, eventAdvanceActionSchema, projectPlanActionSchema, rememberFactActionSchema, assignTaskActionSchema, profileContextActionSchema]);
+const conversationTaskUpdateActionSchema = z.object({
+  type: z.literal("update_conversation_task"),
+  sourceMessageId: z.string().min(1).max(128),
+  sourceMessageCreatedAt: z.string().datetime({ offset: true }),
+  taskId: z.string().min(1).max(128),
+  taskUpdatedAt: z.string().datetime({ offset: true }),
+  taskTitle: z.string().min(1).max(240),
+  operation: z.enum(managerConversationTaskUpdateOperations),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  dateBasisTimezone: z.string().min(1).max(80).nullable(),
+  blockedReason: z.string().min(1).max(1000).nullable(),
+  waitingOn: z.string().min(1).max(240).nullable()
+}).strict().superRefine((input, context) => {
+  if ((input.operation === "reschedule") !== Boolean(input.dueDate)) context.addIssue({ code: "custom", path: ["dueDate"], message: "Only rescheduling requires a due date" });
+  if (input.operation !== "reschedule" && input.dateBasisTimezone) context.addIssue({ code: "custom", path: ["dateBasisTimezone"], message: "Only rescheduling may record a date timezone" });
+  if ((input.operation === "block") !== Boolean(input.blockedReason)) context.addIssue({ code: "custom", path: ["blockedReason"], message: "Only a blocked update requires a blocker" });
+  if ((input.operation === "set_waiting_on") !== Boolean(input.waitingOn)) context.addIssue({ code: "custom", path: ["waitingOn"], message: "Only a waiting update requires a waiting party" });
+});
+const conversationTaskAssignmentActionSchema = z.object({
+  type: z.literal("assign_conversation_task"),
+  sourceMessageId: z.string().min(1).max(128),
+  sourceMessageCreatedAt: z.string().datetime({ offset: true }),
+  taskId: z.string().min(1).max(128),
+  taskUpdatedAt: z.string().datetime({ offset: true }),
+  taskTitle: z.string().min(1).max(240),
+  bandMemberId: z.string().min(1).max(128),
+  bandMemberName: z.string().min(1).max(200),
+  previousBandMemberId: z.string().min(1).max(128).nullable(),
+  previousOwnerLabel: z.string().max(200).nullable(),
+  checkInId: z.string().min(1).max(128).nullable(),
+  availability: z.enum(["available", "limited", "unknown"])
+}).strict();
+const proposedActionSchema = z.union([taskActionSchema, conversationTaskActionSchema, conversationTaskUpdateActionSchema, conversationTaskAssignmentActionSchema, decisionActionSchema, eventAdvanceActionSchema, projectPlanActionSchema, rememberFactActionSchema, assignTaskActionSchema, profileContextActionSchema]);
 const itemSchema = z.object({ stableKey: z.string().regex(/^[a-z0-9_-]{1,80}$/), title: z.string().min(1).max(200), reason: z.string().min(1).max(800), nextAction: z.string().min(1).max(500), workstream: z.nativeEnum(ManagerWorkstream), priority: z.enum(["low","med","high"]), evidenceIds: z.array(z.string()).max(8), proposedAction: proposedActionSchema.nullable() }).strict();
 const briefSchema = z.object({ summary: z.string().min(1).max(1200), today: z.array(itemSchema).max(5), thisWeek: z.array(itemSchema).max(10), decisionsNeeded: z.array(z.object({ title: z.string(), explanation: z.string(), evidenceIds: z.array(z.string()).max(8) }).strict()).max(8), waitingOn: z.array(z.object({ title: z.string(), dueAt: z.string().nullable(), evidenceIds: z.array(z.string()).max(8) }).strict()).max(10), risksAndOpportunities: z.array(z.object({ title: z.string(), detail: z.string(), confidence: z.number().min(0).max(1), evidenceIds: z.array(z.string()).max(8) }).strict()).max(10) }).strict();
 const chatOutputSchema = z.object({
@@ -108,6 +142,12 @@ type OptionalFields<T> = { [K in keyof T]?: T[K] | undefined };
 type GoalMeasurementClient = Pick<Prisma.TransactionClient, "bookingProspect" | "bandEvent" | "artistProject">;
 function clean<T extends Record<string, unknown>>(value: T): Record<string, unknown> { return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)); }
 function objectRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+function managerTaskAssignmentMembers(members: Array<{ id: string; name: string; checkIns?: Array<{ id: string; status: "available" | "limited" | "unavailable"; note?: string | null; effectiveUntil?: Date | null; createdAt: Date }> }>, now = new Date()): ManagerTaskAssignmentMember[] {
+  return members.map((member) => {
+    const current = currentManagerMemberCheckIn({ id: member.id, name: member.name, checkIn: member.checkIns?.[0] ?? null }, now);
+    return { id: member.id, name: member.name, checkInId: current.checkInId, availability: current.status };
+  });
+}
 
 @Injectable()
 export class ManagerService {
@@ -874,7 +914,7 @@ export class ManagerService {
       this.prisma.client.bandMember.findMany({ where: { artistId, active: true }, select: { id: true, name: true, roles: true, instruments: true, checkIns: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, note: true, effectiveUntil: true, createdAt: true } } } }),
       this.prisma.client.managerGoal.findMany({ where: { artistId, status: { in: [ManagerGoalStatus.draft, ManagerGoalStatus.active] } }, take: 20 }),
       this.prisma.client.managerInitiative.findMany({ where: { artistId, status: { in: [ManagerInitiativeStatus.proposed, ManagerInitiativeStatus.active, ManagerInitiativeStatus.blocked] } }, take: 30 }),
-      this.prisma.client.task.findMany({ where: { artistId, OR: [{ status: { not: "done" } }, { initiativeId: { not: null } }] }, include: { bandMember: { select: { id: true, name: true } }, prerequisites: { select: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } } } }, orderBy: { dueAt: "asc" }, take: 100 }),
+      this.prisma.client.task.findMany({ where: { artistId, OR: [{ status: { not: "done" } }, { initiativeId: { not: null } }] }, include: { bandMember: { select: { id: true, name: true } }, prerequisites: { select: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } } }, dependents: { select: { task: { select: { id: true, title: true, status: true, dueAt: true } } } } }, orderBy: { dueAt: "asc" }, take: 100 }),
       this.prisma.client.bookingOpportunity.findMany({ where: { artistId, stage: { not: "closed" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
       this.prisma.client.bandEvent.findMany({ where: { artistId, status: { in: ["draft", "hold", "confirmed"] } }, include: { participants: true, tasks: true, schedule: { orderBy: { sortOrder: "asc" } }, setlist: { include: { items: { select: { id: true } } } }, deals: { include: { agreements: { select: { id: true, status: true } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } }, orderBy: { startsAt: "asc" }, take: 30 }),
       this.prisma.client.artistProject.findMany({ where: { artistId, status: { in: ["draft", "active", "paused"] } }, include: { tasks: true, expenses: true, events: { select: { id: true } } }, orderBy: { dueAt: "asc" }, take: 30 }),
@@ -946,7 +986,7 @@ export class ManagerService {
       goals: facts.goals,
       goalMeasurements: facts.goalMeasurements,
       initiatives: facts.initiatives,
-      tasks: facts.tasks.map((row) => ({ id: row.id, title: row.title, status: row.status, ownerLabel: row.ownerLabel, bandMemberId: row.bandMemberId, dueAt: row.dueAt, blockedReason: row.blockedReason, waitingOn: row.waitingOn, deferralCount: row.deferralCount, lastDeferredAt: row.lastDeferredAt, opportunityId: row.opportunityId, eventId: row.eventId, projectId: row.projectId, initiativeId: row.initiativeId, prerequisites: row.prerequisites })),
+      tasks: facts.tasks.map((row) => ({ id: row.id, title: row.title, status: row.status, ownerLabel: row.ownerLabel, bandMemberId: row.bandMemberId, dueAt: row.dueAt, updatedAt: row.updatedAt, blockedReason: row.blockedReason, waitingOn: row.waitingOn, deferralCount: row.deferralCount, lastDeferredAt: row.lastDeferredAt, opportunityId: row.opportunityId, eventId: row.eventId, projectId: row.projectId, initiativeId: row.initiativeId, prerequisites: row.prerequisites, dependents: row.dependents })),
       opportunities: facts.opportunities.map((row) => ({ id: row.id, title: row.title, stage: row.stage, targetDate: row.targetDate, venueId: row.venueId })),
       events: facts.events.map((row) => ({ id: row.id, type: row.type, status: row.status, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, venueId: row.venueId, guaranteeMinor: row.guaranteeMinor, depositMinor: row.depositMinor, currency: row.currency, readiness: row.readiness, dayOf: row.dayOf, participants: row.participants.map((participant) => ({ id: participant.id, bandMemberId: participant.bandMemberId, response: participant.response })) })),
       projects: facts.projects.map((row) => ({ id: row.id, type: row.type, status: row.status, name: row.name, startsAt: row.startsAt, dueAt: row.dueAt, budgetMinor: row.budgetMinor, currency: row.currency, successMetrics: row.successMetrics, readiness: row.readiness })),
@@ -1217,6 +1257,14 @@ export class ManagerService {
     let taskAction: z.infer<typeof taskActionSchema> | null = null;
     let conversationTaskAction: ManagerConversationTaskAction | null = null;
     let conversationTaskSource: { id: string; content: string; createdAt: Date } | null = null;
+    let conversationTaskUpdateAction: ManagerConversationTaskUpdateAction | null = null;
+    let conversationTaskUpdateSource: { id: string; content: string; createdAt: Date } | null = null;
+    let conversationTaskUpdateTarget: ManagerTaskUpdateTask | null = null;
+    let conversationTaskUpdatePrevious: { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null = null;
+    let conversationTaskUpdateCurrent: { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null = null;
+    let conversationTaskAssignmentAction: ManagerConversationTaskAssignmentAction | null = null;
+    let conversationTaskAssignmentSource: { id: string; content: string; createdAt: Date } | null = null;
+    let conversationTaskAssignmentTarget: { task: ManagerTaskAssignmentTask; member: ManagerTaskAssignmentMember } | null = null;
     let decisionAction: z.infer<typeof decisionActionSchema> | null = null;
     let eventAdvanceAction: z.infer<typeof eventAdvanceActionSchema> | null = null;
     let projectPlanAction: z.infer<typeof projectPlanActionSchema> | null = null;
@@ -1247,6 +1295,47 @@ export class ManagerService {
         if (!conversationTaskSource || !managerConversationTaskActionMatchesMessage(conversationTaskAction, conversationTaskSource)) throw new BadRequestException("The proposed task no longer matches the reviewed request");
         const openTasks = await this.prisma.client.task.findMany({ where: { artistId, status: { not: "done" } }, select: { id: true, title: true, status: true } });
         if (openTasks.some((task) => normalizeManagerTaskTitle(task.title) === normalizeManagerTaskTitle(conversationTaskAction!.title))) throw new BadRequestException("An equivalent task is already open");
+      } else if (parsed.data.type === "update_conversation_task") {
+        conversationTaskUpdateAction = parsed.data;
+        const responseMessage = rec.managerRun.message;
+        if (!responseMessage) throw new BadRequestException("The task update request is no longer available");
+        const [source, target] = await Promise.all([
+          this.prisma.client.managerMessage.findFirst({
+            where: { id: conversationTaskUpdateAction.sourceMessageId, conversationId: responseMessage.conversationId, role: "user", createdAt: { lte: responseMessage.createdAt } },
+            select: { id: true, content: true, createdAt: true }
+          }),
+          this.prisma.client.task.findFirst({
+            where: { id: conversationTaskUpdateAction.taskId, artistId },
+            select: {
+              id: true, title: true, status: true, dueAt: true, updatedAt: true, blockedReason: true, waitingOn: true,
+              prerequisites: { select: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } } },
+              dependents: { select: { task: { select: { id: true, title: true, status: true, dueAt: true } } } }
+            }
+          })
+        ]);
+        if (!target) throw new NotFoundException("Record not found");
+        if (!source || !managerConversationTaskUpdateActionMatchesMessage(conversationTaskUpdateAction, source, [target])) throw new BadRequestException("The proposed task update no longer matches the reviewed request or current task");
+        conversationTaskUpdateSource = source;
+        conversationTaskUpdateTarget = target;
+      } else if (parsed.data.type === "assign_conversation_task") {
+        conversationTaskAssignmentAction = parsed.data;
+        const responseMessage = rec.managerRun.message;
+        if (!responseMessage) throw new BadRequestException("The task assignment request is no longer available");
+        const [source, tasks, activeMembers] = await Promise.all([
+          this.prisma.client.managerMessage.findFirst({
+            where: { id: conversationTaskAssignmentAction.sourceMessageId, conversationId: responseMessage.conversationId, role: "user", createdAt: { lte: responseMessage.createdAt } },
+            select: { id: true, content: true, createdAt: true }
+          }),
+          this.prisma.client.task.findMany({ where: { artistId, status: { not: "done" } }, select: { id: true, title: true, status: true, updatedAt: true, bandMemberId: true, ownerLabel: true }, orderBy: { updatedAt: "desc" }, take: 200 }),
+          this.prisma.client.bandMember.findMany({ where: { artistId, active: true }, select: { id: true, name: true, checkIns: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, note: true, effectiveUntil: true, createdAt: true } } } })
+        ]);
+        const members = managerTaskAssignmentMembers(activeMembers);
+        const task = tasks.find((candidate) => candidate.id === conversationTaskAssignmentAction!.taskId);
+        const member = members.find((candidate) => candidate.id === conversationTaskAssignmentAction!.bandMemberId);
+        if (!task || !member) throw new NotFoundException("Record not found");
+        if (!source || !managerConversationTaskAssignmentActionMatchesMessage(conversationTaskAssignmentAction, source, tasks, members)) throw new BadRequestException("The proposed task assignment no longer matches the reviewed request, task, member, or availability check-in");
+        conversationTaskAssignmentSource = source;
+        conversationTaskAssignmentTarget = { task, member };
       } else if (parsed.data.type === "create_decision") {
         decisionAction = parsed.data;
       } else if (parsed.data.type === "generate_event_advance") {
@@ -1301,7 +1390,7 @@ export class ManagerService {
       if (!currentPath || currentPath.status !== "missing_task") throw new BadRequestException("This goal path changed; refresh before creating more work");
     }
 
-    const immediateAction = eventAdvanceAction ?? projectPlanAction ?? rememberFactAction ?? assignTaskAction ?? profileContextAction;
+    const immediateAction = eventAdvanceAction ?? projectPlanAction ?? rememberFactAction ?? assignTaskAction ?? profileContextAction ?? conversationTaskUpdateAction ?? conversationTaskAssignmentAction;
     const finalOutcome = immediateAction ? ManagerRecommendationOutcome.completed : outcome as ManagerRecommendationOutcome;
     const reason = immediateAction ? "action_executed" : feedback.reason ?? (outcome === "accepted" ? "accepted" : outcome === "completed" ? (rec.task ? "task_completed" : rec.decision ? "decision_reviewed" : "already_handled") : "not_relevant");
     let createdCount = 0;
@@ -1340,6 +1429,56 @@ export class ManagerService {
         });
         taskId = task.id;
         createdCount = 1;
+      }
+      if (conversationTaskUpdateAction && conversationTaskUpdateSource && conversationTaskUpdateTarget) {
+        const fresh = await tx.task.findFirst({
+          where: { id: conversationTaskUpdateTarget.id, artistId },
+          select: {
+            id: true, status: true, dueAt: true, updatedAt: true, blockedReason: true, waitingOn: true, deferralCount: true,
+            prerequisites: { select: { prerequisiteTask: { select: { status: true, dueAt: true } } } },
+            dependents: { select: { task: { select: { status: true, dueAt: true } } } }
+          }
+        });
+        if (!fresh || fresh.updatedAt.toISOString() !== conversationTaskUpdateAction.taskUpdatedAt) throw new BadRequestException("This task changed before the reviewed update was saved; refresh and review it again");
+        if (fresh.status === "done" && conversationTaskUpdateAction.operation !== "complete") throw new BadRequestException("A completed task must be reopened explicitly from the task board");
+        const patchData: Prisma.TaskUncheckedUpdateManyInput = {};
+        if (conversationTaskUpdateAction.operation === "complete") {
+          if (fresh.prerequisites.some((dependency) => dependency.prerequisiteTask.status !== "done")) throw new BadRequestException("Complete every prerequisite before finishing this task");
+          patchData.status = "done";
+          patchData.blockedReason = null;
+          patchData.waitingOn = null;
+        } else if (["start", "resume"].includes(conversationTaskUpdateAction.operation)) {
+          patchData.status = "in_progress";
+          patchData.blockedReason = null;
+          patchData.waitingOn = null;
+        } else if (conversationTaskUpdateAction.operation === "block") {
+          patchData.status = "blocked";
+          patchData.blockedReason = conversationTaskUpdateAction.blockedReason;
+        } else if (conversationTaskUpdateAction.operation === "reschedule" || conversationTaskUpdateAction.operation === "clear_due_date") {
+          const nextDueAt = conversationTaskUpdateAction.operation === "reschedule" ? managerConversationTaskUpdateDueAt(conversationTaskUpdateAction) : null;
+          if (nextDueAt && fresh.prerequisites.some((dependency) => dependency.prerequisiteTask.dueAt && dependency.prerequisiteTask.dueAt > nextDueAt)) throw new BadRequestException("A task cannot be due before one of its prerequisites");
+          if (nextDueAt && fresh.dependents.some((dependency) => dependency.task.dueAt && dependency.task.dueAt < nextDueAt)) throw new BadRequestException("A prerequisite cannot be due after a task it unlocks");
+          patchData.dueAt = nextDueAt;
+          const deferred = Boolean(fresh.dueAt) && (!nextDueAt || nextDueAt > fresh.dueAt!);
+          if (deferred) {
+            patchData.deferralCount = { increment: 1 };
+            patchData.lastDeferredAt = new Date();
+          }
+        } else {
+          patchData.waitingOn = conversationTaskUpdateAction.operation === "set_waiting_on" ? conversationTaskUpdateAction.waitingOn : null;
+        }
+        conversationTaskUpdatePrevious = { status: fresh.status, dueAt: fresh.dueAt, blockedReason: fresh.blockedReason, waitingOn: fresh.waitingOn, deferralCount: fresh.deferralCount };
+        const updated = await tx.task.updateMany({ where: { id: fresh.id, artistId, updatedAt: fresh.updatedAt }, data: patchData });
+        if (updated.count !== 1) throw new BadRequestException("This task changed before the reviewed update was saved; refresh and review it again");
+        const current = await tx.task.findUniqueOrThrow({ where: { id: fresh.id }, select: { status: true, dueAt: true, blockedReason: true, waitingOn: true, deferralCount: true } });
+        conversationTaskUpdateCurrent = current;
+        if (conversationTaskUpdateAction.operation === "complete") {
+          await tx.managerRecommendation.updateMany({
+            where: { id: { not: id }, taskId: fresh.id, outcome: ManagerRecommendationOutcome.accepted },
+            data: { outcome: ManagerRecommendationOutcome.completed, outcomeReason: "task_completed", outcomeAt: new Date() }
+          });
+        }
+        taskId = fresh.id;
       }
       if (decisionAction) {
         const decision = await tx.managerDecision.create({ data: { artistId, workstream: decisionAction.workstream, title: decisionAction.title, context: decisionAction.context, options: decisionAction.options, evidence: Array.isArray(rec.evidence) ? rec.evidence : [], needsFraming: true } });
@@ -1388,6 +1527,24 @@ export class ManagerService {
           });
         }
       }
+      if (conversationTaskAssignmentAction && conversationTaskAssignmentSource && conversationTaskAssignmentTarget) {
+        const [freshTask, freshMember] = await Promise.all([
+          tx.task.findFirst({ where: { id: conversationTaskAssignmentTarget.task.id, artistId }, select: { id: true, status: true, updatedAt: true, bandMemberId: true, ownerLabel: true } }),
+          tx.bandMember.findFirst({ where: { id: conversationTaskAssignmentTarget.member.id, artistId, active: true }, select: { id: true, name: true, checkIns: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, note: true, effectiveUntil: true, createdAt: true } } } })
+        ]);
+        if (!freshTask || !freshMember) throw new NotFoundException("Record not found");
+        if (freshTask.status === "done") throw new BadRequestException("A completed task cannot receive a new owner");
+        if (freshTask.updatedAt.toISOString() !== conversationTaskAssignmentAction.taskUpdatedAt || freshTask.bandMemberId !== conversationTaskAssignmentAction.previousBandMemberId || freshTask.ownerLabel !== conversationTaskAssignmentAction.previousOwnerLabel) throw new BadRequestException("This task owner changed before the reviewed assignment was saved; refresh and review it again");
+        const currentMember = managerTaskAssignmentMembers([freshMember])[0]!;
+        if (currentMember.availability === "unavailable") throw new BadRequestException("This member is currently unavailable; refresh before assigning work");
+        if (currentMember.checkInId !== conversationTaskAssignmentAction.checkInId || currentMember.availability !== conversationTaskAssignmentAction.availability || freshMember.name !== conversationTaskAssignmentAction.bandMemberName) throw new BadRequestException("This member or their capacity check-in changed; refresh before assigning work");
+        const assigned = await tx.task.updateMany({
+          where: { id: freshTask.id, artistId, updatedAt: freshTask.updatedAt, bandMemberId: conversationTaskAssignmentAction.previousBandMemberId, ownerLabel: conversationTaskAssignmentAction.previousOwnerLabel },
+          data: { bandMemberId: freshMember.id, ownerLabel: freshMember.name }
+        });
+        if (assigned.count !== 1) throw new BadRequestException("This task owner changed before the reviewed assignment was saved; refresh and review it again");
+        taskId = freshTask.id;
+      }
       if (assignTaskAction && assignmentTarget) {
         const latestCheckIn = await tx.bandMemberCheckIn.findFirst({ where: { artistId, bandMemberId: assignmentTarget.member.id }, orderBy: { createdAt: "desc" }, select: { id: true, status: true, note: true, effectiveUntil: true, createdAt: true } });
         const availability = currentManagerMemberCheckIn({ ...assignmentTarget.member, checkIn: latestCheckIn });
@@ -1401,8 +1558,10 @@ export class ManagerService {
       }
       return tx.managerRecommendation.update({ where: { id }, data: { taskId, decisionId, memoryFactId } });
     }, { isolationLevel: "Serializable" });
-    const actionType = eventAdvanceAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? profileContextAction?.type ?? conversationTaskAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
-    const targetId = eventTarget?.id ?? projectTarget?.id ?? assignmentTarget?.task.id ?? profileContextTarget?.id ?? row.taskId ?? row.memoryFactId ?? null;
+    const taskUpdatePrevious = conversationTaskUpdatePrevious as { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null;
+    const taskUpdateCurrent = conversationTaskUpdateCurrent as { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null;
+    const actionType = eventAdvanceAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? profileContextAction?.type ?? conversationTaskUpdateAction?.type ?? conversationTaskAssignmentAction?.type ?? conversationTaskAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
+    const targetId = eventTarget?.id ?? projectTarget?.id ?? assignmentTarget?.task.id ?? profileContextTarget?.id ?? conversationTaskUpdateTarget?.id ?? conversationTaskAssignmentTarget?.task.id ?? row.taskId ?? row.memoryFactId ?? null;
     await this.audit.log({ artistId, aggregateType: "ManagerRecommendation", aggregateId: id, action: `manager.recommendation_${finalOutcome}`, actorLabel, actorOperatorId, metadata: { taskId: row.taskId ?? null, decisionId: row.decisionId ?? null, memoryFactId: row.memoryFactId ?? null, bandMemberId: assignmentTarget?.member.id ?? null, reason, actionType, targetId, createdCount } });
     if (outcome === "accepted" && row.decisionId) await this.audit.log({ artistId, aggregateType: "ManagerDecision", aggregateId: row.decisionId, action: "manager.decision_draft_created", actorLabel, actorOperatorId, metadata: { recommendationId: id } });
     if (eventTarget) await this.audit.log({ artistId, aggregateType: "BandEvent", aggregateId: eventTarget.id, action: "event.advance_generated", actorLabel, actorOperatorId, metadata: { version: SHOW_ADVANCE_VERSION, createdCount, recommendationId: id } });
@@ -1411,6 +1570,41 @@ export class ManagerService {
     if (assignmentTarget) await this.audit.log({ artistId, aggregateType: "Task", aggregateId: assignmentTarget.task.id, action: "task.assigned", actorLabel, actorOperatorId, metadata: { recommendationId: id, previousOwnerLabel: assignmentTarget.task.ownerLabel, bandMemberId: assignmentTarget.member.id, ownerLabel: assignmentTarget.member.name, checkInId: assignmentTarget.checkInId, availability: assignmentTarget.availability } });
     if (profileContextAction && profileContextTarget) await this.audit.log({ artistId, aggregateType: "ArtistOperatingProfile", aggregateId: profileContextTarget.id, action: "manager.profile_context_updated", actorLabel, actorOperatorId, metadata: { recommendationId: id, gapCode: profileContextAction.gapCode, field: profileContextAction.field } });
     if (conversationTaskAction && row.taskId) await this.audit.log({ artistId, aggregateType: "Task", aggregateId: row.taskId, action: "task.created_from_manager_chat", actorLabel, actorOperatorId, metadata: { recommendationId: id, sourceMessageId: conversationTaskAction.sourceMessageId, dueDate: conversationTaskAction.dueDate, policyVersion: MANAGER_TASK_CAPTURE_POLICY_VERSION } });
+    if (conversationTaskUpdateAction && conversationTaskUpdateTarget && taskUpdatePrevious && taskUpdateCurrent) await this.audit.log({
+      artistId,
+      aggregateType: "Task",
+      aggregateId: conversationTaskUpdateTarget.id,
+      action: "task.updated_from_manager_chat",
+      actorLabel,
+      actorOperatorId,
+      metadata: {
+        recommendationId: id,
+        sourceMessageId: conversationTaskUpdateAction.sourceMessageId,
+        operation: conversationTaskUpdateAction.operation,
+        policyVersion: MANAGER_TASK_UPDATE_POLICY_VERSION,
+        previous: { status: taskUpdatePrevious.status, dueAt: taskUpdatePrevious.dueAt, waitingOnPresent: Boolean(taskUpdatePrevious.waitingOn), blockerPresent: Boolean(taskUpdatePrevious.blockedReason), deferralCount: taskUpdatePrevious.deferralCount },
+        current: { status: taskUpdateCurrent.status, dueAt: taskUpdateCurrent.dueAt, waitingOnPresent: Boolean(taskUpdateCurrent.waitingOn), blockerPresent: Boolean(taskUpdateCurrent.blockedReason), deferralCount: taskUpdateCurrent.deferralCount }
+      }
+    });
+    if (conversationTaskAssignmentAction && conversationTaskAssignmentTarget) await this.audit.log({
+      artistId,
+      aggregateType: "Task",
+      aggregateId: conversationTaskAssignmentTarget.task.id,
+      action: "task.assigned_from_manager_chat",
+      actorLabel,
+      actorOperatorId,
+      metadata: {
+        recommendationId: id,
+        sourceMessageId: conversationTaskAssignmentAction.sourceMessageId,
+        policyVersion: MANAGER_TASK_ASSIGNMENT_POLICY_VERSION,
+        previousBandMemberId: conversationTaskAssignmentAction.previousBandMemberId,
+        previousOwnerLabel: conversationTaskAssignmentAction.previousOwnerLabel,
+        bandMemberId: conversationTaskAssignmentAction.bandMemberId,
+        ownerLabel: conversationTaskAssignmentAction.bandMemberName,
+        checkInId: conversationTaskAssignmentAction.checkInId,
+        availability: conversationTaskAssignmentAction.availability
+      }
+    });
     return row;
   }
 
@@ -1457,6 +1651,10 @@ export class ManagerService {
     const contextCaptureRoute = naturalFeedback.status === "not_feedback" && contextCapture.status !== "not_answer";
     const taskCapture = resolveManagerTaskCapture({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, timezone: settings.timezone, openTasks: facts.tasks });
     const taskCaptureRoute = naturalFeedback.status === "not_feedback" && !contextCaptureRoute && taskCapture.status !== "not_task";
+    const taskUpdate = resolveManagerTaskUpdate({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, timezone: settings.timezone, tasks: facts.tasks });
+    const taskUpdateRoute = naturalFeedback.status === "not_feedback" && !contextCaptureRoute && !taskCaptureRoute && taskUpdate.status !== "not_update";
+    const taskAssignment = resolveManagerTaskAssignment({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, tasks: facts.tasks, members: managerTaskAssignmentMembers(facts.members) });
+    const taskAssignmentRoute = naturalFeedback.status === "not_feedback" && !contextCaptureRoute && !taskCaptureRoute && !taskUpdateRoute && taskAssignment.status !== "not_assignment";
     const safeFacts = this.safeFacts(facts);
     const now = new Date();
     const continuity = resolveManagerConversationContinuity(input.message, history);
@@ -1468,6 +1666,10 @@ export class ManagerService {
         ? { answer: contextCapture.message, citations: [], recommendation: managerContextCaptureRecommendation(contextCapture) }
       : taskCaptureRoute
         ? { answer: taskCapture.message, citations: taskCapture.duplicateTaskId ? [taskCapture.duplicateTaskId] : [], recommendation: taskCapture.action ? managerConversationTaskRecommendation(taskCapture.action) : null }
+      : taskUpdateRoute
+        ? { answer: taskUpdate.message, citations: taskUpdate.taskId ? [taskUpdate.taskId] : [], recommendation: taskUpdate.action ? managerConversationTaskUpdateRecommendation(taskUpdate.action) : null }
+      : taskAssignmentRoute
+        ? { answer: taskAssignment.message, citations: [taskAssignment.taskId, taskAssignment.memberId].filter((value): value is string => Boolean(value)), recommendation: taskAssignment.action ? managerConversationTaskAssignmentRecommendation(taskAssignment.action) : null }
       : deterministicManagerChat(facts, input.message, now, continuity, subjectReference);
     const coachingTopics = managerCoachingTopics(input.message).map((topic) => topic.id);
     const unknownCoachingTopic = managerUnrecognizedCoachingTopic(input.message);
@@ -1481,7 +1683,7 @@ export class ManagerService {
     let content = fallback.answer;
     let citations = fallback.citations;
     let recommendation: ManagerRecommendationDraft | null = fallback.recommendation;
-    let mode = naturalFeedbackRoute ? "deterministic_feedback" : contextCaptureRoute ? "deterministic_context_capture" : taskCaptureRoute ? "deterministic_task_capture" : "deterministic";
+    let mode = naturalFeedbackRoute ? "deterministic_feedback" : contextCaptureRoute ? "deterministic_context_capture" : taskCaptureRoute ? "deterministic_task_capture" : taskUpdateRoute ? "deterministic_task_update" : taskAssignmentRoute ? "deterministic_task_assignment" : "deterministic";
     let model: string | null = null;
     let inputTokens: number | null = null;
     let outputTokens: number | null = null;
@@ -1489,7 +1691,7 @@ export class ManagerService {
     const started = Date.now();
     const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, settings);
     let providerAttempted = false;
-    if (!naturalFeedbackRoute && !contextCaptureRoute && !taskCaptureRoute && !continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
+    if (!naturalFeedbackRoute && !contextCaptureRoute && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       try {
         model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
@@ -1525,7 +1727,7 @@ export class ManagerService {
         }
       } catch { mode = "deterministic_fallback"; }
     }
-    const calibrated = naturalFeedbackRoute || contextCaptureRoute || taskCaptureRoute
+    const calibrated = naturalFeedbackRoute || contextCaptureRoute || taskCaptureRoute || taskUpdateRoute || taskAssignmentRoute
       ? { answer: content, citations, recommendation }
       : calibrateManagerChatResult({ answer: content, citations, recommendation }, facts, input.message);
     content = calibrated.answer;
@@ -1545,7 +1747,7 @@ export class ManagerService {
           factsRead: [...this.knownIds(facts)],
           conversationMessageIds: history.map((message) => message.id),
           toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
-          guardrails: ["known-evidence", "bounded-history", "structured-conversation-continuity", "tenant-subject-resolution", "explicit-natural-feedback", "reviewed-context-capture", "reviewed-task-capture", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", "code-owned-manager-coaching", "team-load-premise-check"],
+          guardrails: ["known-evidence", "bounded-history", "structured-conversation-continuity", "tenant-subject-resolution", "explicit-natural-feedback", "reviewed-context-capture", "reviewed-task-capture", "reviewed-task-update", "reviewed-task-assignment", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", "code-owned-manager-coaching", "team-load-premise-check"],
           providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
           coaching: { policyVersion: MANAGER_COACHING_POLICY_VERSION, topicIds: coachingTopics, unrecognized: Boolean(unknownCoachingTopic), providerBypassed: coachingRoute },
           teamLoad: { policyVersion: facts.teamLoad.policyVersion, status: facts.teamLoad.status, confidence: facts.teamLoad.confidence, suggestionCount: facts.teamLoad.suggestions.length },
@@ -1558,6 +1760,8 @@ export class ManagerService {
           naturalFeedback: { policyVersion: MANAGER_NATURAL_FEEDBACK_POLICY_VERSION, status: naturalFeedback.status, signal: naturalFeedback.parsed?.signal ?? null, reason: naturalFeedback.parsed?.input.reason ?? null, targetMessageId: naturalFeedback.targetMessageId, notePresent: Boolean(naturalFeedback.parsed?.input.note), providerBypassed: naturalFeedbackRoute },
           contextCapture: { policyVersion: MANAGER_CONTEXT_CAPTURE_POLICY_VERSION, status: contextCapture.status, gapCode: contextCapture.gap?.code ?? null, field: contextCapture.action?.field ?? null, profileId: contextCapture.action?.profileId ?? null, providerBypassed: contextCaptureRoute },
           taskCapture: { policyVersion: MANAGER_TASK_CAPTURE_POLICY_VERSION, status: taskCapture.status, sourceMessageId: taskCapture.action?.sourceMessageId ?? null, dueDatePresent: Boolean(taskCapture.action?.dueDate), duplicateTaskId: taskCapture.duplicateTaskId, providerBypassed: taskCaptureRoute },
+          taskUpdate: { policyVersion: MANAGER_TASK_UPDATE_POLICY_VERSION, status: taskUpdate.status, sourceMessageId: taskUpdate.action?.sourceMessageId ?? null, taskId: taskUpdate.taskId, operation: taskUpdate.action?.operation ?? null, providerBypassed: taskUpdateRoute },
+          taskAssignment: { policyVersion: MANAGER_TASK_ASSIGNMENT_POLICY_VERSION, status: taskAssignment.status, sourceMessageId: taskAssignment.action?.sourceMessageId ?? null, taskId: taskAssignment.taskId, memberId: taskAssignment.memberId, availability: taskAssignment.action?.availability ?? null, checkInId: taskAssignment.action?.checkInId ?? null, providerBypassed: taskAssignmentRoute },
           responseQuality,
           responseFeedbackSignals: summarizeManagerResponseFeedback(responseFeedback)
         },
@@ -1590,6 +1794,10 @@ export class ManagerService {
         ? contextCapture.preview
         : recommendationActionType === "create_conversation_task" && taskCapture.status === "ready" && taskCapture.action
           ? managerTaskCapturePreview(taskCapture.action)
+        : recommendationActionType === "update_conversation_task" && taskUpdate.status === "ready" && taskUpdate.action
+          ? managerTaskUpdatePreview(taskUpdate.action)
+        : recommendationActionType === "assign_conversation_task" && taskAssignment.status === "ready" && taskAssignment.action
+          ? managerTaskAssignmentPreview(taskAssignment.action)
         : null;
     const message = await this.prisma.client.managerMessage.create({
       data: {
@@ -1602,7 +1810,7 @@ export class ManagerService {
       }
     });
     await this.prisma.client.managerConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
-    await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, feedbackTargetMessageId: naturalFeedback.targetMessageId, naturalFeedbackApplied: Boolean(appliedFeedback), contextGapCode: contextCapture.gap?.code ?? null, contextCaptureProposed: contextCapture.status === "ready", taskCaptureStatus: taskCapture.status, taskCaptureProposed: taskCapture.status === "ready", taskSourceMessageId: taskCapture.action?.sourceMessageId ?? null, tool: providerAttempted ? "read_manager_snapshot" : null, providerOutputUsed: mode === "openai" } });
+    await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, feedbackTargetMessageId: naturalFeedback.targetMessageId, naturalFeedbackApplied: Boolean(appliedFeedback), contextGapCode: contextCapture.gap?.code ?? null, contextCaptureProposed: contextCapture.status === "ready", taskCaptureStatus: taskCapture.status, taskCaptureProposed: taskCapture.status === "ready", taskSourceMessageId: taskCapture.action?.sourceMessageId ?? null, taskUpdateStatus: taskUpdate.status, taskUpdateProposed: taskUpdate.status === "ready", taskUpdateSourceMessageId: taskUpdate.action?.sourceMessageId ?? null, taskUpdateTaskId: taskUpdate.taskId, taskAssignmentStatus: taskAssignment.status, taskAssignmentProposed: taskAssignment.status === "ready", taskAssignmentSourceMessageId: taskAssignment.action?.sourceMessageId ?? null, taskAssignmentTaskId: taskAssignment.taskId, taskAssignmentMemberId: taskAssignment.memberId, tool: providerAttempted ? "read_manager_snapshot" : null, providerOutputUsed: mode === "openai" } });
     return {
       conversationId: conversation.id,
       message: { ...message, feedback: null },
@@ -1660,6 +1868,8 @@ export class ManagerService {
       return !initiativeId || facts.initiatives.some((initiative) => initiative.id === initiativeId);
     }
     if (parsed.data.type === "create_conversation_task") return false;
+    if (parsed.data.type === "update_conversation_task") return false;
+    if (parsed.data.type === "assign_conversation_task") return false;
     if (parsed.data.type === "create_decision") return allowDecision;
     if (parsed.data.type === "remember_fact") return Boolean(question) && managerMemoryCaptureMatches(question, parsed.data);
     if (parsed.data.type === "update_profile_context") return false;

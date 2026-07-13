@@ -200,7 +200,7 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
   }
   async function runEvaluation() {
     setBusy(true); setError("");
-    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v25" } })); }
+    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v27" } })); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function submitMessageFeedback(messageId: string, payload: { helpful: boolean; reason?: string | null; note?: string | null }) {
@@ -604,6 +604,8 @@ function friendlyReason(reason: string) {
 
 function managerActionLabel(actionType?: string | null) {
   if (actionType === "create_conversation_task") return "Suggested shared task";
+  if (actionType === "update_conversation_task") return "Suggested task update";
+  if (actionType === "assign_conversation_task") return "Suggested task owner";
   if (actionType === "remember_fact") return "Suggested band memory";
   if (actionType === "update_profile_context") return "Suggested band context";
   if (actionType === "create_decision") return "Suggested open decision";
@@ -621,6 +623,8 @@ function managerActionButton(actionType?: string | null) {
   if (actionType === "generate_project_plan") return "Build milestone plan";
   if (actionType === "assign_task") return "Assign task";
   if (actionType === "create_task" || actionType === "create_conversation_task") return "Add task";
+  if (actionType === "update_conversation_task") return "Update task";
+  if (actionType === "assign_conversation_task") return "Assign task";
   return "Accept";
 }
 

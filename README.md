@@ -140,7 +140,7 @@ Feedback, promotion, resolution, and version activation remain separate; no
 rating or queue read activates a new version. A
 deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v25`
+already performed an outside action. Prompt/policy version `manager_os_v27`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -168,6 +168,24 @@ reminders, multi-task requests, credential values, and implicit plans are not
 captured. Acceptance re-parses the originating tenant message, rechecks open
 tasks, and creates one source-keyed Task without sending or executing anything
 outside StoryBoard.
+Existing commitments can be maintained in the same reviewed conversation.
+Explicit requests such as `mark "Confirm rehearsal" done`, `block "Send the
+stage plot" because the buyer has not confirmed dimensions`, or `move "Call
+the buyer" to Friday` route through code-owned `manager_task_update_v1`.
+StoryBoard resolves one current artist Task, previews the exact change, and
+writes only after acceptance. It refuses ambiguous names, pronouns, no-ops,
+secret values, stale Task versions, unsupported dates, completed-task
+reopening, and changes that violate prerequisite completion or date order. The
+provider cannot emit this action.
+Direct ownership choices use the same reviewed boundary. A request such as
+`assign "Confirm load-in" to Morgan` routes through
+`manager_task_assignment_v1`, resolves one current Task and one active band
+member, and previews the ownership change with the member's current voluntary
+availability signal. Acceptance rechecks the source message, Task version,
+current owner, active lineup, and latest check-in inside one serializable
+transaction. Ambiguous names, implicit ownership, unavailable members,
+completed work, and no-op assignments fail closed. Capacity notes never enter
+model context or audit metadata, and the provider cannot emit this action.
 `manager_work_sequence_v1` projection makes task order explicit. Members can
 record one Task as another Task's prerequisite; the API rejects cross-artist
 links, self-links, cycles, impossible date order, and completion that skips
