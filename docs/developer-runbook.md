@@ -1303,11 +1303,12 @@ On Linux CI images, use `playwright install --with-deps chromium` to install
 the operating-system packages as well. macOS needs only the command above.
 The release-validated package passes all 15 Chromium journeys. Prisma reports
 all 40 local migrations current with no schema diff, the read-only relationship
-diagnostic reports zero issues, and the rebuilt Compose bundle passes API/web
-health, dependency readiness, Dev-login session, and authenticated-Dashboard
-smoke. The database and browser suites emit a non-fatal `pg@8.14.1`
-concurrent-`client.query()` deprecation warning; remove its source before a
-future `pg@9` upgrade without weakening transaction ownership.
+diagnostic reports no violations (and logs non-fatal skips when optional
+tables are missing from older database snapshots), and the rebuilt Compose
+bundle passes API/web health, dependency readiness, Dev-login session, and
+authenticated-Dashboard smoke. The database and browser suites emit a non-fatal
+`pg@8.14.1` concurrent-`client.query()` deprecation warning; remove its source
+before a future `pg@9` upgrade without weakening transaction ownership.
 
 Optional after infra and `.env` are up:
 

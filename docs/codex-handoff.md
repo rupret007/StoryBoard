@@ -37,7 +37,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | Release-validated on 2026-07-13: Prisma generation; root typecheck/lint; 11/11 shared tests; 235/235 API assertions across 230 top-level tests; both production builds; 82/82 `manager_evals_v38` checks at 100% safety; 5/5 Postgres workflows across all 40 migrations; 15/15 Chromium journeys; no Prisma schema drift; zero relationship-diagnostic issues; and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
+| Tests | Release-validated on 2026-07-13: Prisma generation; root typecheck/lint; 11/11 shared tests; 235/235 API assertions across 230 top-level tests; both production builds; 82/82 `manager_evals_v38` checks at 100% safety; 5/5 Postgres workflows across all 40 migrations; 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
 
 The final web role audit fails mutation affordances closed as well as relying on
 the API boundary: viewers can read Manager and Band operations records without

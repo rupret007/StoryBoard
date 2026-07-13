@@ -533,7 +533,23 @@ let issueCount = 0;
 try {
   await client.connect();
   for (const check of checks) {
-    const result = await client.query(check.query);
+    let result;
+    try {
+      result = await client.query(check.query);
+    } catch (error) {
+      if (
+        error.code === "42P01" &&
+        typeof error.message === "string" &&
+        /relation "([^"]+)" does not exist/.test(error.message)
+      ) {
+        const [, missingRelation] = error.message.match(/relation "([^"]+)" does not exist/) ?? [];
+        console.warn(
+          `${check.relation}: skipped (table ${missingRelation ?? "unknown"} missing in this database)`
+        );
+        continue;
+      }
+      throw error;
+    }
     if (result.rows.length === 0) {
       console.log(`${check.relation}: no integrity issues`);
       continue;

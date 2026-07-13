@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-13
-Baseline for this round: `main` at `3640795`
+Baseline for this round: `main` at `36f02dc`
 
 ## Product and current architecture
 
@@ -37,6 +37,8 @@ mock-safe provider adapters.
   on Node 22 and pnpm 10.
 - [x] Verify registration binding, role enforcement, and audit writes against
   the explicit test database.
+- [x] Make the relationship audit resilient when optional tables are absent in
+  older DB snapshots (for example, `ApprovalReconciliation`), and keep it read-only.
 
 ### P0 — booking acquisition (completed 2026-07-10)
 

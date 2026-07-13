@@ -639,7 +639,8 @@ Release validation snapshot (2026-07-13): root typecheck/lint, 11/11 shared
 tests, 235/235 API assertions across 230 top-level tests, both production
 builds, 82/82 Manager checks at 100% safety, 5/5 database workflows across all
 40 migrations, and 15/15 Chromium workflows pass. Prisma reports no schema
-drift, the relationship diagnostic reports zero integrity issues, and the
+drift, the relationship diagnostic reports zero integrity issues (and now reports
+non-fatal skips when optional tables are absent from older DB snapshots), and the
 rebuilt local container bundle passes health, readiness, Dev-login session,
 and authenticated-Dashboard smoke. One non-fatal `pg@8.14.1` concurrent-query
 deprecation warning remains tracked before any `pg@9` upgrade.
