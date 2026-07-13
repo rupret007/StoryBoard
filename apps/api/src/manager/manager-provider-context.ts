@@ -16,6 +16,52 @@ export type ManagerProviderContextPolicy = {
   restrictedMemoryNeverShared: true;
 };
 
+export type ManagerFullContextSourceBinding = {
+  sourceMessageId: string | null;
+  sourceMessageCreatedAt: string | null;
+};
+
+export type ManagerOwnerOnlyRunSource = {
+  trace?: unknown;
+  message?: { visibility?: string | null } | null;
+};
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+export function managerRunFullContextSourceBinding(
+  managerRun: { trace?: unknown } | null | undefined
+): ManagerFullContextSourceBinding | null {
+  const trace = record(managerRun?.trace);
+  const providerContext = record(trace?.providerContext);
+  // The privacy boundary is established when full context is selected, not
+  // after a provider response is accepted. A failed request, rejected output,
+  // or deterministic fallback may still have received or been derived from
+  // the owner-only source turn.
+  if (providerContext?.fullContextEnabled !== true) return null;
+  const sourceMessageId = typeof providerContext.sourceMessageId === "string" && providerContext.sourceMessageId
+    ? providerContext.sourceMessageId
+    : null;
+  const sourceMessageCreatedAt = typeof providerContext.sourceMessageCreatedAt === "string" && !Number.isNaN(Date.parse(providerContext.sourceMessageCreatedAt))
+    ? providerContext.sourceMessageCreatedAt
+    : null;
+  return { sourceMessageId, sourceMessageCreatedAt };
+}
+
+export function managerRunUsesOwnerOnlyContext(
+  managerRun: ManagerOwnerOnlyRunSource | null | undefined
+) {
+  return managerRun?.message?.visibility === "owner_only" || Boolean(managerRunFullContextSourceBinding(managerRun));
+}
+
+export function managerFullProviderContextEnabled(
+  settings: { aiEnabled: boolean; fullContextEnabled: boolean },
+  actorIsOwner: boolean
+) {
+  return actorIsOwner && settings.aiEnabled && settings.fullContextEnabled;
+}
+
 export function projectManagerMemoryForProvider<T extends ManagerProviderMemoryFact>(
   memoryFacts: T[],
   fullContextEnabled: boolean

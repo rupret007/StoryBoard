@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, contextCapture, taskCapture, taskUpdate, taskAssignment, projectCapture, eventCapture, eventAvailability, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, naturalFeedback, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, contextCapture, taskCapture, taskUpdate, taskAssignment, projectCapture, eventCapture, eventAvailability, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, naturalFeedback, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, followThrough, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -49,9 +49,11 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("operations/event-readiness.js"),
   loadApi("operations/event-day-of.js"),
   loadApi("operations/project-plan.js"),
+  loadApi("manager/manager-follow-through.js"),
   loadApi("workflow-automation/workflow-job-processor.service.js")
 ]);
 const eventLogistics = await loadApi("operations/event-logistics.js");
+const conversationVisibility = await loadApi("manager/manager-conversation-visibility.js");
 
 const now = new Date("2026-07-12T12:00:00.000Z");
 function managerFacts(overrides = {}) {
@@ -76,6 +78,7 @@ function managerFacts(overrides = {}) {
     prospects: [],
     settlements: [],
     recommendationHistory: [],
+    followThrough: followThrough.summarizeManagerFollowThrough([], now),
     ...overrides
   };
 }
@@ -746,19 +749,126 @@ test("manager provider context enforces memory sensitivity independently of mode
   const service = new managerMod.ManagerService({ client: {} }, { log: async () => undefined }, { get: () => false });
   const capacityMembers = [{ id: "member-a", name: "Alex", roles: ["booking"], instruments: [], checkIn: { id: "checkin-a", status: "limited", note: "UI-only capacity detail", effectiveUntil: new Date("2026-07-20T12:00:00.000Z"), createdAt: now } }];
   const capacityLoad = teamLoad.deterministicManagerTeamLoad({ members: capacityMembers, tasks: [], now });
-  const facts = managerFacts({ members: capacityMembers, teamLoad: capacityLoad, memoryFacts, knowledgeHealth: knowledgeHealth.deterministicManagerKnowledgeHealth({ profile: null, memoryFacts: [memoryFacts[0]] }, now), outcomeReview: { recordedLessons: [], evidenceIds: [] } });
+  const memoryReceiptSource = (fact) => ({
+    id: `recommendation-${fact.id}`,
+    title: `Remember ${fact.key}`,
+    workstream: "band_operations",
+    priority: "low",
+    outcome: "completed",
+    outcomeReason: "action_executed",
+    nextAction: "Keep this fact current.",
+    proposedAction: { type: "remember_fact", key: fact.key, label: fact.key, value: `stored-${fact.id}` },
+    createdAt: now,
+    updatedAt: now,
+    outcomeAt: now,
+    task: null,
+    decision: null,
+    project: null,
+    event: null,
+    memoryFact: { ...fact, archivedAt: null },
+    approvals: []
+  });
+  const allMemoryFollowThrough = followThrough.summarizeManagerFollowThrough(memoryFacts.map(memoryReceiptSource), now, "owner");
+  const facts = managerFacts({ members: capacityMembers, teamLoad: capacityLoad, memoryFacts, followThrough: allMemoryFollowThrough, knowledgeHealth: knowledgeHealth.deterministicManagerKnowledgeHealth({ profile: null, memoryFacts: [memoryFacts[0]] }, now), outcomeReview: { recordedLessons: [], evidenceIds: [] } });
   assert.deepEqual(service.providerFacts(facts, false).memoryFacts.map((fact) => fact.id), ["normal-a"]);
   assert.deepEqual(service.providerFacts(facts, true).memoryFacts.map((fact) => fact.id), ["normal-a", "sensitive-a"]);
   assert.equal(JSON.stringify(service.providerFacts(facts, false)).includes("UI-only capacity detail"), false);
   assert.equal(JSON.stringify(service.providerFacts(facts, true)).includes("UI-only capacity detail"), false);
   assert.deepEqual(service.providerFacts(facts, false).knowledgeHealth.evidenceIds, ["normal-a"]);
   assert.equal(service.providerFacts(facts, true).knowledgeHealth.evidenceIds.includes("restricted-a"), false);
+  assert.deepEqual(service.providerFacts(facts, false).followThrough.items.map((item) => item.target.id), ["normal-a"]);
+  assert.deepEqual(service.providerFacts(facts, true).followThrough.items.map((item) => item.target.id).sort(), ["normal-a", "sensitive-a"]);
+  assert.equal(JSON.stringify(service.providerFacts(facts, true)).includes("restricted_health"), false);
   const redactedIds = service.providerKnownIds(facts, false);
   assert.equal(redactedIds.has("normal-a"), true);
   assert.equal(redactedIds.has("sensitive-a"), false);
   assert.equal(redactedIds.has("restricted-a"), false);
   assert.equal(service.chatOutputIsGrounded({ answer: "Use the recorded home market.", citations: ["normal-a"], recommendation: null }, facts, "", redactedIds), true);
   assert.equal(service.chatOutputIsGrounded({ answer: "Use the private note.", citations: ["restricted-a"], recommendation: null }, facts, "", redactedIds), false);
+});
+
+test("full Manager provider context requires an owner and stays owner-only after persistence", () => {
+  const settings = { aiEnabled: true, fullContextEnabled: true };
+  assert.equal(providerContext.managerFullProviderContextEnabled(settings, false), false, "members stay redacted");
+  assert.equal(providerContext.managerFullProviderContextEnabled(settings, false), false, "viewers stay redacted");
+  assert.equal(providerContext.managerFullProviderContextEnabled(settings, true), true, "owners may use the enabled setting");
+  assert.equal(providerContext.managerFullProviderContextEnabled({ ...settings, fullContextEnabled: false }, true), false);
+
+  const sourceAt = new Date("2026-07-12T11:00:00.000Z");
+  const privateTurn = [
+    { id: "owner-question", role: "user", content: "What is our private guarantee ceiling?", createdAt: sourceAt },
+    {
+      id: "owner-answer",
+      role: "assistant",
+      content: "The private guarantee ceiling is 98765.",
+      createdAt: new Date(sourceAt.getTime() + 1000),
+      managerRun: {
+        trace: {
+          providerContext: {
+            fullContextEnabled: true,
+            outputUsed: true,
+            sourceMessageId: "owner-question",
+            sourceMessageCreatedAt: sourceAt.toISOString()
+          }
+        },
+        recommendations: []
+      }
+    },
+    { id: "public-question", role: "user", content: "What should we do next?", createdAt: new Date(sourceAt.getTime() + 2000) }
+  ];
+  for (const visibility of ["normal", "provider_redacted"]) {
+    const projected = conversationVisibility.projectManagerConversationMessages(privateTurn, visibility);
+    assert.doesNotMatch(JSON.stringify(projected), /98765|private guarantee ceiling/i);
+    assert.match(JSON.stringify(projected), /What should we do next/);
+  }
+  assert.match(JSON.stringify(conversationVisibility.projectManagerConversationMessages(privateTurn, "owner")), /98765/);
+  assert.match(JSON.stringify(conversationVisibility.projectManagerConversationMessages(privateTurn, "provider_full")), /98765/);
+
+  const legacyFullContext = [
+    { id: "legacy-question", role: "user", content: "Use the confidential value 45678", createdAt: sourceAt },
+    {
+      id: "legacy-answer",
+      role: "assistant",
+      content: "The confidential value is 45678.",
+      createdAt: new Date(sourceAt.getTime() + 1000),
+      managerRun: { trace: { providerContext: { fullContextEnabled: true, outputUsed: true } }, recommendations: [] }
+    },
+    { id: "member-question", role: "user", content: "What is next?", createdAt: new Date(sourceAt.getTime() + 2000) }
+  ];
+  const memberHistory = conversationVisibility.projectManagerConversationMessages(legacyFullContext, "provider_redacted");
+  assert.doesNotMatch(JSON.stringify(memberHistory), /45678/);
+  assert.equal(memberHistory.every((message) => /hidden by current privacy settings/i.test(message.content)), true);
+});
+
+test("Manager chat and recommendation routes forward owner scope and reject viewers before service execution", async () => {
+  const ownerFlags = [];
+  const recommendationOwnerFlags = [];
+  const feedbackOwnerFlags = [];
+  const controller = new managerControllerMod.ManagerController(
+    {
+      chat: async (_artistId, _input, _label, _operatorId, actorIsOwner) => { ownerFlags.push(actorIsOwner); return { ok: true }; },
+      recommendation: async (_artistId, _id, _outcome, _feedback, _label, _operatorId, actorIsOwner) => { recommendationOwnerFlags.push(actorIsOwner); return { ok: true }; },
+      messageFeedback: async (_artistId, _id, _feedback, _label, _operatorId, actorIsOwner) => { feedbackOwnerFlags.push(actorIsOwner); return { ok: true }; }
+    },
+    { resolveArtistId: async () => "artist-a" },
+    {
+      assertCanMutateWorkflow: async (operatorId) => { if (operatorId === "viewer-a") throw new Error("viewer cannot mutate workflow"); },
+      getRole: async (operatorId) => operatorId === "owner-a" ? "owner" : operatorId === "member-a" ? "member" : "viewer"
+    }
+  );
+  await controller.chat({ message: "What should we do next?" }, { id: "member-a", email: "member@test" }, {}, "artist-a");
+  await controller.chat({ message: "What should we do next?" }, { id: "owner-a", email: "owner@test" }, {}, "artist-a");
+  await assert.rejects(
+    () => controller.chat({ message: "What should we do next?" }, { id: "viewer-a", email: "viewer@test" }, {}, "artist-a"),
+    /viewer cannot mutate workflow/
+  );
+  await controller.recommendationDismiss("recommendation-a", {}, { id: "member-a", email: "member@test" }, {}, "artist-a");
+  await controller.recommendationDismiss("recommendation-a", {}, { id: "owner-a", email: "owner@test" }, {}, "artist-a");
+  await controller.messageFeedback("message-a", { helpful: true }, { id: "member-a", email: "member@test" }, {}, "artist-a");
+  await controller.messageFeedback("message-a", { helpful: true }, { id: "owner-a", email: "owner@test" }, {}, "artist-a");
+  assert.deepEqual(ownerFlags, [false, true]);
+  assert.deepEqual(recommendationOwnerFlags, [false, true]);
+  assert.deepEqual(feedbackOwnerFlags, [false, true]);
 });
 
 test("the queue dispatches the Manager schedule scan through the registered service", async () => {
@@ -787,7 +897,7 @@ test("manager decisions preserve the choice, require a review checkpoint, and re
       },
       findUniqueOrThrow: async () => ({ ...row })
     },
-    managerRecommendation: { updateMany: async () => ({ count: 0 }) }
+    managerRecommendation: { updateManyAndReturn: async () => [] }
   };
   client.$transaction = async (fn) => fn(client);
   const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
@@ -907,6 +1017,42 @@ test("recommendation acceptance can create a tenant task but cannot execute prov
   await assert.rejects(() => service.recommendation("artist-a", "rec-a", "accepted", {}, "member@test", "operator-a"), /Unsupported manager action/);
   assert.equal(taskCreates, 1);
   await assert.rejects(() => service.recommendation("artist-b", "rec-a", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+});
+
+test("non-owners cannot mutate an owner full-context recommendation by known ID", async () => {
+  const privateRecommendation = {
+    id: "recommendation-private",
+    artistId: "artist-a",
+    stableKey: "private-98765",
+    title: "Private guarantee 98765",
+    reason: "Owner-only reasoning 98765",
+    nextAction: "Use 98765",
+    workstream: "business",
+    priority: "high",
+    outcome: "suggested",
+    outcomeReason: null,
+    proposedAction: null,
+    task: null,
+    decision: null,
+    memoryFact: null,
+    project: null,
+    event: null,
+    approvals: [],
+    managerRun: { trace: { providerContext: { fullContextEnabled: true, outputUsed: true } }, message: null }
+  };
+  const service = new managerMod.ManagerService(
+    { client: { managerRecommendation: { findFirst: async () => privateRecommendation } } },
+    { log: async () => assert.fail("Rejected private recommendation access must not audit") },
+    { get: () => false }
+  );
+  await assert.rejects(
+    () => service.recommendation("artist-a", privateRecommendation.id, "dismissed", {}, "member@test", "member-a", false),
+    (error) => error?.getStatus?.() === 404 && !/98765/.test(error.message)
+  );
+  await assert.rejects(
+    () => service.recommendation("artist-a", privateRecommendation.id, "accepted", {}, "owner@test", "owner-a", true),
+    /no trackable action/i
+  );
 });
 
 test("accepted conversational task is source-bound, unassigned, duplicate-safe, tenant-scoped, and audited", async () => {
@@ -1087,15 +1233,15 @@ test("accepted conversational task update is source-bound, optimistic, tenant-sa
   let task = { id: "task-a", artistId: "artist-a", title: "Confirm rehearsal", status: "in_progress", dueAt: new Date("2026-07-18T12:00:00.000Z"), updatedAt: originalUpdatedAt, blockedReason: null, waitingOn: "The band", deferralCount: 0, prerequisites: [], dependents: [] };
   const captured = taskUpdate.resolveManagerTaskUpdate({ message: source.content, sourceMessageId: source.id, sourceMessageCreatedAt: source.createdAt, timezone: null, tasks: [task] });
   assert.equal(captured.status, "ready");
-  let outcome = "suggested"; let taskWrites = 0; let attributed = 0; const audits = [];
+  let outcome = "suggested"; let taskWrites = 0; let attributed = null; let inTransaction = false; const audits = [];
   const client = {
     managerRecommendation: {
       findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-update", outcome, taskId: null, decisionId: null, memoryFactId: null, task: null, decision: null, memoryFact: null, proposedAction: captured.action, evidence: [task.id], managerRun: { message: { id: "answer-update", conversationId: "conversation-a", createdAt: new Date("2026-07-12T12:00:01.000Z") } } } : null,
       updateMany: async ({ where, data }) => {
         if (where.id === "rec-update") { if (outcome !== "suggested") return { count: 0 }; outcome = data.outcome; return { count: 1 }; }
-        if (where.taskId === task.id) { attributed += 1; return { count: 1 }; }
         return { count: 0 };
       },
+      updateManyAndReturn: async (args) => { attributed = args; return [{ id: "rec-linked-task" }]; },
       update: async ({ data }) => ({ id: "rec-update", outcome, taskId: data.taskId ?? null, decisionId: null, memoryFactId: null })
     },
     managerMessage: { findFirst: async ({ where }) => where.id === source.id && where.conversationId === "conversation-a" ? source : null },
@@ -1110,8 +1256,8 @@ test("accepted conversational task update is source-bound, optimistic, tenant-sa
       findUniqueOrThrow: async () => task
     }
   };
-  client.$transaction = async (fn) => fn(client);
-  const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+  client.$transaction = async (fn) => { inTransaction = true; try { return await fn(client); } finally { inTransaction = false; } };
+  const service = new managerMod.ManagerService({ client }, { log: async (entry, auditClient) => { if (entry.aggregateType === "ManagerRecommendation") { assert.equal(inTransaction, true); assert.equal(auditClient, client); } audits.push(entry); } }, { get: () => false });
 
   task = { ...task, updatedAt: new Date("2026-07-12T11:01:00.000Z") };
   await assert.rejects(() => service.recommendation("artist-a", "rec-update", "accepted", {}, "member@test", "operator-a"), /no longer matches|changed/i);
@@ -1125,7 +1271,13 @@ test("accepted conversational task update is source-bound, optimistic, tenant-sa
   assert.equal(task.status, "done");
   assert.equal(task.waitingOn, null);
   assert.equal(taskWrites, 1);
-  assert.equal(attributed, 1);
+  assert.equal(attributed.where.taskId, task.id);
+  assert.equal(attributed.where.managerRun.artistId, "artist-a");
+  const linkedAudit = audits.find((entry) => entry.aggregateId === "rec-linked-task" && entry.action === "manager.recommendation_completed");
+  assert.deepEqual(linkedAudit.metadata, { taskId: task.id, reason: "task_completed", source: "manager_task_update" });
+  const primaryAudit = audits.find((entry) => entry.aggregateId === "rec-update" && entry.action === "manager.recommendation_completed");
+  assert.equal(primaryAudit.metadata.actionType, "update_conversation_task");
+  assert.equal(audits.filter((entry) => entry.aggregateId === "rec-update" && entry.action === "manager.recommendation_completed").length, 1);
   const taskAudit = audits.find((entry) => entry.action === "task.updated_from_manager_chat");
   assert.equal(taskAudit.aggregateId, task.id);
   assert.equal(taskAudit.metadata.operation, "complete");
@@ -1193,17 +1345,28 @@ test("accepted conversational assignment is source-bound, capacity-aware, optimi
 test("accepted conversational memory is exact, normal-sensitivity, idempotent, linked, and audited", async () => {
   const capture = memoryCapture.assessManagerMemoryCapture("Remember that Morgan handles production advances");
   assert.equal(capture.status, "ready");
+  const source = { id: "message-memory-source", content: "Remember that Morgan handles production advances", createdAt: new Date("2026-07-12T12:00:00.000Z") };
+  const response = { id: "message-memory-response", conversationId: "conversation-memory", createdAt: new Date("2026-07-12T12:00:01.000Z") };
   let outcome = "suggested"; let upserts = 0; const audits = [];
   const client = {
     managerRecommendation: {
-      findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-memory", outcome, taskId: null, decisionId: null, memoryFactId: null, task: null, decision: null, memoryFact: null, proposedAction: { type: "remember_fact", key: capture.key, label: capture.label, value: capture.value }, evidence: [] } : null,
+      findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-memory", outcome, taskId: null, decisionId: null, memoryFactId: null, task: null, decision: null, memoryFact: null, approvals: [], managerRun: { message: response }, proposedAction: { type: "remember_fact", sourceMessageId: source.id, sourceMessageCreatedAt: source.createdAt.toISOString(), key: capture.key, label: capture.label, value: capture.value }, evidence: [] } : null,
       updateMany: async ({ data }) => { if (outcome !== "suggested") return { count: 0 }; outcome = data.outcome; return { count: 1 }; },
       update: async ({ data }) => ({ id: "rec-memory", outcome, taskId: null, decisionId: null, ...data })
     },
-    managerMemoryFact: { upsert: async ({ create, update }) => { upserts += 1; assert.equal(create.sensitivity, "normal"); assert.equal(create.sourceType, "operator_confirmation"); assert.equal(create.value, capture.value); assert.equal(update.archivedAt, null); return { id: "memory-a", ...create }; } }
+    managerMessage: { findFirst: async ({ where }) => where.id === source.id && where.conversationId === response.conversationId ? source : null },
+    managerMemoryFact: {
+      findUnique: async () => null,
+      upsert: async ({ create, update }) => { upserts += 1; assert.equal(create.sensitivity, "normal"); assert.equal(create.sourceType, "operator_confirmation"); assert.equal(create.value, capture.value); assert.equal(Object.hasOwn(update, "sensitivity"), false); assert.equal(Object.hasOwn(update, "archivedAt"), false); return { id: "memory-a", archivedAt: null, ...create }; }
+    }
   };
   client.$transaction = async (fn) => fn(client);
   const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+  source.content = "Remember that Jordan handles production advances";
+  await assert.rejects(() => service.recommendation("artist-a", "rec-memory", "accepted", {}, "member@test", "operator-a"), /no longer matches the reviewed request/i);
+  assert.equal(outcome, "suggested");
+  assert.equal(upserts, 0);
+  source.content = "Remember that Morgan handles production advances";
   const accepted = await service.recommendation("artist-a", "rec-memory", "accepted", {}, "member@test", "operator-a");
   assert.equal(accepted.outcome, "completed");
   assert.equal(accepted.memoryFactId, "memory-a");
@@ -1212,6 +1375,80 @@ test("accepted conversational memory is exact, normal-sensitivity, idempotent, l
   await assert.rejects(() => service.recommendation("artist-a", "rec-memory", "accepted", {}, "member@test", "operator-a"), /already been decided/);
   await assert.rejects(() => service.recommendation("artist-b", "rec-memory", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
   assert.equal(upserts, 1);
+});
+
+test("chat memory acceptance rejects owner-managed facts and updates only active normal memory", async (t) => {
+  const source = { id: "message-memory-privacy-source", content: "Remember that Morgan handles production advances", createdAt: new Date("2026-07-12T12:00:00.000Z") };
+  const response = { id: "message-memory-privacy-response", conversationId: "conversation-memory-privacy", createdAt: new Date("2026-07-12T12:00:01.000Z") };
+  const capture = memoryCapture.assessManagerMemoryCapture(source.content);
+  const action = { type: "remember_fact", sourceMessageId: source.id, sourceMessageCreatedAt: source.createdAt.toISOString(), key: capture.key, label: capture.label, value: capture.value };
+  const archivedAt = new Date("2026-07-01T12:00:00.000Z");
+  const scenarios = [
+    { name: "member rejects sensitive", actor: "member@test", sensitivity: "sensitive", archivedAt: null, accepted: false },
+    { name: "member rejects restricted", actor: "member@test", sensitivity: "restricted", archivedAt: null, accepted: false },
+    { name: "member rejects archived", actor: "member@test", sensitivity: "normal", archivedAt, accepted: false },
+    { name: "owner also rejects restricted archived state", actor: "owner@test", sensitivity: "restricted", archivedAt, accepted: false },
+    { name: "member updates active normal memory", actor: "member@test", sensitivity: "normal", archivedAt: null, accepted: true }
+  ];
+
+  for (const scenario of scenarios) await t.test(scenario.name, async () => {
+    let outcome = "suggested";
+    let upserts = 0;
+    const audits = [];
+    let stored = {
+      id: `memory-${scenario.name.replaceAll(" ", "-")}`,
+      artistId: "artist-a",
+      key: action.key,
+      value: "Earlier owner-reviewed value",
+      sensitivity: scenario.sensitivity,
+      archivedAt: scenario.archivedAt,
+      sourceType: "owner_correction",
+      sourceId: "owner-a",
+      confidence: 1,
+      confirmedAt: new Date("2026-07-01T11:00:00.000Z")
+    };
+    const client = {
+      managerRecommendation: {
+        findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-memory-privacy", stableKey: "remember-memory-privacy", outcome, taskId: null, decisionId: null, memoryFactId: null, projectId: null, eventId: null, task: null, decision: null, memoryFact: null, project: null, event: null, approvals: [], managerRun: { message: response }, proposedAction: action, evidence: [] } : null,
+        updateMany: async () => { if (outcome !== "suggested") return { count: 0 }; outcome = "completed"; return { count: 1 }; },
+        update: async ({ data }) => ({ id: "rec-memory-privacy", outcome, taskId: null, decisionId: null, projectId: null, eventId: null, ...data })
+      },
+      managerMessage: { findFirst: async ({ where }) => where.id === source.id && where.conversationId === response.conversationId ? source : null },
+      managerMemoryFact: {
+        findUnique: async () => ({ id: stored.id, sensitivity: stored.sensitivity, archivedAt: stored.archivedAt }),
+        upsert: async ({ update }) => {
+          upserts += 1;
+          assert.equal(Object.hasOwn(update, "sensitivity"), false);
+          assert.equal(Object.hasOwn(update, "archivedAt"), false);
+          stored = { ...stored, ...update };
+          return stored;
+        }
+      }
+    };
+    client.$transaction = async (fn) => {
+      const previousOutcome = outcome;
+      const previousStored = { ...stored };
+      try { return await fn(client); }
+      catch (error) { outcome = previousOutcome; stored = previousStored; throw error; }
+    };
+    const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+    const before = { ...stored };
+    if (!scenario.accepted) {
+      await assert.rejects(() => service.recommendation("artist-a", "rec-memory-privacy", "accepted", {}, scenario.actor, `${scenario.actor}-id`), /must be reviewed in Manager memory/i);
+      assert.deepEqual(stored, before);
+      assert.equal(outcome, "suggested");
+      assert.equal(upserts, 0);
+      assert.equal(audits.length, 0);
+      return;
+    }
+    const accepted = await service.recommendation("artist-a", "rec-memory-privacy", "accepted", {}, scenario.actor, `${scenario.actor}-id`);
+    assert.equal(accepted.memoryFactId, stored.id);
+    assert.equal(stored.sensitivity, "normal");
+    assert.equal(stored.archivedAt, null);
+    assert.equal(stored.value, action.value);
+    assert.equal(upserts, 1);
+    assert.equal(audits.some((entry) => entry.action === "manager.memory_confirmed"), true);
+  });
 });
 
 test("accepted conversational context updates the exact current profile once and audits no raw value", async () => {
@@ -1512,8 +1749,15 @@ test("deterministic Manager answer depth follows the saved style and reviewed to
 
 test("manager response feedback is exact-message, tenant-safe, idempotent, and audited", async () => {
   let upserts = 0; let audits = 0;
+  const privateRun = { trace: { providerContext: { fullContextEnabled: true, outputUsed: true } }, recommendations: [] };
+  const privateMemoryRun = { recommendations: [{ id: "recommendation-memory", outcome: "completed", proposedAction: { type: "remember_fact", sourceMessageId: "source-a", sourceMessageCreatedAt: now.toISOString() }, memoryFact: { id: "memory-a", sensitivity: "restricted", archivedAt: null } }] };
   const client = {
-    managerMessage: { findFirst: async ({ where }) => where.conversation.artistId === "artist-a" && where.role === "assistant" ? { id: "message-a", managerRunId: "run-a" } : null },
+    managerMessage: { findFirst: async ({ where }) => {
+      if (where.conversation.artistId !== "artist-a" || where.role !== "assistant") return null;
+      if (where.id === "message-owner-only") return { id: where.id, role: "assistant", visibility: "owner_only", managerRunId: "run-private", managerRun: privateRun };
+      if (where.id === "message-private-memory") return { id: where.id, role: "assistant", visibility: "team", managerRunId: "run-memory", managerRun: privateMemoryRun };
+      return where.id === "message-a" ? { id: "message-a", role: "assistant", visibility: "team", managerRunId: "run-a", managerRun: null } : null;
+    } },
     managerMessageFeedback: { upsert: async ({ create, update }) => { upserts += 1; return { id: "feedback-a", ...create, ...update }; } }
   };
   const service = new managerMod.ManagerService({ client }, { log: async () => { audits += 1; } }, { get: () => false });
@@ -1524,7 +1768,18 @@ test("manager response feedback is exact-message, tenant-safe, idempotent, and a
   assert.equal(upserts, 2);
   assert.equal(audits, 2);
   await assert.rejects(() => service.messageFeedback("artist-b", "message-a", { helpful: true }, "member@test", "operator-a"), (error) => error?.getStatus?.() === 404);
+  for (const messageId of ["message-owner-only", "message-private-memory"]) {
+    await assert.rejects(
+      () => service.messageFeedback("artist-a", messageId, { helpful: true }, "member@test", "operator-a", false),
+      (error) => error?.getStatus?.() === 404 && error?.message === "Manager response not found"
+    );
+  }
   assert.equal(upserts, 2);
+  assert.equal(audits, 2);
+  await service.messageFeedback("artist-a", "message-owner-only", { helpful: true }, "owner@test", "owner-a", true);
+  await service.messageFeedback("artist-a", "message-private-memory", { helpful: true }, "owner@test", "owner-a", true);
+  assert.equal(upserts, 4);
+  assert.equal(audits, 4);
 });
 
 test("manager recommendation outcome review keeps finished results bounded without treating completion as usefulness", () => {
@@ -1664,7 +1919,9 @@ test("manager response review reads only the active artist and current operator'
         }];
         return [{ conversationId: "conversation-a", content: "What needs attention?", createdAt: new Date("2026-07-12T10:59:00.000Z") }];
       }
-    }
+    },
+    managerRecommendation: { findMany: async () => [] },
+    managerRun: { findMany: async () => [] }
   };
   const service = new managerMod.ManagerService({ client }, { log: async () => assert.fail("Review reads must not audit or write") }, { get: () => false });
   const queue = await service.responseReview("artist-a", "operator-a", 3, now);
@@ -1675,29 +1932,103 @@ test("manager response review reads only the active artist and current operator'
   const evalQueue = await service.responseEvalReview("artist-a", "operator-a", 3, now);
   assert.equal(evalQueue.items[0].messageId, "message-a");
   assert.equal(evalQueue.items[0].feedback.helpful, true);
-  assert.equal(calls[2].feedback.some.operatorId, "operator-a");
+  assert.equal(calls.find((where) => where.feedback?.some)?.feedback.some.operatorId, "operator-a");
   assert.equal((await service.responseReview("artist-b", "operator-a", 3, now)).items.length, 0);
   assert.equal((await service.responseEvalReview("artist-b", "operator-a", 3, now)).items.length, 0);
+});
+
+test("manager response review applies current memory visibility and exact source bindings", async () => {
+  const sourceAt = new Date("2026-07-12T10:00:00.000Z");
+  const responseAt = new Date("2026-07-12T10:01:00.000Z");
+  const action = (sourceMessageId, bound = true) => ({
+    type: "remember_fact",
+    ...(bound ? { sourceMessageId, sourceMessageCreatedAt: sourceAt.toISOString() } : {}),
+    key: `operator_note_${sourceMessageId.replaceAll("-", "_")}`,
+    label: "booking note",
+    value: `value-${sourceMessageId}`
+  });
+  const response = (kind, sensitivity, archivedAt = null, bound = true) => ({
+    id: `response-${kind}`,
+    conversationId: `conversation-${kind}`,
+    content: `answer-${kind}`,
+    citations: [],
+    proposedActions: [],
+    createdAt: responseAt,
+    conversation: { title: `title-${kind}` },
+    managerRun: {
+      promptVersion: "manager_os_v31",
+      mode: "deterministic_memory_capture",
+      recommendations: [{
+        id: `recommendation-${kind}`,
+        outcome: "completed",
+        proposedAction: action(`source-${kind}`, bound),
+        memoryFact: { id: `memory-${kind}`, sensitivity, archivedAt }
+      }]
+    },
+    feedback: [],
+    responseEval: null
+  });
+  const responses = [
+    response("normal", "normal"),
+    response("restricted", "restricted"),
+    response("archived", "normal", new Date("2026-07-12T10:02:00.000Z")),
+    response("legacy", "normal", null, false)
+  ];
+  responses.push({
+    ...response("restricted-later", "normal"),
+    conversationId: "conversation-restricted",
+    content: "later answer in the restricted memory conversation",
+    createdAt: new Date(responseAt.getTime() + 1000),
+    managerRun: { promptVersion: "manager_os_v31", mode: "deterministic", recommendations: [] }
+  });
+  const questions = [
+    ...responses.map((candidate) => ({ id: `source-${candidate.id.replace("response-", "")}`, conversationId: candidate.conversationId, content: `question-${candidate.id}`, createdAt: sourceAt })),
+    { id: "source-interleaved", conversationId: "conversation-normal", content: "wrong newer question", createdAt: new Date("2026-07-12T10:00:30.000Z") }
+  ];
+  const client = {
+    managerMessage: { findMany: async ({ where }) => where.role === "assistant" ? responses : questions },
+    managerRecommendation: {
+      findMany: async () => responses.flatMap((candidate) => candidate.managerRun.recommendations.map((recommendation) => ({
+        ...recommendation,
+        managerRun: { message: { conversationId: candidate.conversationId } }
+      })))
+    },
+    managerRun: { findMany: async () => [] }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => assert.fail("Review reads must not audit or write") }, { get: () => false });
+
+  const member = await service.responseReview("artist-a", "member-a", 5, now);
+  assert.deepEqual(member.items.map((item) => item.messageId), ["response-normal"]);
+  assert.equal(member.items[0].question, "question-response-normal");
+  assert.equal(JSON.stringify(member).includes("restricted"), false);
+  assert.equal(JSON.stringify(member).includes("wrong newer question"), false);
+
+  const owner = await service.responseReview("artist-a", "owner-a", 5, now, "owner");
+  assert.deepEqual(owner.items.map((item) => item.messageId).sort(), ["response-normal", "response-restricted-later"]);
+  assert.equal(JSON.stringify(owner).includes("response-archived"), false);
+  assert.equal(JSON.stringify(owner).includes("response-legacy"), false);
 });
 
 test("manager learning review routes enforce owner/member roles and bound every queue", async () => {
   const calls = [];
   const controller = new managerControllerMod.ManagerController(
     {
-      responseReview: async (artistId, operatorId, limit) => { calls.push({ route: "feedback", artistId, operatorId, limit }); return { items: [] }; },
+      responseReview: async (artistId, operatorId, limit, _now, visibility) => { calls.push({ route: "feedback", artistId, operatorId, limit, visibility }); return { items: [] }; },
       responseEvalReview: async (artistId, operatorId, limit) => { calls.push({ route: "eval", artistId, operatorId, limit }); return { items: [] }; },
       recommendationEvalReview: async (artistId, limit) => { calls.push({ route: "recommendation", artistId, limit }); return { items: [] }; }
     },
     { resolveArtistId: async () => "artist-a" },
     {
       assertCanMutateWorkflow: async (operatorId) => { if (operatorId === "viewer-a") throw new Error("viewer cannot mutate workflow"); },
-      assertOwner: async (operatorId) => { if (operatorId !== "owner-a") throw new Error("owner required"); }
+      assertOwner: async (operatorId) => { if (operatorId !== "owner-a") throw new Error("owner required"); },
+      getRole: async (operatorId) => operatorId === "owner-a" ? "owner" : "member"
     }
   );
   await controller.responseReview("2", { id: "member-a" }, {}, "artist-a");
+  await controller.responseReview("2", { id: "owner-a" }, {}, "artist-a");
   await controller.responseEvalReview("3", { id: "owner-a" }, {}, "artist-a");
   await controller.recommendationEvalReview("4", { id: "owner-a" }, {}, "artist-a");
-  assert.deepEqual(calls, [{ route: "feedback", artistId: "artist-a", operatorId: "member-a", limit: 2 }, { route: "eval", artistId: "artist-a", operatorId: "owner-a", limit: 3 }, { route: "recommendation", artistId: "artist-a", limit: 4 }]);
+  assert.deepEqual(calls, [{ route: "feedback", artistId: "artist-a", operatorId: "member-a", limit: 2, visibility: "normal" }, { route: "feedback", artistId: "artist-a", operatorId: "owner-a", limit: 2, visibility: "owner" }, { route: "eval", artistId: "artist-a", operatorId: "owner-a", limit: 3 }, { route: "recommendation", artistId: "artist-a", limit: 4 }]);
   await assert.rejects(() => controller.responseReview("2", { id: "viewer-a" }, {}, "artist-a"), /viewer cannot mutate workflow/);
   await assert.rejects(() => controller.responseEvalReview("2", { id: "member-a" }, {}, "artist-a"), /owner required/);
   await assert.rejects(() => controller.recommendationEvalReview("2", { id: "member-a" }, {}, "artist-a"), /owner required/);
@@ -1714,7 +2045,10 @@ test("manager conversation summaries stay bounded, ordered, and useful for histo
         query = input;
         return [{ id: "conversation-a", artistId: "artist-a", title: "Booking plan", createdAt: now, updatedAt: now, messages: [{ id: "message-a", role: "assistant", content: "Start with the venue follow-up.", createdAt: now }], _count: { messages: 6 } }];
       }
-    }
+    },
+    managerMessage: { findMany: async () => [] },
+    managerRecommendation: { findMany: async () => [] },
+    managerRun: { findMany: async () => [] }
   };
   const service = new managerMod.ManagerService({ client }, { log: async () => assert.fail("Conversation reads must not audit or write") }, { get: () => false });
   const rows = await service.conversations("artist-a", 100);
@@ -1909,6 +2243,23 @@ test("a cached brief is invalidated when an audited operating fact changes", asy
   service.generateBrief = async () => { generations += 1; return { id: "fresh-brief" }; };
   const result = await service.currentBrief("artist-a", "daily", "member@test", "operator-a");
   assert.equal(result.id, "fresh-brief");
+  assert.equal(generations, 1);
+});
+
+test("a cached full-context brief is replaced before the shared brief is returned", async () => {
+  const service = new managerMod.ManagerService({ client: { task: { findFirst: async () => null } } }, { log: async () => undefined }, { get: () => false });
+  let generations = 0;
+  service.latestBrief = async () => ({
+    id: "private-brief",
+    promptVersion: evaluation.MANAGER_PROMPT_VERSION,
+    createdAt: new Date(),
+    trace: { providerContext: { fullContextEnabled: true, outputUsed: true } }
+  });
+  service.profile = async () => ({ intakeCompletedAt: new Date("2026-01-01T00:00:00.000Z") });
+  service.latestManagerFactChange = async () => null;
+  service.generateBrief = async () => { generations += 1; return { id: "redacted-brief" }; };
+  const result = await service.currentBrief("artist-a", "daily", "viewer@test", "operator-viewer");
+  assert.equal(result.id, "redacted-brief");
   assert.equal(generations, 1);
 });
 
@@ -2338,6 +2689,7 @@ test("conversational memory requires an explicit safe request and exact reviewab
   assert.equal(memoryCapture.managerMemoryCaptureMatches("Remember that Morgan handles production advances", ready), true);
   assert.equal(memoryCapture.managerMemoryCaptureMatches("Remember that Morgan handles production advances", { ...ready, value: "Morgan handles all finances" }), false);
   assert.equal(memoryCapture.assessManagerMemoryCapture("Morgan handles production advances").status, "not_requested");
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Remember").status, "invalid");
   assert.equal(memoryCapture.assessManagerMemoryCapture("Remember that our API key is secret-123").status, "blocked_sensitive");
   assert.equal(memoryCapture.assessManagerMemoryCapture("Remember that our home market is Chicago").status, "profile_owned");
 
@@ -2352,6 +2704,73 @@ test("conversational memory requires an explicit safe request and exact reviewab
   const profile = intelligence.deterministicManagerChat(managerFacts(), "Remember that our home market is Chicago", now);
   assert.equal(profile.recommendation, null);
   assert.match(profile.answer, /Band context/i);
+});
+
+test("explicit memory capture is local-only and removes sensitive values before persistence", () => {
+  const secret = "secret-123-do-not-store";
+  const blocked = memoryCapture.managerMemoryCapturePolicy(`Remember that our API key is ${secret}`);
+  assert.equal(blocked.requiresLocalHandling, true);
+  assert.equal(blocked.assessment.status, "blocked_sensitive");
+  assert.doesNotMatch(blocked.persistedMessage, new RegExp(secret));
+  assert.equal(blocked.persistedMessage, memoryCapture.MANAGER_SENSITIVE_CAPTURE_REDACTION);
+
+  const ready = memoryCapture.managerMemoryCapturePolicy("Remember that Morgan handles production advances");
+  assert.equal(ready.requiresLocalHandling, true);
+  assert.equal(ready.persistedMessage, "Remember that Morgan handles production advances");
+  assert.equal(memoryCapture.managerMemoryCapturePolicy("What should we do next?").requiresLocalHandling, false);
+  assert.equal(memoryCapture.managerMemoryCapturePolicy("Remember").requiresLocalHandling, true);
+});
+
+test("conversation visibility follows current memory classification for reads, continuity, and provider history", () => {
+  const sourceCreatedAt = "2026-07-12T12:00:00.000Z";
+  const recommendation = (sensitivity, archivedAt = null, outcome = "completed", bound = true) => ({
+    id: "recommendation-memory",
+    stableKey: "remember_private_guarantee_ceiling",
+    title: "Remember: private guarantee ceiling",
+    reason: "The owner asked StoryBoard to remember it.",
+    nextAction: "Use the private guarantee ceiling.",
+    outcome,
+    evidence: [],
+    proposedAction: { type: "remember_fact", ...(bound ? { sourceMessageId: "message-user", sourceMessageCreatedAt: sourceCreatedAt } : {}), key: "operator_note_private_guarantee", label: "private guarantee ceiling", value: "Never expose 98765" },
+    memoryFact: outcome === "suggested" ? null : { id: "memory-private", sensitivity, archivedAt }
+  });
+  const history = (source) => [
+    { id: "message-user", role: "user", content: "Remember that the private guarantee ceiling is 98765" },
+    { id: "message-assistant", role: "assistant", content: "I can remember the private guarantee ceiling of 98765.", managerRun: { recommendations: [source] } }
+  ];
+
+  const restricted = history(recommendation("restricted"));
+  const member = conversationVisibility.projectManagerConversationMessages(restricted, "normal");
+  assert.doesNotMatch(JSON.stringify(member), /98765/);
+  assert.equal(conversationContinuity.resolveManagerConversationContinuity("Why that?", member).status, "needs_clarification");
+  const owner = conversationVisibility.projectManagerConversationMessages(restricted, "owner");
+  assert.match(JSON.stringify(owner), /98765/);
+  const provider = conversationVisibility.projectManagerConversationMessages(restricted, "provider_full");
+  assert.doesNotMatch(JSON.stringify(provider), /98765/);
+
+  const sensitiveProvider = conversationVisibility.projectManagerConversationMessages(history(recommendation("sensitive")), "provider_full");
+  assert.match(JSON.stringify(sensitiveProvider), /98765/);
+  const archivedOwner = conversationVisibility.projectManagerConversationMessages(history(recommendation("normal", now)), "owner");
+  assert.doesNotMatch(JSON.stringify(archivedOwner), /98765/);
+  const unacceptedProvider = conversationVisibility.projectManagerConversationMessages(history(recommendation("normal", null, "suggested")), "provider_redacted");
+  assert.doesNotMatch(JSON.stringify(unacceptedProvider), /98765/);
+
+  const interleaved = conversationVisibility.projectManagerConversationMessages([
+    { id: "message-user", role: "user", content: "Remember that the private guarantee ceiling is 98765" },
+    { id: "message-other-user", role: "user", content: "What should we do next?" },
+    { id: "message-other-assistant", role: "assistant", content: "Start with the public show checklist." },
+    { id: "message-assistant", role: "assistant", content: "I can remember 98765.", managerRun: { recommendations: [recommendation("restricted")] } }
+  ], "normal");
+  assert.doesNotMatch(JSON.stringify(interleaved), /98765/);
+  assert.match(JSON.stringify(interleaved), /public show checklist/);
+  assert.match(JSON.stringify(interleaved), /What should we do next/);
+
+  const legacy = conversationVisibility.projectManagerConversationMessages(history(recommendation("restricted", null, "completed", false)), "normal");
+  assert.doesNotMatch(JSON.stringify(legacy), /98765/);
+  assert.equal(legacy.every((message) => /hidden by current privacy settings/i.test(message.content)), true);
+  const legacySuggested = conversationVisibility.projectManagerConversationMessages(history(recommendation("normal", null, "suggested", false)), "owner");
+  assert.equal(legacySuggested.every((message) => /hidden by current privacy settings/i.test(message.content)), true);
+  assert.equal(legacySuggested.flatMap((message) => message.managerRun?.recommendations ?? []).length, 0);
 });
 
 test("manager coaching explains vetted band-business concepts in context without adding authority", () => {
@@ -2586,6 +3005,328 @@ test("manager answers retrospective questions from the shared outcome review", (
   assert.equal(answer.recommendation, null);
 });
 
+test("manager follow-through is relational, reload-safe, and quarantines uncertain execution", () => {
+  const source = (overrides = {}) => ({
+    id: "recommendation-a",
+    title: "Confirm the buyer response",
+    workstream: "relationships",
+    priority: "high",
+    outcome: "accepted",
+    outcomeReason: "accepted",
+    nextAction: "Record the buyer response.",
+    proposedAction: { type: "create_task", title: "Confirm the buyer response" },
+    createdAt: now,
+    updatedAt: now,
+    outcomeAt: now,
+    task: null,
+    decision: null,
+    project: null,
+    event: null,
+    memoryFact: null,
+    approvals: [],
+    ...overrides
+  });
+  const taskSource = source({
+    task: { id: "task-a", title: "Confirm the buyer response", status: "in_progress", dueAt: new Date("2026-07-20T00:00:00.000Z"), updatedAt: now, blockedReason: null, waitingOn: null }
+  });
+  const task = followThrough.projectManagerFollowThrough(taskSource);
+  assert.equal(task.state, "in_motion");
+  assert.equal(task.stage, "task_in_progress");
+  assert.equal(task.target.kind, "task");
+  assert.equal(task.target.id, "task-a");
+  assert.deepEqual(task.destination, { href: "/tasks", label: "Open task" });
+
+  const reloaded = followThrough.hydrateManagerMessageActions([{
+    recommendationId: "recommendation-a",
+    title: "Stale title",
+    nextAction: "Stale next action",
+    outcome: "suggested",
+    actionType: "create_task",
+    preview: "Reviewed preview"
+  }], [taskSource]);
+  assert.equal(reloaded.length, 1);
+  assert.equal(reloaded[0].outcome, "accepted");
+  assert.equal(reloaded[0].title, "Confirm the buyer response");
+  assert.equal(reloaded[0].preview, "Reviewed preview");
+  assert.equal(reloaded[0].followThrough.target.id, "task-a");
+
+  const waiting = followThrough.projectManagerFollowThrough(source({
+    task: { id: "task-a", title: "Confirm the buyer response", status: "blocked", dueAt: null, updatedAt: now, blockedReason: "No response", waitingOn: "Buyer" }
+  }));
+  assert.equal(waiting.state, "blocked");
+  assert.equal(waiting.stage, "waiting_external");
+  assert.match(waiting.status, /Buyer/);
+
+  const futureDecision = followThrough.projectManagerFollowThrough(source({
+    decision: { id: "decision-a", title: "Choose the fall market", status: "decided", needsFraming: false, reviewAt: new Date("2026-08-01T00:00:00.000Z"), updatedAt: now }
+  }), now);
+  const dueDecision = followThrough.projectManagerFollowThrough(source({
+    decision: { id: "decision-a", title: "Choose the fall market", status: "decided", needsFraming: false, reviewAt: new Date("2026-07-01T00:00:00.000Z"), updatedAt: now }
+  }), now);
+  assert.equal(futureDecision.state, "in_motion");
+  assert.match(futureDecision.status, /waiting for review checkpoint/i);
+  assert.equal(dueDecision.state, "needs_action");
+  assert.match(dueDecision.status, /due for review/i);
+
+  const pending = followThrough.projectManagerFollowThrough(source({ approvals: [{ id: "approval-pending", title: "Add show to Calendar", status: "pending", actionType: "calendar_hold_batch", executionAttemptedAt: null, approvedAt: null, updatedAt: now }] }));
+  const executable = followThrough.projectManagerFollowThrough(source({ approvals: [{ id: "approval-executable", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: null, approvedAt: now, updatedAt: now }] }));
+  const unknown = followThrough.projectManagerFollowThrough(source({ approvals: [{ id: "approval-unknown", title: "Add show to Calendar", status: "approved", actionType: "calendar_hold_batch", executionAttemptedAt: now, approvedAt: now, updatedAt: now }] }));
+  assert.equal(pending.stage, "awaiting_approval");
+  assert.equal(executable.stage, "awaiting_execution");
+  assert.equal(unknown.stage, "execution_unknown");
+  assert.equal(unknown.state, "blocked");
+  assert.match(unknown.detail, /not safe/i);
+
+  const simulated = followThrough.projectManagerFollowThrough(source({
+    outcome: "blocked",
+    outcomeReason: "approval_simulated",
+    approvals: [{ id: "approval-mock", title: "Add show to Calendar", status: "executed", actionType: "calendar_hold_batch", executionAttemptedAt: now, approvedAt: now, updatedAt: now }]
+  }));
+  assert.equal(simulated.stage, "approval_simulated");
+  assert.equal(simulated.state, "blocked");
+  assert.equal(simulated.canMutate, true);
+  assert.equal(simulated.canReconcile, true);
+  const reconciled = followThrough.projectManagerFollowThrough(source({
+    outcome: "completed",
+    outcomeReason: "reconciled",
+    approvals: [{ id: "approval-failed", title: "Add show to Calendar", status: "failed", actionType: "calendar_hold_batch", executionAttemptedAt: now, approvedAt: now, updatedAt: now }]
+  }));
+  assert.equal(reconciled.stage, "reconciled");
+  assert.equal(reconciled.state, "completed");
+  assert.match(reconciled.detail, /not evidence/i);
+  assert.equal(managerSchemas.managerRecommendationFeedbackSchema.safeParse({ reason: "reconciled", note: "Reviewed the replacement request" }).success, true);
+
+  const actionless = followThrough.projectManagerFollowThrough(source({ proposedAction: null }));
+  assert.equal(actionless.stage, "needs_tracking");
+  assert.equal(actionless.canAccept, false);
+  assert.equal(actionless.canMutate, true);
+  assert.equal(actionless.canReconcile, false);
+  const summary = followThrough.summarizeManagerFollowThrough([taskSource, source({ id: "recommendation-actionless", proposedAction: null })], now);
+  assert.deepEqual(summary.counts, { total: 2, needsAction: 1, inMotion: 1, blocked: 0, completed: 0 });
+});
+
+test("owner full-context recommendation prose never enters shared receipts or provider history", () => {
+  const privateRun = {
+    trace: {
+      providerContext: {
+        fullContextEnabled: true,
+        outputUsed: true,
+        sourceMessageId: "owner-question",
+        sourceMessageCreatedAt: "2026-07-12T11:00:00.000Z"
+      }
+    }
+  };
+  const source = (overrides = {}) => ({
+    id: "recommendation-private",
+    title: "Private title 98765",
+    workstream: "business",
+    priority: "high",
+    outcome: "suggested",
+    outcomeReason: "private_reason_98765",
+    nextAction: "Private next action 98765",
+    proposedAction: { type: "create_task", title: "Private task 98765", dueAt: null, initiativeId: null },
+    createdAt: now,
+    updatedAt: now,
+    outcomeAt: null,
+    task: null,
+    decision: null,
+    project: null,
+    event: null,
+    memoryFact: null,
+    approvals: [],
+    managerRun: privateRun,
+    ...overrides
+  });
+
+  for (const outcome of ["suggested", "accepted", "dismissed", "blocked", "completed"]) {
+    const projection = followThrough.summarizeManagerFollowThrough([source({ outcome })], now);
+    assert.equal(projection.items.length, 0, `${outcome} private metadata stays hidden without a shared target`);
+  }
+  const ownerSuggested = followThrough.summarizeManagerFollowThrough([source()], now, "owner");
+  assert.equal(ownerSuggested.items.length, 1);
+  assert.equal(ownerSuggested.items[0].canMutate, true);
+  assert.equal(ownerSuggested.items[0].canAccept, true);
+  assert.match(JSON.stringify(ownerSuggested), /98765/);
+
+  const sharedTask = { id: "task-public", title: "Public follow-up task", status: "in_progress", dueAt: null, updatedAt: now, blockedReason: null, waitingOn: null };
+  const accepted = source({ outcome: "accepted", outcomeAt: now, task: sharedTask });
+  const sharedAccepted = followThrough.summarizeManagerFollowThrough([accepted], now);
+  assert.equal(sharedAccepted.items.length, 1);
+  assert.equal(sharedAccepted.items[0].title, sharedTask.title);
+  assert.equal(sharedAccepted.items[0].target.id, sharedTask.id);
+  assert.equal(sharedAccepted.items[0].outcomeReason, null);
+  assert.equal(sharedAccepted.items[0].actionType, null);
+  assert.equal(sharedAccepted.items[0].canMutate, false);
+  assert.equal(sharedAccepted.items[0].canReconcile, false);
+  assert.doesNotMatch(JSON.stringify(sharedAccepted), /98765/);
+
+  const failedApprovalSource = source({
+    outcome: "blocked",
+    outcomeReason: "approval_failed",
+    outcomeAt: now,
+    approvals: [{ id: "approval-failed", title: "Public failed Calendar request", status: "failed", actionType: "google_calendar_create", executionAttemptedAt: now, approvedAt: now, updatedAt: now }]
+  });
+  const memberFailureReceipt = followThrough.summarizeManagerFollowThrough([failedApprovalSource], now).items[0];
+  const ownerFailureReceipt = followThrough.summarizeManagerFollowThrough([failedApprovalSource], now, "owner").items[0];
+  assert.equal(memberFailureReceipt.stage, "approval_failed");
+  assert.equal(memberFailureReceipt.canMutate, false);
+  assert.equal(memberFailureReceipt.canReconcile, false);
+  assert.equal(ownerFailureReceipt.canMutate, true);
+  assert.equal(ownerFailureReceipt.canReconcile, true);
+
+  const completed = followThrough.summarizeManagerFollowThrough([source({ outcome: "completed", outcomeAt: now, task: { ...sharedTask, status: "done" } })], now);
+  assert.equal(completed.items[0].title, sharedTask.title);
+  assert.doesNotMatch(JSON.stringify(completed), /98765/);
+  const dismissedApproval = followThrough.summarizeManagerFollowThrough([source({
+    outcome: "dismissed",
+    outcomeAt: now,
+    approvals: [{ id: "approval-public", title: "Public Calendar request", status: "rejected", actionType: "google_calendar_create", executionAttemptedAt: null, approvedAt: null, updatedAt: now }]
+  })], now);
+  assert.equal(dismissedApproval.items[0].title, "Public Calendar request");
+  assert.doesNotMatch(JSON.stringify(dismissedApproval), /98765/);
+
+  const storedPreview = [{ recommendationId: accepted.id, title: "Private title 98765", nextAction: "Private next action 98765", preview: "Private preview 98765" }];
+  const memberReceipt = followThrough.hydrateManagerMessageActions(storedPreview, [accepted]);
+  assert.equal(memberReceipt.length, 1);
+  assert.equal(memberReceipt[0].title, sharedTask.title);
+  assert.equal(memberReceipt[0].followThrough.canMutate, false);
+  assert.equal(memberReceipt[0].followThrough.canReconcile, false);
+  assert.equal(Object.hasOwn(memberReceipt[0], "preview"), false);
+  assert.doesNotMatch(JSON.stringify(memberReceipt), /98765/);
+  assert.match(JSON.stringify(followThrough.hydrateManagerMessageActions(storedPreview, [accepted], "owner")), /98765/);
+
+  const history = {
+    id: accepted.id,
+    stableKey: "private-history-98765",
+    outcome: "accepted",
+    outcomeReason: "private_reason_98765",
+    outcomeAt: now,
+    updatedAt: now,
+    proposedAction: accepted.proposedAction,
+    memoryFact: null,
+    task: { status: "in_progress" },
+    managerRun: privateRun,
+    hasTrackedWork: true,
+    followThroughState: "in_motion"
+  };
+  const service = new managerMod.ManagerService({ client: {} }, { log: async () => undefined }, { get: () => false });
+  const facts = managerFacts({ recommendationHistory: [history], followThrough: sharedAccepted, memoryFacts: [], outcomeReview: { recordedLessons: [], evidenceIds: [] } });
+  assert.doesNotMatch(JSON.stringify(service.safeFacts(facts)), /98765/);
+  assert.doesNotMatch(JSON.stringify(service.providerFacts(facts, false)), /98765/);
+  assert.match(JSON.stringify(service.providerFacts(facts, true)), /private-history-98765/);
+});
+
+test("reclassified or archived Manager memory cannot leak through follow-through or conversation reload", async () => {
+  const memorySource = (memoryFact) => ({
+    id: "recommendation-memory",
+    title: "Remember: private guarantee ceiling",
+    workstream: "business",
+    priority: "low",
+    outcome: "completed",
+    outcomeReason: "action_executed",
+    nextAction: "Keep the private ceiling current.",
+    proposedAction: { type: "remember_fact", sourceMessageId: "message-memory-user", sourceMessageCreatedAt: new Date(now.getTime() - 1000).toISOString(), key: "operator_note_private_ceiling", label: "private guarantee ceiling", value: "Never expose this stale value" },
+    createdAt: now,
+    updatedAt: now,
+    outcomeAt: now,
+    task: null,
+    decision: null,
+    project: null,
+    event: null,
+    memoryFact,
+    approvals: []
+  });
+  const sensitive = memorySource({ id: "memory-private", key: "operator_note_private_ceiling", sensitivity: "restricted", archivedAt: null, updatedAt: now });
+  assert.equal(followThrough.summarizeManagerFollowThrough([sensitive], now).items.length, 0);
+  assert.equal(followThrough.summarizeManagerFollowThrough([sensitive], now, "owner").items.length, 1);
+  const ownerAction = followThrough.hydrateManagerMessageActions([{ recommendationId: sensitive.id, preview: "Never expose this stale value" }], [sensitive], "owner");
+  assert.equal(ownerAction.length, 1);
+  assert.equal(Object.hasOwn(ownerAction[0], "preview"), false);
+  assert.equal(followThrough.hydrateManagerMessageActions([{ recommendationId: sensitive.id, preview: "Never expose this stale value" }], [sensitive]).length, 0);
+  const archived = memorySource({ id: "memory-private", key: "operator_note_private_ceiling", sensitivity: "normal", archivedAt: now, updatedAt: now });
+  assert.equal(followThrough.summarizeManagerFollowThrough([archived], now, "owner").items.length, 0);
+
+  const userMessage = {
+    id: "message-memory-user",
+    conversationId: "conversation-memory",
+    managerRunId: null,
+    role: "user",
+    content: "Remember that the private guarantee ceiling is Never expose this stale value",
+    citations: [],
+    proposedActions: [],
+    createdAt: new Date(now.getTime() - 1000),
+    feedback: [],
+    managerRun: null
+  };
+  const message = {
+    id: "message-memory",
+    conversationId: "conversation-memory",
+    managerRunId: "run-memory",
+    role: "assistant",
+    visibility: "team",
+    content: "The reviewed fact was saved.",
+    citations: [],
+    proposedActions: [{ recommendationId: sensitive.id, preview: "Never expose this stale value" }],
+    createdAt: now,
+    feedback: [{ id: "feedback-private", helpful: false, note: "Never expose this stale value", createdAt: now, updatedAt: now }],
+    managerRun: { recommendations: [sensitive] }
+  };
+  const client = {
+    managerConversation: { findFirst: async () => ({ id: "conversation-memory", artistId: "artist-a", title: "Never expose this stale value", createdAt: now, updatedAt: now }) },
+    managerMessage: { findMany: async () => [message, userMessage] },
+    managerRecommendation: { findMany: async () => [{ ...sensitive, managerRun: { message: { conversationId: "conversation-memory" } } }] },
+    managerRun: { findMany: async () => [] }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => assert.fail("Conversation reads must not audit") }, { get: () => false });
+  const viewer = await service.conversation("artist-a", "conversation-memory", "viewer-a", false);
+  assert.deepEqual(viewer.messages[1].proposedActions, []);
+  assert.equal(viewer.messages[1].canSubmitFeedback, false);
+  assert.equal(viewer.messages[1].feedback, null);
+  assert.doesNotMatch(JSON.stringify(viewer), /Never expose this stale value/);
+  assert.equal(viewer.title, "Private Manager memory");
+  const owner = await service.conversation("artist-a", "conversation-memory", "owner-a", true);
+  assert.match(JSON.stringify(owner), /Never expose this stale value/);
+  assert.equal(owner.messages[1].proposedActions.length, 1);
+  assert.equal(owner.messages[1].canSubmitFeedback, true);
+  assert.equal(owner.messages[1].feedback.id, "feedback-private");
+  assert.equal(Object.hasOwn(owner.messages[1].proposedActions[0], "preview"), false);
+});
+
+test("manager learning counts only real linked open tasks", async () => {
+  const client = {
+    managerRecommendation: {
+      findMany: async () => [
+        { outcome: "accepted", outcomeReason: "accepted", outcomeAt: now, task: null },
+        { outcome: "accepted", outcomeReason: "accepted", outcomeAt: now, task: { status: "todo" } },
+        { outcome: "accepted", outcomeReason: "accepted", outcomeAt: now, task: { status: "done" } }
+      ]
+    },
+    managerMessageFeedback: { findMany: async () => [] },
+    managerEvalExample: { findMany: async () => [] }
+  };
+  const service = new managerMod.ManagerService({ client }, { log: async () => assert.fail("Learning reads must not audit") }, { get: () => false });
+  const summary = await service.learningSummary("artist-a");
+  assert.equal(summary.accepted, 3);
+  assert.equal(summary.openAcceptedTasks, 1);
+});
+
+test("manager follow-through query is tenant-scoped and time-bounded", async () => {
+  let query = null;
+  const service = new managerMod.ManagerService({ client: { managerRecommendation: { findMany: async (input) => { query = input; return []; } } } }, { log: async () => assert.fail("Follow-through reads must not audit") }, { get: () => false });
+  const observedAt = new Date("2026-07-13T12:00:00.000Z");
+  const result = await service.followThrough("artist-a", observedAt);
+  assert.equal(query.where.managerRun.artistId, "artist-a");
+  assert.equal(query.take, 200);
+  assert.equal(query.orderBy.updatedAt, "desc");
+  const completedBranch = query.where.OR.find((branch) => branch.outcome === "completed" && branch.OR);
+  assert.equal(completedBranch.OR[0].outcomeAt.gte.toISOString(), "2026-06-13T12:00:00.000Z");
+  assert.ok(query.where.OR.some((branch) => branch.outcome === "completed" && branch.task?.is?.status?.not === "done"));
+  assert.ok(query.where.OR.some((branch) => branch.outcome === "completed" && branch.project?.is?.status?.not === "completed"));
+  assert.ok(query.where.OR.some((branch) => branch.outcome === "completed" && branch.event?.is?.status?.not === "completed"));
+  assert.equal(result.observedAt, observedAt.toISOString());
+  assert.deepEqual(result.items, []);
+});
+
 test("reviewed outcomes suppress repeated advice only for a bounded cooldown", () => {
   const base = managerFacts();
   const sequence = workSequence.deterministicManagerWorkSequence([], now);
@@ -2594,9 +3335,50 @@ test("reviewed outcomes suppress repeated advice only for a bounded cooldown", (
   assert.ok(recommendation);
   const acceptedOpen = [{ id: "rec-a", stableKey: recommendation.stableKey, outcome: "accepted", outcomeReason: "accepted", outcomeAt: now, updatedAt: now, task: { status: "todo" } }];
   assert.equal(intelligence.managerRecommendationIsSuppressed(recommendation, acceptedOpen, now), true);
+  const acceptedActionless = [{ id: "rec-actionless", stableKey: recommendation.stableKey, outcome: "accepted", outcomeReason: "accepted", outcomeAt: now, updatedAt: now, task: null, hasTrackedWork: false, followThroughState: "needs_action" }];
+  assert.equal(intelligence.managerRecommendationIsSuppressed(recommendation, acceptedActionless, now), false);
+  const oldCompletedButActive = [{ id: "rec-active", stableKey: recommendation.stableKey, outcome: "completed", outcomeReason: "action_executed", outcomeAt: new Date(now.getTime() - 45 * 86400000), updatedAt: new Date(now.getTime() - 45 * 86400000), task: null, hasTrackedWork: true, followThroughState: "in_motion" }];
+  assert.equal(intelligence.managerRecommendationIsSuppressed(recommendation, oldCompletedButActive, now), true);
   const recentDismissal = [{ id: "rec-b", stableKey: recommendation.stableKey, outcome: "dismissed", outcomeReason: "wrong_priority", outcomeAt: now, updatedAt: now, task: null }];
   assert.equal(intelligence.managerRecommendationIsSuppressed(recommendation, recentDismissal, now), true);
   assert.equal(intelligence.managerRecommendationIsSuppressed(recommendation, recentDismissal, new Date(now.getTime() + 8 * 86400000)), false);
+});
+
+test("follow-through questions and pronoun follow-ups use the code-owned relational receipt", () => {
+  const source = {
+    id: "recommendation-blocked",
+    title: "Confirm the buyer response",
+    workstream: "relationships",
+    priority: "high",
+    outcome: "accepted",
+    outcomeReason: "accepted",
+    nextAction: "Record the buyer response.",
+    proposedAction: { type: "create_task", title: "Confirm the buyer response" },
+    createdAt: now,
+    updatedAt: now,
+    outcomeAt: now,
+    task: { id: "task-blocked", title: "Confirm the buyer response", status: "blocked", dueAt: null, updatedAt: now, blockedReason: "The buyer has not replied", waitingOn: "Buyer" },
+    decision: null,
+    project: null,
+    event: null,
+    memoryFact: null,
+    approvals: []
+  };
+  const projection = followThrough.summarizeManagerFollowThrough([source], now);
+  const prior = { id: source.id, stableKey: "buyer-response", title: source.title, reason: "The response is missing.", nextAction: source.nextAction, outcome: "accepted", evidence: ["task-blocked"], proposedAction: source.proposedAction };
+  const continuity = conversationContinuity.resolveManagerConversationContinuity("What is blocking that?", [{ role: "assistant", managerRun: { recommendations: [prior] } }]);
+  const facts = managerFacts({ followThrough: projection, recommendationHistory: [{ id: source.id, stableKey: prior.stableKey, outcome: "accepted", outcomeReason: "accepted", outcomeAt: now, updatedAt: now, task: { status: "blocked" }, hasTrackedWork: true, followThroughState: "blocked" }] });
+  const answer = intelligence.deterministicManagerChat(facts, "What is blocking that?", now, continuity);
+  assert.match(answer.answer, /Buyer responds/i);
+  assert.ok(answer.citations.includes("task-blocked"));
+  assert.equal(intelligence.managerQuestionAsksAboutFollowThrough("What accepted work is in motion?"), true);
+
+  const unknownSource = { ...source, id: "recommendation-unknown", task: null, approvals: [{ id: "approval-unknown", title: "Add show to Calendar", status: "approved", actionType: "google_calendar_create", executionAttemptedAt: now, approvedAt: now, updatedAt: now }] };
+  const unknownProjection = followThrough.summarizeManagerFollowThrough([unknownSource], now);
+  const unknownAnswer = intelligence.deterministicManagerChat(managerFacts({ followThrough: unknownProjection }), "What is the status of the recommendation?", now);
+  assert.match(unknownAnswer.answer, /execution outcome unknown/i);
+  assert.match(unknownAnswer.answer, /reconcile/i);
+  assert.doesNotMatch(unknownAnswer.answer, /retry it/i);
 });
 
 test("finishing a linked task attributes completion to the accepted recommendation", async () => {
@@ -2604,12 +3386,13 @@ test("finishing a linked task attributes completion to the accepted recommendati
   let row = { id: "task-a", artistId: "artist-a", status: "in_progress", ownerLabel: "Alex", dueAt: null, blockedReason: null, waitingOn: null, deferralCount: 0, updatedAt: new Date("2026-07-01T00:00:00.000Z") };
   const client = {
     task: { findFirst: async () => ({ ...row }), updateMany: async ({ data }) => { row = { ...row, ...data }; return { count: 1 }; }, findUniqueOrThrow: async () => ({ ...row }) },
-    managerRecommendation: { updateMany: async (args) => { attributed = args; return { count: 1 }; } }
+    managerRecommendation: { updateManyAndReturn: async (args) => { attributed = args; return [{ id: "rec-a" }]; } }
   };
   client.$transaction = async (fn) => fn(client);
   const service = new tasksMod.TasksService({ client }, { log: async () => undefined });
   await service.patch("artist-a", "task-a", { status: "done" }, "member@test", "operator-a");
   assert.equal(attributed.where.taskId, "task-a");
+  assert.equal(attributed.where.managerRun.artistId, "artist-a");
   assert.equal(attributed.where.outcome, "accepted");
   assert.equal(attributed.data.outcome, "completed");
   assert.equal(attributed.data.outcomeReason, "task_completed");

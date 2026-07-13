@@ -91,6 +91,6 @@ Compose injects `POSTGRES_*` into the container; your app uses **`DATABASE_URL`*
 - **Docker**: `docker compose ps` (and healthchecks in Compose)
 - **Postgres / Redis**: `pnpm preflight` (after infra is up and `.env` is loaded)
 - **API**: `GET /health`
-- **API dependencies/worker**: `GET /ready` (returns non-2xx when PostgreSQL,
-  Redis, or the enabled queue worker is unavailable)
+- **API dependencies/worker**: `GET /ready` (reports PostgreSQL, Redis, and
+  worker state; returns non-2xx when PostgreSQL or Redis is unavailable)
 - **Web**: open `/` on the dev or production server

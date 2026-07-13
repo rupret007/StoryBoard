@@ -5,6 +5,7 @@ import { MembershipService } from "../auth/membership.service";
 import type { RequestOperator } from "../auth/request-operator";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { PrismaService } from "../prisma/prisma.service";
+import { projectAuditEventsForRead } from "./audit-event-projection";
 
 @Controller("audit-events")
 @UseGuards(SessionAuthGuard)
@@ -27,10 +28,11 @@ export class AuditEventsController {
       artistHeader
     );
     const n = take ? Math.min(parseInt(take, 10) || 50, 200) : 50;
-    return this.prisma.client.auditEvent.findMany({
+    const events = await this.prisma.client.auditEvent.findMany({
       where: { artistId },
       orderBy: { createdAt: "desc" },
       take: n
     });
+    return projectAuditEventsForRead(events);
   }
 }

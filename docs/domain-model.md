@@ -21,20 +21,73 @@ are operating work, while reviewed results are bounded evidence rather than a
 rule the system may generalize automatically. `ManagerMemoryFact` stores only explicit
 facts with source, confidence, sensitivity, and confirmation time.
 An explicit `remember_fact` recommendation is the only conversational memory
-write: its exact value is shown before acceptance, the current operator request
-must match it byte-for-byte after normalization, and acceptance upserts a
-normal-sensitivity `operator_confirmation` fact. `ManagerRecommendation.memoryFactId`
-retains that provenance. Profile-owned facts remain in
-`ArtistOperatingProfile`, while sensitive conversational capture is refused.
+write: its exact value is shown before acceptance, its action binds the exact
+persisted source-message ID and timestamp, and acceptance rechecks that source
+plus the normalized key/label/value before upserting a normal-sensitivity
+`operator_confirmation` fact. `ManagerRecommendation.memoryFactId` retains
+that provenance. If the key already names archived, sensitive, or restricted
+memory, conversational acceptance fails closed for every role before mutation
+or audit. Only active normal memory may be refreshed; private/archive changes
+remain in the explicit owner-controlled memory editor. Legacy unbound proposals fail closed. Profile-owned facts
+remain in `ArtistOperatingProfile`, while sensitive conversational capture is
+refused. `manager_memory_capture_v3` scans the complete value before truncation
+and detects sensitive terms plus known credential-token shapes before provider
+routing. A refused value is replaced with a fixed redaction before its
+conversation message is stored and is never supplied to OpenAI. New fact keys
+are opaque SHA-256 digests; memory audit writes omit those keys, while Activity
+and weekly-summary projections remove historical memory-key fields without
+mutating immutable audit rows.
 `ManagerRun` and `ManagerRecommendation` preserve the prompt/model version,
 facts read, structured output, safe proposed actions, outcome, and runtime
-metadata. `ManagerConversation` and `ManagerMessage` retain a shared,
-artist-scoped conversation; reasoning uses only the latest 12 messages and API
-reads return at most 50. Every delivered assistant message may link its exact
-`ManagerRun`. `ManagerMessageFeedback` stores one audited, tenant-scoped
-helpful/correction verdict per response and operator. Free-text corrections are
-retained for human review but are not sent back through model instructions;
-only bounded reason aggregates affect code-owned response presentation.
+metadata. `ManagerConversation` and `ManagerMessage` retain an artist-scoped
+conversation; reasoning uses only the latest 12 messages and API reads return
+at most 50. `ManagerMessage.visibility` is either `team` or `owner_only`.
+When an owner has enabled full provider context, the initiating user message is
+persisted as `owner_only` before provider work begins and the linked assistant
+message receives the same visibility even on provider error, rejected output,
+or deterministic fallback. The additive migration backfills both historical
+messages from their exact full-context run trace. Every delivered assistant
+message may link its exact `ManagerRun`. `ManagerMessageFeedback` stores one
+audited, tenant-scoped helpful/correction verdict per response and operator.
+Before upsert it rechecks durable message visibility plus the current linked
+memory boundary; hidden responses return not found without a feedback or audit
+write. Free-text corrections are retained for human review but are not sent
+back through model instructions; only bounded reason aggregates affect
+code-owned response presentation.
+`ManagerFollowThrough` (`manager_follow_through_v1`) is a non-persistent read
+model over those recommendations and their existing relations. It does not own
+status. Instead, it projects whether accepted work needs action, is in motion,
+is blocked, or completed recently from the linked `Task`, `ManagerDecision`,
+`ArtistProject`, `BandEvent`, `ManagerMemoryFact`, or `ApprovalRequest` and
+returns a bounded internal destination when one applies. Conversation action
+JSON remains a preview: detail reads rehydrate outcome and receipt from the
+relational recommendation. A resolved memory receipt inherits the current
+`ManagerMemoryFact` visibility boundary; archived or missing facts are omitted,
+members and viewers receive only normal facts, and resolved saved values are
+not replayed from preview JSON. Conversation titles, message bodies, action
+previews, continuity, and provider history apply that current boundary too, so
+later archive or sensitivity changes cannot leak a stale copy. Response-review
+selection applies the same current visibility and omits hidden-memory
+conversations. A recommendation derived from an owner full-context turn also
+retains that provenance: non-owners cannot mutate it by ID, private metadata is
+omitted from normal/shared and redacted-provider projections, and accepted
+linked work may surface only as a sanitized receipt rebuilt from its
+authoritative shared record. Such a receipt is explicitly navigation-only:
+`canMutate` and `canReconcile` are false, while owner-visible receipts expose
+only the operations valid for their current projected state. Pending approval,
+approved-ready execution, attempted/unknown
+execution, failure/rejection/expiry, simulated execution, and recorded real
+execution remain distinct states. In a mixed batch, any attempted provider
+write without a final result takes precedence over a known failed, rejected, or
+expired sibling. Rejected/expired receipts are terminal and do not offer
+reconciliation. A note-backed `reconciled`
+outcome may close a failed, simulated, or orphaned recommendation receipt, but
+it does not change the linked Approval or prove provider success. An uncertain
+attempted provider result cannot be closed or retried from Manager.
+Recommendation acceptance and linked Task or Decision completion update the
+recommendation and write the corresponding audit rows in the same database
+transaction as the authoritative change. Acceptance and Task completion retain
+their serializable guards.
 `manager_response_adaptation_v1` is a non-persistent, band-level projection of
 those aggregates plus the operating profile's decision style. It applies the
 same bounded presentation contract to deterministic and provider-backed
@@ -182,10 +235,20 @@ all linked requests execute, or to dismissed/blocked after rejection/failure.
 The provider-output schema cannot invent this action; it is generated from the
 tenant event and the `event_logistics_v1` projection.
 `ManagerMemoryFact.sensitivity` also controls provider eligibility: `normal`
-may enter redacted context, `sensitive` requires full-context owner consent,
-and `restricted` remains local. `ManagerRun.inputFacts` always stores the
-redacted projection; its trace stores policy counts and provider-attempt/output
-status rather than withheld values.
+may enter redacted context, `sensitive` requires both full-context consent and
+an owner-initiated interactive chat, and `restricted` remains local. Shared and
+scheduled briefs always use redacted context. Full-context turns retain an
+exact source binding and durable `owner_only` message visibility, and are hidden
+from non-owner conversation/history/review reads regardless of whether provider
+output was used; legacy unbound turns fail closed across the bounded window.
+Their recommendations remain owner-only and private unless accepted into a
+shared authoritative record, in which case non-owners receive only the
+sanitized record-derived receipt. Shared deterministic reasoning and
+member-visible learning summaries likewise filter owner-only recommendation
+history, outcomes, feedback, and reviews rather than letting private work steer
+team results.
+`ManagerRun.inputFacts` always stores the redacted projection; its trace stores
+policy counts and provider-attempt/output status rather than withheld values.
 `ManagerResponseEvalExample` is an owner-promoted, artist-scoped reference to
 one assistant message and its exact rated response snapshot. It does not copy
 run input facts. Useful examples replay quality and evidence rules; negative

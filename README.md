@@ -158,6 +158,34 @@ typed action are single-use and linked to their internal result or prepared appr
 task/decision completion and linked approval status record the outcome
 automatically. Dismissal reasons and bounded
 cooldowns keep the Manager from repeating recently rejected or finished work.
+The code-owned `manager_follow_through_v1` view then follows accepted work from
+the recommendation into its authoritative Task, Decision, Project, Event,
+reviewed Manager memory fact, or Approval. The Manager page shows work that
+needs confirmation, is in motion, is blocked, or completed recently, with a
+direct link to the owning workspace when one applies.
+Conversation actions are rehydrated from relational state after every reload,
+so accepted work cannot reappear as a stale suggestion. Advice without a typed
+action offers **Mark handled** or dismissal instead of pretending that
+acceptance created work. Approved provider actions remain a separate execution
+step; a recorded-but-unresolved attempt is quarantined for reconciliation, and
+mock execution is never described as a real Calendar or Drive result. In a
+mixed approval batch, an uncertain attempted write takes precedence over a
+failed, rejected, or expired sibling so the batch cannot become retryable.
+Resolved memory receipts inherit the current memory record's access boundary:
+archived or missing facts disappear, non-owners see only normal facts, and a
+saved value is never replayed from stale conversation preview JSON. A member
+may close a failed, simulated, or orphaned receipt only with a written
+reconciliation note. That closes the Manager receipt without claiming provider
+success; an uncertain attempted provider action remains read-only and cannot be
+closed or retried from Manager.
+Every receipt also carries code-owned `canMutate` and `canReconcile` flags.
+Owner-private work projected as a sanitized shared-record receipt sets both to
+false, and the web client renders no mutation or reconciliation control for it.
+Recommendation acceptance and linked Task/Decision completion write their
+Manager lifecycle audits inside the same database transaction as the state
+change; acceptance and Task completion retain their serializable guards. If the
+audit cannot be persisted, the transition rolls back instead of leaving
+unaudited accepted or completed work.
 Owners also get a read-only queue of finished recommendations that have not yet
 been reviewed for the regression set. Completion is shown as execution—not
 proof of usefulness—and the owner explicitly chooses useful, not useful, or
@@ -189,8 +217,8 @@ to deterministic and provider-backed answers through
 action explicit, simplify tone, or ask one evidence-backed missing-premise
 question. Raw correction notes never become instructions, and adaptation cannot
 change facts, citations, recommendations, tools, permissions, or writes.
-Prompt/policy version `manager_os_v32`
-and its offline eval suite cover response quality, conversation-created
+Prompt/policy version `manager_os_v33` and its `manager_evals_v37` offline eval
+suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
 `manager_evidence_v1` projection checks live work, booking, projects, money,
@@ -392,14 +420,51 @@ low-confidence, or conflicted; the profile wins any duplicate conflict, and
 the Manager asks for confirmation instead of asserting an unreliable value.
 Members can confirm, correct, or archive non-profile memory, while sensitive
 memory remains owner-controlled. Provider context follows the same boundary:
-normal memory may enter the standard redacted snapshot, sensitive memory
-requires the owner's separate full-context consent, and restricted memory
-never enters a model snapshot. An explicit conversational request such as
+normal memory may enter the standard redacted snapshot, sensitive memory may
+enter only an owner's interactive chat after that owner separately enables
+full context, and restricted memory never enters a model snapshot. Shared and
+scheduled briefs always use redacted context. An owner-only full-context turn
+marks both `ManagerMessage` rows durably as `owner_only`, beginning with the
+user write before any provider exchange. The assistant row keeps that marker
+even when OpenAI fails, rejects output, or deterministic fallback is used, so a
+partial request cannot become team history. Historical full-context
+source/response pairs are backfilled by the forward migration; ambiguous
+interrupted conversations are quarantined and empty legacy conversation titles
+are neutralized. Exact source bindings remain enforced, and legacy unbound
+turns fail closed across the bounded conversation. Recommendations created
+from that private turn remain
+owner-only: a non-owner receives a generic not-found result even with the
+recommendation ID, and shared deterministic briefs/chat suppression,
+member-visible learning summaries, and redacted provider history omit its
+private recommendation metadata and outcomes. If the owner accepts work into a
+shared Task, Event, Project, or Approval, teammates see only a sanitized receipt
+derived from that authoritative record. An explicit conversational request such as
 “Remember that Morgan handles production advances” creates a review card with
 the exact proposed value; it is saved only after a member chooses **Remember
 this**. Ordinary conversation never writes memory, canonical profile facts are
 redirected to Band context, and credentials, financial identifiers, and health
-information are refused without echoing the submitted value. Owners can see the current mode and
+information are refused without echoing the submitted value. Explicit remember
+requests are classified locally against the complete submitted value before
+truncation or model routing, including known credential-token shapes; a refused
+sensitive value is replaced with a fixed redaction before the message is stored
+and is never sent to OpenAI. Each proposal is bound to the exact persisted
+source-message ID and timestamp, and acceptance rechecks that source so
+concurrent turns cannot authorize the wrong memory. Legacy proposals without
+that binding fail closed. If the key already belongs to archived, sensitive, or
+restricted memory, conversational acceptance fails closed for every role and
+does not modify the fact; only the owner-controlled memory editor can change
+those records. Existing active normal memory may be refreshed. New
+memory uses an opaque SHA-256 identifier, new
+memory audit metadata omits it, and Activity/weekly-summary reads remove legacy
+memory-key fields without rewriting audit history. Conversation titles,
+content, action previews, continuity, response-review queues, and provider
+history all re-check the memory fact's current sensitivity and archive state.
+The feedback write performs that same authorization check again by message ID;
+hidden owner-only or currently private-memory responses return a generic
+not-found response without a feedback or audit write. Conversation responses
+publish `canSubmitFeedback`, and hidden placeholders never expose rating
+controls.
+Owners can see the current mode and
 included/withheld counts without exposing the withheld values. Reviewed
 feedback influences future ranking and evaluation only—it never lets
 the model rewrite prompts, policy, schemas, or application code. Owners can
@@ -537,8 +602,8 @@ Gmail (OAuth compose/send), Bandsintown (the artist's own event context only), a
 
 - **Manager OS:** guided band intake, an editable 90-day plan, goals,
   initiatives, decisions, team context, evidence-grounded daily/weekly briefs,
-  bounded conversation, reviewed internal actions, and an offline evaluation
-  gate.
+  bounded conversation, reviewed internal actions, durable recommendation
+  follow-through, and an offline evaluation gate.
 - **Booking:** venue/contact CRM, booking profile, one-market prospecting,
   pipeline, tracked campaign replies, approval-gated pitch campaigns, and
   follow-up work.

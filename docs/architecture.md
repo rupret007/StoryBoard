@@ -29,7 +29,7 @@ adapter layer rather than leaking into domain modules.
 Feature modules live under `apps/api/src/` as Nest modules: `venues`, `contacts`,
 `booking` (profiles, prospects, campaigns, replies, and opportunities),
 `manager` (intake, operating state, evidence-grounded briefs, persistent
-bounded conversation, and reviewable recommendations), `operations`
+bounded conversation, reviewable recommendations, and relational follow-through), `operations`
 (events, songs/setlists, projects, deals, documents, invoices, settlements),
 `tasks`, `approvals`, `audit-events`, `commands`, `summary` (weekly aggregation),
 and `dashboard` (stats/intelligence). Global
@@ -107,6 +107,43 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   small allowlist of canned phrases, or ask one current evidence-health
   question. It cannot alter evidence, facts, actions, risk, permissions, or
   provider boundaries. The trace records only policy flags and reason codes.
+  `manager_follow_through_v1` separately projects the current accepted-work
+  lifecycle from existing relational links. It creates no competing status or
+  work record, reloads conversation actions from the same recommendation rows,
+  and exposes only application-relative destinations. Its `canMutate` and
+  `canReconcile` flags are part of the server projection, not inferred in the
+  browser; sanitized member receipts from owner-private work disable both.
+  Resolved memory receipts
+  follow the current fact's role/sensitivity boundary; conversation titles,
+  message bodies, action previews, continuity, and provider history are all
+  re-projected from that current boundary. The exact bound user turn and its
+  assistant response are hidden when the fact is no longer visible; legacy
+  unbound rows fail closed across the bounded conversation. Archived or missing
+  facts and stale saved-value previews fail closed. Explicit remember requests are classified
+  locally before provider routing; refused sensitive values are replaced with
+  a fixed redaction before persistence and never reach OpenAI. Pending approval,
+  approved-ready execution, uncertain claimed execution, failure, simulation,
+  human receipt reconciliation, and real recorded completion remain distinct.
+  Reconciliation closes only a failed, simulated, or orphaned Manager receipt
+  with a note and never asserts provider success. Uncertain provider results
+  remain read-only and are never closed or automatically retried by Manager;
+  in a mixed batch they take precedence over failed, rejected, or expired
+  siblings. Rejected and expired receipts are terminal and expose no Manager
+  reconciliation action.
+  A recommendation produced from an owner full-context run retains that private
+  provenance. Non-owners cannot mutate it by known ID; normal/shared and
+  provider-redacted projections omit its model-authored metadata. If the owner
+  accepts linked work into a shared Task, Event, Project, or Approval, only a
+  sanitized receipt rebuilt from that authoritative record crosses the boundary.
+  Shared deterministic briefs/chat repeat suppression and member learning
+  summaries also filter owner-only recommendation history, outcomes, feedback,
+  and reviews. Feedback mutation rechecks the persisted response visibility and
+  current linked-memory boundary before upsert; a hidden response ID produces
+  generic not-found with no feedback or audit write.
+  Recommendation acceptance and linked Task or Decision completion persist
+  their lifecycle audits in the same database transaction as the state
+  transition; acceptance and Task completion retain their serializable guards.
+  Audit failure therefore rolls back the transition.
   `manager_natural_feedback_v1` may bind a narrow, standalone verdict only to
   the directly preceding answer in the same tenant conversation. It reuses the
   audited feedback upsert, bypasses the provider, excludes its acknowledgement
@@ -182,10 +219,15 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   Conversational memory uses the same explicit-confirmation boundary. Only a
   current operator message beginning with a supported remember directive may
   produce `remember_fact`; the proposal exposes the exact value, grounding
-  rechecks the key/label/value, and a separate accepted recommendation performs
-  the tenant-scoped audited write. Briefs and ordinary model prose cannot save
-  memory. Profile-owned facts redirect to their canonical form, and sensitive
-  values fail closed without being echoed.
+  binds its exact persisted source-message ID/timestamp and rechecks that source
+  plus the key/label/value, and a separate accepted recommendation performs the
+  tenant-scoped audited write. `manager_memory_capture_v3` scans the complete
+  input before truncation and model routing, including known credential shapes.
+  Briefs and ordinary model prose cannot save memory. Profile-owned facts
+  redirect to their canonical form, sensitive values fail closed without being
+  echoed, and legacy unbound proposals remain hidden. New fact identifiers are
+  opaque SHA-256 digests; memory audit writes omit them and read projections
+  strip historical key fields without rewriting the audit log.
   Conversational continuity is also structured rather than inferred from
   prose. `manager_conversation_continuity_v1` recognizes a small allowlist of
   reference-bound follow-ups and binds them only to the immediately preceding
@@ -226,7 +268,9 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   Conversation recovery uses the existing tenant-scoped records rather than a
   second memory store. The list projection returns at most 20 newest-first
   summaries with the latest message and total message count; detail returns at
-  most 50 messages and only the requesting operator's feedback. The client
+  most 50 messages and only the requesting operator's feedback. Detail also
+  returns `canSubmitFeedback` from the same server-side privacy projection;
+  hidden placeholders clear feedback and proposed actions. The client
   replaces its visible message set on a switch and clears unsent input, so
   continuity, recommendations, and named-record resolution never cross thread
   boundaries.
@@ -335,10 +379,21 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   in the same transaction. `manager_knowledge_v1` records consistency,
   confirmation, confidence, and review age, and runtime projection replaces a
   contradictory duplicate with the profile value before reasoning.
-  Redacted mode includes only normal memory; full-context owner consent may add
-  sensitive memory; restricted memory is always excluded. Model citations are
-  checked against the same projected evidence IDs, while persisted run inputs
-  remain redacted even when full context was used transiently.
+  Redacted mode includes only normal memory; full context requires both owner
+  consent and an owner-initiated interactive chat. Shared/scheduled briefs stay
+  redacted and restricted memory is always excluded. Both messages in a
+  full-context turn carry durable `owner_only` visibility; the user message is
+  marked before the provider call and the response remains private for provider
+  failure, rejected output, or deterministic fallback. The forward migration
+  backfills exact historical source/response pairs from run traces, quarantines
+  conversations with unmatched legacy requests, and neutralizes empty legacy
+  titles. These turns
+  bind their exact source question and are hidden from non-owner conversation,
+  history, and review reads; legacy unbound turns fail closed. Recommendations
+  from those runs remain owner-only, with shared linked results represented only
+  through sanitized authoritative-record receipts. Model citations
+  are checked against the same projected evidence IDs, while persisted run
+  inputs remain redacted even when full context was used transiently.
 - `manager_evidence_v1` is one non-persistent confidence layer over the
   specialist operating projections and tenant records. It classifies six
   answer areas as current, needs-confirmation, stale, missing, or conflicted,

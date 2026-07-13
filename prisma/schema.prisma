@@ -247,6 +247,11 @@ enum ManagerMemorySensitivity {
   restricted
 }
 
+enum ManagerMessageVisibility {
+  team
+  owner_only
+}
+
 enum BandEventType {
   gig
   rehearsal
@@ -755,6 +760,7 @@ model ManagerMessage {
   managerRunId    String?                     @unique
   operatorId      String?
   role            String
+  visibility      ManagerMessageVisibility    @default(team)
   content         String
   citations       Json                        @default("[]")
   proposedActions Json                        @default("[]")
@@ -766,6 +772,7 @@ model ManagerMessage {
   responseEval    ManagerResponseEvalExample?
 
   @@index([conversationId, createdAt])
+  @@index([conversationId, visibility, createdAt])
 }
 
 model ManagerResponseEvalExample {

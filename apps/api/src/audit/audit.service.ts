@@ -1,6 +1,9 @@
 import { Injectable } from "@nestjs/common";
+import type { Prisma } from "../generated/prisma/client";
 import { AuditSeverity } from "../generated/prisma/enums";
 import { PrismaService } from "../prisma/prisma.service";
+
+type AuditClient = Pick<Prisma.TransactionClient, "auditEvent">;
 
 @Injectable()
 export class AuditService {
@@ -15,8 +18,8 @@ export class AuditService {
     actorLabel?: string | null | undefined;
     actorOperatorId?: string | null | undefined;
     metadata: Record<string, unknown>;
-  }) {
-    return this.prisma.client.auditEvent.create({
+  }, client: AuditClient = this.prisma.client) {
+    return client.auditEvent.create({
       data: {
         artistId: input.artistId ?? null,
         severity: input.severity ?? AuditSeverity.info,

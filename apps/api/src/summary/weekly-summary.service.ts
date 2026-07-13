@@ -6,6 +6,7 @@ import type {
 } from "../generated/prisma/client";
 import { BookingStage, TaskStatus } from "../generated/prisma/enums";
 import { PrismaService } from "../prisma/prisma.service";
+import { projectAuditEventsForRead } from "../audit-events/audit-event-projection";
 
 @Injectable()
 export class WeeklySummaryService {
@@ -90,7 +91,7 @@ export class WeeklySummaryService {
       overdueTasks,
       staleFollowUpsOlderThan7d: staleFollowUps,
       pendingApprovals,
-      recentAudit: audit,
+      recentAudit: projectAuditEventsForRead(audit),
       recentCommands: commands,
       recommendations
     };

@@ -25,6 +25,7 @@ import type { ManagerConversationEventAction } from "./manager-event-capture";
 import type { ManagerConversationEventAvailabilityAction } from "./manager-event-availability";
 import { EVENT_LOGISTICS_POLICY_VERSION, type EventLogisticsAssessment, type PrepareEventLogisticsApprovalsAction } from "../operations/event-logistics";
 import { applyManagerResponseAdaptation, managerResponseAdaptationPolicy, type ManagerResponseAdaptationPolicy } from "./manager-response-quality";
+import type { ManagerFollowThrough } from "./manager-follow-through";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -47,6 +48,8 @@ export type ManagerProposedAction = {
   projectId: string;
 } | {
   type: "remember_fact";
+  sourceMessageId?: string;
+  sourceMessageCreatedAt?: string;
   key: string;
   label: string;
   value: string;
@@ -112,7 +115,7 @@ export type ManagerFacts = {
   deals: { id: string; title: string; status: string; expiresAt: Date | null; updatedAt?: Date }[];
   invoices: { id: string; number: string; status: string; currency: string; totalMinor: number; paidMinor: number; dueAt: Date | null; updatedAt?: Date }[];
   decisions: { id: string; workstream: ManagerWorkstream; title: string; context: string | null; options: unknown; choice: string | null; rationale: string | null; expectedOutcome: string | null; needsFraming?: boolean; evidence: unknown; status: string; reviewAt: Date | null; decidedAt: Date | null; reviewOutcome?: string | null; reviewNote?: string | null; reviewedAt?: Date | null }[];
-  approvals: { id: string; title: string; status: string; actionType: string; updatedAt: Date }[];
+  approvals: { id: string; title: string; status: string; actionType: string; executionAttemptedAt?: Date | null; updatedAt: Date }[];
   bookingReplies: { id: string; subject: string | null; fromName: string | null; fromEmail: string; processingStatus: string; receivedAt: Date }[];
   campaignRecipients: { id: string; status: string; followUpDueAt: Date | null; followUpTaskId: string | null }[];
   prospects: { id: string; name: string; status: string; kind: string; city: string; updatedAt?: Date }[];
@@ -125,7 +128,8 @@ export type ManagerFacts = {
   evidenceHealth?: ManagerEvidenceHealth;
   workSequence?: ManagerWorkSequence;
   goalPath?: ManagerGoalPath;
-  recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null }[];
+  followThrough?: ManagerFollowThrough;
+  recommendationHistory: { id: string; stableKey: string; outcome: string; outcomeReason: string | null; outcomeAt: Date | null; updatedAt: Date; task: { status: string } | null; hasTrackedWork?: boolean; followThroughState?: string | null }[];
 };
 
 export type ManagerChatResult = {
@@ -165,7 +169,8 @@ export function managerRecommendationIsSuppressed(
 ) {
   return history.some((prior) => {
     if (prior.stableKey !== recommendation.stableKey) return false;
-    if (prior.outcome === "accepted" && prior.task?.status !== "done") return true;
+    if (prior.hasTrackedWork && prior.followThroughState && prior.followThroughState !== "completed") return true;
+    if (prior.outcome === "accepted" && prior.task && prior.task.status !== "done") return true;
     const outcomeAt = prior.outcomeAt ?? prior.updatedAt;
     const age = now.getTime() - outcomeAt.getTime();
     if ((prior.outcome === "completed" || prior.task?.status === "done") && age < COMPLETION_COOLDOWN_MS) return true;
@@ -619,11 +624,12 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
   const pendingApprovals = facts.approvals.filter((approval) => approval.status === "pending" || approval.status === "approved");
   if (pendingApprovals[0]) {
     const approval = pendingApprovals[0];
+    const executionUnknown = approval.status === "approved" && Boolean(approval.executionAttemptedAt);
     addToday({
       stableKey: `approval-${approval.id}`,
-      title: approval.status === "approved" ? `Execute approved work: ${approval.title}` : `Review approval: ${approval.title}`,
-      reason: approval.status === "approved" ? "A band-approved action is ready, but it has not been executed." : "External work is waiting for a human decision.",
-      nextAction: "Open Approvals, inspect the exact payload, and approve, reject, or execute it there.",
+      title: executionUnknown ? `Reconcile uncertain execution: ${approval.title}` : approval.status === "approved" ? `Execute approved work: ${approval.title}` : `Review approval: ${approval.title}`,
+      reason: executionUnknown ? "An execution attempt was recorded without a final result. Retrying could duplicate an outside action." : approval.status === "approved" ? "A band-approved action is ready, but it has not been executed." : "External work is waiting for a human decision.",
+      nextAction: executionUnknown ? "Open Approvals and verify the provider outcome. Do not retry this action automatically." : "Open Approvals, inspect the exact payload, and approve, reject, or execute it there.",
       workstream: "band_operations",
       priority: "high",
       evidenceIds: [approval.id],
@@ -886,6 +892,25 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
   const availabilityConflicts = facts.events.filter((event) => event.participants.some((participant) => participant.response === "unavailable"));
   const readinessRisks = facts.events.filter((event) => event.readiness && event.readiness.status !== "ready");
   const activeOpportunities = facts.opportunities.filter((opportunity) => opportunity.stage !== "closed");
+  const followThroughItems = facts.followThrough?.items ?? [];
+  const followThroughDecisions = followThroughItems
+    .filter((item) => item.state === "needs_action" && ["decision_needed", "awaiting_approval", "awaiting_execution", "needs_tracking"].includes(item.stage))
+    .map((item) => ({ title: item.title, explanation: `${item.status}. ${item.nextAction}`, evidenceIds: unique([item.recommendationId, item.target.id]) }));
+  const followThroughWaiting = followThroughItems
+    .filter((item) => item.stage === "waiting_external")
+    .map((item) => ({ title: `${item.title} — ${item.status}`, dueAt: item.dates.dueAt, evidenceIds: unique([item.recommendationId, item.target.id]) }));
+  const followThroughRisks = followThroughItems
+    .filter((item) => item.state === "blocked")
+    .map((item) => ({ title: `Follow-through blocked: ${item.title}`, detail: `${item.detail} ${item.nextAction}`, confidence: 1, evidenceIds: unique([item.recommendationId, item.target.id]) }));
+  const followThroughDecisionTargetIds = new Set(followThroughItems
+    .filter((item) => item.state === "needs_action" && ["decision_needed", "awaiting_approval", "awaiting_execution", "needs_tracking"].includes(item.stage))
+    .map((item) => item.target.id));
+  const followThroughWaitingTargetIds = new Set(followThroughItems
+    .filter((item) => item.stage === "waiting_external")
+    .map((item) => item.target.id));
+  const followThroughBlockedTargetIds = new Set(followThroughItems
+    .filter((item) => item.state === "blocked")
+    .map((item) => item.target.id));
 
   return {
     summary: today[0]
@@ -894,23 +919,26 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
     today,
     thisWeek,
     decisionsNeeded: [
-      ...facts.decisions.filter((decision) => decision.status === "open").map((decision) => ({ title: decision.title, explanation: decision.context ?? "A recorded decision is waiting for a choice.", evidenceIds: [decision.id] })),
-      ...facts.decisions.filter((decision) => decision.status === "decided" && decision.reviewAt && decision.reviewAt <= now).map((decision) => ({ title: `Review: ${decision.title}`, explanation: `The recorded choice was “${decision.choice}”. Compare the actual result with ${decision.expectedOutcome ? `the expected result: ${decision.expectedOutcome}` : "what the band expected"}.`, evidenceIds: [decision.id] })),
-      ...openApprovals.map((approval) => ({ title: approval.title, explanation: `This ${approval.actionType.replaceAll("_", " ")} is waiting for human approval.`, evidenceIds: [approval.id] }))
+      ...followThroughDecisions,
+      ...facts.decisions.filter((decision) => decision.status === "open" && !followThroughDecisionTargetIds.has(decision.id)).map((decision) => ({ title: decision.title, explanation: decision.context ?? "A recorded decision is waiting for a choice.", evidenceIds: [decision.id] })),
+      ...facts.decisions.filter((decision) => decision.status === "decided" && decision.reviewAt && decision.reviewAt <= now && !followThroughDecisionTargetIds.has(decision.id)).map((decision) => ({ title: `Review: ${decision.title}`, explanation: `The recorded choice was “${decision.choice}”. Compare the actual result with ${decision.expectedOutcome ? `the expected result: ${decision.expectedOutcome}` : "what the band expected"}.`, evidenceIds: [decision.id] })),
+      ...openApprovals.filter((approval) => !followThroughDecisionTargetIds.has(approval.id)).map((approval) => ({ title: approval.title, explanation: `This ${approval.actionType.replaceAll("_", " ")} is waiting for human approval.`, evidenceIds: [approval.id] }))
     ].slice(0, 8),
     waitingOn: [
-      ...(facts.workSequence?.waiting.filter((item) => item.state === "waiting_on_prerequisites").map((item) => ({ title: `${item.title} — ${item.reason}`, dueAt: item.dueAt, evidenceIds: item.evidenceIds.slice(0, 8) })) ?? []),
-      ...(facts.commitmentHealth?.items.filter((item) => item.waitingOn).map((item) => ({ title: `${item.title} — waiting on ${item.waitingOn}`, dueAt: item.dueAt, evidenceIds: [item.taskId] })) ?? []),
+      ...followThroughWaiting,
+      ...(facts.workSequence?.waiting.filter((item) => item.state === "waiting_on_prerequisites" && !followThroughWaitingTargetIds.has(item.taskId)).map((item) => ({ title: `${item.title} — ${item.reason}`, dueAt: item.dueAt, evidenceIds: item.evidenceIds.slice(0, 8) })) ?? []),
+      ...(facts.commitmentHealth?.items.filter((item) => item.waitingOn && !followThroughWaitingTargetIds.has(item.taskId)).map((item) => ({ title: `${item.title} — waiting on ${item.waitingOn}`, dueAt: item.dueAt, evidenceIds: [item.taskId] })) ?? []),
       ...proposedDeals.map((deal) => ({ title: deal.title, dueAt: deal.expiresAt?.toISOString() ?? null, evidenceIds: [deal.id] })),
       ...facts.campaignRecipients.filter((recipient) => recipient.status === "sent").map((recipient) => ({ title: "Booking outreach awaiting reply", dueAt: recipient.followUpDueAt?.toISOString() ?? null, evidenceIds: [recipient.id] }))
     ].slice(0, 10),
     risksAndOpportunities: [
+      ...followThroughRisks,
       ...(facts.knowledgeHealth && facts.knowledgeHealth.status !== "healthy" ? [{ title: facts.knowledgeHealth.status === "conflicted" ? "Conflicting manager knowledge" : "Band knowledge needs review", detail: facts.knowledgeHealth.summary, confidence: 1, evidenceIds: facts.knowledgeHealth.evidenceIds.slice(0, 8) }] : []),
       ...(facts.evidenceHealth && facts.evidenceHealth.status !== "strong" ? [{ title: "Operating evidence needs confirmation", detail: facts.evidenceHealth.summary, confidence: facts.evidenceHealth.confidence, evidenceIds: facts.evidenceHealth.evidenceIds.slice(0, 8) }] : []),
       ...(availabilityConflicts.length ? [{ title: "Member availability conflict", detail: `${availabilityConflicts.length} upcoming event${availabilityConflicts.length === 1 ? " has" : "s have"} an unavailable participant.`, confidence: 1, evidenceIds: availabilityConflicts.slice(0, 8).map((event) => event.id) }] : []),
       ...(readinessRisks.length ? [{ title: "Show readiness gaps", detail: `${readinessRisks.length} upcoming show${readinessRisks.length === 1 ? " has" : "s have"} unresolved operational gaps; the nearest is ${readinessRisks[0]?.readiness?.score ?? 0}/100.`, confidence: readinessRisks[0]?.readiness?.confidence ?? 0.5, evidenceIds: readinessRisks.slice(0, 8).map((event) => event.id) }] : []),
       ...(overdueInvoices.length ? [{ title: "Overdue receivables", detail: `${overdueInvoices.length} invoice${overdueInvoices.length === 1 ? " is" : "s are"} past the recorded due date.`, confidence: 1, evidenceIds: overdueInvoices.slice(0, 8).map((item) => item.id) }] : []),
-      ...(facts.commitmentHealth?.counts.blocked ? [{ title: "Blocked commitments", detail: `${facts.commitmentHealth.counts.blocked} task${facts.commitmentHealth.counts.blocked === 1 ? " is" : "s are"} blocked with a recorded reason.`, confidence: 1, evidenceIds: facts.commitmentHealth.items.filter((item) => item.state === "blocked").slice(0, 8).map((item) => item.taskId) }] : []),
+      ...(facts.commitmentHealth?.items.some((item) => item.state === "blocked" && !followThroughBlockedTargetIds.has(item.taskId)) ? [{ title: "Blocked commitments", detail: `${facts.commitmentHealth.items.filter((item) => item.state === "blocked" && !followThroughBlockedTargetIds.has(item.taskId)).length} task${facts.commitmentHealth.items.filter((item) => item.state === "blocked" && !followThroughBlockedTargetIds.has(item.taskId)).length === 1 ? " is" : "s are"} blocked with a recorded reason.`, confidence: 1, evidenceIds: facts.commitmentHealth.items.filter((item) => item.state === "blocked" && !followThroughBlockedTargetIds.has(item.taskId)).slice(0, 8).map((item) => item.taskId) }] : []),
       ...(facts.commitmentHealth?.counts.repeatedlyDeferred ? [{ title: "Repeatedly deferred work", detail: `${facts.commitmentHealth.counts.repeatedlyDeferred} task${facts.commitmentHealth.counts.repeatedlyDeferred === 1 ? " has" : "s have"} moved at least twice and should be re-scoped before another date change.`, confidence: 1, evidenceIds: facts.commitmentHealth.items.filter((item) => item.deferralCount >= 2).slice(0, 8).map((item) => item.taskId) }] : []),
       ...(facts.workSequence?.counts.conflicted ? [{ title: "Task sequence conflict", detail: facts.workSequence.summary, confidence: 1, evidenceIds: facts.workSequence.evidenceIds.slice(0, 8) }] : []),
       ...(unreadReplies.length ? [{ title: "Fresh booking interest", detail: `${unreadReplies.length} booking repl${unreadReplies.length === 1 ? "y is" : "ies are"} waiting for review.`, confidence: 1, evidenceIds: unreadReplies.slice(0, 8).map((reply) => reply.id) }] : []),
@@ -969,6 +997,10 @@ export function managerQuestionAsksAboutPlanHealth(question: string) {
   return /\b(goal|plan|progress|on track|off track|realistic|strategy|90-day|90 day|target|under budget|over budget)\b/i.test(question);
 }
 
+export function managerQuestionAsksAboutFollowThrough(question: string) {
+  return /\b(follow[- ]?through|accepted recommendations?|accepted work|status of (?:the |that )?recommendation)\b/i.test(question);
+}
+
 function deterministicManagerChatBase(
   facts: ManagerFacts,
   question: string,
@@ -995,6 +1027,7 @@ function deterministicManagerChatBase(
   const decisionQuestion = subject?.kind === "decision" || Boolean(proposedDecisionDraft) || questionHas(question, /\b(decision|decide|choice|choose|option|tradeoff|what did we decide|why did we choose|review that choice)\b/);
   const contextQuestion = questionHas(question, /\b(what do you (?:still )?(?:need|know)|what are you missing|missing context|band context|about (?:us|the band)|know about (?:us|the band)|setup|profile completeness)\b/);
   const knowledgeQuestion = questionHas(question, /\b(what do you remember|manager memory|saved memory|is (?:that|this) current|stale|out of date|trust your memory|confirm(?:ed|ation)? facts?)\b/);
+  const followThroughQuestion = managerQuestionAsksAboutFollowThrough(question);
   const memoryCapture = assessManagerMemoryCapture(question);
 
   if (subjectReference?.status === "needs_clarification") return {
@@ -1011,6 +1044,27 @@ function deterministicManagerChatBase(
 
   if (continuity?.status === "resolved" && continuity.recommendation && continuity.intent) {
     const prior = continuity.recommendation;
+    const tracked = facts.followThrough?.items.find((item) => item.recommendationId === prior.id) ?? null;
+    if (tracked) {
+      const citations = [...new Set([tracked.recommendationId, tracked.target.id])].slice(0, 10);
+      if (continuity.intent === "blocking") return {
+        answer: tracked.state === "blocked"
+          ? `“${tracked.title}” is blocked (${tracked.status.toLowerCase()}): ${tracked.detail} ${tracked.nextAction}`
+          : `“${tracked.title}” is ${tracked.status.toLowerCase()}. ${tracked.detail} ${tracked.nextAction}`,
+        citations,
+        recommendation: null
+      };
+      if (continuity.intent === "recheck" || continuity.intent === "details" || continuity.intent === "explain") return {
+        answer: `“${tracked.title}” is ${tracked.status.toLowerCase()}. ${tracked.detail} ${tracked.nextAction}`,
+        citations,
+        recommendation: null
+      };
+      return {
+        answer: `“${tracked.title}” already has durable follow-through and is ${tracked.status.toLowerCase()}. Open its linked record instead of creating or accepting duplicate work.`,
+        citations,
+        recommendation: null
+      };
+    }
     const current = currentContinuityRecommendation(prior, brief, facts);
     const currentEvidence = current?.evidenceIds ?? prior.evidenceIds;
     if (continuity.intent === "explain") return {
@@ -1068,6 +1122,20 @@ function deterministicManagerChatBase(
 
   if (memoryCapture.status === "blocked_sensitive") return { answer: `${memoryCapture.reason} Put that information in the appropriate secured system instead of Manager conversation.`, citations: [], recommendation: null };
   if (memoryCapture.status === "profile_owned") return { answer: `${memoryCapture.reason} Update Band context so every Manager view uses one source of truth.`, citations: [], recommendation: null };
+  if (memoryCapture.status === "invalid") return { answer: memoryCapture.reason, citations: [], recommendation: null };
+
+  if (followThroughQuestion && facts.followThrough) {
+    const active = facts.followThrough.items.filter((item) => item.state !== "completed").slice(0, Math.min(5, responsePolicy.itemLimit));
+    const completed = facts.followThrough.items.filter((item) => item.state === "completed").slice(0, Math.min(2, responsePolicy.itemLimit));
+    const items = active.length ? active : completed;
+    if (!items.length) return { answer: "No accepted, blocked, or recently completed Manager recommendation is recorded. Acceptance is not inferred from conversation alone.", citations: [], recommendation: null };
+    const counts = facts.followThrough.counts;
+    return {
+      answer: `${active.length ? `${counts.inMotion} item${counts.inMotion === 1 ? " is" : "s are"} in motion, ${counts.needsAction} ${counts.needsAction === 1 ? "needs" : "need"} a decision or action, and ${counts.blocked} ${counts.blocked === 1 ? "is" : "are"} blocked.` : "There is no active accepted work; these are the most recent completed items."}\n\n${items.map((item) => `• ${item.title} — ${item.status}. ${item.nextAction}`).join("\n")}`,
+      citations: [...new Set(items.flatMap((item) => [item.recommendationId, item.target.id]))].slice(0, 10),
+      recommendation: null
+    };
+  }
 
   if (externalRequest) {
     const recommendation = matchingRecommendation(brief);

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { instantToDateTimeLocal } from "@storyboard/shared";
 
 const browserTestWebUrl = process.env.E2E_WEB_URL ?? "http://127.0.0.1:3000";
@@ -42,6 +42,14 @@ async function artistApi<T>(page: Page, artistId: string, path: string, method: 
   });
   expect(response.ok(), `${method} ${path}: ${await response.text()}`).toBe(true);
   return response.json() as Promise<T>;
+}
+
+async function expectManagerActionReceipt(proposal: Locator, state: "needs_action" | "in_motion" | "blocked" | "completed", tone: "success" | "warning" | "danger" | "neutral" = "success") {
+  const receipt = proposal.getByTestId("manager-action-receipt");
+  await expect(receipt).toHaveAttribute("data-state", state);
+  await expect(receipt).toHaveAttribute("data-tone", tone);
+  await expect(proposal.getByTestId("manager-action-outcome")).toHaveAttribute("data-tone", tone);
+  return receipt;
 }
 
 const managerFoundationProfile = {
@@ -364,7 +372,7 @@ test("manager conversations retain context and guide team ownership", async ({ p
   await expect(continuityReply).toContainText(/role match/i);
   await expect(page.getByText("Suggested task owner", { exact: true })).toHaveCount(1);
   await assignmentProposal.getByRole("button", { name: "Assign task" }).click();
-  await expect(assignmentProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expectManagerActionReceipt(assignmentProposal, "in_motion");
   const coachingPrompts = page.getByTestId("manager-coaching-prompts");
   await expect(coachingPrompts.getByRole("button", { name: "How does a show settlement work?" })).toBeVisible();
   await coachingPrompts.getByRole("button", { name: "How does a show settlement work?" }).click();
@@ -393,7 +401,7 @@ test("manager feedback and reviewed memory feed the release gate", async ({ page
   const contextSaved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/accept") && response.ok());
   await contextProposal.getByRole("button", { name: "Save context" }).click();
   await contextSaved;
-  await expect(contextProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expectManagerActionReceipt(contextProposal, "completed");
   await expect(context.getByText(/82\/100 · Strong/i)).toBeVisible();
   await managerMessage.fill("Explain our next priority in plain language.");
   await page.getByRole("button", { name: "Send message" }).click();
@@ -442,7 +450,8 @@ test("manager feedback and reviewed memory feed the release gate", async ({ page
   const dismissed = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/dismiss") && response.ok());
   await dismissedProposal.getByRole("button", { name: "Not useful" }).click();
   await dismissed;
-  await expect(dismissedProposal.getByText("dismissed", { exact: true })).toBeVisible();
+  await expect(dismissedProposal.getByText("Dismissed", { exact: true })).toBeVisible();
+  await expect(dismissedProposal.getByTestId("manager-action-outcome")).toHaveAttribute("data-tone", "neutral");
   await dismissedProposal.getByRole("button", { name: "Add to eval set" }).click();
   await expect(dismissedProposal.getByText("in eval set", { exact: true })).toBeVisible();
   await managerMessage.fill("Where does our money stand?");
@@ -480,7 +489,7 @@ test("manager feedback and reviewed memory feed the release gate", async ({ page
   const memoryProposal = page.getByText("Suggested band memory", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
   await expect(memoryProposal.getByTestId("manager-memory-preview")).toHaveText("Morgan handles production advances");
   await memoryProposal.getByRole("button", { name: "Remember this" }).click();
-  await expect(memoryProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expectManagerActionReceipt(memoryProposal, "completed");
   await page.reload();
   await expect(page.getByText(/plan-health score is/i).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "What your manager remembers" })).toBeVisible();
@@ -506,7 +515,7 @@ test("manager feedback and reviewed memory feed the release gate", async ({ page
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v32", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v33", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -613,7 +622,7 @@ test("manager-created gigs become practical day-of workspaces", async ({ page })
   const eventCreated = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/accept") && response.ok());
   await eventProposal.getByRole("button", { name: "Create event" }).click();
   await eventCreated;
-  await expect(eventProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expectManagerActionReceipt(eventProposal, "in_motion");
   await expect(page.getByText("Event and availability list created.", { exact: true })).toBeVisible();
   await blockedQuestion.fill(`Mark Morgan available for "${eventTitle}"`);
   await page.getByRole("button", { name: "Send message" }).click();
@@ -625,7 +634,7 @@ test("manager-created gigs become practical day-of workspaces", async ({ page })
   const availabilityUpdated = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/accept") && response.ok());
   await availabilityProposal.getByRole("button", { name: "Update availability" }).click();
   await availabilityUpdated;
-  await expect(availabilityProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expectManagerActionReceipt(availabilityProposal, "in_motion");
   await expect(page.getByText("Member availability updated.", { exact: true })).toBeVisible();
 
   await page.goto("/operations");
@@ -701,7 +710,7 @@ test("manager-created release projects stay grounded in operations", async ({ pa
   const projectCreated = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/accept") && response.ok());
   await projectProposal.getByRole("button", { name: "Create project and plan" }).click();
   await projectCreated;
-  await expect(projectProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expectManagerActionReceipt(projectProposal, "in_motion");
   await expect(page.getByText("Project and milestone plan created.", { exact: true })).toBeVisible();
 
   await page.goto("/operations");
@@ -843,7 +852,19 @@ test("manager task proposals remain idempotent, assignable, and reviewable", asy
   await expect(capturedTaskProposal).toContainText("Due: Dec 31, 2099");
   await expect(capturedTaskProposal).toContainText("Owner: Unassigned");
   await capturedTaskProposal.getByRole("button", { name: "Add task" }).click();
-  await expect(capturedTaskProposal.getByText("accepted", { exact: true })).toBeVisible();
+  const acceptedReceipt = await expectManagerActionReceipt(capturedTaskProposal, "in_motion");
+  await expect(acceptedReceipt).toContainText(/Linked task ready/i);
+  await expect(acceptedReceipt.getByTestId("manager-action-receipt-destination")).toHaveAttribute("href", "/tasks");
+  const acceptedWork = page.getByTestId("manager-follow-through-item").filter({ hasText: capturedTaskTitle }).first();
+  await expect(acceptedWork).toHaveAttribute("data-state", "in_motion");
+  await expect(acceptedWork.getByTestId("manager-follow-through-destination")).toHaveAttribute("href", "/tasks");
+
+  await page.reload();
+  const reloadedTaskProposal = page.getByText("Suggested shared task", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await expect(reloadedTaskProposal.getByRole("button", { name: "Add task" })).toHaveCount(0);
+  const reloadedReceipt = await expectManagerActionReceipt(reloadedTaskProposal, "in_motion");
+  await expect(reloadedReceipt).toContainText(/Linked task ready/i);
+  await expect(page.getByTestId("manager-follow-through-item").filter({ hasText: capturedTaskTitle }).first()).toHaveAttribute("data-state", "in_motion");
   await outcomeQuestion.fill(`Create a task: ${capturedTaskTitle}!`);
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "already open" }).last()).toContainText("will not add a duplicate task");
@@ -854,31 +875,33 @@ test("manager task proposals remain idempotent, assignable, and reviewable", asy
   await expect(capturedTaskAssignment).toContainText("Owner: Unassigned → Morgan");
   await expect(capturedTaskAssignment).toContainText("Availability: Limited");
   await capturedTaskAssignment.getByRole("button", { name: "Assign task" }).click();
-  await expect(capturedTaskAssignment.getByText("completed", { exact: true })).toBeVisible();
+  await expectManagerActionReceipt(capturedTaskAssignment, "in_motion");
   await outcomeQuestion.fill(`Mark "${capturedTaskTitle}" done`);
   await page.getByRole("button", { name: "Send message" }).click();
   const capturedTaskUpdate = page.getByText("Suggested task update", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
   await expect(capturedTaskUpdate).toContainText(`Task: ${capturedTaskTitle}`);
   await expect(capturedTaskUpdate).toContainText("Change: Mark done");
   await capturedTaskUpdate.getByRole("button", { name: "Update task" }).click();
-  await expect(capturedTaskUpdate.getByText("completed", { exact: true })).toBeVisible();
+  await expectManagerActionReceipt(capturedTaskUpdate, "completed");
   await page.goto("/tasks");
   const capturedTaskRow = page.getByRole("row", { name: new RegExp(capturedTaskTitle) });
   await expect(capturedTaskRow).toBeVisible();
   await expect(capturedTaskRow.getByLabel(`Due date for ${capturedTaskTitle}`)).toHaveValue("2099-12-31");
   await expect(capturedTaskRow.getByLabel(`Owner for ${capturedTaskTitle}`).locator("option:checked")).toHaveText("Morgan");
   await expect(capturedTaskRow.getByLabel(`Status for ${capturedTaskTitle}`).locator("option:checked")).toHaveText("done");
+  await page.goto("/manager");
+  await expect(page.getByTestId("manager-follow-through-item").filter({ hasText: capturedTaskTitle }).first()).toHaveAttribute("data-state", "completed");
 });
 
 test("confirmed event logistics move through approvals before provider execution", async ({ page }) => {
   const suffix = Date.now().toString(36);
   const eventTitle = `E2E logistics ${suffix}`;
-  const eventStart = new Date(Date.now() + 90 * 86400000);
+  const eventStart = new Date(Date.now() + 10 * 86400000);
   eventStart.setMinutes(0, 0, 0);
   const eventEnd = new Date(eventStart.getTime() + 3 * 3600000);
   const localTime = (date: Date) => dateTimeLocalInZone(date, "America/Chicago");
 
-  await signInForBrowserTest(page);
+  await ensureManagerFoundation(page);
   await page.goto("/operations");
   await page.getByLabel("Title", { exact: true }).fill(eventTitle);
   await page.getByLabel("Starts", { exact: true }).fill(localTime(eventStart));
@@ -900,10 +923,19 @@ test("confirmed event logistics move through approvals before provider execution
   const logistics = eventCard.locator('[data-testid^="event-logistics-"]');
   await expect(logistics.getByText("No external Calendar event is linked yet.", { exact: true })).toBeVisible();
   await expect(logistics.getByText("No Drive folder is linked yet.", { exact: true })).toBeVisible();
-  const prepared = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/prepare-logistics-approvals") && response.ok());
-  await logistics.getByRole("button", { name: "Prepare Calendar and Drive approvals" }).click();
+
+  await page.goto("/manager");
+  const recommendationTitle = `Prepare ${eventTitle} logistics`;
+  const logisticsRecommendation = page.getByText(recommendationTitle, { exact: true }).locator("xpath=ancestor::div[contains(@class,'sm:flex-row')][1]");
+  await expect(logisticsRecommendation).toContainText(/Nothing is written to Google until/i);
+  const prepared = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/accept") && response.ok());
+  await logisticsRecommendation.getByRole("button", { name: "Prepare approvals" }).click();
   await prepared;
-  await expect(logistics.getByRole("link", { name: "Review existing approvals" })).toBeVisible();
+  await expect(logisticsRecommendation.getByTestId("manager-recommendation-outcome")).toHaveAttribute("data-tone", "warning");
+  let logisticsFollowThrough = page.getByTestId("manager-follow-through-item").filter({ hasText: recommendationTitle }).first();
+  await expect(logisticsFollowThrough).toHaveAttribute("data-state", "needs_action");
+  await expect(logisticsFollowThrough).toHaveAttribute("data-stage", "awaiting_approval");
+  await expect(logisticsFollowThrough).toHaveAttribute("data-tone", "warning");
 
   await page.goto("/approvals");
   const calendarTitle = `Add ${eventTitle} to Google Calendar`;
@@ -938,6 +970,23 @@ test("confirmed event logistics move through approvals before provider execution
   await expect(completedLogistics.getByText(/Event ID: mock-cal-/)).toBeVisible();
   await expect(completedLogistics.getByRole("link", { name: "Open Drive folder" })).toHaveAttribute("href", /^https:\/\/drive\.mock\/folder\//);
   await expect(completedLogistics.getByRole("button", { name: /Prepare .* approval/ })).toBeVisible();
+
+  await page.goto("/manager");
+  logisticsFollowThrough = page.getByTestId("manager-follow-through-item").filter({ hasText: recommendationTitle }).first();
+  await expect(logisticsFollowThrough).toHaveAttribute("data-state", "blocked");
+  await expect(logisticsFollowThrough).toHaveAttribute("data-stage", "approval_simulated");
+  await expect(logisticsFollowThrough).toHaveAttribute("data-tone", "warning");
+  await expect(logisticsFollowThrough).toHaveAttribute("data-can-mutate", "true");
+  await expect(logisticsFollowThrough).toContainText(/not a real Calendar or Drive result/i);
+  page.once("dialog", (dialog) => dialog.accept("Verified that only mock adapters ran; no external result exists."));
+  const reconciled = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/complete") && response.ok());
+  await logisticsFollowThrough.getByRole("button", { name: "Close after review" }).click();
+  await reconciled;
+  logisticsFollowThrough = page.getByTestId("manager-follow-through-item").filter({ hasText: recommendationTitle }).first();
+  await expect(logisticsFollowThrough).toHaveAttribute("data-state", "completed");
+  await expect(logisticsFollowThrough).toHaveAttribute("data-stage", "reconciled");
+  await expect(logisticsFollowThrough).toHaveAttribute("data-tone", "neutral");
+  await expect(logisticsFollowThrough).toContainText(/not evidence that a provider action ran or succeeded/i);
 });
 
 test("approved immediate-send campaigns remain executable and create follow-up work", async ({ page }) => {

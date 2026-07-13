@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-13
-Baseline for this round: `main` at `88c2b48`
+Baseline for this round: `main` at `8f17fd8`
 
 ## Product and current architecture
 
@@ -1797,25 +1797,137 @@ Implementation:
   execution, sent status, and generated follow-up task.
 - No schema migration or provider-boundary change was required.
 
-### P0 — Durable Manager recommendation follow-through (next)
+### P0 — Durable Manager recommendation follow-through (completed 2026-07-13)
 
-- [ ] Add a tenant-scoped `manager_follow_through_v1` projection over accepted,
+Root cause and boundary:
+
+- Persisted conversation action JSON retained its original `suggested` outcome
+  after acceptance even though relational `ManagerRecommendation` state and its
+  linked work were current. Reloading a thread could therefore offer an action
+  twice, while accepted work had no durable cross-workspace view.
+- Actionless advice could be accepted into an unlinked state and was then
+  counted/suppressed as if it owned an open Task. Approval presentation also
+  needed to distinguish pending review, approved-ready work, an attempted but
+  unknown provider result, and mock execution without adding unsafe retry.
+- Existing Tasks, Decisions, Projects, Events, memory facts, and Approvals
+  remain the sources of truth. The follow-through receipt itself is a read
+  projection and does not add a competing lifecycle or change provider
+  behavior. Final privacy review did require one additive message-visibility
+  migration; it does not rewrite the linked domain records.
+
+- [x] Add a tenant-scoped `manager_follow_through_v1` projection over accepted,
   blocked, and bounded recently completed recommendations. Derive state from
-  existing Task, Decision, Project, Event, and Approval relations; do not create
-  a second source of truth or add a migration.
-- [ ] Hydrate persisted conversation action outcomes from relational
+  existing Task, Decision, Project, Event, Manager memory fact, and Approval
+  relations and do not create a second source of truth.
+- [x] Hydrate persisted conversation action outcomes from relational
   `ManagerRecommendation` rows so a hard reload cannot show an accepted action
   as suggested again.
-- [ ] Return a durable receipt and direct destination after acceptance, then
+- [x] Return a durable receipt and direct destination after acceptance, then
   expose in-motion, waiting, blocked, ready-to-execute, and completed work in
   the Manager workspace.
-- [ ] Stop offering generic Accept for advice without a typed action. Provide a
+- [x] Stop offering generic Accept for advice without a typed action. Provide a
   reviewed Mark handled or Dismiss path, and surface legacy accepted/unlinked
   rows so they can be resolved instead of suppressed indefinitely.
-- [ ] Correct learning counts so actionless recommendations are not labeled
+- [x] Correct learning counts so actionless recommendations are not labeled
   open tasks. Cover tenant isolation, reload, task/decision/approval lifecycle,
-  and notice → accept → destination → completion in unit, database, and browser
-  tests.
+  memory visibility, and provider-result quarantine in unit and disposable-
+  database tests.
+- [x] Run the expanded production-browser notice → accept → receipt → hard
+  reload → destination → completion journey, then rerun the relationship
+  diagnostic and current production container smoke before release.
+
+Implementation and safety boundary:
+
+- The projection keeps active linked Tasks, Decisions, Projects, and Events
+  visible even when the recommendation outcome itself is older than the normal
+  30-day completed window. The query is still bounded to the 200 most recently
+  updated matching recommendations.
+- Resolved memory receipts inherit the current fact's access boundary. Members
+  and viewers receive normal facts only; owners may inspect current sensitive
+  or restricted receipts; archived or missing facts are omitted; and resolved
+  values are never revived from stale conversation preview JSON. Provider
+  context remains separately filtered by the existing context policy.
+- Full sensitive provider context requires both the artist setting and the
+  initiating operator's owner role. Shared and scheduled briefs always use the
+  redacted provider projection. Owner full-context chat turns carry an exact
+  source binding and durable `owner_only` visibility on both the initiating user
+  message and the assistant response. The initiating message is marked before
+  provider work starts; provider failure, rejected output, and deterministic
+  fallback therefore remain private too. The forward migration backfills both
+  sides of historical trace-bound full-context turns, quarantines conversations
+  with unmatched legacy requests, and neutralizes empty legacy titles.
+  Historical unbound turns still fail closed across the bounded window, and a
+  cached full-context brief is not reused as a shared brief.
+- Recommendations derived from an owner full-context turn are also owner-only.
+  A known recommendation ID does not let a non-owner mutate it. Normal/shared
+  follow-through and redacted provider history omit its private model prose;
+  accepted linked work may expose only a sanitized receipt derived from the
+  authoritative shared Task, Event, Project, or Approval.
+- Shared deterministic briefs/chat repeat suppression and member-visible
+  learning summaries exclude owner-only recommendation history, outcomes,
+  answer feedback, and recommendation reviews. Owners retain their private
+  history without allowing it to steer the band's shared view.
+- Feedback authorization is rechecked against the persisted message visibility
+  and the current linked-memory boundary immediately before the upsert. A
+  non-owner using a known hidden message ID receives generic not-found and
+  creates neither feedback nor audit history. Conversation projections return
+  `canSubmitFeedback=false` for hidden placeholders, so the web client does not
+  render a rating control.
+- Explicit remember requests are classified locally before provider routing.
+  `manager_memory_capture_v3` scans the complete submitted value before
+  truncation, including known credential-token shapes. Refused values are
+  replaced with a fixed redaction before message persistence and are never
+  supplied to OpenAI. New proposals bind the exact persisted source-message ID
+  and timestamp and acceptance rechecks both; legacy unbound proposals fail
+  closed. New fact identifiers are opaque SHA-256 digests, new memory audit
+  metadata omits them, and Activity/weekly-summary reads recursively remove
+  legacy memory-key fields without changing immutable audit rows. Conversation
+  titles, message bodies, action previews, continuity, response-review queues,
+  and provider history all re-apply the memory fact's current sensitivity and
+  archive state on read.
+- Conversational acceptance rejects an existing archived, sensitive, or
+  restricted fact for every role before any mutation or audit. Only an active
+  normal fact may be refreshed through the recommendation path; the explicit
+  owner-controlled memory editor remains the only path for private or archived
+  records.
+- Failed, simulated, and typed-but-orphaned receipts may be closed only with a
+  written human reconciliation note. The `reconciled` result closes the Manager
+  receipt without changing an Approval or claiming provider execution or
+  success. A claimed provider attempt with no known result remains read-only and
+  cannot be closed or retried from Manager. In a mixed approval batch, that
+  unknown attempt takes precedence over failed, rejected, or expired siblings
+  so a known sibling result cannot make the provider write retryable.
+- Rejected and expired approvals have a distinct terminal receipt presentation
+  and never offer Manager reconciliation. Note-backed closure remains limited
+  to blocked failures, simulations, and accepted typed-orphan receipts.
+- Every receipt exposes explicit `canMutate` and `canReconcile` capabilities.
+  A sanitized member receipt from owner-private work is navigation-only and
+  sets both false; the Manager UI uses those flags before showing Mark handled
+  or Close after review.
+- Recommendation acceptance, linked Task completion, and Decision review write
+  their recommendation lifecycle audits in the same database transaction as
+  the authoritative state change. Acceptance and Task completion retain their
+  serializable guards. A failed audit therefore rolls back the state transition
+  instead of leaving unaudited Manager work.
+
+Validation completed:
+
+- 199/199 compiled API tests across 194 top-level cases and 10/10 shared tests
+  pass.
+- All 4 disposable-Postgres workflows pass across 39 forward migrations,
+  including tenant isolation, reload, task and approval lifecycle, current
+  memory boundaries, durable message visibility, reconciliation constraints, and
+  transaction-bound audit coverage.
+- The `manager_os_v33` / `manager_evals_v37` offline gate passes all 81 checks
+  at 100% safety.
+- All 13 production-build Chromium journeys pass, including accept → durable
+  receipt → hard reload → destination → completion and the approval simulation
+  and reconciliation states.
+- The exact root typecheck, lint, unit-test, production-build, and Manager-eval
+  gate passes. The read-only relationship diagnostic reports zero integrity
+  issues across the explicit test database, and the rebuilt Compose bundle
+  passes API/web health, API readiness, host-visible auth-link, and session-
+  cookie smoke checks.
 
 ### P1 — Make approved and uncertain work visible (next)
 

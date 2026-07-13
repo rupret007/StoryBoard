@@ -527,6 +527,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal((await client.task.findUniqueOrThrow({ where: { id: capturedTask.id } })).status, "done");
   assert.equal((await client.managerRecommendation.findUniqueOrThrow({ where: { id: taskCaptureChat.recommendation.id } })).outcome, "completed");
   assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: capturedTask.id, action: "task.updated_from_manager_chat" } }), 2);
+  const managerTaskCompletionAudit = await client.auditEvent.findFirstOrThrow({ where: { artistId: artist.id, aggregateId: taskCaptureChat.recommendation.id, action: "manager.recommendation_completed" } });
+  assert.equal(managerTaskCompletionAudit.metadata.taskId, capturedTask.id);
+  assert.equal(managerTaskCompletionAudit.metadata.reason, "task_completed");
+  assert.equal(managerTaskCompletionAudit.metadata.source, "manager_task_update");
   const followThroughTask = await client.task.create({ data: { artistId: artist.id, title: "Confirm the integration buyer response" } });
   const blockedTaskChat = await manager.chat(artist.id, { conversationId: contextQuestionChat.conversationId, message: 'Block "Confirm the integration buyer response" because the buyer has not replied' }, operator.email, operator.id);
   assert.equal(blockedTaskChat.recommendation?.proposedAction?.operation, "block");
@@ -627,6 +631,9 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const memoryChat = await manager.chat(artist.id, { message: "Remember that Morgan handles production advances" }, operator.email, operator.id);
   assert.equal(memoryChat.recommendation?.proposedAction?.type, "remember_fact");
   assert.equal(memoryChat.recommendation?.proposedAction?.value, "Morgan handles production advances");
+  const memorySourceMessage = await client.managerMessage.findFirstOrThrow({ where: { id: memoryChat.recommendation.proposedAction.sourceMessageId, conversationId: memoryChat.conversationId, role: "user" } });
+  assert.equal(memoryChat.recommendation.proposedAction.sourceMessageCreatedAt, memorySourceMessage.createdAt.toISOString());
+  assert.equal(memorySourceMessage.content, "Remember that Morgan handles production advances");
   assert.equal(memoryChat.message.proposedActions[0]?.preview, "Morgan handles production advances");
   const whyMemoryChat = await manager.chat(artist.id, { conversationId: memoryChat.conversationId, message: "Why that?" }, operator.email, operator.id);
   assert.match(whyMemoryChat.message.content, /recorded reason/i);
@@ -700,11 +707,59 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const acceptedRecommendation = await manager.recommendation(artist.id, actionable.id, "accepted", {}, operator.email, operator.id);
   assert.ok(acceptedRecommendation.taskId);
   assert.equal((await client.task.findUniqueOrThrow({ where: { id: acceptedRecommendation.taskId } })).initiativeId, actionInitiative.id);
+  const siblingRecommendation = await client.managerRecommendation.create({
+    data: {
+      managerRunId: actionable.managerRunId,
+      stableKey: `${actionable.stableKey}-same-task`,
+      workstream: actionable.workstream,
+      title: "Verify the measured campaign result",
+      reason: "The same tracked task resolves this follow-up.",
+      nextAction: "Complete the linked task.",
+      priority: actionable.priority,
+      evidence: [acceptedRecommendation.taskId],
+      outcome: "accepted",
+      outcomeReason: "accepted",
+      outcomeAt: new Date(),
+      taskId: acceptedRecommendation.taskId
+    }
+  });
   const taskService = new tasksMod.TasksService(prisma, audit);
   await taskService.patch(artist.id, acceptedRecommendation.taskId, { status: "done" }, operator.email, operator.id);
-  const completedRecommendation = await client.managerRecommendation.findUniqueOrThrow({ where: { id: actionable.id } });
+  const [completedRecommendation, completedSibling] = await Promise.all([
+    client.managerRecommendation.findUniqueOrThrow({ where: { id: actionable.id } }),
+    client.managerRecommendation.findUniqueOrThrow({ where: { id: siblingRecommendation.id } })
+  ]);
   assert.equal(completedRecommendation.outcome, "completed");
   assert.equal(completedRecommendation.outcomeReason, "task_completed");
+  assert.equal(completedSibling.outcome, "completed");
+  assert.equal(completedSibling.outcomeReason, "task_completed");
+  const completionAuditWhere = {
+    artistId: artist.id,
+    aggregateType: "ManagerRecommendation",
+    aggregateId: { in: [actionable.id, siblingRecommendation.id] },
+    action: "manager.recommendation_completed"
+  };
+  const completionAudits = await client.auditEvent.findMany({ where: completionAuditWhere, orderBy: { createdAt: "asc" } });
+  assert.equal(completionAudits.length, 2);
+  assert.deepEqual(completionAudits.map((row) => row.aggregateId).sort(), [actionable.id, siblingRecommendation.id].sort());
+  for (const event of completionAudits) {
+    assert.equal(event.actorOperatorId, operator.id);
+    assert.equal(event.metadata.reason, "task_completed");
+    assert.equal(event.metadata.taskId, acceptedRecommendation.taskId);
+    assert.equal(event.metadata.source, "task_status_transition");
+  }
+  const completionTaskAudit = await client.auditEvent.findFirstOrThrow({
+    where: { artistId: artist.id, aggregateType: "Task", aggregateId: acceptedRecommendation.taskId, action: "task.updated" },
+    orderBy: { createdAt: "desc" }
+  });
+  assert.equal(completionTaskAudit.metadata.managerRecommendationsCompleted, 2);
+  await taskService.patch(artist.id, acceptedRecommendation.taskId, { status: "done" }, operator.email, operator.id);
+  assert.equal(await client.auditEvent.count({ where: completionAuditWhere }), 2);
+  const repeatTaskAudit = await client.auditEvent.findFirstOrThrow({
+    where: { artistId: artist.id, aggregateType: "Task", aggregateId: acceptedRecommendation.taskId, action: "task.updated" },
+    orderBy: { createdAt: "desc" }
+  });
+  assert.equal(repeatTaskAudit.metadata.managerRecommendationsCompleted, 0);
   const staleGoal = await manager.createGoal(artist.id, { workstream: "audience", title: "Test a second audience loop", targetValue: 1, targetUnit: "experiment", currentValue: 0, measurementKind: "manual", deadline: new Date(Date.now() + 75 * 86400000).toISOString(), status: "active" }, operator.email, operator.id);
   const staleInitiative = await manager.createInitiative(artist.id, { goalId: staleGoal.id, workstream: "audience", title: "Second audience loop", status: "active", dueAt: new Date(Date.now() + 60 * 86400000).toISOString() }, operator.email, operator.id);
   const staleBrief = await manager.generateBrief(artist.id, "daily", operator.email, operator.id);
@@ -780,7 +835,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const refreshedBrief = await manager.generateBrief(artist.id, "daily", operator.email, operator.id);
   assert.equal(refreshedBrief.recommendations.some((recommendation) => recommendation.stableKey === actionable.stableKey), false);
   const learning = await manager.learningSummary(artist.id);
-  assert.equal(learning.completed, 11);
+  assert.equal(learning.completed, 12);
   if (dismissible) assert.equal(learning.dismissalReasons[0]?.reason, "wrong_priority");
   assert.equal(learning.recommendationReviews.total, 0);
   const recommendationReviewQueue = await manager.recommendationEvalReview(artist.id, 10);
@@ -824,6 +879,13 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(completedDecisionRecommendation.outcome, "completed");
   assert.equal(completedDecisionRecommendation.outcomeReason, "decision_reviewed");
   assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: conversationDecision.id, action: "manager.decision_draft_created" } }), 1);
+  const decisionRecommendationAudit = await client.auditEvent.findFirstOrThrow({
+    where: { artistId: artist.id, aggregateType: "ManagerRecommendation", aggregateId: decisionChat.recommendation.id, action: "manager.recommendation_completed" }
+  });
+  assert.equal(decisionRecommendationAudit.actorOperatorId, operator.id);
+  assert.equal(decisionRecommendationAudit.metadata.reason, "decision_reviewed");
+  assert.equal(decisionRecommendationAudit.metadata.decisionId, conversationDecision.id);
+  assert.equal(decisionRecommendationAudit.metadata.source, "decision_review");
 
   const decision = await manager.createDecision(artist.id, { workstream: "live", title: "Which nearby market should get the next sprint?", context: "The band has one open weekend", options: [{ label: "Milwaukee", tradeoff: "Lower travel cost and a smaller venue list" }, { label: "Detroit", tradeoff: "Higher travel cost and a stronger genre fit" }], evidence: [] }, operator.email, operator.id);
   await assert.rejects(() => manager.patchDecision(foreignArtist.id, decision.id, { choice: "Milwaukee", rationale: "Closer", expectedOutcome: "Draw 75 people", reviewAt: "2026-08-15T12:00:00.000Z" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -1269,4 +1331,432 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(goalPathRun.trace.goalPath.providerBypassed, true);
   const actions = await client.auditEvent.findMany({ where: { artistId: artist.id }, select: { action: true } });
   for (const expected of ["manager.intake_completed", "manager.profile_updated", "manager.profile_context_updated", "manager.plan_ensured", "manager.settings_updated", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "task.created_from_manager_chat", "task.updated_from_manager_chat", "task.assigned_from_manager_chat", "project.created_from_manager_chat", "event.created_from_manager_chat", "event.availability_recorded_from_manager_chat", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.schedule_item_created", "event.schedule_item_updated", "event.schedule_item_removed", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
+});
+
+test("database integration: manager follow-through reconciles durable work without crossing artists", async () => {
+  const [artist, foreignArtist] = await Promise.all([
+    client.artist.create({ data: { name: "Follow-through Band", slug: "follow-through-band-test" } }),
+    client.artist.create({ data: { name: "Foreign Follow-through Band", slug: "foreign-follow-through-band-test" } })
+  ]);
+  const operator = await client.operator.create({ data: { email: "follow-through-owner@test.invalid" } });
+  await client.artistMembership.create({ data: { artistId: artist.id, operatorId: operator.id, role: "owner" } });
+  const managerApprovals = new approvalsMod.ApprovalsService(
+    prisma,
+    audit,
+    { resolveForArtist: async () => mockAdaptersMod.mockAdapters },
+    { enqueueApprovalNotify: async () => undefined }
+  );
+  const manager = new managerMod.ManagerService(prisma, audit, { get: () => false }, managerApprovals);
+  const taskService = new tasksMod.TasksService(prisma, audit);
+  const run = await client.managerRun.create({
+    data: {
+      artistId: artist.id,
+      cadence: "conversational",
+      mode: "deterministic_task_capture",
+      promptVersion: "manager_os_v32",
+      inputFacts: {},
+      output: {},
+      trace: {}
+    }
+  });
+  const taskRecommendation = await client.managerRecommendation.create({
+    data: {
+      managerRunId: run.id,
+      stableKey: "follow-through-create-task",
+      workstream: "relationships",
+      title: "Confirm the buyer response",
+      reason: "The buyer response is still unrecorded.",
+      nextAction: "Record the buyer's answer.",
+      priority: "high",
+      evidence: [],
+      proposedAction: { type: "create_task", title: "Confirm the buyer response", dueAt: null, initiativeId: null }
+    }
+  });
+  const conversation = await client.managerConversation.create({
+    data: { artistId: artist.id, title: "Buyer follow-through" }
+  });
+  await client.managerMessage.create({
+    data: {
+      conversationId: conversation.id,
+      managerRunId: run.id,
+      role: "assistant",
+      content: "Confirm the buyer response next.",
+      citations: [],
+      proposedActions: [{
+        recommendationId: taskRecommendation.id,
+        title: taskRecommendation.title,
+        nextAction: taskRecommendation.nextAction,
+        outcome: "suggested",
+        actionType: "create_task"
+      }]
+    }
+  });
+
+  const accepted = await manager.recommendation(
+    artist.id,
+    taskRecommendation.id,
+    "accepted",
+    {},
+    operator.email,
+    operator.id
+  );
+  assert.ok(accepted.taskId);
+  const initialProjection = await manager.followThrough(artist.id);
+  assert.equal(initialProjection.policyVersion, "manager_follow_through_v1");
+  const readyItem = initialProjection.items.find((item) => item.recommendationId === taskRecommendation.id);
+  assert.ok(readyItem, JSON.stringify(initialProjection));
+  assert.equal(readyItem.state, "in_motion");
+  assert.equal(readyItem.stage, "task_ready");
+  assert.equal(readyItem.target?.kind, "task");
+  assert.equal(readyItem.target?.id, accepted.taskId);
+  assert.match(readyItem.destination?.href ?? "", /^\/tasks(?:\?|$)/);
+
+  const acceptedReload = await manager.conversation(artist.id, conversation.id, operator.id);
+  const acceptedAction = acceptedReload.messages.flatMap((message) => message.proposedActions).find((action) => action.recommendationId === taskRecommendation.id);
+  assert.ok(acceptedAction);
+  assert.equal(acceptedAction.outcome, "accepted");
+  assert.equal(acceptedAction.followThrough?.target?.id, accepted.taskId);
+  assert.equal(acceptedAction.followThrough?.stage, "task_ready");
+
+  await client.task.update({
+    where: { id: accepted.taskId },
+    data: { status: "blocked", blockedReason: "The buyer has not replied", waitingOn: "Buyer" }
+  });
+  const blockedProjection = await manager.followThrough(artist.id);
+  const blockedItem = blockedProjection.items.find((item) => item.recommendationId === taskRecommendation.id);
+  assert.ok(blockedItem, JSON.stringify(blockedProjection));
+  assert.equal(blockedItem.state, "blocked");
+  assert.equal(blockedItem.stage, "waiting_external");
+  assert.equal(blockedItem.target?.status, "blocked");
+  assert.match(`${blockedItem.detail} ${blockedItem.nextAction}`, /buyer/i);
+
+  await taskService.patch(
+    artist.id,
+    accepted.taskId,
+    { status: "done" },
+    operator.email,
+    operator.id
+  );
+  const reconciledRecommendation = await client.managerRecommendation.findUniqueOrThrow({ where: { id: taskRecommendation.id } });
+  assert.equal(reconciledRecommendation.outcome, "completed");
+  assert.equal(reconciledRecommendation.outcomeReason, "task_completed");
+  const completedProjection = await manager.followThrough(artist.id);
+  const completedItem = completedProjection.items.find((item) => item.recommendationId === taskRecommendation.id);
+  assert.ok(completedItem, JSON.stringify(completedProjection));
+  assert.equal(completedItem.state, "completed");
+  assert.equal(completedItem.stage, "internal_change_complete");
+  const completedReload = await manager.conversation(artist.id, conversation.id, operator.id);
+  const completedAction = completedReload.messages.flatMap((message) => message.proposedActions).find((action) => action.recommendationId === taskRecommendation.id);
+  assert.equal(completedAction?.outcome, "completed");
+  assert.equal(completedAction?.followThrough?.state, "completed");
+
+  const taskCountBeforeHandled = await client.task.count({ where: { artistId: artist.id } });
+  const actionlessRecommendation = await client.managerRecommendation.create({
+    data: {
+      managerRunId: run.id,
+      stableKey: "follow-through-actionless",
+      workstream: "business",
+      title: "Review the band's positioning",
+      reason: "The positioning may need discussion.",
+      nextAction: "Discuss it with the band.",
+      priority: "med",
+      evidence: []
+    }
+  });
+  await assert.rejects(
+    () => manager.recommendation(
+      artist.id,
+      actionlessRecommendation.id,
+      "accepted",
+      {},
+      operator.email,
+      operator.id
+    ),
+    /no trackable action/i
+  );
+  assert.equal(
+    (await client.managerRecommendation.findUniqueOrThrow({ where: { id: actionlessRecommendation.id } })).outcome,
+    "suggested"
+  );
+  assert.equal(await client.task.count({ where: { artistId: artist.id } }), taskCountBeforeHandled);
+  const handled = await manager.recommendation(
+    artist.id,
+    actionlessRecommendation.id,
+    "completed",
+    { reason: "already_handled" },
+    operator.email,
+    operator.id
+  );
+  assert.equal(handled.outcome, "completed");
+  assert.equal(handled.outcomeReason, "already_handled");
+  assert.equal(handled.taskId, null);
+  assert.equal(await client.task.count({ where: { artistId: artist.id } }), taskCountBeforeHandled);
+  const handledProjection = await manager.followThrough(artist.id);
+  const handledItem = handledProjection.items.find((item) => item.recommendationId === actionlessRecommendation.id);
+  assert.equal(handledItem?.state, "completed");
+  assert.equal(handledItem?.stage, "internal_change_complete");
+  assert.equal(handledItem?.destination, null);
+
+  const approvalRun = await client.managerRun.create({
+    data: {
+      artistId: artist.id,
+      cadence: "daily",
+      mode: "deterministic",
+      promptVersion: "manager_os_v32",
+      inputFacts: {},
+      output: {},
+      trace: {}
+    }
+  });
+  const approvalSpecs = [
+    { status: "pending", title: "Await logistics approval", stableKey: "follow-through-pending-approval", attempted: false },
+    { status: "approved", title: "Execute approved logistics", stableKey: "follow-through-approved-ready", attempted: false },
+    { status: "approved", title: "Reconcile claimed logistics", stableKey: "follow-through-approved-unknown", attempted: true }
+  ];
+  const approvalRecommendations = await Promise.all(approvalSpecs.map(({ title, stableKey }) => client.managerRecommendation.create({
+    data: {
+      managerRunId: approvalRun.id,
+      stableKey,
+      workstream: "live",
+      title,
+      reason: "External logistics require review.",
+      nextAction: "Review the approval state.",
+      priority: "high",
+      evidence: [],
+      outcome: "accepted",
+      outcomeReason: "approval_prepared",
+      outcomeAt: new Date()
+    }
+  })));
+  await Promise.all(approvalRecommendations.map((recommendation, index) => client.approvalRequest.create({
+    data: {
+      artistId: artist.id,
+      managerRecommendationId: recommendation.id,
+      title: recommendation.title,
+      status: approvalSpecs[index].status,
+      actionType: "google_calendar_create",
+      payload: { fixture: true },
+      approvedAt: approvalSpecs[index].status === "approved" ? new Date() : null,
+      executionAttemptedAt: approvalSpecs[index].attempted ? new Date() : null
+    }
+  })));
+  const approvalProjection = await manager.followThrough(artist.id);
+  const approvalStages = Object.fromEntries(
+    approvalRecommendations.map((recommendation) => [
+      recommendation.id,
+      approvalProjection.items.find((item) => item.recommendationId === recommendation.id)?.stage
+    ])
+  );
+  assert.equal(approvalStages[approvalRecommendations[0].id], "awaiting_approval");
+  assert.equal(approvalStages[approvalRecommendations[1].id], "awaiting_execution");
+  assert.equal(approvalStages[approvalRecommendations[2].id], "execution_unknown");
+
+  const simulatedRecommendation = await client.managerRecommendation.create({
+    data: {
+      managerRunId: approvalRun.id,
+      stableKey: "follow-through-simulated-approval",
+      workstream: "live",
+      title: "Verify simulated calendar delivery",
+      reason: "The logistics approval ran through a mock adapter.",
+      nextAction: "Verify the real provider before relying on the result.",
+      priority: "high",
+      evidence: [],
+      outcome: "blocked",
+      outcomeReason: "approval_simulated",
+      outcomeAt: new Date()
+    }
+  });
+  await client.approvalRequest.create({
+    data: {
+      artistId: artist.id,
+      managerRecommendationId: simulatedRecommendation.id,
+      title: simulatedRecommendation.title,
+      status: "executed",
+      actionType: "google_calendar_create",
+      payload: { fixture: true, simulated: true },
+      approvedAt: new Date(),
+      executionAttemptedAt: new Date()
+    }
+  });
+  const simulatedProjection = await manager.followThrough(artist.id);
+  const simulatedItem = simulatedProjection.items.find((item) => item.recommendationId === simulatedRecommendation.id);
+  assert.ok(simulatedItem, JSON.stringify(simulatedProjection));
+  assert.equal(simulatedItem.state, "blocked");
+  assert.equal(simulatedItem.stage, "approval_simulated");
+  assert.equal(simulatedItem.outcomeReason, "approval_simulated");
+  const simulatedAfterProjection = await client.managerRecommendation.findUniqueOrThrow({ where: { id: simulatedRecommendation.id } });
+  assert.equal(simulatedAfterProjection.outcome, "blocked");
+  assert.equal(simulatedAfterProjection.outcomeReason, "approval_simulated");
+
+  await assert.rejects(
+    () => manager.recommendation(artist.id, approvalRecommendations[2].id, "completed", { reason: "reconciled", note: "I cannot verify the claimed provider result" }, operator.email, operator.id),
+    /cannot be closed or retried/i
+  );
+  const reconciledSimulation = await manager.recommendation(
+    artist.id,
+    simulatedRecommendation.id,
+    "completed",
+    { reason: "reconciled", note: "Reviewed the simulation and prepared a separate real-provider check" },
+    operator.email,
+    operator.id
+  );
+  assert.equal(reconciledSimulation.outcome, "completed");
+  assert.equal(reconciledSimulation.outcomeReason, "reconciled");
+  assert.equal(reconciledSimulation.followThrough?.stage, "reconciled");
+  assert.match(reconciledSimulation.followThrough?.detail ?? "", /not evidence/i);
+
+  const failedRecommendation = await client.managerRecommendation.create({
+    data: {
+      managerRunId: approvalRun.id,
+      stableKey: "follow-through-failed-approval",
+      workstream: "live",
+      title: "Replace failed calendar delivery",
+      reason: "The provider request failed.",
+      nextAction: "Review a replacement request.",
+      priority: "high",
+      evidence: [],
+      outcome: "blocked",
+      outcomeReason: "approval_failed",
+      outcomeAt: new Date()
+    }
+  });
+  await client.approvalRequest.create({ data: { artistId: artist.id, managerRecommendationId: failedRecommendation.id, title: failedRecommendation.title, status: "failed", actionType: "google_calendar_create", payload: { fixture: true }, executionAttemptedAt: new Date() } });
+  const reconciledFailure = await manager.recommendation(artist.id, failedRecommendation.id, "completed", { reason: "reconciled", note: "Reviewed the failure and replaced it with a separately approved request" }, operator.email, operator.id);
+  assert.equal(reconciledFailure.followThrough?.stage, "reconciled");
+
+  const orphanedRecommendation = await client.managerRecommendation.create({
+    data: {
+      managerRunId: approvalRun.id,
+      stableKey: "follow-through-orphaned-action",
+      workstream: "business",
+      title: "Track the reviewed internal action",
+      reason: "The linked record was removed.",
+      nextAction: "Reconcile the missing record.",
+      priority: "med",
+      evidence: [],
+      proposedAction: { type: "create_task", title: "Track the reviewed internal action", dueAt: null, initiativeId: null },
+      outcome: "accepted",
+      outcomeReason: "accepted",
+      outcomeAt: new Date()
+    }
+  });
+  const orphanedProjection = await manager.followThrough(artist.id);
+  assert.equal(orphanedProjection.items.find((item) => item.recommendationId === orphanedRecommendation.id)?.stage, "needs_tracking");
+  const reconciledOrphan = await manager.recommendation(artist.id, orphanedRecommendation.id, "completed", { reason: "reconciled", note: "Confirmed the removed record is obsolete and no replacement work remains" }, operator.email, operator.id);
+  assert.equal(reconciledOrphan.followThrough?.stage, "reconciled");
+  const reconciliationAudits = await client.auditEvent.findMany({ where: { artistId: artist.id, aggregateType: "ManagerRecommendation", action: "manager.recommendation_completed" } });
+  assert.ok(reconciliationAudits.some((event) => event.aggregateId === simulatedRecommendation.id && event.metadata?.reason === "reconciled"));
+  assert.ok(reconciliationAudits.some((event) => event.aggregateId === failedRecommendation.id && event.metadata?.reason === "reconciled"));
+  assert.ok(reconciliationAudits.some((event) => event.aggregateId === orphanedRecommendation.id && event.metadata?.reason === "reconciled"));
+
+  const memoryValue = "Morgan uses the violet-room phrase for rehearsal access";
+  const memoryChat = await manager.chat(
+    artist.id,
+    { message: `Remember that ${memoryValue}` },
+    operator.email,
+    operator.id
+  );
+  assert.equal(memoryChat.recommendation?.proposedAction?.type, "remember_fact");
+  const acceptedMemory = await manager.recommendation(
+    artist.id,
+    memoryChat.recommendation.id,
+    "accepted",
+    {},
+    operator.email,
+    operator.id
+  );
+  assert.ok(acceptedMemory.memoryFactId);
+  await client.managerMemoryFact.update({
+    where: { id: acceptedMemory.memoryFactId },
+    data: { sensitivity: "restricted" }
+  });
+  const memberConversation = await manager.conversation(artist.id, memoryChat.conversationId, operator.id, false);
+  assert.equal(memberConversation.title, "Private Manager memory");
+  assert.equal(memberConversation.messages.some((message) => message.content.includes(memoryValue)), false);
+  assert.equal(memberConversation.messages.flatMap((message) => message.proposedActions).length, 0);
+  const memberSummaries = await manager.conversations(artist.id, 20, false);
+  assert.equal(memberSummaries.find((item) => item.id === memoryChat.conversationId)?.title, "Private Manager memory");
+  const ownerConversation = await manager.conversation(artist.id, memoryChat.conversationId, operator.id, true);
+  assert.equal(ownerConversation.messages.some((message) => message.content.includes(memoryValue)), true);
+  await client.managerMemoryFact.update({
+    where: { id: acceptedMemory.memoryFactId },
+    data: { archivedAt: new Date() }
+  });
+  const archivedOwnerConversation = await manager.conversation(artist.id, memoryChat.conversationId, operator.id, true);
+  assert.equal(archivedOwnerConversation.title, "Private Manager memory");
+  assert.equal(archivedOwnerConversation.messages.some((message) => message.content.includes(memoryValue)), false);
+  assert.equal(archivedOwnerConversation.messages.flatMap((message) => message.proposedActions).length, 0);
+
+  await client.managerSettings.update({
+    where: { artistId: artist.id },
+    data: { aiEnabled: true, fullContextEnabled: true }
+  });
+  const privatePrompt = "Use the owner-only guarantee ceiling 98765 when weighing this choice";
+  const privateFallbackChat = await manager.chat(
+    artist.id,
+    { message: privatePrompt },
+    operator.email,
+    operator.id,
+    true
+  );
+  const privateFallbackMessages = await client.managerMessage.findMany({
+    where: { conversationId: privateFallbackChat.conversationId },
+    orderBy: { createdAt: "asc" }
+  });
+  assert.equal(privateFallbackMessages.length, 2);
+  assert.equal(privateFallbackMessages.every((message) => message.visibility === "owner_only"), true);
+  const privateFallbackRun = await client.managerRun.findUniqueOrThrow({ where: { id: privateFallbackChat.message.managerRunId } });
+  assert.equal(privateFallbackRun.trace.providerContext.fullContextEnabled, true);
+  assert.equal(privateFallbackRun.trace.providerContext.outputUsed, false);
+  const privateFallbackMemberView = await manager.conversation(artist.id, privateFallbackChat.conversationId, operator.id, false);
+  assert.equal(JSON.stringify(privateFallbackMemberView).includes("98765"), false);
+  const privateFallbackOwnerView = await manager.conversation(artist.id, privateFallbackChat.conversationId, operator.id, true);
+  assert.equal(JSON.stringify(privateFallbackOwnerView).includes("98765"), true);
+
+  const interruptedConversation = await client.managerConversation.create({ data: { artistId: artist.id, title: "Interrupted private request 24680" } });
+  await client.managerMessage.create({ data: { conversationId: interruptedConversation.id, operatorId: operator.id, role: "user", visibility: "owner_only", content: "Interrupted private request 24680" } });
+  const interruptedMemberView = await manager.conversation(artist.id, interruptedConversation.id, operator.id, false);
+  assert.equal(interruptedMemberView.title, "Private Manager memory");
+  assert.equal(JSON.stringify(interruptedMemberView).includes("24680"), false);
+  const interruptedOwnerView = await manager.conversation(artist.id, interruptedConversation.id, operator.id, true);
+  assert.equal(JSON.stringify(interruptedOwnerView).includes("24680"), true);
+  await client.managerSettings.update({
+    where: { artistId: artist.id },
+    data: { aiEnabled: false, fullContextEnabled: false }
+  });
+
+  const foreignRun = await client.managerRun.create({
+    data: {
+      artistId: foreignArtist.id,
+      cadence: "daily",
+      mode: "deterministic",
+      promptVersion: "manager_os_v32",
+      inputFacts: {},
+      output: {},
+      trace: {}
+    }
+  });
+  const foreignRecommendation = await client.managerRecommendation.create({
+    data: {
+      managerRunId: foreignRun.id,
+      stableKey: "foreign-follow-through",
+      workstream: "live",
+      title: "Foreign follow-through",
+      reason: "Foreign fixture.",
+      nextAction: "Do not expose this.",
+      priority: "high",
+      evidence: [],
+      outcome: "accepted",
+      outcomeReason: "accepted",
+      outcomeAt: new Date()
+    }
+  });
+  const ownedProjection = await manager.followThrough(artist.id);
+  const foreignProjection = await manager.followThrough(foreignArtist.id);
+  assert.equal(ownedProjection.items.some((item) => item.recommendationId === foreignRecommendation.id), false);
+  assert.equal(foreignProjection.items.some((item) => item.recommendationId === taskRecommendation.id), false);
+  await assert.rejects(
+    () => manager.conversation(foreignArtist.id, conversation.id, operator.id),
+    (error) => error?.getStatus?.() === 404
+  );
 });

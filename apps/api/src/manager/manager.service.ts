@@ -13,6 +13,7 @@ import {
   deterministicManagerChat,
   deterministicManagerPlanHealth,
   mergeManagerBriefCandidates,
+  managerQuestionAsksAboutFollowThrough,
   managerQuestionAsksAboutPlanHealth,
   managerRecommendationIsSuppressed,
   prioritizeManagerBrief,
@@ -35,10 +36,10 @@ import { deterministicManagerOutcomeReview } from "./manager-outcome-review";
 import { deterministicManagerContextHealth } from "./manager-context-health";
 import { deterministicManagerCommitmentHealth, managerQuestionAsksAboutCommitments } from "./manager-commitment-health";
 import { managerScheduleKey, managerScheduleSlot } from "./manager-schedule";
-import { managerProviderContextPolicy, projectManagerMemoryForProvider } from "./manager-provider-context";
+import { managerFullProviderContextEnabled, managerProviderContextPolicy, managerRunFullContextSourceBinding, projectManagerMemoryForProvider } from "./manager-provider-context";
 import { deterministicManagerKnowledgeHealth, isProfileBackedMemoryKey, managerProfileMemoryValues, projectManagerMemoryForReasoning } from "./manager-knowledge-health";
 import { deterministicManagerGoalMeasurement, deterministicManagerGoalMeasurements } from "./manager-goal-measurement";
-import { managerMemoryCaptureMatches } from "./manager-memory-capture";
+import { MANAGER_MEMORY_CAPTURE_POLICY_VERSION, managerMemoryCaptureMatches, managerMemoryCapturePolicy } from "./manager-memory-capture";
 import { MANAGER_COACHING_POLICY_VERSION, managerCoachingTopics, managerUnrecognizedCoachingTopic } from "./manager-coaching";
 import { currentManagerMemberCheckIn, deterministicManagerTeamLoad, managerTaskMayReceiveAssignment } from "./manager-team-load";
 import { deterministicManagerWorkSequence, managerQuestionAsksAboutWorkSequence } from "./manager-work-sequence";
@@ -56,6 +57,8 @@ import { managerConversationTaskAssignmentActionMatchesMessage, managerConversat
 import { managerConversationProjectActionMatchesMessage, managerConversationProjectDueAt, managerConversationProjectRecommendation, managerConversationProjectTypes, managerProjectCapturePreview, MANAGER_PROJECT_CAPTURE_POLICY_VERSION, normalizeManagerProjectName, resolveManagerProjectCapture, type ManagerConversationProjectAction } from "./manager-project-capture";
 import { managerConversationEventActionMatchesMessage, managerConversationEventRecommendation, managerConversationEventStatuses, managerConversationEventTypes, managerEventCapturePreview, MANAGER_EVENT_CAPTURE_POLICY_VERSION, normalizeManagerEventTitle, resolveManagerEventCapture, type ManagerConversationEventAction } from "./manager-event-capture";
 import { managerConversationEventAvailabilityActionMatchesMessage, managerConversationEventAvailabilityRecommendation, managerEventAvailabilityPreview, managerEventAvailabilityResponses, managerMessageIsEventAvailabilityIntent, MANAGER_EVENT_AVAILABILITY_POLICY_VERSION, resolveManagerEventAvailability, type ManagerConversationEventAvailabilityAction, type ManagerEventAvailabilityEvent, type ManagerEventAvailabilityMember } from "./manager-event-availability";
+import { hydrateManagerMessageActions, managerRecommendationActionType, managerRecommendationMetadataIsVisible, projectManagerFollowThrough, projectManagerFollowThroughForProvider, summarizeManagerFollowThrough } from "./manager-follow-through";
+import { managerConversationAssistantMessageIsVisible, managerConversationReasoningVisibility, managerConversationRecommendationIsVisible, managerMemoryRecommendationSourceBinding, managerRunIsVisible, projectManagerConversationMessages, type ManagerConversationVisibility } from "./manager-conversation-visibility";
 
 const PROMPT_VERSION = MANAGER_PROMPT_VERSION;
 const MANAGER_FACT_AGGREGATES = [
@@ -77,7 +80,14 @@ const eventLogisticsActionSchema = z.object({
   retryChannels: z.array(z.enum(["calendar", "drive"])).max(2)
 }).strict();
 const projectPlanActionSchema = z.object({ type: z.literal("generate_project_plan"), projectId: z.string().min(1) }).strict();
-const rememberFactActionSchema = z.object({ type: z.literal("remember_fact"), key: z.string().regex(/^operator_note_[a-z0-9_]{1,66}$/), label: z.string().min(1).max(120), value: z.string().min(3).max(1000) }).strict();
+const rememberFactActionSchema = z.object({
+  type: z.literal("remember_fact"),
+  sourceMessageId: z.string().min(1).max(128),
+  sourceMessageCreatedAt: z.string().datetime({ offset: true }),
+  key: z.string().regex(/^operator_note_[a-z0-9_]{1,66}$/),
+  label: z.string().min(1).max(120),
+  value: z.string().min(3).max(1000)
+}).strict();
 const assignTaskActionSchema = z.object({ type: z.literal("assign_task"), taskId: z.string().min(1), bandMemberId: z.string().min(1), checkInId: z.string().min(1).nullable(), availability: z.enum(["available", "limited", "unknown"]) }).strict();
 const profileContextActionBase = { type: z.literal("update_profile_context"), profileId: z.string().min(1), profileUpdatedAt: z.string().datetime({ offset: true }), gapCode: z.string().min(1).max(80) } as const;
 const profileContextActionSchema = z.discriminatedUnion("field", [
@@ -175,6 +185,26 @@ const chatOutputSchema = z.object({
   citations: z.array(z.string()).max(10),
   recommendation: itemSchema.nullable()
 }).strict();
+const managerFollowThroughRecommendationSelect = {
+  id: true,
+  title: true,
+  workstream: true,
+  priority: true,
+  outcome: true,
+  outcomeReason: true,
+  nextAction: true,
+  proposedAction: true,
+  createdAt: true,
+  updatedAt: true,
+  outcomeAt: true,
+  task: { select: { id: true, title: true, status: true, dueAt: true, updatedAt: true, blockedReason: true, waitingOn: true } },
+  decision: { select: { id: true, title: true, status: true, needsFraming: true, reviewAt: true, updatedAt: true } },
+  project: { select: { id: true, name: true, status: true, dueAt: true, updatedAt: true } },
+  event: { select: { id: true, title: true, status: true, startsAt: true, updatedAt: true } },
+  memoryFact: { select: { id: true, key: true, sensitivity: true, archivedAt: true, updatedAt: true } },
+  approvals: { select: { id: true, title: true, status: true, actionType: true, executionAttemptedAt: true, approvedAt: true, updatedAt: true }, orderBy: { updatedAt: "desc" as const } },
+  managerRun: { select: { trace: true, message: { select: { visibility: true } } } }
+} as const;
 type Brief = z.infer<typeof briefSchema>;
 type ScheduledBriefPersistence = {
   settingsId: string;
@@ -353,10 +383,24 @@ export class ManagerService {
     const row = await this.prisma.client.$transaction(async (tx) => {
       const result = await tx.managerDecision.updateMany({ where: { id, artistId, status: "decided", reviewedAt: null, updatedAt: current.updatedAt }, data: { status: "reviewed", reviewOutcome: input.outcome, reviewNote: input.note, reviewEvidence: input.evidence, reviewedAt: new Date() } });
       if (result.count !== 1) throw new BadRequestException("This decision has already been reviewed");
-      await tx.managerRecommendation.updateMany({ where: { decisionId: id, outcome: "accepted" }, data: { outcome: "completed", outcomeReason: "decision_reviewed", outcomeAt: new Date() } });
-      return tx.managerDecision.findUniqueOrThrow({ where: { id } });
+      const completedRecommendations = await tx.managerRecommendation.updateManyAndReturn({
+        where: { decisionId: id, outcome: "accepted", managerRun: { artistId } },
+        data: { outcome: "completed", outcomeReason: "decision_reviewed", outcomeAt: new Date() },
+        select: { id: true }
+      });
+      for (const recommendation of completedRecommendations) await this.audit.log({
+        artistId,
+        aggregateType: "ManagerRecommendation",
+        aggregateId: recommendation.id,
+        action: "manager.recommendation_completed",
+        actorLabel,
+        actorOperatorId,
+        metadata: { decisionId: id, reason: "decision_reviewed", source: "decision_review" }
+      }, tx);
+      const reviewed = await tx.managerDecision.findUniqueOrThrow({ where: { id } });
+      await this.audit.log({ artistId, aggregateType: "ManagerDecision", aggregateId: id, action: "manager.decision_reviewed", actorLabel, actorOperatorId, metadata: { choice: reviewed.choice, reviewOutcome: reviewed.reviewOutcome } }, tx);
+      return reviewed;
     });
-    await this.audit.log({ artistId, aggregateType: "ManagerDecision", aggregateId: id, action: "manager.decision_reviewed", actorLabel, actorOperatorId, metadata: { choice: row.choice, reviewOutcome: row.reviewOutcome } });
     return row;
   }
 
@@ -465,47 +509,101 @@ export class ManagerService {
       ...(input.sensitivity ? { sensitivity: input.sensitivity } : {})
     };
     const row = await this.prisma.client.managerMemoryFact.update({ where: { id }, data });
-    await this.audit.log({ artistId, aggregateType: "ManagerMemoryFact", aggregateId: id, action: input.archived ? "manager.memory_archived" : "manager.memory_corrected", actorLabel, actorOperatorId, metadata: { key: current.key, fields: Object.keys(input), sensitivity: row.sensitivity } });
+    await this.audit.log({ artistId, aggregateType: "ManagerMemoryFact", aggregateId: id, action: input.archived ? "manager.memory_archived" : "manager.memory_corrected", actorLabel, actorOperatorId, metadata: { fields: Object.keys(input), sensitivity: row.sensitivity } });
     return row;
   }
 
-  async learningSummary(artistId: string) {
+  async followThrough(artistId: string, observedAt = new Date(), includeSensitive = false) {
+    const completedSince = new Date(observedAt.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const recentlyResolved = [
+      { outcomeAt: { gte: completedSince } },
+      { outcomeAt: null, updatedAt: { gte: completedSince } }
+    ];
+    const rows = await this.prisma.client.managerRecommendation.findMany({
+      where: {
+        managerRun: { artistId },
+        OR: [
+          { outcome: { in: [ManagerRecommendationOutcome.accepted, ManagerRecommendationOutcome.blocked] } },
+          { outcome: ManagerRecommendationOutcome.completed, OR: recentlyResolved },
+          { outcome: ManagerRecommendationOutcome.completed, task: { is: { status: { not: "done" } } } },
+          { outcome: ManagerRecommendationOutcome.completed, decision: { is: { status: { notIn: ["reviewed", "superseded"] } } } },
+          { outcome: ManagerRecommendationOutcome.completed, project: { is: { status: { not: "completed" } } } },
+          { outcome: ManagerRecommendationOutcome.completed, event: { is: { status: { not: "completed" } } } },
+          { outcome: ManagerRecommendationOutcome.dismissed, outcomeReason: "approval_rejected", OR: recentlyResolved }
+        ]
+      },
+      select: managerFollowThroughRecommendationSelect,
+      orderBy: { updatedAt: "desc" },
+      take: 200
+    });
+    return summarizeManagerFollowThrough(rows, observedAt, includeSensitive ? "owner" : "normal");
+  }
+
+  async learningSummary(artistId: string, includeOwnerOnly = false) {
     const since = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
     const [rows, responseRows, recommendationReviewRows] = await Promise.all([
       this.prisma.client.managerRecommendation.findMany({
         where: { managerRun: { artistId }, createdAt: { gte: since } },
-        select: { outcome: true, outcomeReason: true, outcomeAt: true, task: { select: { status: true } } }
+        select: {
+          outcome: true,
+          outcomeReason: true,
+          outcomeAt: true,
+          proposedAction: true,
+          memoryFact: { select: { id: true, sensitivity: true, archivedAt: true } },
+          task: { select: { status: true } },
+          managerRun: { select: { trace: true, message: { select: { visibility: true } } } }
+        }
       }),
       this.prisma.client.managerMessageFeedback.findMany({
         where: { artistId, createdAt: { gte: since } },
-        select: { helpful: true, reason: true },
+        select: { helpful: true, reason: true, managerMessage: { select: { visibility: true, managerRun: { select: { trace: true, message: { select: { visibility: true } } } } } } },
         orderBy: { createdAt: "desc" },
         take: 500
       }),
       this.prisma.client.managerEvalExample.findMany({
         where: { artistId, createdAt: { gte: since } },
-        select: { label: true },
+        select: {
+          label: true,
+          recommendation: {
+            select: {
+              outcome: true,
+              proposedAction: true,
+              memoryFact: { select: { id: true, sensitivity: true, archivedAt: true } },
+              managerRun: { select: { trace: true, message: { select: { visibility: true } } } }
+            }
+          }
+        },
         orderBy: { createdAt: "desc" },
         take: 500
       })
     ]);
+    const visibility: ManagerConversationVisibility = includeOwnerOnly ? "owner" : "normal";
+    const visibleRows = rows.filter((row) =>
+      managerRunIsVisible(row.managerRun, visibility) && managerRecommendationMetadataIsVisible(row, includeOwnerOnly ? "owner" : "normal")
+    );
+    const visibleResponseRows = responseRows.filter((row) =>
+      managerRunIsVisible(row.managerMessage.managerRun, visibility)
+    );
+    const visibleRecommendationReviewRows = recommendationReviewRows.filter((row) =>
+      managerRunIsVisible(row.recommendation.managerRun, visibility) && managerRecommendationMetadataIsVisible(row.recommendation, includeOwnerOnly ? "owner" : "normal")
+    );
     const counts = { suggested: 0, accepted: 0, dismissed: 0, completed: 0, blocked: 0 };
     const reasonCounts: Record<string, number> = {};
-    for (const row of rows) {
+    for (const row of visibleRows) {
       counts[row.outcome] += 1;
       if (row.outcome === ManagerRecommendationOutcome.dismissed && row.outcomeReason) reasonCounts[row.outcomeReason] = (reasonCounts[row.outcomeReason] ?? 0) + 1;
     }
     const decided = counts.accepted + counts.dismissed + counts.completed + counts.blocked;
     return {
       windowDays: 90,
-      total: rows.length,
+      total: visibleRows.length,
       ...counts,
       acceptanceRate: decided ? (counts.accepted + counts.completed) / decided : null,
       completionRate: counts.accepted + counts.completed ? counts.completed / (counts.accepted + counts.completed) : null,
-      openAcceptedTasks: rows.filter((row) => row.outcome === "accepted" && row.task?.status !== "done").length,
+      openAcceptedTasks: visibleRows.filter((row) => row.outcome === "accepted" && row.task && row.task.status !== "done").length,
       dismissalReasons: Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]).map(([reason, count]) => ({ reason, count })),
-      responseFeedback: summarizeManagerResponseFeedback(responseRows),
-      recommendationReviews: summarizeManagerRecommendationReviews(recommendationReviewRows)
+      responseFeedback: summarizeManagerResponseFeedback(visibleResponseRows),
+      recommendationReviews: summarizeManagerRecommendationReviews(visibleRecommendationReviewRows)
     };
   }
 
@@ -583,11 +681,12 @@ export class ManagerService {
     }), limit, now);
   }
 
-  private async responseReviewCandidates(artistId: string, operatorId: string, feedbackState: "unrated" | "rated", now: Date) {
+  private async responseReviewCandidates(artistId: string, operatorId: string, feedbackState: "unrated" | "rated", now: Date, visibility: ManagerConversationVisibility) {
     const since = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
     const responses = await this.prisma.client.managerMessage.findMany({
       where: {
         role: "assistant",
+        ...(visibility === "owner" || visibility === "provider_full" ? {} : { visibility: "team" as const }),
         createdAt: { gte: since, lte: now },
         conversation: { artistId },
         managerRun: { is: { mode: { not: "deterministic_feedback" } } },
@@ -600,9 +699,23 @@ export class ManagerService {
         content: true,
         citations: true,
         proposedActions: true,
+        visibility: true,
         createdAt: true,
         conversation: { select: { title: true } },
-        managerRun: { select: { promptVersion: true, mode: true } },
+        managerRun: {
+          select: {
+            promptVersion: true,
+            mode: true,
+            recommendations: {
+              select: {
+                id: true,
+                outcome: true,
+                proposedAction: true,
+                memoryFact: { select: { id: true, sensitivity: true, archivedAt: true } }
+              }
+            }
+          }
+        },
         feedback: { where: { operatorId }, select: { helpful: true, reason: true, note: true, updatedAt: true }, take: 1 },
         responseEval: { select: { id: true } }
       },
@@ -610,15 +723,39 @@ export class ManagerService {
       take: 100
     });
     const conversationIds = [...new Set(responses.map((response) => response.conversationId))];
-    const questions = conversationIds.length ? await this.prisma.client.managerMessage.findMany({
-      where: { role: "user", conversationId: { in: conversationIds }, conversation: { artistId }, createdAt: { lte: now } },
-      select: { conversationId: true, content: true, createdAt: true },
+    const hiddenConversationIds = await this.hiddenConversationIds(artistId, conversationIds, visibility);
+    const visibleResponses = responses.filter((response) => !hiddenConversationIds.has(response.conversationId));
+    const visibleConversationIds = [...new Set(visibleResponses.map((response) => response.conversationId))];
+    const questions = visibleConversationIds.length ? await this.prisma.client.managerMessage.findMany({
+      where: {
+        role: "user",
+        ...(visibility === "owner" || visibility === "provider_full" ? {} : { visibility: "team" as const }),
+        conversationId: { in: visibleConversationIds },
+        conversation: { artistId },
+        createdAt: { lte: now }
+      },
+      select: { id: true, conversationId: true, content: true, createdAt: true },
       orderBy: { createdAt: "desc" },
       take: 500
     }) : [];
-    return responses.flatMap((response) => {
+    return visibleResponses.flatMap((response) => {
       if (!response.managerRun) return [];
-      const question = questions.find((candidate) => candidate.conversationId === response.conversationId && candidate.createdAt <= response.createdAt);
+      const memoryRecommendations = (response.managerRun.recommendations ?? []).filter((recommendation) => managerRecommendationActionType(recommendation.proposedAction) === "remember_fact");
+      let question: (typeof questions)[number] | undefined;
+      if (memoryRecommendations.length) {
+        // A memory answer and its source turn form one privacy unit. Legacy
+        // rows without an exact binding are omitted rather than paired by
+        // timestamp, which is ambiguous under concurrent chat requests.
+        if (memoryRecommendations.some((recommendation) => !managerConversationRecommendationIsVisible(recommendation, visibility))) return [];
+        const bindings = memoryRecommendations.map(managerMemoryRecommendationSourceBinding);
+        if (bindings.some((binding) => !binding)) return [];
+        const sourceIds = new Set(bindings.map((binding) => binding!.sourceMessageId));
+        if (sourceIds.size !== 1) return [];
+        const binding = bindings[0]!;
+        question = questions.find((candidate) => candidate.id === binding.sourceMessageId && candidate.conversationId === response.conversationId && candidate.createdAt <= response.createdAt && candidate.createdAt.toISOString() === binding.sourceMessageCreatedAt);
+      } else {
+        question = questions.find((candidate) => candidate.conversationId === response.conversationId && candidate.createdAt <= response.createdAt);
+      }
       if (!question) return [];
       const citations = Array.isArray(response.citations) ? response.citations.filter((value): value is string => typeof value === "string").slice(0, 10) : [];
       const actionTypes = Array.isArray(response.proposedActions) ? response.proposedActions.flatMap((value) => {
@@ -642,8 +779,8 @@ export class ManagerService {
     });
   }
 
-  async responseReview(artistId: string, operatorId: string, limit = 3, now = new Date()) {
-    const rows = await this.responseReviewCandidates(artistId, operatorId, "unrated", now);
+  async responseReview(artistId: string, operatorId: string, limit = 3, now = new Date(), visibility: ManagerConversationVisibility = "normal") {
+    const rows = await this.responseReviewCandidates(artistId, operatorId, "unrated", now, visibility);
     return selectManagerResponseReviewQueue(rows.map((row) => ({
       messageId: row.messageId,
       conversationId: row.conversationId,
@@ -659,7 +796,7 @@ export class ManagerService {
   }
 
   async responseEvalReview(artistId: string, operatorId: string, limit = 3, now = new Date()) {
-    const rows = await this.responseReviewCandidates(artistId, operatorId, "rated", now);
+    const rows = await this.responseReviewCandidates(artistId, operatorId, "rated", now, "owner");
     return selectManagerResponseEvalReviewQueue(rows.flatMap(({ feedback, responseEvalId, ...candidate }) => feedback && !responseEvalId ? [{ ...candidate, feedback }] : []), limit, now);
   }
 
@@ -713,12 +850,31 @@ export class ManagerService {
     return deterministicManagerOutcomeReview({ windowDays, through, events, projects, completedTasks, campaignRecipients });
   }
 
-  async messageFeedback(artistId: string, messageId: string, input: ManagerMessageFeedbackInput, actorLabel: string, actorOperatorId: string) {
+  async messageFeedback(artistId: string, messageId: string, input: ManagerMessageFeedbackInput, actorLabel: string, actorOperatorId: string, includeSensitive = false) {
+    const visibility: ManagerConversationVisibility = includeSensitive ? "owner" : "normal";
     const message = await this.prisma.client.managerMessage.findFirst({
       where: { id: messageId, role: "assistant", conversation: { artistId } },
-      select: { id: true, managerRunId: true }
+      select: {
+        id: true,
+        role: true,
+        visibility: true,
+        managerRunId: true,
+        managerRun: {
+          select: {
+            trace: true,
+            recommendations: {
+              select: {
+                id: true,
+                outcome: true,
+                proposedAction: true,
+                memoryFact: { select: { id: true, sensitivity: true, archivedAt: true } }
+              }
+            }
+          }
+        }
+      }
     });
-    if (!message) throw new NotFoundException("Manager response not found");
+    if (!message || !managerConversationAssistantMessageIsVisible(message, visibility)) throw new NotFoundException("Manager response not found");
     const row = await this.prisma.client.managerMessageFeedback.upsert({
       where: { managerMessageId_operatorId: { managerMessageId: messageId, operatorId: actorOperatorId } },
       create: { artistId, managerMessageId: messageId, operatorId: actorOperatorId, helpful: input.helpful, reason: input.reason ?? null, note: input.note ?? null },
@@ -966,7 +1122,8 @@ export class ManagerService {
       prospects,
       settlements,
       outcomeReview,
-      recommendationHistory
+      recommendationHistory,
+      followThrough
     ] = await Promise.all([
       this.prisma.client.artist.findUniqueOrThrow({ where: { id: artistId }, select: { id: true, name: true } }),
       this.profile(artistId),
@@ -981,13 +1138,14 @@ export class ManagerService {
       this.prisma.client.invoice.findMany({ where: { artistId, status: { in: ["issued", "partially_paid", "overdue"] } }, orderBy: { dueAt: "asc" }, take: 30 }),
       this.prisma.client.managerDecision.findMany({ where: { artistId, status: { in: ["open", "decided", "reviewed"] } }, orderBy: [{ status: "asc" }, { reviewAt: "asc" }, { updatedAt: "desc" }], take: 30 }),
       this.prisma.client.managerMemoryFact.findMany({ where: { artistId, archivedAt: null }, select: { id: true, key: true, value: true, sourceType: true, sourceId: true, confidence: true, sensitivity: true, confirmedAt: true, updatedAt: true } }),
-      this.prisma.client.approvalRequest.findMany({ where: { artistId, status: { in: ["pending", "approved"] } }, select: { id: true, title: true, status: true, actionType: true, updatedAt: true }, orderBy: { updatedAt: "asc" }, take: 30 }),
+      this.prisma.client.approvalRequest.findMany({ where: { artistId, status: { in: ["pending", "approved"] } }, select: { id: true, title: true, status: true, actionType: true, executionAttemptedAt: true, updatedAt: true }, orderBy: { updatedAt: "asc" }, take: 30 }),
       this.prisma.client.bookingReply.findMany({ where: { artistId, processingStatus: "unread" }, select: { id: true, subject: true, fromName: true, fromEmail: true, processingStatus: true, receivedAt: true }, orderBy: { receivedAt: "desc" }, take: 20 }),
       this.prisma.client.bookingCampaignRecipient.findMany({ where: { campaign: { artistId }, status: { in: ["drafted", "sent"] } }, select: { id: true, status: true, followUpDueAt: true, followUpTaskId: true }, orderBy: { followUpDueAt: "asc" }, take: 30 }),
       this.prisma.client.bookingProspect.findMany({ where: { artistId, status: "qualified" }, select: { id: true, name: true, status: true, kind: true, city: true, updatedAt: true }, orderBy: { updatedAt: "asc" }, take: 30 }),
       this.prisma.client.settlement.findMany({ where: { artistId, status: "draft" }, select: { id: true, status: true, currency: true, grossMinor: true, expenseMinor: true, netMinor: true, updatedAt: true, event: { select: { title: true } } }, orderBy: { updatedAt: "asc" }, take: 20 }),
       this.outcomeReview(artistId, 90),
-      this.prisma.client.managerRecommendation.findMany({ where: { managerRun: { artistId }, outcome: { not: "suggested" } }, select: { id: true, stableKey: true, outcome: true, outcomeReason: true, outcomeAt: true, updatedAt: true, task: { select: { status: true } } }, orderBy: { updatedAt: "desc" }, take: 100 })
+      this.prisma.client.managerRecommendation.findMany({ where: { managerRun: { artistId }, outcome: { not: "suggested" } }, select: { id: true, stableKey: true, outcome: true, outcomeReason: true, outcomeAt: true, updatedAt: true, proposedAction: true, memoryFact: { select: { id: true, sensitivity: true, archivedAt: true } }, task: { select: { status: true } }, managerRun: { select: { trace: true, message: { select: { visibility: true } } } } }, orderBy: { updatedAt: "desc" }, take: 100 }),
+      this.followThrough(artistId)
     ]);
     const goalMeasurements = await this.measurementsForGoals(this.prisma.client, artistId, goals);
     const knowledgeHealth = deterministicManagerKnowledgeHealth({ profile, memoryFacts: memoryFacts.filter((fact) => fact.sensitivity === "normal") });
@@ -1033,12 +1191,30 @@ export class ManagerService {
       evidenceHealth,
       workSequence,
       goalPath,
-      recommendationHistory,
+      recommendationHistory: recommendationHistory.map((row) => {
+        const tracked = followThrough.items.find((item) => item.recommendationId === row.id);
+        return { ...row, hasTrackedWork: Boolean(tracked && tracked.target.kind !== "recommendation"), followThroughState: tracked?.state ?? null };
+      }),
+      followThrough,
       generatedAt: new Date().toISOString()
     };
   }
 
+  private sharedFacts(facts: Awaited<ReturnType<ManagerService["facts"]>>) {
+    return {
+      ...facts,
+      recommendationHistory: facts.recommendationHistory.filter((row) =>
+        managerRunIsVisible(row.managerRun, "normal") && managerRecommendationMetadataIsVisible(row, "normal")
+      )
+    };
+  }
+
   private safeFacts(facts: Awaited<ReturnType<ManagerService["facts"]>>) {
+    const memoryFacts = projectManagerMemoryForProvider(facts.memoryFacts, false);
+    const followThrough = projectManagerFollowThroughForProvider(facts.followThrough, new Set(memoryFacts.map((fact) => fact.id)));
+    const recommendationHistory = facts.recommendationHistory.filter((row) =>
+      managerRunIsVisible(row.managerRun, "provider_redacted") && managerConversationRecommendationIsVisible(row, "provider_redacted") && managerRecommendationMetadataIsVisible(row, "normal")
+    );
     return {
       artist: facts.artist,
       profile: facts.profile ? { id: facts.profile.id, bandMode: facts.profile.bandMode, careerStage: facts.profile.careerStage, homeCity: facts.profile.homeCity, homeRegion: facts.profile.homeRegion, homeCountry: facts.profile.homeCountry, genres: facts.profile.genres, currentAssets: facts.profile.currentAssets, revenueSources: facts.profile.revenueSources, constraints: facts.profile.constraints, educationTopics: facts.profile.educationTopics, availabilityExpectations: facts.profile.availabilityExpectations, budgetToleranceMinor: facts.profile.budgetToleranceMinor, currency: facts.profile.currency, twelveMonthAmbition: facts.profile.twelveMonthAmbition, communicationCadence: facts.profile.communicationCadence, decisionStyle: facts.profile.decisionStyle, intakeCompletedAt: facts.profile.intakeCompletedAt } : null,
@@ -1053,7 +1229,7 @@ export class ManagerService {
       deals: facts.deals.map((row) => ({ id: row.id, eventId: row.eventId, opportunityId: row.opportunityId, status: row.status, title: row.title, offerAmountMinor: row.offerAmountMinor, currency: row.currency, depositMinor: row.depositMinor, depositDueAt: row.depositDueAt, balanceDueAt: row.balanceDueAt, performanceDate: row.performanceDate, expiresAt: row.expiresAt })),
       invoices: facts.invoices.map((row) => ({ id: row.id, dealOfferId: row.dealOfferId, eventId: row.eventId, number: row.number, status: row.status, currency: row.currency, totalMinor: row.totalMinor, paidMinor: row.paidMinor, dueAt: row.dueAt })),
       decisions: facts.decisions,
-      memoryFacts: projectManagerMemoryForProvider(facts.memoryFacts, false),
+      memoryFacts,
       approvals: facts.approvals,
       bookingReplies: facts.bookingReplies,
       campaignRecipients: facts.campaignRecipients,
@@ -1067,7 +1243,8 @@ export class ManagerService {
       evidenceHealth: facts.evidenceHealth,
       workSequence: facts.workSequence,
       goalPath: facts.goalPath,
-      recommendationHistory: facts.recommendationHistory.map((row) => ({ id: row.id, stableKey: row.stableKey, outcome: row.outcome, outcomeReason: row.outcomeReason, outcomeAt: row.outcomeAt, taskStatus: row.task?.status ?? null })),
+      followThrough,
+      recommendationHistory: recommendationHistory.map((row) => ({ id: row.id, stableKey: row.stableKey, outcome: row.outcome, outcomeReason: row.outcomeReason, outcomeAt: row.outcomeAt, taskStatus: row.task?.status ?? null, hasTrackedWork: row.hasTrackedWork, followThroughState: row.followThroughState })),
       generatedAt: facts.generatedAt
     };
   }
@@ -1075,13 +1252,70 @@ export class ManagerService {
   private providerFacts(facts: Awaited<ReturnType<ManagerService["facts"]>>, fullContextEnabled: boolean) {
     if (!fullContextEnabled) return this.safeFacts(facts);
     const memoryFacts = projectManagerMemoryForProvider(facts.memoryFacts, true);
+    const followThrough = projectManagerFollowThroughForProvider(facts.followThrough, new Set(memoryFacts.map((fact) => fact.id)));
+    const recommendationHistory = facts.recommendationHistory.filter((row) =>
+      managerRunIsVisible(row.managerRun, "provider_full") && managerConversationRecommendationIsVisible(row, "provider_full") && managerRecommendationMetadataIsVisible(row, "provider_full")
+    );
     return {
       ...facts,
       members: facts.members.map((member) => ({ id: member.id, name: member.name, roles: member.roles, instruments: member.instruments })),
       teamLoad: facts.teamLoad ? { ...facts.teamLoad, members: facts.teamLoad.members.map((member) => Object.fromEntries(Object.entries(member).filter(([key]) => key !== "availabilityNote"))) } : facts.teamLoad,
       memoryFacts,
+      followThrough,
+      recommendationHistory: recommendationHistory.map((row) => ({ id: row.id, stableKey: row.stableKey, outcome: row.outcome, outcomeReason: row.outcomeReason, outcomeAt: row.outcomeAt, taskStatus: row.task?.status ?? null, hasTrackedWork: row.hasTrackedWork, followThroughState: row.followThroughState })),
       knowledgeHealth: deterministicManagerKnowledgeHealth({ profile: facts.profile, memoryFacts })
     };
+  }
+
+  private async hiddenConversationIds(artistId: string, conversationIds: string[], visibility: ManagerConversationVisibility) {
+    if (!conversationIds.length) return new Set<string>();
+    const rowLimit = Math.min(2000, Math.max(100, conversationIds.length * 20));
+    const [rows, fullContextRuns, ownerOnlyMessages] = await Promise.all([
+      this.prisma.client.managerRecommendation.findMany({
+        where: {
+          managerRun: { artistId, message: { conversationId: { in: conversationIds } } },
+          proposedAction: { path: ["type"], equals: "remember_fact" }
+        },
+        select: {
+          id: true,
+          outcome: true,
+          proposedAction: true,
+          memoryFact: { select: { id: true, sensitivity: true, archivedAt: true } },
+          managerRun: { select: { message: { select: { conversationId: true } } } }
+        },
+        orderBy: { id: "asc" },
+        take: rowLimit
+      }),
+      visibility === "owner" || visibility === "provider_full"
+        ? Promise.resolve([])
+        : this.prisma.client.managerRun.findMany({
+            where: { artistId, message: { conversationId: { in: conversationIds } } },
+            select: { id: true, trace: true, message: { select: { conversationId: true } } },
+            orderBy: { id: "asc" },
+            take: rowLimit
+          }),
+      visibility === "owner" || visibility === "provider_full"
+        ? Promise.resolve([])
+        : this.prisma.client.managerMessage.findMany({
+            where: { conversationId: { in: conversationIds }, visibility: "owner_only", conversation: { artistId } },
+            select: { conversationId: true, visibility: true },
+            orderBy: { id: "asc" },
+            take: rowLimit
+          })
+    ]);
+    // Reaching the cap means the privacy scan may be incomplete. Hide the
+    // bounded candidate set instead of letting an unscanned private turn leak.
+    if (rows.length >= rowLimit || fullContextRuns.length >= rowLimit || ownerOnlyMessages.length >= rowLimit) return new Set(conversationIds);
+    const hidden = rows.flatMap((row) => {
+      const conversationId = row.managerRun.message?.conversationId;
+      return conversationId && !managerConversationRecommendationIsVisible(row, visibility) ? [conversationId] : [];
+    });
+    for (const run of fullContextRuns) {
+      const conversationId = run.message?.conversationId;
+      if (conversationId && managerRunFullContextSourceBinding(run)) hidden.push(conversationId);
+    }
+    hidden.push(...ownerOnlyMessages.filter((message) => message.visibility === "owner_only").map((message) => message.conversationId));
+    return new Set(hidden);
   }
 
   private async readSnapshotTool(client: OpenAI, model: string, request: string, facts: unknown) {
@@ -1098,7 +1332,7 @@ export class ManagerService {
 
   async generateBrief(artistId: string, cadence: "intake" | "daily" | "weekly", actorLabel: string, actorOperatorId: string | null, options: GenerateBriefOptions = {}) {
     const started = Date.now();
-    const facts = await this.facts(artistId);
+    const facts = this.sharedFacts(await this.facts(artistId));
     const safeFacts = this.safeFacts(facts);
     const deterministicCandidates = deterministicManagerBriefCandidates(facts);
     let brief = deterministicCandidates;
@@ -1107,14 +1341,17 @@ export class ManagerService {
     let inputTokens: number | null = null;
     let outputTokens: number | null = null;
     const settings = await this.settings(artistId);
-    const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, settings);
+    // Briefs are shared records: members and viewers can read the latest run.
+    // Keep their provider input redacted even when an owner enabled full context
+    // for their own interactive Manager chats.
+    const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, { ...settings, fullContextEnabled: false });
     let providerAttempted = false;
     if ((options.allowModel ?? true) && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
       try {
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
         providerAttempted = true;
-        const context = await this.readSnapshotTool(client, model, `Prepare the ${cadence} manager brief.`, this.providerFacts(facts, settings.fullContextEnabled));
+        const context = await this.readSnapshotTool(client, model, `Prepare the ${cadence} manager brief.`, this.providerFacts(facts, false));
         const response = await client.responses.create({
           model,
           store: false,
@@ -1126,7 +1363,7 @@ export class ManagerService {
         inputTokens = context.inputTokens + (response.usage?.input_tokens ?? 0);
         outputTokens = context.outputTokens + (response.usage?.output_tokens ?? 0);
         const parsed = briefSchema.safeParse(JSON.parse(response.output_text));
-        if (parsed.success && this.briefIsGrounded(parsed.data, facts, this.providerKnownIds(facts, settings.fullContextEnabled))) {
+        if (parsed.success && this.briefIsGrounded(parsed.data, facts, this.providerKnownIds(facts, false))) {
           brief = mergeManagerBriefCandidates(deterministicCandidates, parsed.data);
           mode = "openai";
         } else {
@@ -1216,7 +1453,8 @@ export class ManagerService {
     const predatesTaskChange = Boolean(latest && latestTask && latest.createdAt < latestTask.updatedAt);
     const predatesFactChange = Boolean(latest && latestFactChange && latest.createdAt < latestFactChange.createdAt);
     const usesCurrentPolicy = latest?.promptVersion === PROMPT_VERSION;
-    if (latest && usesCurrentPolicy && !predatesCompletedIntake && !predatesTaskChange && !predatesFactChange && latest.createdAt.getTime() >= Date.now() - maxAge) return latest;
+    const usesShareableProviderContext = !managerRunFullContextSourceBinding(latest);
+    if (latest && usesCurrentPolicy && usesShareableProviderContext && !predatesCompletedIntake && !predatesTaskChange && !predatesFactChange && latest.createdAt.getTime() >= Date.now() - maxAge) return latest;
     return this.generateBrief(artistId, cadence, actorLabel, actorOperatorId);
   }
   async runScheduledBriefScan(now = new Date()) {
@@ -1301,19 +1539,30 @@ export class ManagerService {
     }
     return { ok: failed === 0, scanned: rows.length, generated: results.length, failed, notDue, runs: results };
   }
-  async recommendation(artistId: string, id: string, outcome: "accepted" | "dismissed" | "completed", feedback: ManagerRecommendationFeedbackInput, actorLabel: string, actorOperatorId: string) {
-    const rec = await this.prisma.client.managerRecommendation.findFirst({ where: { id, managerRun: { artistId } }, include: { task: true, decision: true, memoryFact: true, project: true, event: true, approvals: true, managerRun: { select: { message: { select: { id: true, conversationId: true, createdAt: true } } } } } });
+  async recommendation(artistId: string, id: string, outcome: "accepted" | "dismissed" | "completed", feedback: ManagerRecommendationFeedbackInput, actorLabel: string, actorOperatorId: string, actorIsOwner = false) {
+    const rec = await this.prisma.client.managerRecommendation.findFirst({ where: { id, managerRun: { artistId } }, include: { task: true, decision: true, memoryFact: true, project: true, event: true, approvals: true, managerRun: { select: { trace: true, message: { select: { id: true, conversationId: true, visibility: true, createdAt: true } } } } } });
     if (!rec) throw new NotFoundException("Manager recommendation not found");
+    if (!managerRunIsVisible(rec.managerRun, actorIsOwner ? "owner" : "normal")) throw new NotFoundException("Manager recommendation not found");
+    const requestedReconciliation = outcome === "completed" && feedback.reason === "reconciled";
+    const currentFollowThrough = requestedReconciliation ? projectManagerFollowThrough({ ...rec, approvals: rec.approvals ?? [] }) : null;
+    const reconcilableStages = ["approval_failed", "approval_simulated", "needs_tracking"];
+    const mayReconcile = Boolean(currentFollowThrough && reconcilableStages.includes(currentFollowThrough.stage) && (
+      rec.outcome === ManagerRecommendationOutcome.blocked ||
+      (rec.outcome === ManagerRecommendationOutcome.accepted && currentFollowThrough.stage === "needs_tracking" && Boolean(currentFollowThrough.actionType))
+    ));
     const allowed: ManagerRecommendationOutcome[] = outcome === "completed"
-      ? [ManagerRecommendationOutcome.suggested, ManagerRecommendationOutcome.accepted]
+      ? [ManagerRecommendationOutcome.suggested, ManagerRecommendationOutcome.accepted, ...(requestedReconciliation && mayReconcile ? [ManagerRecommendationOutcome.blocked] : [])]
       : [ManagerRecommendationOutcome.suggested];
     if (!allowed.includes(rec.outcome)) throw new BadRequestException("Recommendation has already been decided");
+    if (requestedReconciliation && !mayReconcile) throw new BadRequestException(currentFollowThrough?.stage === "execution_unknown" ? "An uncertain provider attempt cannot be closed or retried; reconcile it in Approvals first" : "This recommendation does not need receipt reconciliation");
+    if (requestedReconciliation && (!feedback.note || feedback.note.trim().length < 10)) throw new BadRequestException("Describe how this receipt was reconciled");
     if (outcome === "completed" && rec.task && rec.task.status !== "done") throw new BadRequestException("Complete the linked task before completing this recommendation");
     if (outcome === "completed" && rec.decision && !["reviewed", "superseded"].includes(rec.decision.status)) throw new BadRequestException("Review or supersede the linked decision before completing this recommendation");
-    if (outcome === "completed" && rec.approvals.length && rec.approvals.some((approval) => approval.status !== "executed")) throw new BadRequestException("Execute every linked approval before completing this recommendation");
+    if (outcome === "completed" && !requestedReconciliation && rec.approvals.length && rec.approvals.some((approval) => approval.status !== "executed")) throw new BadRequestException("Execute every linked approval before completing this recommendation");
+    if (outcome === "accepted" && !rec.proposedAction) throw new BadRequestException("This advice has no trackable action to accept; mark it handled only after the band has dealt with it");
     if (outcome === "accepted" && feedback.reason && feedback.reason !== "accepted") throw new BadRequestException("Invalid reason for an accepted recommendation");
     if (outcome === "dismissed" && feedback.reason && ["accepted", "action_executed", "task_completed", "decision_reviewed"].includes(feedback.reason)) throw new BadRequestException("Invalid reason for a dismissed recommendation");
-    if (outcome === "completed" && feedback.reason && !["action_executed", "task_completed", "decision_reviewed", "already_handled", "other"].includes(feedback.reason)) throw new BadRequestException("Invalid reason for a completed recommendation");
+    if (outcome === "completed" && feedback.reason && !["action_executed", "task_completed", "decision_reviewed", "already_handled", "reconciled", "other"].includes(feedback.reason)) throw new BadRequestException("Invalid reason for a completed recommendation");
 
     let taskAction: z.infer<typeof taskActionSchema> | null = null;
     let conversationTaskAction: ManagerConversationTaskAction | null = null;
@@ -1338,6 +1587,7 @@ export class ManagerService {
     let eventLogisticsAction: PrepareEventLogisticsApprovalsAction | null = null;
     let projectPlanAction: z.infer<typeof projectPlanActionSchema> | null = null;
     let rememberFactAction: z.infer<typeof rememberFactActionSchema> | null = null;
+    let rememberFactSource: { id: string; content: string; createdAt: Date } | null = null;
     let assignTaskAction: z.infer<typeof assignTaskActionSchema> | null = null;
     let profileContextAction: ManagerProfileContextAction | null = null;
     let profileContextTarget: ManagerContextCaptureProfile | null = null;
@@ -1490,6 +1740,17 @@ export class ManagerService {
         assignmentTarget = { task, member, checkInId: availability.checkInId, availability: availability.status };
       } else if (parsed.data.type === "remember_fact") {
         rememberFactAction = parsed.data;
+        const responseMessage = rec.managerRun.message;
+        if (!responseMessage) throw new BadRequestException("The memory request is no longer available");
+        rememberFactSource = await this.prisma.client.managerMessage.findFirst({
+          where: { id: rememberFactAction.sourceMessageId, conversationId: responseMessage.conversationId, role: "user", createdAt: { lte: responseMessage.createdAt } },
+          select: { id: true, content: true, createdAt: true }
+        });
+        if (
+          !rememberFactSource ||
+          rememberFactSource.createdAt.toISOString() !== rememberFactAction.sourceMessageCreatedAt ||
+          !managerMemoryCaptureMatches(rememberFactSource.content, rememberFactAction)
+        ) throw new BadRequestException("The proposed memory no longer matches the reviewed request");
       } else {
         profileContextAction = parsed.data as ManagerProfileContextAction;
         const [profile, health] = await Promise.all([
@@ -1519,6 +1780,7 @@ export class ManagerService {
     const immediateAction = eventAdvanceAction ?? projectPlanAction ?? rememberFactAction ?? assignTaskAction ?? profileContextAction ?? conversationTaskUpdateAction ?? conversationTaskAssignmentAction ?? conversationProjectAction ?? conversationEventAction ?? conversationEventAvailabilityAction;
     const finalOutcome = immediateAction ? ManagerRecommendationOutcome.completed : outcome as ManagerRecommendationOutcome;
     const reason = immediateAction ? "action_executed" : eventLogisticsAction ? "approval_prepared" : feedback.reason ?? (outcome === "accepted" ? "accepted" : outcome === "completed" ? (rec.task ? "task_completed" : rec.decision ? "decision_reviewed" : "already_handled") : "not_relevant");
+    const actionType = eventAdvanceAction?.type ?? eventLogisticsAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? profileContextAction?.type ?? conversationTaskUpdateAction?.type ?? conversationTaskAssignmentAction?.type ?? conversationProjectAction?.type ?? conversationEventAction?.type ?? conversationEventAvailabilityAction?.type ?? conversationTaskAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
     let createdCount = 0;
     let eventLogisticsApprovalIds: string[] = [];
     const eventLogisticsCreatedApprovalIds: string[] = [];
@@ -1614,10 +1876,20 @@ export class ManagerService {
         const current = await tx.task.findUniqueOrThrow({ where: { id: fresh.id }, select: { status: true, dueAt: true, blockedReason: true, waitingOn: true, deferralCount: true } });
         conversationTaskUpdateCurrent = current;
         if (conversationTaskUpdateAction.operation === "complete") {
-          await tx.managerRecommendation.updateMany({
-            where: { id: { not: id }, taskId: fresh.id, outcome: ManagerRecommendationOutcome.accepted },
-            data: { outcome: ManagerRecommendationOutcome.completed, outcomeReason: "task_completed", outcomeAt: new Date() }
+          const completedRecommendations = await tx.managerRecommendation.updateManyAndReturn({
+            where: { id: { not: id }, taskId: fresh.id, outcome: ManagerRecommendationOutcome.accepted, managerRun: { artistId } },
+            data: { outcome: ManagerRecommendationOutcome.completed, outcomeReason: "task_completed", outcomeAt: new Date() },
+            select: { id: true }
           });
+          for (const completedRecommendation of completedRecommendations) await this.audit.log({
+            artistId,
+            aggregateType: "ManagerRecommendation",
+            aggregateId: completedRecommendation.id,
+            action: "manager.recommendation_completed",
+            actorLabel,
+            actorOperatorId,
+            metadata: { taskId: fresh.id, reason: "task_completed", source: "manager_task_update" }
+          }, tx);
         }
         taskId = fresh.id;
       }
@@ -1644,11 +1916,27 @@ export class ManagerService {
         createdCount = result.count;
       }
       if (rememberFactAction) {
+        const existingMemory = await tx.managerMemoryFact.findUnique({
+          where: { artistId_key: { artistId, key: rememberFactAction.key } },
+          select: { id: true, sensitivity: true, archivedAt: true }
+        });
+        if (existingMemory && (existingMemory.sensitivity !== "normal" || existingMemory.archivedAt)) {
+          throw new BadRequestException("This memory must be reviewed in Manager memory before it can change");
+        }
         const memory = await tx.managerMemoryFact.upsert({
           where: { artistId_key: { artistId, key: rememberFactAction.key } },
           create: { artistId, key: rememberFactAction.key, value: rememberFactAction.value, sourceType: "operator_confirmation", sourceId: actorOperatorId, confidence: 1, sensitivity: "normal", confirmedAt: new Date() },
-          update: { value: rememberFactAction.value, sourceType: "operator_confirmation", sourceId: actorOperatorId, confidence: 1, sensitivity: "normal", confirmedAt: new Date(), archivedAt: null }
+          // Only the active-normal branch reaches this update. Omitting the
+          // privacy fields is defense in depth; recommendation acceptance is
+          // never an owner-memory-editor path.
+          update: { value: rememberFactAction.value, sourceType: "operator_confirmation", sourceId: actorOperatorId, confidence: 1, confirmedAt: new Date() }
         });
+        // The serializable transaction already protects the read, but this
+        // post-upsert guard also rolls back if privacy state changed while the
+        // duplicate was being confirmed.
+        if (memory.sensitivity !== "normal" || memory.archivedAt) {
+          throw new BadRequestException("This memory must be reviewed in Manager memory before it can change");
+        }
         memoryFactId = memory.id;
       }
       if (profileContextAction && profileContextTarget) {
@@ -1801,19 +2089,19 @@ export class ManagerService {
         taskId = assignmentTarget.task.id;
       }
       if (projectPlanAction && projectTarget) projectId = projectTarget.id;
-      return tx.managerRecommendation.update({ where: { id }, data: { taskId, decisionId, memoryFactId, projectId, eventId } });
+      const updatedRecommendation = await tx.managerRecommendation.update({ where: { id }, data: { taskId, decisionId, memoryFactId, projectId, eventId } });
+      const targetId = eventTarget?.id ?? eventLogisticsTarget?.id ?? projectTarget?.id ?? updatedRecommendation.eventId ?? updatedRecommendation.projectId ?? assignmentTarget?.task.id ?? profileContextTarget?.id ?? conversationTaskUpdateTarget?.id ?? conversationTaskAssignmentTarget?.task.id ?? updatedRecommendation.taskId ?? updatedRecommendation.memoryFactId ?? null;
+      await this.audit.log({ artistId, aggregateType: "ManagerRecommendation", aggregateId: id, action: `manager.recommendation_${finalOutcome}`, actorLabel, actorOperatorId, metadata: { taskId: updatedRecommendation.taskId ?? null, decisionId: updatedRecommendation.decisionId ?? null, memoryFactId: updatedRecommendation.memoryFactId ?? null, projectId: updatedRecommendation.projectId ?? null, eventId: updatedRecommendation.eventId ?? null, approvalIds: eventLogisticsApprovalIds, bandMemberId: conversationEventAvailabilityAction?.bandMemberId ?? assignmentTarget?.member.id ?? null, reason, actionType, targetId, createdCount } }, tx);
+      return updatedRecommendation;
     }, { isolationLevel: "Serializable" });
     if (eventLogisticsCreatedApprovalIds.length && this.approvals) this.approvals.notifyCreatedApprovals(artistId, eventLogisticsCreatedApprovalIds);
     const taskUpdatePrevious = conversationTaskUpdatePrevious as { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null;
     const taskUpdateCurrent = conversationTaskUpdateCurrent as { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null;
-    const actionType = eventAdvanceAction?.type ?? eventLogisticsAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? profileContextAction?.type ?? conversationTaskUpdateAction?.type ?? conversationTaskAssignmentAction?.type ?? conversationProjectAction?.type ?? conversationEventAction?.type ?? conversationEventAvailabilityAction?.type ?? conversationTaskAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
-    const targetId = eventTarget?.id ?? eventLogisticsTarget?.id ?? projectTarget?.id ?? row.eventId ?? row.projectId ?? assignmentTarget?.task.id ?? profileContextTarget?.id ?? conversationTaskUpdateTarget?.id ?? conversationTaskAssignmentTarget?.task.id ?? row.taskId ?? row.memoryFactId ?? null;
-    await this.audit.log({ artistId, aggregateType: "ManagerRecommendation", aggregateId: id, action: `manager.recommendation_${finalOutcome}`, actorLabel, actorOperatorId, metadata: { taskId: row.taskId ?? null, decisionId: row.decisionId ?? null, memoryFactId: row.memoryFactId ?? null, projectId: row.projectId ?? null, eventId: row.eventId ?? null, approvalIds: eventLogisticsApprovalIds, bandMemberId: conversationEventAvailabilityAction?.bandMemberId ?? assignmentTarget?.member.id ?? null, reason, actionType, targetId, createdCount } });
     if (outcome === "accepted" && row.decisionId) await this.audit.log({ artistId, aggregateType: "ManagerDecision", aggregateId: row.decisionId, action: "manager.decision_draft_created", actorLabel, actorOperatorId, metadata: { recommendationId: id } });
     if (eventTarget) await this.audit.log({ artistId, aggregateType: "BandEvent", aggregateId: eventTarget.id, action: "event.advance_generated", actorLabel, actorOperatorId, metadata: { version: SHOW_ADVANCE_VERSION, createdCount, recommendationId: id } });
     if (eventLogisticsTarget) await this.audit.log({ artistId, aggregateType: "BandEvent", aggregateId: eventLogisticsTarget.id, action: "event.logistics_approvals_prepared", actorLabel, actorOperatorId, metadata: { policyVersion: EVENT_LOGISTICS_POLICY_VERSION, approvalIds: eventLogisticsApprovalIds, createdCount, recommendationId: id } });
     if (projectTarget) await this.audit.log({ artistId, aggregateType: "ArtistProject", aggregateId: projectTarget.id, action: "project.plan_generated", actorLabel, actorOperatorId, metadata: { version: PROJECT_PLAN_VERSION, createdCount, recommendationId: id } });
-    if (rememberFactAction && row.memoryFactId) await this.audit.log({ artistId, aggregateType: "ManagerMemoryFact", aggregateId: row.memoryFactId, action: "manager.memory_confirmed", actorLabel, actorOperatorId, metadata: { key: rememberFactAction.key, recommendationId: id, sourceType: "operator_confirmation" } });
+    if (rememberFactAction && row.memoryFactId) await this.audit.log({ artistId, aggregateType: "ManagerMemoryFact", aggregateId: row.memoryFactId, action: "manager.memory_confirmed", actorLabel, actorOperatorId, metadata: { recommendationId: id, sourceType: "operator_confirmation", policyVersion: MANAGER_MEMORY_CAPTURE_POLICY_VERSION } });
     if (assignmentTarget) await this.audit.log({ artistId, aggregateType: "Task", aggregateId: assignmentTarget.task.id, action: "task.assigned", actorLabel, actorOperatorId, metadata: { recommendationId: id, previousOwnerLabel: assignmentTarget.task.ownerLabel, bandMemberId: assignmentTarget.member.id, ownerLabel: assignmentTarget.member.name, checkInId: assignmentTarget.checkInId, availability: assignmentTarget.availability } });
     if (profileContextAction && profileContextTarget) await this.audit.log({ artistId, aggregateType: "ArtistOperatingProfile", aggregateId: profileContextTarget.id, action: "manager.profile_context_updated", actorLabel, actorOperatorId, metadata: { recommendationId: id, gapCode: profileContextAction.gapCode, field: profileContextAction.field } });
     if (conversationTaskAction && row.taskId) await this.audit.log({ artistId, aggregateType: "Task", aggregateId: row.taskId, action: "task.created_from_manager_chat", actorLabel, actorOperatorId, metadata: { recommendationId: id, sourceMessageId: conversationTaskAction.sourceMessageId, dueDate: conversationTaskAction.dueDate, policyVersion: MANAGER_TASK_CAPTURE_POLICY_VERSION } });
@@ -1906,26 +2194,75 @@ export class ManagerService {
         participantExisted: Boolean(conversationEventAvailabilityAction.participantId)
       }
     });
-    return row;
+    const current = await this.prisma.client.managerRecommendation.findFirst({
+      where: { id, managerRun: { artistId } },
+      select: managerFollowThroughRecommendationSelect
+    });
+    if (!current) throw new NotFoundException("Manager recommendation not found");
+    const canonical = {
+      ...current,
+      ...row,
+      task: current.task ?? null,
+      decision: current.decision ?? null,
+      project: current.project ?? null,
+      event: current.event ?? null,
+      memoryFact: current.memoryFact ?? null,
+      approvals: current.approvals ?? []
+    };
+    const receiptSource = {
+      ...canonical,
+      id: canonical.id,
+      title: canonical.title ?? rec.title ?? "Manager recommendation",
+      workstream: canonical.workstream ?? rec.workstream ?? "band_operations",
+      priority: canonical.priority ?? rec.priority ?? "med",
+      outcome: canonical.outcome,
+      outcomeReason: canonical.outcomeReason ?? null,
+      nextAction: canonical.nextAction ?? rec.nextAction ?? "Review the accepted work.",
+      proposedAction: canonical.proposedAction ?? null,
+      createdAt: canonical.createdAt instanceof Date ? canonical.createdAt : rec.createdAt instanceof Date ? rec.createdAt : new Date(),
+      updatedAt: canonical.updatedAt instanceof Date ? canonical.updatedAt : rec.updatedAt instanceof Date ? rec.updatedAt : new Date(),
+      outcomeAt: canonical.outcomeAt instanceof Date ? canonical.outcomeAt : null
+    };
+    return { ...canonical, followThrough: projectManagerFollowThrough(receiptSource) };
   }
 
-  async chat(artistId: string, input: { conversationId?: string | null | undefined; message: string }, actorLabel: string, actorOperatorId: string) {
-    const conversation = input.conversationId ? await this.prisma.client.managerConversation.findFirst({ where: { id: input.conversationId, artistId } }) : await this.prisma.client.managerConversation.create({ data: { artistId, title: input.message.slice(0, 80) } });
-    if (!conversation) throw new NotFoundException("Manager conversation not found");
-    await this.prisma.client.managerMessage.create({ data: { conversationId: conversation.id, operatorId: actorOperatorId, role: "user", content: input.message } });
-    const [facts, history, responseFeedback, settings] = await Promise.all([
+  async chat(artistId: string, input: { conversationId?: string | null | undefined; message: string }, actorLabel: string, actorOperatorId: string, actorIsOwner = false) {
+    const memoryCapture = managerMemoryCapturePolicy(input.message);
+    const memoryCaptureRoute = memoryCapture.requiresLocalHandling;
+    const settings = await this.settings(artistId);
+    const fullProviderContextEnabled = managerFullProviderContextEnabled(settings, actorIsOwner);
+    const { conversation, persistedUserMessage } = await this.prisma.client.$transaction(async (tx) => {
+      const storedConversation = input.conversationId
+        ? await tx.managerConversation.findFirst({ where: { id: input.conversationId, artistId } })
+        : await tx.managerConversation.create({ data: { artistId, title: memoryCaptureRoute ? "Manager memory request" : input.message.slice(0, 80) } });
+      if (!storedConversation) throw new NotFoundException("Manager conversation not found");
+      const storedUserMessage = await tx.managerMessage.create({
+        data: {
+          conversationId: storedConversation.id,
+          operatorId: actorOperatorId,
+          role: "user",
+          visibility: fullProviderContextEnabled ? "owner_only" : "team",
+          content: memoryCapture.persistedMessage
+        },
+        select: { id: true, role: true, visibility: true, content: true, createdAt: true }
+      });
+      return { conversation: storedConversation, persistedUserMessage: storedUserMessage };
+    });
+    const [facts, rawHistory, responseFeedback] = await Promise.all([
       this.facts(artistId),
       this.prisma.client.managerMessage.findMany({
         where: { conversationId: conversation.id },
         select: {
           id: true,
           role: true,
+          visibility: true,
           content: true,
           createdAt: true,
           managerRun: {
             select: {
+              trace: true,
               recommendations: {
-                select: { id: true, stableKey: true, title: true, reason: true, nextAction: true, outcome: true, evidence: true, proposedAction: true }
+                select: { id: true, stableKey: true, title: true, reason: true, nextAction: true, outcome: true, evidence: true, proposedAction: true, memoryFact: { select: { id: true, sensitivity: true, archivedAt: true } } }
               }
             }
           }
@@ -1938,15 +2275,18 @@ export class ManagerService {
         select: { helpful: true, reason: true },
         orderBy: { createdAt: "desc" },
         take: 100
-      }),
-      this.settings(artistId)
+      })
     ]);
-    history.reverse();
-    const currentUserMessage = history.at(-1);
-    if (!currentUserMessage || currentUserMessage.role !== "user") throw new BadRequestException("The Manager request could not be loaded");
+    rawHistory.reverse();
+    const sharedFacts = this.sharedFacts(facts);
+    const providerReasoningFacts = fullProviderContextEnabled ? facts : sharedFacts;
+    const history = projectManagerConversationMessages(rawHistory, managerConversationReasoningVisibility(fullProviderContextEnabled));
+    // Never infer the initiating turn from recency. Another request can append
+    // to the same conversation between this write and the bounded history read.
+    const currentUserMessage = persistedUserMessage;
     const naturalFeedback = resolveManagerNaturalFeedback(input.message, history.slice(0, -1));
     const appliedFeedback = naturalFeedback.status === "ready"
-      ? await this.messageFeedback(artistId, naturalFeedback.targetMessageId, naturalFeedback.parsed.input, actorLabel, actorOperatorId)
+      ? await this.messageFeedback(artistId, naturalFeedback.targetMessageId, naturalFeedback.parsed.input, actorLabel, actorOperatorId, actorIsOwner)
       : null;
     const contextCapture = resolveManagerContextCapture(input.message, history.slice(0, -1), facts.contextHealth, facts.profile);
     const taskCapture = resolveManagerTaskCapture({ message: input.message, sourceMessageId: currentUserMessage.id, sourceMessageCreatedAt: currentUserMessage.createdAt, timezone: settings.timezone, openTasks: facts.tasks });
@@ -1970,13 +2310,15 @@ export class ManagerService {
     const projectCaptureRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !eventAvailabilityRoute && !taskUpdateRoute && !taskAssignmentRoute && projectCapture.status !== "not_project";
     const eventCaptureRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventAvailabilityRoute && eventCapture.status !== "not_event";
     const contextCaptureRoute = naturalFeedback.status === "not_feedback" && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventAvailabilityRoute && !eventCaptureRoute && contextCapture.status !== "not_answer";
-    const safeFacts = this.safeFacts(facts);
+    const safeFacts = this.safeFacts(sharedFacts);
     const now = new Date();
     const continuity = resolveManagerConversationContinuity(input.message, history);
     const subjectReference = resolveManagerSubjectReference(input.message, managerSubjectCandidates(facts));
     const responseAdaptation = managerResponseAdaptationPolicy(facts.profile?.decisionStyle ?? "guided", responseFeedback);
     const naturalFeedbackAnswer = managerNaturalFeedbackAcknowledgement(naturalFeedback);
-    const fallback = naturalFeedbackAnswer
+    const fallback = memoryCaptureRoute
+      ? deterministicManagerChat(sharedFacts, input.message, now, continuity, subjectReference, responseAdaptation)
+      : naturalFeedbackAnswer
       ? { answer: naturalFeedbackAnswer, citations: [], recommendation: null }
       : contextCaptureRoute
         ? { answer: contextCapture.message, citations: [], recommendation: managerContextCaptureRecommendation(contextCapture) }
@@ -1992,38 +2334,40 @@ export class ManagerService {
         ? { answer: eventAvailability.message, citations: [eventAvailability.eventId, eventAvailability.memberId].filter((value): value is string => Boolean(value)), recommendation: eventAvailability.action ? managerConversationEventAvailabilityRecommendation(eventAvailability.action) : null }
       : eventCaptureRoute
         ? { answer: eventCapture.message, citations: eventCapture.duplicateEventId ? [eventCapture.duplicateEventId] : eventCapture.action?.bandMemberIds.slice(0, 8) ?? [], recommendation: eventCapture.action ? managerConversationEventRecommendation(eventCapture.action) : null }
-      : deterministicManagerChat(facts, input.message, now, continuity, subjectReference, responseAdaptation);
+      : deterministicManagerChat(sharedFacts, input.message, now, continuity, subjectReference, responseAdaptation);
     const coachingTopics = managerCoachingTopics(input.message).map((topic) => topic.id);
     const unknownCoachingTopic = managerUnrecognizedCoachingTopic(input.message);
     const coachingRoute = coachingTopics.length > 0 || Boolean(unknownCoachingTopic);
     const workSequenceRoute = managerQuestionAsksAboutWorkSequence(input.message);
     const goalPathRoute = managerQuestionAsksAboutGoalPath(input.message);
     const planHealthRoute = managerQuestionAsksAboutPlanHealth(input.message);
+    const followThroughRoute = managerQuestionAsksAboutFollowThrough(input.message);
     const continuityRoute = continuity.status !== "not_follow_up";
     const subjectRoute = subjectReference.status !== "not_requested";
     const naturalFeedbackRoute = naturalFeedback.status !== "not_feedback";
     let content = fallback.answer;
     let citations = fallback.citations;
     let recommendation: ManagerRecommendationDraft | null = fallback.recommendation;
-    let mode = naturalFeedbackRoute ? "deterministic_feedback" : contextCaptureRoute ? "deterministic_context_capture" : taskCaptureRoute ? "deterministic_task_capture" : taskUpdateRoute ? "deterministic_task_update" : taskAssignmentRoute ? "deterministic_task_assignment" : projectCaptureRoute ? "deterministic_project_capture" : eventAvailabilityRoute ? "deterministic_event_availability" : eventCaptureRoute ? "deterministic_event_capture" : "deterministic";
+    let mode = memoryCaptureRoute ? "deterministic_memory_capture" : naturalFeedbackRoute ? "deterministic_feedback" : contextCaptureRoute ? "deterministic_context_capture" : taskCaptureRoute ? "deterministic_task_capture" : taskUpdateRoute ? "deterministic_task_update" : taskAssignmentRoute ? "deterministic_task_assignment" : projectCaptureRoute ? "deterministic_project_capture" : eventAvailabilityRoute ? "deterministic_event_availability" : eventCaptureRoute ? "deterministic_event_capture" : "deterministic";
     let model: string | null = null;
     let inputTokens: number | null = null;
     let outputTokens: number | null = null;
     let responseQuality = evaluateManagerResponseQuality(content, facts.profile?.decisionStyle ?? "guided");
     const started = Date.now();
-    const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, settings);
+    const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, { ...settings, fullContextEnabled: fullProviderContextEnabled });
+    const providerHistory = projectManagerConversationMessages(rawHistory, fullProviderContextEnabled ? "provider_full" : "provider_redacted");
     let providerAttempted = false;
-    if (!naturalFeedbackRoute && !contextCaptureRoute && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventAvailabilityRoute && !eventCaptureRoute && !continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
+    if (!memoryCaptureRoute && !naturalFeedbackRoute && !contextCaptureRoute && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventAvailabilityRoute && !eventCaptureRoute && !continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && !followThroughRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       try {
         model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
         const request = JSON.stringify({
           currentQuestion: input.message,
-          recentConversation: history.map((message) => ({ role: message.role, content: message.content })),
+          recentConversation: providerHistory.map((message) => ({ role: message.role, content: message.content })),
           responseStyle: facts.profile?.decisionStyle ?? "guided"
         });
         providerAttempted = true;
-        const context = await this.readSnapshotTool(client, model, request, this.providerFacts(facts, settings.fullContextEnabled));
+        const context = await this.readSnapshotTool(client, model, request, this.providerFacts(providerReasoningFacts, fullProviderContextEnabled));
         const response = await client.responses.create({
           model,
           store: false,
@@ -2038,10 +2382,10 @@ export class ManagerService {
         const candidateQuality = parsed.success
           ? evaluateManagerResponseQuality(parsed.data.answer, facts.profile?.decisionStyle ?? "guided")
           : null;
-        if (parsed.success && candidateQuality?.passed && this.chatOutputIsGrounded(parsed.data, facts, input.message, this.providerKnownIds(facts, settings.fullContextEnabled))) {
+        if (parsed.success && candidateQuality?.passed && this.chatOutputIsGrounded(parsed.data, providerReasoningFacts, input.message, this.providerKnownIds(providerReasoningFacts, fullProviderContextEnabled))) {
           content = parsed.data.answer;
           citations = parsed.data.citations;
-          recommendation = parsed.data.recommendation && !managerRecommendationIsSuppressed(parsed.data.recommendation, facts.recommendationHistory) ? parsed.data.recommendation : null;
+          recommendation = parsed.data.recommendation && !managerRecommendationIsSuppressed(parsed.data.recommendation, providerReasoningFacts.recommendationHistory) ? parsed.data.recommendation : null;
           responseQuality = candidateQuality;
           mode = "openai";
         } else {
@@ -2049,9 +2393,10 @@ export class ManagerService {
         }
       } catch { mode = "deterministic_fallback"; }
     }
-    const calibrated = naturalFeedbackRoute || contextCaptureRoute || taskCaptureRoute || taskUpdateRoute || taskAssignmentRoute || projectCaptureRoute || eventAvailabilityRoute || eventCaptureRoute
+    const responseFacts = mode === "openai" && fullProviderContextEnabled ? providerReasoningFacts : sharedFacts;
+    const calibrated = memoryCaptureRoute || naturalFeedbackRoute || contextCaptureRoute || taskCaptureRoute || taskUpdateRoute || taskAssignmentRoute || projectCaptureRoute || eventAvailabilityRoute || eventCaptureRoute
       ? { answer: content, citations, recommendation }
-      : calibrateManagerChatResult({ answer: content, citations, recommendation }, facts, input.message);
+      : calibrateManagerChatResult({ answer: content, citations, recommendation }, responseFacts, input.message);
     const evidenceArea = managerEvidenceAreaForQuestion(input.message);
     const missingPremiseQuestion = evidenceArea
       ? facts.evidenceHealth.areas.find((area) => area.area === evidenceArea && area.state !== "current")?.nextQuestion ?? null
@@ -2060,6 +2405,16 @@ export class ManagerService {
     content = adapted.answer;
     citations = adapted.citations;
     recommendation = adapted.recommendation;
+    if (recommendation?.proposedAction?.type === "remember_fact") {
+      recommendation = {
+        ...recommendation,
+        proposedAction: {
+          ...recommendation.proposedAction,
+          sourceMessageId: currentUserMessage.id,
+          sourceMessageCreatedAt: currentUserMessage.createdAt.toISOString()
+        }
+      };
+    }
     responseQuality = evaluateManagerResponseQuality(content, facts.profile?.decisionStyle ?? "guided");
     const run = await this.prisma.client.managerRun.create({
       data: {
@@ -2071,11 +2426,18 @@ export class ManagerService {
         inputFacts: safeFacts,
         output: { answer: content, citations },
         trace: {
-          factsRead: [...this.knownIds(facts)],
+          factsRead: [...this.knownIds(providerReasoningFacts)],
           conversationMessageIds: history.map((message) => message.id),
           toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
           guardrails: ["known-evidence", "bounded-history", "structured-conversation-continuity", "tenant-subject-resolution", "explicit-natural-feedback", "reviewed-context-capture", "reviewed-task-capture", "reviewed-task-update", "reviewed-task-assignment", "reviewed-project-capture", "reviewed-event-capture", "reviewed-event-availability", "natural-response-quality", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", "code-owned-manager-coaching", "team-load-premise-check"],
-          providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
+          providerContext: {
+            ...providerPolicy,
+            attempted: providerAttempted,
+            outputUsed: mode === "openai",
+            sourceMessageId: currentUserMessage.id,
+            sourceMessageCreatedAt: currentUserMessage.createdAt.toISOString()
+          },
+          memoryCapture: { policyVersion: memoryCapture.policyVersion, status: memoryCapture.assessment.status, providerBypassed: memoryCaptureRoute, persistedRedacted: memoryCapture.assessment.status === "blocked_sensitive" },
           coaching: { policyVersion: MANAGER_COACHING_POLICY_VERSION, topicIds: coachingTopics, unrecognized: Boolean(unknownCoachingTopic), providerBypassed: coachingRoute },
           teamLoad: { policyVersion: facts.teamLoad.policyVersion, status: facts.teamLoad.status, confidence: facts.teamLoad.confidence, suggestionCount: facts.teamLoad.suggestions.length },
           evidenceHealth: { policyVersion: facts.evidenceHealth.policyVersion, status: facts.evidenceHealth.status, confidence: facts.evidenceHealth.confidence, attentionAreas: facts.evidenceHealth.areas.filter((area) => area.state !== "current").map((area) => area.area) },
@@ -2141,6 +2503,7 @@ export class ManagerService {
         conversationId: conversation.id,
         managerRunId: run.id,
         role: "assistant",
+        visibility: fullProviderContextEnabled ? "owner_only" : "team",
         content,
         citations,
         proposedActions: recommendationRecord ? [{ recommendationId: recommendationRecord.id, title: recommendationRecord.title, nextAction: recommendationRecord.nextAction, outcome: recommendationRecord.outcome, actionType: recommendationActionType, ...(recommendationPreview ? { preview: recommendationPreview } : {}) }] : []
@@ -2150,7 +2513,7 @@ export class ManagerService {
     await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, feedbackTargetMessageId: naturalFeedback.targetMessageId, naturalFeedbackApplied: Boolean(appliedFeedback), contextGapCode: contextCapture.gap?.code ?? null, contextCaptureProposed: contextCapture.status === "ready", taskCaptureStatus: taskCapture.status, taskCaptureProposed: taskCapture.status === "ready", taskSourceMessageId: taskCapture.action?.sourceMessageId ?? null, taskUpdateStatus: taskUpdate.status, taskUpdateProposed: taskUpdate.status === "ready", taskUpdateSourceMessageId: taskUpdate.action?.sourceMessageId ?? null, taskUpdateTaskId: taskUpdate.taskId, taskAssignmentStatus: taskAssignment.status, taskAssignmentProposed: taskAssignment.status === "ready", taskAssignmentSourceMessageId: taskAssignment.action?.sourceMessageId ?? null, taskAssignmentTaskId: taskAssignment.taskId, taskAssignmentMemberId: taskAssignment.memberId, projectCaptureStatus: projectCapture.status, projectCaptureProposed: projectCapture.status === "ready", projectSourceMessageId: projectCapture.action?.sourceMessageId ?? null, projectType: projectCapture.action?.projectType ?? null, eventAvailabilityStatus: eventAvailability.status, eventAvailabilityProposed: eventAvailability.status === "ready", eventAvailabilitySourceMessageId: eventAvailability.action?.sourceMessageId ?? null, eventAvailabilityEventId: eventAvailability.eventId, eventAvailabilityMemberId: eventAvailability.memberId, eventCaptureStatus: eventCapture.status, eventCaptureProposed: eventCapture.status === "ready", eventSourceMessageId: eventCapture.action?.sourceMessageId ?? null, eventType: eventCapture.action?.eventType ?? null, eventStatus: eventCapture.action?.status ?? null, tool: providerAttempted ? "read_manager_snapshot" : null, providerOutputUsed: mode === "openai" } });
     return {
       conversationId: conversation.id,
-      message: { ...message, feedback: null },
+      message: { ...message, feedback: null, canSubmitFeedback: true },
       recommendation: recommendationRecord,
       feedbackApplied: appliedFeedback ? {
         messageId: naturalFeedback.targetMessageId,
@@ -2166,26 +2529,61 @@ export class ManagerService {
     };
   }
 
-  async conversations(artistId: string, limit = 10) {
+  async conversations(artistId: string, limit = 10, includeSensitive = false) {
+    const visibility: ManagerConversationVisibility = includeSensitive ? "owner" : "normal";
     const rows = await this.prisma.client.managerConversation.findMany({
       where: { artistId },
-      include: { messages: { orderBy: { createdAt: "desc" }, take: 1 }, _count: { select: { messages: true } } },
+      include: { messages: { orderBy: { createdAt: "desc" }, take: 1, include: { managerRun: { select: { trace: true, recommendations: { select: { id: true, outcome: true, proposedAction: true, memoryFact: { select: { id: true, sensitivity: true, archivedAt: true } } } } } } } }, _count: { select: { messages: true } } },
       orderBy: { updatedAt: "desc" },
       take: Math.min(Math.max(limit, 1), 20)
     });
-    return rows.map(({ _count, ...row }) => ({ ...row, messageCount: _count.messages }));
+    const hiddenConversationIds = await this.hiddenConversationIds(artistId, rows.map((row) => row.id), visibility);
+    return rows.map(({ _count, messages, ...row }) => ({
+      ...row,
+      title: hiddenConversationIds.has(row.id) ? "Private Manager memory" : row.title,
+      messages: projectManagerConversationMessages(messages, visibility).map(({ managerRun, visibility: messageVisibility, ...message }) => {
+        void managerRun;
+        void messageVisibility;
+        return message;
+      }),
+      messageCount: _count.messages
+    }));
   }
 
-  async conversation(artistId: string, id: string, operatorId: string) {
+  async conversation(artistId: string, id: string, operatorId: string, includeSensitive = false) {
     const conversation = await this.prisma.client.managerConversation.findFirst({ where: { id, artistId } });
     if (!conversation) throw new NotFoundException("Manager conversation not found");
-    const messages = await this.prisma.client.managerMessage.findMany({
-      where: { conversationId: id },
-      include: { feedback: { where: { operatorId }, take: 1 } },
-      orderBy: { createdAt: "desc" },
-      take: 50
-    });
-    return { ...conversation, messages: messages.reverse().map((message) => ({ ...message, feedback: message.feedback[0] ?? null })) };
+    const visibility: ManagerConversationVisibility = includeSensitive ? "owner" : "normal";
+    const [messages, hiddenConversationIds] = await Promise.all([
+      this.prisma.client.managerMessage.findMany({
+        where: { conversationId: id },
+        include: {
+          feedback: { where: { operatorId }, take: 1 },
+          managerRun: { select: { trace: true, recommendations: { select: managerFollowThroughRecommendationSelect } } }
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50
+      }),
+      this.hiddenConversationIds(artistId, [id], visibility)
+    ]);
+    const orderedMessages = messages.reverse();
+    const feedbackAllowedIds = new Set(orderedMessages.filter((message) =>
+      managerConversationAssistantMessageIsVisible(message, visibility)
+    ).map((message) => message.id));
+    const projectedMessages = projectManagerConversationMessages(orderedMessages, visibility);
+    return {
+      ...conversation,
+      title: hiddenConversationIds.has(id) ? "Private Manager memory" : conversation.title,
+      messages: projectedMessages.map(({ managerRun, visibility: messageVisibility, ...message }) => {
+        void messageVisibility;
+        return {
+          ...message,
+          proposedActions: hydrateManagerMessageActions(message.proposedActions, managerRun?.recommendations ?? [], visibility === "owner" ? "owner" : "normal"),
+          canSubmitFeedback: feedbackAllowedIds.has(message.id),
+          feedback: feedbackAllowedIds.has(message.id) ? message.feedback[0] ?? null : null
+        };
+      })
+    };
   }
 
   private chatInstructions(decisionStyle: string, responseFeedback: { helpful: boolean; reason: string | null }[] = []) {
@@ -2314,6 +2712,7 @@ export class ManagerService {
       ...facts.prospects.map((x) => x.id),
       ...facts.settlements.map((x) => x.id),
       ...(facts.outcomeReview?.evidenceIds ?? []),
+      ...(facts.followThrough?.items.flatMap((item) => [item.recommendationId, item.target.id]) ?? []),
       ...facts.recommendationHistory.map((x) => x.id)
     ]);
   }
@@ -2343,5 +2742,5 @@ export class ManagerService {
   private async owned(model: "bandMember" | "managerGoal" | "managerInitiative", artistId: string, id: string) { const where = { id, artistId }; const row = model === "bandMember" ? await this.prisma.client.bandMember.findFirst({ where, select: { id: true } }) : model === "managerGoal" ? await this.prisma.client.managerGoal.findFirst({ where, select: { id: true } }) : await this.prisma.client.managerInitiative.findFirst({ where, select: { id: true } }); if (!row) throw new NotFoundException("Record not found"); return row; }
   private briefJsonSchema() { return { type: "object", additionalProperties: false, required: ["summary","today","thisWeek","decisionsNeeded","waitingOn","risksAndOpportunities"], properties: { summary: { type: "string" }, today: { type: "array", maxItems: 5, items: this.itemJsonSchema() }, thisWeek: { type: "array", maxItems: 10, items: this.itemJsonSchema() }, decisionsNeeded: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, required: ["title","explanation","evidenceIds"], properties: { title: { type: "string" }, explanation: { type: "string" }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 } } } }, waitingOn: { type: "array", maxItems: 10, items: { type: "object", additionalProperties: false, required: ["title","dueAt","evidenceIds"], properties: { title: { type: "string" }, dueAt: { type: ["string","null"] }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 } } } }, risksAndOpportunities: { type: "array", maxItems: 10, items: { type: "object", additionalProperties: false, required: ["title","detail","confidence","evidenceIds"], properties: { title: { type: "string" }, detail: { type: "string" }, confidence: { type: "number" }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 } } } } } }; }
   private chatJsonSchema() { return { type: "object", additionalProperties: false, required: ["answer", "citations", "recommendation"], properties: { answer: { type: "string" }, citations: { type: "array", items: { type: "string" }, maxItems: 10 }, recommendation: { anyOf: [{ type: "null" }, this.itemJsonSchema()] } } }; }
-  private itemJsonSchema() { return { type: "object", additionalProperties: false, required: ["stableKey","title","reason","nextAction","workstream","priority","evidenceIds","proposedAction"], properties: { stableKey: { type: "string" }, title: { type: "string" }, reason: { type: "string" }, nextAction: { type: "string" }, workstream: { type: "string", enum: ["live","releases","audience","content","business","relationships","band_operations"] }, priority: { type: "string", enum: ["low","med","high"] }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 }, proposedAction: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false, required: ["type","title","dueAt","initiativeId"], properties: { type: { type: "string", enum: ["create_task"] }, title: { type: "string" }, dueAt: { type: ["string","null"] }, initiativeId: { type: ["string","null"] } } }, { type: "object", additionalProperties: false, required: ["type","workstream","title","context","options"], properties: { type: { type: "string", enum: ["create_decision"] }, workstream: { type: "string", enum: ["live","releases","audience","content","business","relationships","band_operations"] }, title: { type: "string" }, context: { type: ["string","null"] }, options: { type: "array", minItems: 2, maxItems: 6, items: { type: "object", additionalProperties: false, required: ["label","tradeoff"], properties: { label: { type: "string" }, tradeoff: { type: "string" } } } } } }, { type: "object", additionalProperties: false, required: ["type","eventId"], properties: { type: { type: "string", enum: ["generate_event_advance"] }, eventId: { type: "string" } } }, { type: "object", additionalProperties: false, required: ["type","projectId"], properties: { type: { type: "string", enum: ["generate_project_plan"] }, projectId: { type: "string" } } }, { type: "object", additionalProperties: false, required: ["type","taskId","bandMemberId","checkInId","availability"], properties: { type: { type: "string", enum: ["assign_task"] }, taskId: { type: "string" }, bandMemberId: { type: "string" }, checkInId: { type: ["string","null"] }, availability: { type: "string", enum: ["available","limited","unknown"] } } }, { type: "object", additionalProperties: false, required: ["type","key","label","value"], properties: { type: { type: "string", enum: ["remember_fact"] }, key: { type: "string", pattern: "^operator_note_[a-z0-9_]{1,66}$" }, label: { type: "string" }, value: { type: "string" } } }] } } }; }
+  private itemJsonSchema() { return { type: "object", additionalProperties: false, required: ["stableKey","title","reason","nextAction","workstream","priority","evidenceIds","proposedAction"], properties: { stableKey: { type: "string" }, title: { type: "string" }, reason: { type: "string" }, nextAction: { type: "string" }, workstream: { type: "string", enum: ["live","releases","audience","content","business","relationships","band_operations"] }, priority: { type: "string", enum: ["low","med","high"] }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 }, proposedAction: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false, required: ["type","title","dueAt","initiativeId"], properties: { type: { type: "string", enum: ["create_task"] }, title: { type: "string" }, dueAt: { type: ["string","null"] }, initiativeId: { type: ["string","null"] } } }, { type: "object", additionalProperties: false, required: ["type","workstream","title","context","options"], properties: { type: { type: "string", enum: ["create_decision"] }, workstream: { type: "string", enum: ["live","releases","audience","content","business","relationships","band_operations"] }, title: { type: "string" }, context: { type: ["string","null"] }, options: { type: "array", minItems: 2, maxItems: 6, items: { type: "object", additionalProperties: false, required: ["label","tradeoff"], properties: { label: { type: "string" }, tradeoff: { type: "string" } } } } } }, { type: "object", additionalProperties: false, required: ["type","eventId"], properties: { type: { type: "string", enum: ["generate_event_advance"] }, eventId: { type: "string" } } }, { type: "object", additionalProperties: false, required: ["type","projectId"], properties: { type: { type: "string", enum: ["generate_project_plan"] }, projectId: { type: "string" } } }, { type: "object", additionalProperties: false, required: ["type","taskId","bandMemberId","checkInId","availability"], properties: { type: { type: "string", enum: ["assign_task"] }, taskId: { type: "string" }, bandMemberId: { type: "string" }, checkInId: { type: ["string","null"] }, availability: { type: "string", enum: ["available","limited","unknown"] } } }, { type: "object", additionalProperties: false, required: ["type","sourceMessageId","sourceMessageCreatedAt","key","label","value"], properties: { type: { type: "string", enum: ["remember_fact"] }, sourceMessageId: { type: "string" }, sourceMessageCreatedAt: { type: "string" }, key: { type: "string", pattern: "^operator_note_[a-z0-9_]{1,66}$" }, label: { type: "string" }, value: { type: "string" } } }] } } }; }
 }

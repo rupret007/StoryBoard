@@ -77,7 +77,7 @@ Important actions: `workflow.telegram.settings.updated`, `telegram.registration.
 1. `pnpm infra:up`, `pnpm db:migrate`, optional `pnpm db:seed`, `pnpm dev`.
 2. For inbound registration without a public URL, use **ngrok** (or similar) and `setWebhook` to the tunnel URL, **or** exercise only the **mock** path by calling the webhook handler with a crafted JSON body.
 3. Without **`TELEGRAM_BOT_TOKEN`**, enable Telegram in the UI and trigger conditions (or wait for scan): check **Activity** for `telegram.urgent.sent` with mock mode.
-4. **Tests:** `pnpm test` runs **`@storyboard/shared`** unit tests and **`@storyboard/api`** tests (API tests run `nest build` first, then Node’s test runner on `apps/api/test/**/*.test.mjs`).
+4. **Tests:** `pnpm test` runs **`@storyboard/shared`** unit tests and the compiled **`@storyboard/api`** unit files matching `apps/api/test/*.test.mjs`. Database cases under `apps/api/test/integration/` run only through the explicit disposable-database `pnpm test:integration` command.
 
 ## Test suite
 

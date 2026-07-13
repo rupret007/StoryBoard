@@ -294,7 +294,7 @@ export class TasksService {
       patchData.deferralCount = { increment: 1 };
       patchData.lastDeferredAt = new Date();
     }
-    let result: { row: Awaited<ReturnType<TasksService["get"]>>; attributed: { count: number } };
+    let result: { row: Awaited<ReturnType<TasksService["get"]>> };
     try {
       result = await this.prisma.client.$transaction(async (tx) => {
         const fresh = await tx.task.findFirst({ where: { id, artistId }, select: { status: true, dueAt: true, prerequisites: { select: { prerequisiteTask: { select: { status: true, dueAt: true } } } }, dependents: { select: { task: { select: { status: true, dueAt: true } } } } } });
@@ -305,37 +305,48 @@ export class TasksService {
         if (nextDueAt && (fresh.dependents ?? []).some((dependency) => dependency.task.dueAt && dependency.task.dueAt < nextDueAt)) throw new BadRequestException("A prerequisite cannot be due after a task it unlocks");
         const updated = await tx.task.updateMany({ where: { id, artistId, updatedAt: current.updatedAt }, data: patchData });
         if (updated.count !== 1) throw new BadRequestException("This task changed while you were editing it; reload before saving");
-        const completed = targetStatus === TaskStatus.done
-          ? await tx.managerRecommendation.updateMany({
-              where: { taskId: id, outcome: ManagerRecommendationOutcome.accepted },
-              data: { outcome: ManagerRecommendationOutcome.completed, outcomeReason: "task_completed", outcomeAt: new Date() }
+        const completedRecommendations = targetStatus === TaskStatus.done
+          ? await tx.managerRecommendation.updateManyAndReturn({
+              where: { taskId: id, outcome: ManagerRecommendationOutcome.accepted, managerRun: { artistId } },
+              data: { outcome: ManagerRecommendationOutcome.completed, outcomeReason: "task_completed", outcomeAt: new Date() },
+              select: { id: true }
             })
-          : { count: 0 };
+          : [];
+        for (const recommendation of completedRecommendations) {
+          await this.audit.log({
+            artistId,
+            aggregateType: "ManagerRecommendation",
+            aggregateId: recommendation.id,
+            action: "manager.recommendation_completed",
+            actorLabel,
+            actorOperatorId: actorOperatorId ?? null,
+            metadata: { reason: "task_completed", taskId: id, source: "task_status_transition" }
+          }, tx);
+        }
         const row = await tx.task.findUniqueOrThrow({ where: { id }, include: { opportunity: { include: { venue: true } }, project: true, event: true, bandMember: true, prerequisites: { include: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } }, orderBy: { createdAt: "asc" } }, dependents: { include: { task: { select: { id: true, title: true, status: true, dueAt: true } } }, orderBy: { createdAt: "asc" } } } });
-        return { row, attributed: completed };
+        await this.audit.log({
+          artistId,
+          aggregateType: "Task",
+          aggregateId: row.id,
+          action: "task.updated",
+          actorLabel,
+          actorOperatorId: actorOperatorId ?? null,
+          metadata: {
+            fields: Object.keys(data),
+            previous: { status: current.status, ownerLabel: current.ownerLabel, bandMemberId: current.bandMemberId, dueAt: current.dueAt, blockedReason: current.blockedReason, waitingOn: current.waitingOn },
+            current: { status: row.status, ownerLabel: row.ownerLabel, bandMemberId: row.bandMemberId, dueAt: row.dueAt, blockedReason: row.blockedReason, waitingOn: row.waitingOn },
+            deferred,
+            deferralCount: row.deferralCount,
+            managerRecommendationsCompleted: completedRecommendations.length
+          }
+        }, tx);
+        return { row };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error ? String(error.code) : null;
       if (code === "P2034") throw new BadRequestException("This task or its prerequisites changed while you were editing it; reload before saving");
       throw error;
     }
-    const { row, attributed } = result;
-    await this.audit.log({
-      artistId,
-      aggregateType: "Task",
-      aggregateId: row.id,
-      action: "task.updated",
-      actorLabel,
-      actorOperatorId: actorOperatorId ?? null,
-      metadata: {
-        fields: Object.keys(data),
-        previous: { status: current.status, ownerLabel: current.ownerLabel, bandMemberId: current.bandMemberId, dueAt: current.dueAt, blockedReason: current.blockedReason, waitingOn: current.waitingOn },
-        current: { status: row.status, ownerLabel: row.ownerLabel, bandMemberId: row.bandMemberId, dueAt: row.dueAt, blockedReason: row.blockedReason, waitingOn: row.waitingOn },
-        deferred,
-        deferralCount: row.deferralCount,
-        managerRecommendationsCompleted: attributed.count
-      }
-    });
-    return row;
+    return result.row;
   }
 }

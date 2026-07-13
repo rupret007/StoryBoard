@@ -77,7 +77,7 @@ export const managerMessageFeedbackSchema = z.object({
   if (input.helpful && input.reason) context.addIssue({ code: "custom", path: ["reason"], message: "Helpful feedback cannot include a correction reason" });
   if (!input.helpful && !input.reason) context.addIssue({ code: "custom", path: ["reason"], message: "Choose what needs improvement" });
 });
-export const managerRecommendationReasons = ["accepted", "approval_prepared", "approval_rejected", "approval_failed", "action_executed", "task_completed", "decision_reviewed", "already_handled", "not_relevant", "wrong_priority", "bad_timing", "missing_context", "other"] as const;
+export const managerRecommendationReasons = ["accepted", "approval_prepared", "approval_rejected", "approval_failed", "action_executed", "task_completed", "decision_reviewed", "already_handled", "reconciled", "not_relevant", "wrong_priority", "bad_timing", "missing_context", "other"] as const;
 export const managerRecommendationFeedbackSchema = z.object({ reason: z.enum(managerRecommendationReasons).optional(), note: z.string().trim().max(1000).nullable().optional() }).strict();
 export const managerEvalPromotionSchema = z.object({ label: z.enum(["useful", "not_useful", "needs_revision"]), notes: z.string().trim().max(2000).nullable().optional() }).strict().superRefine((input, context) => {
   if (input.label === "needs_revision" && (!input.notes || input.notes.length < 10)) context.addIssue({ code: "custom", path: ["notes"], message: "Describe what should change in at least 10 characters" });
@@ -93,7 +93,7 @@ export const managerResponseEvalResolutionSchema = z.object({
   candidateVersion: z.string().regex(/^manager_os_v[1-9][0-9]*$/),
   note: z.string().trim().min(10).max(2000)
 }).strict();
-export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v32").default("manager_os_v32") }).strict();
+export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v33").default("manager_os_v33") }).strict();
 export const managerMemoryPatchSchema = z.object({
   value: z.json().optional(),
   confirmed: z.boolean().optional(),

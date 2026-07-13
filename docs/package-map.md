@@ -29,7 +29,8 @@ The Next.js operator interface. Current responsibilities:
 - Venue and contact CRM, booking pipeline, Find shows, market sprints, pitch
   campaigns/replies, tasks, and approval center
 - Manager OS intake, briefs, conversation, goals/initiatives/decisions, team
-  context, reviewed actions, and evaluation controls
+  context, reviewed actions, durable accepted-work follow-through, and
+  evaluation controls
 - Band operations for events/day-of work, songs/setlists, projects, deals,
   invoices, expenses, and settlements
 - Weekly summary, **Notifications** (prefs, escalation, **Telegram** link + manual chat id)
@@ -42,6 +43,9 @@ The NestJS orchestration backend. Current responsibilities:
 
 - REST modules for venues, contacts, booking opportunities, tasks, approvals,
   audit events, commands, weekly summary, dashboard stats, **insights**
+- Audit-event read safety in `audit-events/audit-event-projection.ts`, shared by
+  Activity and weekly summaries to remove legacy Manager-memory key fields
+  without changing immutable stored events
 - **Tasks:** artist-scoped prerequisite graph, cycle/date/state preflight,
   serializable completion guards, audit history, and relationship diagnostics
 - **Memberships** / invites / onboarding; **auth** (Google OIDC + dev bypass)
@@ -49,7 +53,10 @@ The NestJS orchestration backend. Current responsibilities:
 - **`AuditService`** on important actions; approval execution paths
 - **Approval lifecycle:** artist/source-key idempotent preparation, tenant-bound
   event and Manager links, compare-and-set approve/reject/execute, and
-  `event_logistics_v1` result reconciliation in `src/approvals/`
+  `event_logistics_v1` result reconciliation in `src/approvals/`; an unknown
+  attempted write takes precedence over known failed/rejected/expired siblings
+  in Manager receipt projection, while rejected/expired receipts expose no
+  reconciliation action
 - **Integrations:** adapter registry, Google OAuth, **Telegram** real/mock adapters
 - **Workflow automation:** BullMQ jobs (`workflow-automation/`, `queue/`), in-app notifications, email drafts, digests, opt-in **Manager cadence**, **Telegram urgent scan**
 - **Manager OS:** tenant snapshots, deterministic briefs/chat, post-show outcome
@@ -70,6 +77,16 @@ The NestJS orchestration backend. Current responsibilities:
   reviewed `manager_project_capture_v1` project-plus-plan creation,
   reviewed `manager_event_capture_v1` timezone-safe event/initial-lineup creation,
   reviewed `manager_event_availability_v1` one-member event responses,
+  relational `manager_follow_through_v1` receipts, reload reconciliation, and
+  linked-work destinations (`manager-follow-through.ts`), current memory-aware
+  conversation projection (`manager-conversation-visibility.ts`) with durable
+  `team`/`owner_only` message visibility, exact source-turn binding,
+  feedback-write reauthorization, and fail-closed legacy rows, complete-input
+  `manager_memory_capture_v3` classification, owner-and-setting-gated full
+  context with non-owner turn/recommendation projection and sanitized
+  authoritative-target receipts whose mutation/reconciliation capabilities are
+  server-projected, owner-only history/learning filtering, and always-redacted
+  shared briefs,
   deterministic `event_logistics_v1` approval-preparation recommendations for
   eligible confirmed gigs (provider execution remains in Approvals),
   owner-only `manager_recommendation_eval_review_v1` finished-advice triage,
@@ -136,6 +153,19 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
 - **`packages/shared/test/`** — Node test runner for shared schemas and derived
   policies, including setlist timing and Telegram helpers
 - **`apps/api/test/`** — compiled API regressions (the API package **`test`** script runs **`nest build`** first, then `node --test`)
+- **`apps/api/test/task-audit-atomicity.test.mjs`** — focused transaction/audit
+  rollback and duplicate-completion regression coverage
+- **`apps/api/test/manager-follow-through.test.mjs`** — relational receipts,
+  reload reconciliation, visibility, provider-state quarantine, and reviewed
+  closure coverage
+- **`apps/api/test/manager-message-privacy.test.mjs`** — durable owner-only
+  message persistence/backfill expectations, provider-fallback privacy, hidden
+  feedback authorization, and team-visible continuity coverage
+- **`apps/api/test/private-recommendation-history.test.mjs`** — shared
+  reasoning and member-learning exclusion plus navigation-only receipt
+  capabilities for owner-private recommendations
+- **`apps/api/test/memory-privacy.test.mjs`** — complete-input credential
+  rejection, opaque fact keys, and legacy audit-key read projection coverage
 - **`apps/api/test/integration/`** — opt-in Postgres workflows using only
   `STORYBOARD_TEST_DATABASE_URL`
 - **`apps/web/e2e/`** — production-build Playwright journeys with mock providers

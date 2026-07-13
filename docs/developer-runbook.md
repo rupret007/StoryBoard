@@ -435,7 +435,9 @@ Manager routes:
   sensitive, stale, and provider-generated changes are refused. It does not
   notify the member and does not copy a personal explanation into notes.
 - `POST /manager/messages/:id/feedback` with `{ "helpful": true }` or
-  `{ "helpful": false, "reason": "too_vague", "note": "..." }`
+  `{ "helpful": false, "reason": "too_vague", "note": "..." }`. The write
+  rechecks the persisted message visibility and current linked-memory boundary;
+  a hidden response ID returns generic not-found without feedback or audit.
 - `GET /manager/conversations?limit=1..20` — newest-first summaries with the
   latest message and total message count — and `GET /manager/conversations/:id`
   (bounded to 50 messages and the requesting operator's feedback). The web
@@ -443,6 +445,22 @@ Manager routes:
   a new thread, and clears conversation state when the active artist changes.
 - `GET /manager/memory`, `PATCH /manager/memory/:id`, and
   `GET /manager/learning`
+- `GET /manager/follow-through` — tenant-scoped
+  `manager_follow_through_v1`, bounded to the 200 most recently updated matching
+  rows. It includes accepted and blocked recommendations, completed and
+  approval-rejected recommendations resolved in the last 30 days, and older
+  completed recommendations whose linked Task, Decision, Project, or Event is
+  still active. It derives current state and, when applicable, a safe
+  application destination from linked Tasks, Decisions, Projects, Events,
+  memory facts, and Approvals; it never creates a parallel work record. Members
+  and viewers receive only normal-sensitivity memory receipts. Owners may also
+  see current sensitive or restricted receipts; archived or missing memory
+  facts are omitted for everyone. Conversation-backed memory also requires an
+  exact persisted source-message ID/timestamp binding; legacy unbound proposals
+  are hidden and cannot expose an Accept control. Each projected receipt
+  includes `canMutate` and `canReconcile`; sanitized member receipts derived
+  from owner-private work set both false. Clients must also apply the operator's
+  membership role before rendering any mutation control.
 - `GET /manager/recommendation-eval-review?limit=3` — owner-only, read-only
   queue of completed, dismissed, or blocked recommendations from the last 90
   days that have no reviewed example for that observed stable-key result.
@@ -482,9 +500,16 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v32`)
+  (owner-only; currently accepts only the code-registered `manager_os_v33`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
-  body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
+  body is `{ "reason": "wrong_priority", "note": "Release comes first" }`.
+  Accept requires a supported typed action. Advice without one uses reviewed
+  completion (`reason=already_handled`) or dismissal; legacy accepted/unlinked
+  rows remain visible until a member resolves them. `reason=reconciled` requires
+  a note of at least 10 characters and may close only a failed, simulated, or
+  typed-but-orphaned receipt. It records receipt closure without changing an
+  Approval or claiming that provider work succeeded. An `execution_unknown`
+  receipt cannot use this path.
 - `GET` / `PUT /manager/settings` (PUT owner-only)
 - `GET /manager/provider-context-policy` (owner-only; counts and active policy,
   never memory values)
@@ -517,12 +542,88 @@ and generic memory PATCH rejects them. `manager_knowledge_v1` labels conflicting
 unconfirmed, low-confidence, and stale facts so neither fallback nor model prose
 treats them as settled. Standard redacted context may include `normal` memory
 only. Full-context owner consent may add `sensitive` memory and CRM/operating
-notes. `restricted` memory is never supplied to the model. Model citations are
+notes only to that owner's interactive chat. Shared and scheduled briefs always
+use the redacted projection. Full-context chat marks the initiating user
+message `owner_only` before any provider call and marks its assistant response
+the same even when the provider fails, returns rejected output, or fallback is
+deterministic. The message-visibility migration backfills both sides of
+historical trace-bound full-context turns, quarantines conversations whose
+legacy user/assistant counts reveal an unmatched request, and neutralizes empty
+legacy titles. Non-owner
+conversation/history/review reads hide those turns, while legacy unbound runs
+hide the entire bounded window. `restricted`
+memory is never supplied to the model. Model citations are
 validated against the same projected ID set, and `ManagerRun.inputFacts`
 remains redacted in all modes. Run traces record only policy summaries plus
 whether provider context was attempted and accepted;
 `GET /manager/provider-context-policy` exposes the same value-free summary to
 owners.
+
+Recommendations created from a full-context turn retain that provenance even
+when the provider output was not used.
+Only an owner may accept, dismiss, or complete them; a non-owner gets the same
+generic not-found response whether or not they learned the opaque ID from audit
+history. Normal/shared follow-through and provider-redacted history omit the
+private title, reason, next action, priority, and preview. After an owner accepts
+work into a shared authoritative Task, Event, Project, or Approval, teammates
+may see only a generic receipt rebuilt from that record's current title/state.
+Shared deterministic briefs/chat suppression and member-visible
+`GET /manager/learning` results omit owner-only recommendation history,
+outcomes, answer feedback, and recommendation reviews; owners retain their
+private view.
+
+`manager_follow_through_v1` is the read model for the closed recommendation
+loop. `needs_action`, `in_motion`, `blocked`, and `completed` are projections,
+not editable status columns. A linked Task, Decision, Project, Event, memory
+fact, or Approval remains authoritative. Recommendation mutations return the
+same projected receipt, and `GET /manager/conversations/:id` rebuilds each
+stored action from its relational recommendation before returning it. A stale
+message payload therefore cannot restore **Accept** after a hard reload.
+
+Resolved memory recommendations also inherit the current memory record's
+visibility. Archived or missing facts are omitted, members and viewers receive
+only normal facts, and owners may inspect current sensitive or restricted
+receipts. The resolved saved value is never copied back from conversation
+preview JSON. Conversation titles, messages, proposed actions, continuity, and
+provider history are re-projected from the fact's current visibility on every
+read. Provider context remains separately constrained by the Manager
+provider-context policy; owner UI visibility does not broaden model context.
+
+Explicit remember directives use `manager_memory_capture_v3` and are classified
+locally before provider routing. The complete value is scanned before the
+1,000-character storage limit, including known credential-token shapes. If the
+statement is sensitive, the persisted operator message contains only
+`[Sensitive memory request removed before storage.]`, and the submitted value
+is never sent to OpenAI. Ready proposals carry the exact persisted source
+message ID and timestamp; acceptance reloads and rechecks that turn. New fact
+keys are opaque SHA-256 digests. If that key already identifies archived,
+sensitive, or restricted memory, recommendation acceptance fails closed for
+every role before mutation or audit. Only an active normal fact may be refreshed
+through chat; private/archive changes stay in the owner-controlled memory
+editor. New Manager-memory audit metadata omits the key,
+and Activity/weekly-summary read projections recursively strip historical
+memory-key fields without altering stored audit rows. Ordinary non-memory
+conversation continues through the configured deterministic or provider-backed
+path.
+
+Approval projection deliberately separates pending human review from an
+approved request that is ready for explicit execution. An approved request
+with `executionAttemptedAt` but no final result becomes `execution_unknown` and
+is blocked for read-only reconciliation; it is never represented as executable,
+safe to retry, or closable from Manager. This uncertain attempted state wins
+over failed, rejected, or expired sibling requests in a mixed approval batch,
+so a known sibling result cannot make the unknown provider write retryable.
+Failed, rejected, expired, and
+mock-simulated provider work also remain blocked. Rejected and expired receipts
+are terminal and cannot be reconciled from Manager. A member may use **Close after
+review** for a failed, simulated, or typed-but-orphaned receipt only after
+recording what was verified or replaced. The resulting `reconciled` stage says
+explicitly that closure is not evidence of provider execution or success and
+does not mutate the Approval. Only a recorded real executed result can become
+completed as execution. Viewer access is read-only. Members and owners may
+follow destinations, mark legacy actionless guidance handled, or perform the
+bounded receipt reconciliation above; external execution still happens only in
+Approvals.
 
 `manager_evidence_v1` is a separate, non-persistent operating-coverage check.
 It composes the existing show/project readiness, goal measurement, booking
@@ -557,7 +658,8 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v32` retains the current operator question and at most 12
+version `manager_os_v33` with offline dataset `manager_evals_v37` retains the
+current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -583,7 +685,8 @@ explicitly asks to remember the exact normal-sensitivity statement. The value
 is displayed before acceptance and saved with operator-confirmation provenance
 only after **Remember this**. Ordinary conversation and scheduled briefs cannot
 write memory; operating-profile facts redirect to Band context, and credentials,
-financial identifiers, and health information are refused.
+financial identifiers, and health information are refused before provider
+routing or raw-value persistence.
 Explicit education questions use `manager_coaching_v1` before provider
 reasoning. The reviewed catalog covers common booking/deal structures, show
 production, settlement, and release-rights concepts. Each response explains
@@ -639,7 +742,8 @@ publishing, payments, legal conclusions, and provider writes stay in Approvals.
 Recommendation acceptance uses a transaction so concurrent clicks cannot
 create duplicate tasks. Finishing a linked task attributes completion back to
 the recommendation. Accepted work stays suppressed while its task is open;
-completed work has a 14-day cooldown and dismissed work a 7-day cooldown.
+accepted advice with no linked work is not suppressed indefinitely. Completed
+work has a 14-day cooldown and dismissed work a 7-day cooldown.
 Manager decisions use compare-and-set writes so concurrent choices cannot
 silently overwrite each other. A choice becomes immutable once recorded; its
 expected result and review date create a checkpoint, and a reviewed outcome is
@@ -1030,7 +1134,7 @@ pnpm build
 pnpm manager:eval
 ```
 
-**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
+**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The current baseline is 10 shared tests and 199 API tests across 194 top-level cases. The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing and relational follow-through, reload-safe receipts and capability controls, owner/member provider-context gating, durable/exact/legacy full-context turn projection including provider fallback, owner-only recommendation mutation/history/learning isolation, feedback authorization rechecks, exact-source memory visibility, rejection of archived/private memory re-acceptance with active-normal-only refresh, full-input credential rejection, legacy audit-key projection, mixed provider-state quarantine and reconciliation, rejected/expired receipt behavior, transaction-bound audit rollback, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
 
 **Database integration tests:** Set `STORYBOARD_TEST_DATABASE_URL` to a disposable PostgreSQL database whose name contains `test`, then run:
 
@@ -1042,8 +1146,11 @@ STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/
 The command refuses to fall back to `DATABASE_URL`, runs `prisma generate` and
 `prisma migrate deploy` against that explicit test database, and then verifies
 tenant links (including custom event schedule ownership and event-bound
-approval ownership), role enforcement, Telegram registration binding, and
-audit rows.
+approval ownership), role enforcement, Telegram registration binding, Manager
+follow-through task/approval/reconciliation lifecycle, current memory visibility
+inside conversation JSON, durable full-context message visibility, and
+transaction-bound audit rows. The
+current suite contains four top-level workflows across 39 forward migrations.
 Before a release, run the read-only relationship diagnostic against the target
 database; it exits non-zero if it finds a mismatch and never changes data:
 
@@ -1056,8 +1163,9 @@ at the same kind of explicit disposable test database. It applies migrations,
 builds the current production artifacts, starts the API/web pair with dev auth
 and mock-safe providers, and verifies booking acquisition, Manager and band
 operations, practical setlists, and confirmed event → logistics approvals →
-approved mock Calendar/Drive execution → persisted event references. It never
-falls back to `DATABASE_URL`.
+approved mock Calendar/Drive execution → persisted event references. The
+Manager journey also covers accept → durable receipt → hard reload → linked Task
+destination → completion. It never falls back to `DATABASE_URL`.
 
 ```bash
 pnpm --filter @storyboard/web exec playwright install chromium
