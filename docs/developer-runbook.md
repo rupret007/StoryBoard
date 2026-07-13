@@ -68,10 +68,11 @@ pnpm infra:logs
 
 The existing `docker-compose.yml` starts infrastructure for host-based `pnpm`
 development. To run the complete application in production-built containers,
-use the separate application bundle:
+use the separate application bundle. Container-only users can skip
+`pnpm install`; run this from the cloned repository root:
 
 ```bash
-pnpm container:up
+docker compose -f docker-compose.app.yml up --build
 ```
 
 It runs Postgres, Redis, forward-only Prisma migrations, the idempotent seed,
@@ -79,7 +80,10 @@ the Nest API (including the current in-process BullMQ worker), and Next.js.
 The command stays attached and shows service logs; keep that terminal open, or
 use `docker compose -f docker-compose.app.yml up --build -d --wait` for
 background startup. Open `http://localhost:3000` and use the development login.
-Stop containers without deleting data with `pnpm container:down`; only use
+Stop containers without deleting data with
+`docker compose -f docker-compose.app.yml down`. With Node and pnpm installed,
+`pnpm container:up` / `pnpm container:down` are equivalent convenience
+wrappers. Only use
 `docker compose -f docker-compose.app.yml down -v` when intentionally removing
 local Postgres and Redis data.
 
@@ -752,9 +756,10 @@ that its name contains `test`, then seeds it. Browser coverage therefore
 exercises first-time intake on every run instead of inheriting old test data.
 The runner forces its production build environment internally, so an unrelated
 shell-level `NODE_ENV` cannot invalidate Next.js prerendering.
-The 12 focused browser cases establish their own domain prerequisites and cover
-booking, Manager, operations, finance, tasks, and approval-gated event
-logistics without depending on a previous case's records. They still share the
+The 13 focused browser cases establish their own domain prerequisites and cover
+booking (including approved immediate-send execution and follow-up creation),
+Manager, operations, finance, tasks, and approval-gated event logistics without
+depending on a previous case's records. They still share the
 same reset database, and per-test retries remain intentionally disabled so a
 retry cannot hide state leakage or an idempotency regression. Failed runs
 retain a Playwright trace and should restart from the database reset. If port

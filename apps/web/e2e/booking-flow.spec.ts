@@ -114,6 +114,7 @@ async function ensureQualifiedProspect(page: Page, artistId: string) {
 test("manual prospect can gain a buyer and enter an approval-ready campaign", async ({ page }) => {
   const suffix = Date.now().toString(36);
   const prospectName = `E2E Buyer Lead ${suffix}`;
+  const campaignName = `Austin outreach ${suffix}`;
 
   // The runner resets only the explicit test database, then seeds this owner
   // workspace so first-use flows remain deterministic across iterations.
@@ -143,13 +144,16 @@ test("manual prospect can gain a buyer and enter an approval-ready campaign", as
   await expect(card.getByText("Buyer: Morgan Promoter")).toBeVisible();
 
   await page.goto("/booking-campaigns");
-  await page.getByLabel("Campaign name").fill(`Austin outreach ${suffix}`);
+  const deliveryMode = page.getByLabel("Delivery after approval");
+  await expect(deliveryMode).toHaveValue("draft_only");
+  await page.getByLabel("Campaign name").fill(campaignName);
   await page.getByRole("button", { name: "Create campaign" }).click();
-  await page.getByLabel(`Prospect for Austin outreach ${suffix}`).selectOption({ label: `${prospectName} · Austin` });
-  await page.getByLabel(`Add recipient to Austin outreach ${suffix}`).click();
+  await page.getByLabel(`Prospect for ${campaignName}`).selectOption({ label: `${prospectName} · Austin` });
+  await page.getByLabel(`Add recipient to ${campaignName}`).click();
   await expect(page.getByText("ready")).toBeVisible();
-  await page.getByLabel(`Preview campaign Austin outreach ${suffix}`).click();
-  await expect(page.getByText("Personalized draft preview")).toBeVisible();
+  await page.getByLabel(`Preview campaign ${campaignName}`).click();
+  await expect(page.getByText("Personalized email preview")).toBeVisible();
+  await expect(page.getByText(/execution creates Gmail drafts only/i)).toBeVisible();
   await expect(page.getByText(`morgan-${suffix}@example.test`, { exact: true })).toBeVisible();
 });
 
@@ -934,4 +938,69 @@ test("confirmed event logistics move through approvals before provider execution
   await expect(completedLogistics.getByText(/Event ID: mock-cal-/)).toBeVisible();
   await expect(completedLogistics.getByRole("link", { name: "Open Drive folder" })).toHaveAttribute("href", /^https:\/\/drive\.mock\/folder\//);
   await expect(completedLogistics.getByRole("button", { name: /Prepare .* approval/ })).toBeVisible();
+});
+
+test("approved immediate-send campaigns remain executable and create follow-up work", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  const prospectName = `E2E immediate buyer ${suffix}`;
+  const campaignName = `E2E immediate campaign ${suffix}`;
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+
+  await artistApi(page, artistId, "/booking-profile", "PUT", {
+    homeCity: "Chicago",
+    homeRegion: "IL",
+    homeCountry: "US",
+    genres: ["rock"],
+    targetCapacityMin: 100,
+    targetCapacityMax: 500,
+    bookingPitch: "A sharp, audience-ready live set."
+  });
+  const prospect = await artistApi<{ id: string }>(page, artistId, "/booking-prospects", "POST", {
+    kind: "venue",
+    status: "qualified",
+    name: prospectName,
+    city: "Chicago"
+  });
+  await artistApi(page, artistId, `/booking-prospects/${prospect.id}/contact`, "PUT", {
+    contact: {
+      fullName: "Immediate Buyer",
+      email: `immediate-${suffix}@example.test`,
+      role: "Talent buyer"
+    }
+  });
+  const campaign = await artistApi<{ id: string }>(page, artistId, "/booking-campaigns", "POST", {
+    name: campaignName,
+    subjectTemplate: "Booking inquiry — {{artistName}}",
+    bodyTemplate: "Hi {{contactName}}, {{bookingPitch}}",
+    defaultFollowUpDays: 7,
+    deliveryMode: "send_on_execution"
+  });
+  await artistApi(page, artistId, `/booking-campaigns/${campaign.id}/recipients`, "POST", {
+    prospectId: prospect.id
+  });
+  await artistApi(page, artistId, `/booking-campaigns/${campaign.id}/prepare-approval`, "POST", {});
+
+  await page.goto("/approvals");
+  const approvalTitle = `Send 1 pitch email(s) — ${campaignName}`;
+  const pendingCard = page.getByRole("heading", { name: approvalTitle }).locator("xpath=ancestor::*[contains(@class,'border-violet-500')][1]");
+  await expect(pendingCard).toBeVisible();
+  const approved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/approve") && response.ok());
+  await pendingCard.getByRole("button", { name: "Approve" }).click();
+  await approved;
+
+  const readyCard = page.getByRole("heading", { name: approvalTitle }).locator("xpath=ancestor::*[contains(@class,'border-cyan-500')][1]");
+  await expect(readyCard).toBeVisible();
+  await expect(readyCard.getByText("outbound_email_send_batch", { exact: true })).toBeVisible();
+  const executed = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/execute") && response.ok());
+  await readyCard.getByRole("button", { name: "Execute", exact: true }).click();
+  await executed;
+  await expect(readyCard).toHaveCount(0);
+
+  await page.goto("/booking-campaigns");
+  const campaignCard = page.getByRole("heading", { name: campaignName }).locator("xpath=ancestor::div[contains(@class,'shadow-[var(--shadow-sm)]')][1]");
+  await expect(campaignCard).toContainText("sent");
+  await expect(campaignCard.getByRole("button", { name: "Replied", exact: true })).toBeVisible();
+  await page.goto("/tasks");
+  await expect(page.getByRole("cell", { name: `Follow up with ${prospectName}`, exact: true })).toBeVisible();
 });

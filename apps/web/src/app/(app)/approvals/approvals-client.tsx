@@ -7,12 +7,6 @@ import { useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { ApprovalRequest } from "@/lib/types";
 
-const EXECUTABLE = new Set([
-  "outbound_email_batch",
-  "calendar_hold_batch",
-  "drive_ensure_folder"
-]);
-
 export function ApprovalsClient({
   initialPending,
   initialReadyToExecute
@@ -166,56 +160,55 @@ export function ApprovalsClient({
             Approved — ready to run
           </h2>
           <p className="text-xs text-[var(--text-muted)]">
-            Execution runs approved provider actions (Gmail drafts, calendar
-            holds, Drive folders — mock or real per integration). Use dry run
-            to preview without calling providers.
+            Execution runs approved provider actions (Gmail drafts, explicitly
+            approved email sends, calendar holds, or Drive folders — mock or
+            real per integration). Use dry run to preview without calling
+            providers.
           </p>
-          {initialReadyToExecute
-            .filter((a) => EXECUTABLE.has(a.actionType))
-            .map((a) => (
-              <SurfaceCard
-                key={a.id}
-                elevated
-                className="border-cyan-500/20 bg-[var(--surface-2)]/90"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Play className="h-4 w-4 shrink-0 text-cyan-300" />
-                      <h3 className="font-semibold text-[var(--text-primary)]">
-                        {a.title}
-                      </h3>
-                      <Badge variant="neutral">{a.status}</Badge>
-                      <Badge variant="violet">{a.actionType}</Badge>
-                    </div>
-                    <p className="mt-2 text-xs text-[var(--text-muted)]">
-                      Approved by {a.approvedBy ?? "—"}
-                    </p>
-                    <ApprovalEventLink eventId={a.eventId} />
-                    <ExecutionStatusChips payload={a.payload} />
-                    <PayloadPreview payload={a.payload} />
+          {initialReadyToExecute.map((a) => (
+            <SurfaceCard
+              key={a.id}
+              elevated
+              className="border-cyan-500/20 bg-[var(--surface-2)]/90"
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Play className="h-4 w-4 shrink-0 text-cyan-300" />
+                    <h3 className="font-semibold text-[var(--text-primary)]">
+                      {a.title}
+                    </h3>
+                    <Badge variant="neutral">{a.status}</Badge>
+                    <Badge variant="violet">{a.actionType}</Badge>
                   </div>
-                  <div className="flex shrink-0 flex-col gap-2 lg:items-stretch lg:w-48">
-                    <button
-                      type="button"
-                      disabled={busyId === a.id}
-                      onClick={() => void executeApproval(a.id, false)}
-                      className="rounded-lg bg-cyan-500/15 px-4 py-2.5 text-sm font-semibold text-cyan-100 ring-1 ring-cyan-500/35 hover:bg-cyan-500/25 disabled:opacity-50"
-                    >
-                      Execute
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyId === a.id}
-                      onClick={() => void executeApproval(a.id, true)}
-                      className="sb-btn-secondary text-xs"
-                    >
-                      Dry run (preview)
-                    </button>
-                  </div>
+                  <p className="mt-2 text-xs text-[var(--text-muted)]">
+                    Approved by {a.approvedBy ?? "—"}
+                  </p>
+                  <ApprovalEventLink eventId={a.eventId} />
+                  <ExecutionStatusChips payload={a.payload} />
+                  <PayloadPreview payload={a.payload} />
                 </div>
-              </SurfaceCard>
-            ))}
+                <div className="flex shrink-0 flex-col gap-2 lg:items-stretch lg:w-48">
+                  <button
+                    type="button"
+                    disabled={busyId === a.id}
+                    onClick={() => void executeApproval(a.id, false)}
+                    className="rounded-lg bg-cyan-500/15 px-4 py-2.5 text-sm font-semibold text-cyan-100 ring-1 ring-cyan-500/35 hover:bg-cyan-500/25 disabled:opacity-50"
+                  >
+                    Execute
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === a.id}
+                    onClick={() => void executeApproval(a.id, true)}
+                    className="sb-btn-secondary text-xs"
+                  >
+                    Dry run (preview)
+                  </button>
+                </div>
+              </div>
+            </SurfaceCard>
+          ))}
         </section>
       ) : null}
     </div>

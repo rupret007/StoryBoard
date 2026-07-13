@@ -12,6 +12,10 @@ For source development, follow [Run locally](#run-locally-from-zero) and the
 integration, and agent handoff material without requiring readers to scan this
 entire file.
 
+> Run every command below from the cloned `StoryBoard` directory—the one that
+> contains this README and `package.json`. `ERR_PNPM_NO_PKG_MANIFEST` means the
+> terminal is in the wrong directory; run `cd /path/to/StoryBoard` first.
+
 ## Locked Stack
 
 - `pnpm` workspace monorepo (Node `22.22.x`, pnpm `10.x`)
@@ -59,18 +63,28 @@ Stop infra: `pnpm infra:down`
 ## Run the local container bundle
 
 For a production-built, self-contained local demo (web, API, Postgres, Redis,
-migrations, and a seeded owner), install Docker Compose v2 and run:
+migrations, and a seeded owner), install Git and Docker Compose v2. From a new
+machine, no host Node installation or `pnpm install` is required:
 
 ```bash
-pnpm container:up
+git clone https://github.com/rupret007/StoryBoard.git
+cd StoryBoard
+docker compose -f docker-compose.app.yml up --build
 ```
 
 Open `http://localhost:3000`, then use **Dev login**. The bundle persists data
-in Docker volumes. `pnpm container:up` stays attached so its logs remain
-visible; keep that terminal open, or run
-`docker compose -f docker-compose.app.yml up --build -d --wait` for background
-startup. Stop either form with `pnpm container:down`. To override local
-passwords, the session secret, ports, or browser-facing URLs, copy
+in Docker volumes. The command stays attached so its logs remain visible; keep
+that terminal open. For background startup, use:
+
+```bash
+docker compose -f docker-compose.app.yml up --build -d --wait
+```
+
+Stop the direct form with `docker compose -f docker-compose.app.yml down`. If
+Node and pnpm are already available, `pnpm container:up` and
+`pnpm container:down` are convenient wrappers around the same Compose file. To
+override local passwords, the session secret, ports, or browser-facing URLs,
+copy
 `.env.compose.example` to the gitignored `.env.compose` and pass it explicitly:
 
 ```bash
@@ -139,8 +153,8 @@ acceptance only for allowlisted, premise-checked internal work; deterministic
 code may prepare an approval but never execute its outside action.
 Decision drafts must be corrected and saved by the band before a separate
 choice can be recorded. Email, calendar, Drive, legal, and financial work
-remains human-reviewed and approval-gated. Accepted recommendations are
-single-use and linked to their internal result or prepared approvals;
+remains human-reviewed and approval-gated. Accepted recommendations with a
+typed action are single-use and linked to their internal result or prepared approvals;
 task/decision completion and linked approval status record the outcome
 automatically. Dismissal reasons and bounded
 cooldowns keep the Manager from repeating recently rejected or finished work.
@@ -504,7 +518,7 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm lint` | ESLint (API + web) |
 | `pnpm test` | Unit tests (`@storyboard/shared` + compiled API tests); does not require a database |
 | `pnpm test:integration` | Migrates and tests a dedicated DB named by `STORYBOARD_TEST_DATABASE_URL` (must contain `test`) |
-| `pnpm test:e2e` | Resets an explicit `STORYBOARD_TEST_DATABASE_URL`, builds production artifacts, and runs 12 focused Chromium workflows |
+| `pnpm test:e2e` | Resets an explicit `STORYBOARD_TEST_DATABASE_URL`, builds production artifacts, and runs 13 focused Chromium workflows |
 | `pnpm manager:eval` | Build the API and run the current offline Manager safety/usefulness gate |
 | `pnpm infra:up` / `infra:down` | Docker Postgres + Redis |
 | `pnpm container:up` / `container:down` | Build/start or stop the complete local container bundle |

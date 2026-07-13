@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
-Last reviewed: 2026-07-12
-Baseline for this round: `main` at `d24e79d`
+Last reviewed: 2026-07-13
+Baseline for this round: `main` at `88c2b48`
 
 ## Product and current architecture
 
@@ -1772,6 +1772,62 @@ Validation status:
 - [x] Cover tailored templates, risk classification, foreign project-link
   rejection, generation replay, audits, browser execution, and Manager grounding.
 
+### P0 — Restore the approved campaign delivery loop (completed 2026-07-13)
+
+Root cause and boundary:
+
+- The API correctly returned `outbound_email_send_batch` from its authoritative
+  ready-to-execute endpoint, but the Approval Center applied a second, stale
+  browser allowlist and silently removed that action. A user could prepare and
+  approve immediate delivery but never execute it. The campaign form also
+  selected immediate send by default even though the database, service, and
+  documentation specify draft-only as the safe default, and its preview always
+  claimed the result would be a draft.
+
+Implementation:
+
+- Removed the duplicated browser action allowlist; the tenant-scoped API
+  endpoint is now the single eligibility boundary for approved execution.
+- Restored draft-only as the campaign UI default, made immediate send an
+  explicit choice, and made the post-preview warning describe the selected
+  delivery mode accurately.
+- Kept sent recipients actionable for follow-up date and outcome recording.
+- Extended the existing browser acquisition journey through explicit immediate
+  delivery selection, preview, approval, visible ready-to-execute state, mock
+  execution, sent status, and generated follow-up task.
+- No schema migration or provider-boundary change was required.
+
+### P0 — Durable Manager recommendation follow-through (next)
+
+- [ ] Add a tenant-scoped `manager_follow_through_v1` projection over accepted,
+  blocked, and bounded recently completed recommendations. Derive state from
+  existing Task, Decision, Project, Event, and Approval relations; do not create
+  a second source of truth or add a migration.
+- [ ] Hydrate persisted conversation action outcomes from relational
+  `ManagerRecommendation` rows so a hard reload cannot show an accepted action
+  as suggested again.
+- [ ] Return a durable receipt and direct destination after acceptance, then
+  expose in-motion, waiting, blocked, ready-to-execute, and completed work in
+  the Manager workspace.
+- [ ] Stop offering generic Accept for advice without a typed action. Provide a
+  reviewed Mark handled or Dismiss path, and surface legacy accepted/unlinked
+  rows so they can be resolved instead of suppressed indefinitely.
+- [ ] Correct learning counts so actionless recommendations are not labeled
+  open tasks. Cover tenant isolation, reload, task/decision/approval lifecycle,
+  and notice → accept → destination → completion in unit, database, and browser
+  tests.
+
+### P1 — Make approved and uncertain work visible (next)
+
+- [ ] Count approved-ready work separately from pending approval decisions in
+  dashboard intelligence, the shell badge, summaries, and digests.
+- [ ] Link approval lifecycle notifications directly to `/approvals`.
+- [ ] Add a read-only reconciliation view for failed and one-shot-claimed
+  provider actions. Never expose a blind Retry action when the outside result
+  may be unknown.
+- [ ] Distinguish truly executable approvals from quarantined/non-executable
+  approval records in Manager facts and guidance.
+
 ### P2 — requires deployment or product decisions
 
 - [x] Add a one-command, production-built local container bundle with
@@ -1806,6 +1862,27 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-13: Completed a second code/logic and documentation review centered
+  on the human approval-to-execution loop. The audit found that the API returned
+  `outbound_email_send_batch` as executable while a stale browser allowlist
+  silently hid it; immediate campaigns could be approved but never run. The
+  Approval Center now trusts the tenant-scoped API eligibility result, campaign
+  creation defaults to drafts consistently across UI/service/database, preview
+  language matches the selected mode, and sent recipients retain follow-up and
+  outcome controls. A dedicated final Playwright case covers immediate-send
+  prepare → approve → execute → sent recipient → follow-up task without
+  polluting earlier Manager scenarios. README/runbook setup now gives a direct
+  Docker-only path, explains wrong-directory package-manifest failures, and
+  local links resolve across all 22 Markdown files. The review also recorded
+  the next two evidence-backed gaps: durable Manager recommendation receipts
+  and visibility for approved/uncertain work. Validation passed typecheck,
+  lint, 163 API + 10
+  shared tests, both production builds, 70/70 Manager checks, all 3 database
+  workflows across 38 migrations, all 13 Chromium journeys, `git diff --check`,
+  and the relationship diagnostic with zero issues. The local Compose images
+  rebuilt; migrations/seed completed, database/Redis/worker readiness is green,
+  the landing page returns HTTP 200 with the host-visible Dev login, and no
+  internal Compose hostname leaks into browser links. No migration was needed.
 - 2026-07-13: Completed a code-backed documentation and runnable-release audit.
   Added a task-oriented documentation index, replaced stale scaffold/future
   language in package READMEs, corrected Manager/operations/booking route shapes,

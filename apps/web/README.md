@@ -27,6 +27,12 @@ requests use `NEXT_PUBLIC_API_URL` and include the session cookie. Keep writes
 behind the API; the web app must not connect directly to PostgreSQL or provider
 SDKs.
 
+Approval eligibility is owned by the API's
+`GET /approvals/ready-to-execute` response. Do not add a second browser-side
+action allowlist: doing so can hide approved work when a new executable action
+is added. Pitch campaigns default to Gmail drafts; immediate delivery must be
+chosen explicitly and still requires separate approval and execution.
+
 See [`../../docs/developer-runbook.md`](../../docs/developer-runbook.md) for
 authentication and browser-test setup and
 [`../../docs/package-map.md`](../../docs/package-map.md) for route entry points.
