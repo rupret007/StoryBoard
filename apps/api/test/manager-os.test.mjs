@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, contextCapture, taskCapture, taskUpdate, taskAssignment, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, naturalFeedback, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, contextCapture, taskCapture, taskUpdate, taskAssignment, projectCapture, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, naturalFeedback, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -23,6 +23,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-task-capture.js"),
   loadApi("manager/manager-task-update.js"),
   loadApi("manager/manager-task-assignment.js"),
+  loadApi("manager/manager-project-capture.js"),
   loadApi("manager/manager-knowledge-health.js"),
   loadApi("manager/manager-evidence-health.js"),
   loadApi("manager/manager-work-sequence.js"),
@@ -352,6 +353,55 @@ test("Manager task capture refuses ambiguous, personal, sensitive, duplicate, an
   assert.equal(input("Add a task to Réserver l’hôtel", [{ id: "task-b", title: "Reserver l'hotel", status: "todo" }]).status, "duplicate");
 });
 
+test("Manager project capture stages one exact project and its dated milestone plan", () => {
+  const captured = projectCapture.resolveManagerProjectCapture({ message: "Plan our EP release for October 15, 2026", sourceMessageId: "message-project", sourceMessageCreatedAt: now, projects: [] });
+  assert.equal(captured.status, "ready");
+  assert.equal(captured.action.type, "create_conversation_project");
+  assert.equal(captured.action.projectType, "release");
+  assert.equal(captured.action.name, "EP release");
+  assert.equal(captured.action.dueDate, "2026-10-15");
+  assert.equal(captured.action.planVersion, "project_plan_v1");
+  assert.equal(projectCapture.managerConversationProjectDueAt(captured.action).toISOString(), "2026-10-15T12:00:00.000Z");
+  assert.match(captured.preview, /Project: EP release/);
+  assert.match(captured.preview, /Milestones \(6\)/);
+  assert.match(captured.preview, /Complete masters, credits, and ownership details/);
+  assert.equal(projectCapture.managerConversationProjectActionMatchesMessage(captured.action, { id: "message-project", content: "Plan our EP release for October 15, 2026", createdAt: now }), true);
+  assert.equal(projectCapture.managerConversationProjectActionMatchesMessage(captured.action, { id: "message-other", content: "Plan our EP release for October 15, 2026", createdAt: now }), false);
+  const recommendation = projectCapture.managerConversationProjectRecommendation(captured.action);
+  assert.equal(recommendation.proposedAction.type, "create_conversation_project");
+  assert.equal(recommendation.workstream, "releases");
+  assert.deepEqual(recommendation.evidenceIds, []);
+
+  const namedTour = projectCapture.resolveManagerProjectCapture({ message: 'Create a tour project called "Midwest Weekender" due 2026-11-20', sourceMessageId: "tour-message", sourceMessageCreatedAt: now, projects: [] });
+  assert.equal(namedTour.action.projectType, "tour");
+  assert.equal(namedTour.action.name, "Midwest Weekender");
+  assert.equal(projectCapture.managerConversationProjectRecommendation(namedTour.action).workstream, "live");
+  const campaign = projectCapture.resolveManagerProjectCapture({ message: "Start a content campaign named Fall launch by September 30, 2026", sourceMessageId: "campaign-message", sourceMessageCreatedAt: now, projects: [] });
+  assert.equal(campaign.action.projectType, "content_campaign");
+  assert.equal(campaign.action.name, "Fall launch");
+  assert.equal(projectCapture.managerConversationProjectRecommendation(campaign.action).workstream, "content");
+  const business = projectCapture.resolveManagerProjectCapture({ message: "Build a business project called New merch vendor for 2026-12-01", sourceMessageId: "business-message", sourceMessageCreatedAt: now, projects: [] });
+  assert.equal(business.action.projectType, "business");
+  assert.equal(projectCapture.managerConversationProjectRecommendation(business.action).workstream, "business");
+});
+
+test("Manager project capture refuses ambiguity, duplicates, secrets, questions, and implicit plans", () => {
+  const input = (message, projects = []) => projectCapture.resolveManagerProjectCapture({ message, sourceMessageId: "message-project", sourceMessageCreatedAt: now, projects });
+  assert.equal(input("We should release an EP this fall").status, "not_project");
+  assert.equal(input("Create a project for 2026-10-15").status, "needs_clarification");
+  assert.equal(input("Plan our EP release").status, "needs_clarification");
+  assert.equal(input("Plan our EP release for October 2026").status, "needs_clarification");
+  assert.equal(input("Plan our EP release for 2026-02-30").status, "needs_clarification");
+  assert.equal(input("Create a release and tour project called Fall run for 2026-10-15").status, "needs_clarification");
+  assert.equal(input("Plan our EP release and also a tour for 2026-10-15").status, "needs_clarification");
+  assert.equal(input("Create a business project called Rotate API key: sk-secret-value for 2026-10-15").status, "blocked_sensitive");
+  assert.equal(input("Should we plan our EP release for 2026-10-15?").status, "not_project");
+  assert.equal(input("Plan our EP release for 2026-10-15?").status, "needs_clarification");
+  const duplicate = input("Plan our ÉP release for 2026-10-15", [{ id: "project-a", type: "release", status: "active", name: "EP release", dueAt: new Date("2026-10-15T12:00:00.000Z") }]);
+  assert.equal(duplicate.status, "duplicate");
+  assert.equal(duplicate.duplicateProjectId, "project-a");
+});
+
 test("Manager task updates resolve one current task and stage exact reviewed changes", () => {
   const task = { id: "task-a", title: "Confirm rehearsal", status: "todo", dueAt: new Date("2026-07-18T12:00:00.000Z"), updatedAt: new Date("2026-07-12T11:00:00.000Z"), blockedReason: null, waitingOn: null, prerequisites: [], dependents: [] };
   const input = (message, tasks = [task], timezone = "America/Chicago") => taskUpdate.resolveManagerTaskUpdate({ message, sourceMessageId: "message-a", sourceMessageCreatedAt: now, timezone, tasks });
@@ -671,6 +721,7 @@ test("manager action authorization is code-owned and defaults to forbidden", () 
   assert.equal(policy.classifyManagerAction("create_conversation_task"), "internal");
   assert.equal(policy.classifyManagerAction("update_conversation_task"), "internal");
   assert.equal(policy.classifyManagerAction("assign_conversation_task"), "internal");
+  assert.equal(policy.classifyManagerAction("create_conversation_project"), "internal");
   assert.equal(policy.classifyManagerAction("create_decision"), "internal");
   assert.equal(policy.classifyManagerAction("generate_event_advance"), "internal");
   assert.equal(policy.classifyManagerAction("generate_project_plan"), "internal");
@@ -779,6 +830,47 @@ test("accepted conversational task is source-bound, unassigned, duplicate-safe, 
   openTasks = [{ id: "task-existing", title: "Confirm rehearsal", status: "todo" }];
   await assert.rejects(() => service.recommendation("artist-a", "rec-task", "accepted", {}, "member@test", "operator-a"), /equivalent task is already open/i);
   assert.equal(creates, 1);
+});
+
+test("accepted conversational project is source-bound, atomic, duplicate-safe, tenant-scoped, linked, and audited", async () => {
+  const source = { id: "message-project", content: 'Create a release project called "Midnight Signals" due 2026-10-15', createdAt: new Date("2026-07-12T12:00:00.000Z") };
+  const captured = projectCapture.resolveManagerProjectCapture({ message: source.content, sourceMessageId: source.id, sourceMessageCreatedAt: source.createdAt, projects: [] });
+  assert.equal(captured.status, "ready");
+  let outcome = "suggested"; let projects = []; let milestoneCount = 0; const audits = [];
+  const client = {
+    managerRecommendation: {
+      findFirst: async ({ where }) => where.managerRun.artistId === "artist-a" ? { id: "rec-project", outcome, taskId: null, decisionId: null, memoryFactId: null, projectId: null, task: null, decision: null, memoryFact: null, project: null, proposedAction: captured.action, evidence: [], managerRun: { message: { id: "answer-project", conversationId: "conversation-a", createdAt: new Date("2026-07-12T12:00:01.000Z") } } } : null,
+      updateMany: async ({ data }) => { if (outcome !== "suggested") return { count: 0 }; outcome = data.outcome; return { count: 1 }; },
+      update: async ({ data }) => ({ id: "rec-project", outcome, taskId: null, decisionId: null, memoryFactId: null, projectId: data.projectId ?? null })
+    },
+    managerMessage: { findFirst: async ({ where }) => where.id === source.id && where.conversationId === "conversation-a" ? source : null },
+    artistProject: {
+      findMany: async ({ where }) => projects.filter((project) => project.artistId === where.artistId),
+      create: async ({ data }) => { const project = { id: "project-chat", ...data }; projects = [project]; return project; }
+    },
+    task: {
+      createMany: async ({ data }) => { milestoneCount += data.length; assert.equal(data.every((task) => task.artistId === "artist-a" && task.projectId === "project-chat" && task.sourceKey.startsWith("project_plan_v1:project-chat:")), true); return { count: data.length }; }
+    }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new managerMod.ManagerService({ client }, { log: async (entry) => audits.push(entry) }, { get: () => false });
+  const accepted = await service.recommendation("artist-a", "rec-project", "accepted", {}, "member@test", "operator-a");
+  assert.equal(accepted.outcome, "completed");
+  assert.equal(accepted.projectId, "project-chat");
+  assert.equal(projects[0].type, "release");
+  assert.equal(projects[0].status, "active");
+  assert.equal(projects[0].name, "Midnight Signals");
+  assert.equal(projects[0].dueAt.toISOString(), "2026-10-15T12:00:00.000Z");
+  assert.equal(milestoneCount, 6);
+  const projectAudit = audits.find((entry) => entry.action === "project.created_from_manager_chat");
+  assert.equal(projectAudit.aggregateId, "project-chat");
+  assert.equal(projectAudit.metadata.createdMilestoneCount, 6);
+  assert.equal(projectAudit.metadata.sourceMessageId, source.id);
+  assert.equal(JSON.stringify(projectAudit.metadata).includes(source.content), false);
+  await assert.rejects(() => service.recommendation("artist-a", "rec-project", "accepted", {}, "member@test", "operator-a"), /already been decided/);
+  await assert.rejects(() => service.recommendation("artist-b", "rec-project", "accepted", {}, "member@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+  assert.equal(projects.length, 1);
+  assert.equal(milestoneCount, 6);
 });
 
 test("accepted conversational task update is source-bound, optimistic, tenant-safe, atomic, and audited", async () => {
@@ -1122,7 +1214,7 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v28", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v29", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "available", effectiveUntil: "2026-07-20T12:00:00.000Z" }).success, true);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "busy" }).success, false);
@@ -1243,7 +1335,7 @@ test("manager recommendation outcome review keeps finished results bounded witho
     outcomeNote: null,
     outcomeAt,
     createdAt: outcomeAt,
-    promptVersion: "manager_os_v28",
+    promptVersion: "manager_os_v29",
     cadence: "daily",
     task: { id: "task-a", title: "Finish the work", status: "done" },
     decision: null,
@@ -1287,7 +1379,7 @@ test("manager recommendation outcome review reads only finished, unpromoted advi
           outcomeNote: null,
           outcomeAt: new Date("2026-07-12T11:00:00.000Z"),
           createdAt: new Date("2026-07-10T11:00:00.000Z"),
-          managerRun: { promptVersion: "manager_os_v28", cadence: "daily" },
+          managerRun: { promptVersion: "manager_os_v29", cadence: "daily" },
           task: { id: "task-a", title: "Finish the real task", status: "done" },
           decision: null
         }];
@@ -1317,7 +1409,7 @@ test("manager response review selects recent unrated answers across conversation
     answer: `Answer ${messageId}`,
     citations: [],
     actionTypes: [],
-    promptVersion: "manager_os_v28",
+    promptVersion: "manager_os_v29",
     mode: "deterministic",
     createdAt,
     ...overrides
@@ -1358,7 +1450,7 @@ test("manager response review reads only the active artist and current operator'
           proposedActions: [],
           createdAt: new Date("2026-07-12T11:00:00.000Z"),
           conversation: { title: "What needs attention?" },
-          managerRun: { promptVersion: "manager_os_v28", mode: "deterministic" },
+          managerRun: { promptVersion: "manager_os_v29", mode: "deterministic" },
           feedback: where.feedback.some ? [{ helpful: true, reason: null, note: null, updatedAt: new Date("2026-07-12T11:05:00.000Z") }] : [],
           responseEval: null
         }];
@@ -1664,22 +1756,22 @@ test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v28", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v29", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v28", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v28", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v29", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v29", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v28", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v28", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v29", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v29", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v28", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v28", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v28", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v29", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v29", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v29", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 

@@ -381,6 +381,15 @@ Manager routes:
   no-ops fail closed. Limited or unknown capacity remains visible for the human
   decision. The provider cannot emit this action, and neither model context nor
   audit metadata receives check-in notes.
+  Explicit project requests route through `manager_project_capture_v1`. Use an
+  exact project kind, name, and date, for example `Create a release project
+  called "Autumn EP" due 2027-10-15`. The response previews the active project
+  and every dated `project_plan_v1` milestone. Acceptance reloads and re-parses
+  the source message and atomically creates the artist-scoped project plus all
+  source-keyed tasks. Equivalent type/name/date projects, vague or missing
+  dates, multiple projects, implicit plans, questions, and credential values
+  are refused. This action is code-owned and is absent from the provider output
+  schema.
 - `POST /manager/messages/:id/feedback` with `{ "helpful": true }` or
   `{ "helpful": false, "reason": "too_vague", "note": "..." }`
 - `GET /manager/conversations?limit=1..20` — newest-first summaries with the
@@ -429,7 +438,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v28`)
+  (owner-only; currently accepts only the code-registered `manager_os_v29`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -504,7 +513,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v28` retains the current operator question and at most 12
+version `manager_os_v29` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.

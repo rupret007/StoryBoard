@@ -93,7 +93,7 @@ export const managerResponseEvalResolutionSchema = z.object({
   candidateVersion: z.string().regex(/^manager_os_v[1-9][0-9]*$/),
   note: z.string().trim().min(10).max(2000)
 }).strict();
-export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v28").default("manager_os_v28") }).strict();
+export const managerEvaluationRunSchema = z.object({ candidateVersion: z.literal("manager_os_v29").default("manager_os_v29") }).strict();
 export const managerMemoryPatchSchema = z.object({
   value: z.json().optional(),
   confirmed: z.boolean().optional(),

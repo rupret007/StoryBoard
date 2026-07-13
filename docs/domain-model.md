@@ -85,6 +85,16 @@ the same serializable transaction before a compare-and-set. An unavailable
 member is refused; limited or unknown capacity is displayed for human review.
 Audit history stores bounded IDs and state labels, never raw chat or a check-in
 note.
+`manager_project_capture_v1` stages `create_conversation_project` only from an
+explicit release, content-campaign, tour, or business project request with one
+exact name and target date. The proposed action carries the source message ID
+and timestamp, project type/name/date, `project_plan_v1`, and a complete dated
+milestone preview. Acceptance reloads and re-parses that tenant message inside
+a serializable transaction, rejects an equivalent type/name/date project, and
+atomically creates the active `ArtistProject` and all source-keyed milestone
+`Task` rows. `ManagerRecommendation.projectId` retains the resulting link. Raw
+chat text and sensitive values are excluded from trace and audit metadata, and
+the provider output schema cannot emit this action.
 Conversation list reads are a non-persistent summary projection: newest first,
 at most 20, with the latest message and `_count.messages` mapped to
 `messageCount`. Conversation detail remains the message source of truth, reads

@@ -356,21 +356,23 @@ const checks = [
     `
   },
   {
-    relation: "ManagerRecommendation → task, decision, memory, initiative, and eval example",
+    relation: "ManagerRecommendation → task, decision, memory, project, initiative, and eval example",
     query: `
       SELECT r."id" AS "recordId", run."artistId" AS "recordArtistId",
-             COALESCE(r."taskId", r."decisionId", r."memoryFactId", r."initiativeId", x."id") AS "relatedId",
-             COALESCE(t."artistId", d."artistId", f."artistId", i."artistId", x."artistId") AS "relatedArtistId"
+             COALESCE(r."taskId", r."decisionId", r."memoryFactId", r."projectId", r."initiativeId", x."id") AS "relatedId",
+             COALESCE(t."artistId", d."artistId", f."artistId", p."artistId", i."artistId", x."artistId") AS "relatedArtistId"
       FROM "ManagerRecommendation" r
       INNER JOIN "ManagerRun" run ON run."id" = r."managerRunId"
       LEFT JOIN "Task" t ON t."id" = r."taskId"
       LEFT JOIN "ManagerDecision" d ON d."id" = r."decisionId"
       LEFT JOIN "ManagerMemoryFact" f ON f."id" = r."memoryFactId"
+      LEFT JOIN "ArtistProject" p ON p."id" = r."projectId"
       LEFT JOIN "ManagerInitiative" i ON i."id" = r."initiativeId"
       LEFT JOIN "ManagerEvalExample" x ON x."recommendationId" = r."id"
       WHERE (t."id" IS NOT NULL AND run."artistId" <> t."artistId")
          OR (d."id" IS NOT NULL AND run."artistId" <> d."artistId")
          OR (f."id" IS NOT NULL AND run."artistId" <> f."artistId")
+         OR (p."id" IS NOT NULL AND run."artistId" <> p."artistId")
          OR (i."id" IS NOT NULL AND run."artistId" <> i."artistId")
          OR (x."id" IS NOT NULL AND run."artistId" <> x."artistId")
       ORDER BY r."id";

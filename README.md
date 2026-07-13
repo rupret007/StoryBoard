@@ -151,7 +151,7 @@ to deterministic and provider-backed answers through
 action explicit, simplify tone, or ask one evidence-backed missing-premise
 question. Raw correction notes never become instructions, and adaptation cannot
 change facts, citations, recommendations, tools, permissions, or writes.
-Prompt/policy version `manager_os_v28`
+Prompt/policy version `manager_os_v29`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -197,6 +197,16 @@ current owner, active lineup, and latest check-in inside one serializable
 transaction. Ambiguous names, implicit ownership, unavailable members,
 completed work, and no-op assignments fail closed. Capacity notes never enter
 model context or audit metadata, and the provider cannot emit this action.
+The same conversation can start a complete execution project without forcing a
+novice through several forms. An explicit request such as `Create a release
+project called "Autumn EP" due 2027-10-15` routes through
+`manager_project_capture_v1`. StoryBoard shows the exact active project and all
+dated starter milestones before acceptance. Acceptance reloads and re-parses
+the originating tenant message, rejects an equivalent project, and creates the
+project plus its source-keyed `project_plan_v1` tasks atomically. Release,
+content-campaign, tour, and business projects are supported; vague dates,
+multiple projects, implicit planning, secrets, and provider-generated project
+actions fail closed.
 `manager_work_sequence_v1` projection makes task order explicit. Members can
 record one Task as another Task's prerequisite; the API rejects cross-artist
 links, self-links, cycles, impossible date order, and completion that skips

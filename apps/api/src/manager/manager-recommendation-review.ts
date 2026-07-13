@@ -22,6 +22,7 @@ export type ManagerRecommendationEvalReviewCandidate = {
   cadence: string;
   task: { id: string; title: string; status: string } | null;
   decision: { id: string; title: string; status: string; reviewOutcome: string | null } | null;
+  project: { id: string; name: string; status: string } | null;
 };
 
 export type ManagerRecommendationEvalReviewItem = ManagerRecommendationEvalReviewCandidate & {

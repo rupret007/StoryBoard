@@ -20,6 +20,7 @@ import type { ManagerProfileContextAction } from "./manager-context-capture";
 import type { ManagerConversationTaskAction } from "./manager-task-capture";
 import type { ManagerConversationTaskUpdateAction } from "./manager-task-update";
 import type { ManagerConversationTaskAssignmentAction } from "./manager-task-assignment";
+import type { ManagerConversationProjectAction } from "./manager-project-capture";
 import { applyManagerResponseAdaptation, managerResponseAdaptationPolicy, type ManagerResponseAdaptationPolicy } from "./manager-response-quality";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -52,7 +53,7 @@ export type ManagerProposedAction = {
   bandMemberId: string;
   checkInId: string | null;
   availability: "available" | "limited" | "unknown";
-} | ManagerProfileContextAction | ManagerConversationTaskAction | ManagerConversationTaskUpdateAction | ManagerConversationTaskAssignmentAction;
+} | ManagerProfileContextAction | ManagerConversationTaskAction | ManagerConversationTaskUpdateAction | ManagerConversationTaskAssignmentAction | ManagerConversationProjectAction;
 
 export type ManagerRecommendationDraft = {
   stableKey: string;

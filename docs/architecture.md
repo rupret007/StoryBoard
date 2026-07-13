@@ -138,6 +138,14 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   members, completed work, and no-ops fail closed. Check-in notes are excluded
   from model context and audit metadata, and provider output cannot emit the
   action.
+  `manager_project_capture_v1` applies the same source-bound review pattern to
+  a whole execution project. The code-owned resolver requires one supported
+  project type, name, and exact target date, then previews the shared
+  `project_plan_v1` schedule. Acceptance reloads and re-parses the source
+  message, rechecks equivalent artist projects, claims the recommendation, and
+  atomically creates the project plus every source-keyed milestone in one
+  serializable transaction. The resulting recommendation links the project;
+  provider output cannot emit this action or bypass the duplicate preflight.
   A deterministic response-quality gate rejects canned/meta prose, excessive
   presentation, and unverified claims of completed outside actions before a
   model answer can replace the safe fallback. Feedback may shape reviewed evals,

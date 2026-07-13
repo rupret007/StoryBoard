@@ -329,7 +329,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v28", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v29", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 
@@ -469,6 +469,17 @@ test("novice manager intake produces grounded work and band operations records",
   await showQuestion.fill("Are we ready for our next show?");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: `E2E rehearsal ${suffix}` })).toContainText(/\d+\/100/);
+  const projectDue = new Date(Date.now() + 120 * 86400000).toISOString().slice(0, 10);
+  await showQuestion.fill(`Create a release project called "E2E release ${suffix}" due ${projectDue}`);
+  await page.getByRole("button", { name: "Send message" }).click();
+  const projectProposal = page.getByText("Suggested band project", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await expect(projectProposal).toContainText(`Project: E2E release ${suffix}`);
+  await expect(projectProposal).toContainText("Milestones (6)");
+  const projectCreated = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/accept") && response.ok());
+  await projectProposal.getByRole("button", { name: "Create project and plan" }).click();
+  await projectCreated;
+  await expect(projectProposal.getByText("completed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Project and milestone plan created.", { exact: true })).toBeVisible();
 
   await page.goto("/operations");
   await page.getByRole("tab", { name: "Music & setlists" }).click();
@@ -476,18 +487,7 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByText(`E2E song ${suffix}`)).toBeVisible();
   await page.getByRole("tab", { name: "Projects" }).click();
-  await page.getByPlaceholder("Project name").fill(`E2E release ${suffix}`);
-  const projectDue = new Date(Date.now() + 120 * 86400000).toISOString().slice(0, 10);
-  await page.getByLabel("Project due date").fill(projectDue);
-  await page.getByRole("button", { name: "Create project" }).click();
   await expect(page.getByText(`E2E release ${suffix}`, { exact: true })).toBeVisible();
-  await page.goto("/manager");
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Build milestone plan" })).toBeVisible();
-  await page.getByRole("button", { name: "Build milestone plan" }).click();
-  await expect(page.getByText("Milestone plan created.", { exact: true })).toBeVisible();
-  await page.goto("/operations");
-  await page.getByRole("tab", { name: "Projects" }).click();
   const openProject = page.getByRole("link", { name: "Open project" });
   await openProject.evaluate((element) => element.scrollIntoView({ block: "center" }));
   await openProject.click();
@@ -510,7 +510,9 @@ test("novice manager intake produces grounded work and band operations records",
   const releaseQuestion = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
   await releaseQuestion.fill("How is our release project going?");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: `E2E release ${suffix}` })).toContainText(/\d+\/100/);
+  const projectAnswer = page.getByTestId("manager-conversation-messages").locator("p.whitespace-pre-wrap").filter({ hasText: "Here is the recorded project picture:" });
+  await expect(projectAnswer).toContainText(`E2E release ${suffix}`);
+  await expect(projectAnswer).toContainText(/\d+\/100/);
 
   await page.goto("/operations");
   await page.getByRole("tab", { name: "Deals" }).click();

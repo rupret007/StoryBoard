@@ -51,6 +51,7 @@ The NestJS orchestration backend. Current responsibilities:
   reviewed `manager_task_capture_v1` shared-task proposals,
   reviewed `manager_task_update_v1` existing-task follow-through,
   reviewed `manager_task_assignment_v1` direct ownership changes,
+  reviewed `manager_project_capture_v1` project-plus-plan creation,
   owner-only `manager_recommendation_eval_review_v1` finished-advice triage,
   per-operator `manager_response_review_v1` answer-review queues,
   owner-only `manager_response_eval_review_v1` release-example triage,

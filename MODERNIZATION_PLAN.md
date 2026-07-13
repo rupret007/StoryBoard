@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `fd16d07`
+Baseline for this round: `main` at `fd956d7`
 
 ## Product and current architecture
 
@@ -1481,6 +1481,44 @@ Implementation and validation:
   including the exact review boundary. The full release gate is recorded in the
   progress log below.
 
+### P0 — Reviewed conversational project creation (completed 2026-07-12)
+
+Root cause and boundary:
+
+- StoryBoard could generate a milestone plan only after a user had already
+  created a project in Band operations. A novice asking the Manager to plan an
+  EP, content campaign, tour, or business initiative received advice instead of
+  a complete reviewed execution proposal.
+- Project creation must remain explicit and tenant-bound. The Manager may
+  prepare internal records, but it must not infer a target date, create multiple
+  projects from one turn, accept sensitive values, or let provider output name
+  a new mutation.
+
+Implementation:
+
+- Added `manager_project_capture_v1`, a deterministic source-message resolver
+  for one named release, content-campaign, tour, or business project with an
+  exact target date. The chat turn previews the project and every dated
+  `project_plan_v1` milestone without writing.
+- Acceptance reloads and re-parses the originating artist message, rechecks
+  duplicate type/name/date projects, and atomically creates the active
+  `ArtistProject` plus all source-keyed milestone Tasks in a serializable
+  transaction. The completed recommendation links the project, and both the
+  project creation and recommendation outcome are audited without raw chat.
+- Provider output cannot emit this action. Ambiguous or missing dates,
+  unsupported or multiple project types, questions, implicit planning, secret
+  values, stale source messages, cross-artist access, and replay fail closed.
+- Added focused parser/action/service tests, explicit-database coverage,
+  golden evaluation scenarios, relationship diagnostics, and a production
+  browser journey from Manager request through the Operations project plan.
+- Validation passed 136 API + 2 shared tests, all three disposable-Postgres
+  workflows across 36 migrations, all three production Chromium journeys,
+  typecheck, lint, both production builds, and the 62/62
+  `manager_os_v29` / `manager_evals_v31` gate at 100% safety. The rebuilt
+  container applied migration 36, reports healthy database/Redis/worker
+  dependencies and HTTP 200 web, and the relationship diagnostic found zero
+  integrity issues.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,
@@ -1557,6 +1595,18 @@ Before release, run a read-only diagnostic for historical relationships whose
 artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
+
+- 2026-07-12: Added source-bound reviewed project creation to Manager chat with
+  `manager_project_capture_v1`. One explicit release, content campaign, tour,
+  or business request with an exact date now produces a complete milestone
+  preview; acceptance atomically creates the project and its source-keyed plan,
+  links the completed recommendation, and audits bounded provenance. Mixed
+  project types, ambiguity, secrets, duplicate projects, stale source messages,
+  tenant violations, provider-generated actions, and replay fail closed.
+  Validation passed 136 API + 2 shared tests, all three database workflows
+  across 36 migrations, all three Chromium journeys, the full static/build
+  gate, 62/62 Manager checks at 100% safety, relationship diagnostics with zero
+  issues, and a rebuilt healthy container bundle.
 
 - 2026-07-12: Closed the Manager feedback loop for the default deterministic
   runtime with `manager_response_adaptation_v1`. Reviewed correction categories
