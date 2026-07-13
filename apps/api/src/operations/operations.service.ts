@@ -11,6 +11,7 @@ import { deterministicShowReadiness } from "./event-readiness";
 import { deterministicEventDayOf } from "./event-day-of";
 import { deterministicProjectReadiness, PROJECT_PLAN_VERSION, projectPlanTemplate } from "./project-plan";
 import { SHOW_ADVANCE_VERSION, showAdvanceSourceKey, showAdvanceTaskSpecs } from "./show-advance";
+import { EVENT_LOGISTICS_POLICY_VERSION, assessEventLogistics, planEventLogisticsApprovals } from "./event-logistics";
 
 type EventCreate = z.infer<typeof eventCreateSchema>;
 type EventPatch = z.infer<typeof eventPatchSchema>;
@@ -46,7 +47,8 @@ const eventDetailInclude = {
   deals: { include: { agreements: { orderBy: { version: "desc" as const } }, invoices: { include: { payments: true } } } },
   invoices: { include: { payments: true } },
   expenses: true,
-  settlement: { include: { splits: { include: { bandMember: true } } } }
+  settlement: { include: { splits: { include: { bandMember: true } } } },
+  approvals: { where: { sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, orderBy: { createdAt: "asc" as const } }
 } as const;
 const projectDetailInclude = { goal: true, events: true, tasks: { include: { bandMember: true }, orderBy: [{ dueAt: "asc" as const }, { createdAt: "asc" as const }] }, expenses: { orderBy: { incurredAt: "desc" as const } } } satisfies Prisma.ArtistProjectInclude;
 function cleanDates(input: Record<string, unknown>): Record<string, unknown> {
@@ -65,7 +67,7 @@ function validateEventTimeline(input: EventCreate | EventPatch, existing?: Event
     setAt: eventDate(input.setAt, existing?.setAt),
     curfewAt: eventDate(input.curfewAt, existing?.curfewAt)
   };
-  if (timeline.startsAt && timeline.endsAt && timeline.endsAt < timeline.startsAt) throw new BadRequestException("Event end must be after its start");
+  if (timeline.startsAt && timeline.endsAt && timeline.endsAt <= timeline.startsAt) throw new BadRequestException("Event end must be after its start");
   const schedule = [
     ["Load-in", timeline.loadInAt],
     ["Soundcheck", timeline.soundcheckAt],
@@ -109,8 +111,16 @@ export class OperationsService {
     if (input.setlistId) await this.assertArtistRecord("setlist", artistId, input.setlistId);
   }
 
-  events(artistId: string) { return this.prisma.client.bandEvent.findMany({ where: { artistId }, include: { venue: true, contact: true, participants: { include: { bandMember: true } }, settlement: true }, orderBy: [{ startsAt: "asc" }, { createdAt: "desc" }] }); }
-  async event(artistId: string, id: string) { const row = await this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, include: eventDetailInclude }); if (!row) throw new NotFoundException("Event not found"); return row; }
+  async events(artistId: string) {
+    const rows = await this.prisma.client.bandEvent.findMany({ where: { artistId }, include: { venue: true, contact: true, participants: { include: { bandMember: true } }, settlement: true, approvals: { where: { sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, orderBy: { createdAt: "asc" } } }, orderBy: [{ startsAt: "asc" }, { createdAt: "desc" }] });
+    return rows.map(({ approvals, ...event }) => event.type === "gig" ? { ...event, logisticsAssessment: assessEventLogistics(event, approvals) } : event);
+  }
+  async event(artistId: string, id: string) {
+    const row = await this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, include: eventDetailInclude });
+    if (!row) throw new NotFoundException("Event not found");
+    const { approvals, ...event } = row;
+    return event.type === "gig" ? { ...event, logisticsAssessment: assessEventLogistics(event, approvals) } : event;
+  }
   async eventReadiness(artistId: string, id: string, now = new Date()) {
     const [event, members] = await Promise.all([
       this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, include: eventDetailInclude }),
@@ -126,7 +136,13 @@ export class OperationsService {
     ]);
     if (!event) throw new NotFoundException("Event not found");
     const readiness = deterministicShowReadiness(event, members, now);
-    return { event, activeMembers: members, readiness, dayOf: deterministicEventDayOf(event, readiness, members, now) };
+    const { approvals, ...eventView } = event;
+    return {
+      event: eventView.type === "gig" ? { ...eventView, logisticsAssessment: assessEventLogistics(eventView, approvals) } : eventView,
+      activeMembers: members,
+      readiness,
+      dayOf: deterministicEventDayOf(event, readiness, members, now)
+    };
   }
   async eventReadinessList(artistId: string, days = 90, now = new Date()) {
     const through = new Date(now.getTime() + days * 86400000);
@@ -187,7 +203,30 @@ export class OperationsService {
     await this.auditWrite(artistId, "BandEvent", eventId, "event.advance_generated", actorLabel, actorOperatorId, { version: SHOW_ADVANCE_VERSION, createdCount: result.count });
     return { eventId, version: SHOW_ADVANCE_VERSION, created, createdCount: result.count, existingCount: existing.length };
   }
-  async prepareLogistics(artistId: string, eventId: string, actorLabel: string, actorOperatorId: string) { const event = await this.event(artistId, eventId); if (!event.startsAt || !event.endsAt) throw new BadRequestException("Event start and end are required"); const approvals = [await this.approvals.create(artistId, { title: `Add ${event.title} to Google Calendar`, actionType: "calendar_hold_batch", payload: { holds: [{ title: event.title, start: event.startsAt.toISOString(), end: event.endsAt.toISOString(), ...(event.timezone ? { timeZone: event.timezone } : {}) }] }, opportunityId: event.opportunityId, proposedBy: actorLabel, actorOperatorId, status: ApprovalStatus.pending }), await this.approvals.create(artistId, { title: `Create Drive folder for ${event.title}`, actionType: "drive_ensure_folder", payload: { folderName: `${event.startsAt.toISOString().slice(0,10)} ${event.title}` }, opportunityId: event.opportunityId, proposedBy: actorLabel, actorOperatorId, status: ApprovalStatus.pending })]; return approvals; }
+  async prepareLogistics(artistId: string, eventId: string, actorLabel: string, actorOperatorId: string) {
+    const event = await this.prisma.client.bandEvent.findFirst({
+      where: { id: eventId, artistId },
+      include: { approvals: { where: { sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, orderBy: { createdAt: "asc" } } }
+    });
+    if (!event) throw new NotFoundException("Event not found");
+    if (event.type !== "gig") throw new BadRequestException("Only confirmed gigs can prepare Calendar and Drive approvals");
+    const initial = assessEventLogistics(event, event.approvals);
+    if (!initial.eligible) throw new BadRequestException({ message: "Confirm the show and add a valid start, end, and timezone before preparing logistics approvals", reasons: initial.blockingReasons });
+    const plan = planEventLogisticsApprovals(event, event.approvals, { allowRetryChannels: initial.retryableChannels });
+    const createdApprovalIds: string[] = [];
+    const approvals = plan.specs.length
+      ? await this.approvals.createMany(
+          artistId,
+          plan.specs.map((spec) => ({ ...spec, proposedBy: actorLabel, actorOperatorId })),
+          { collectCreatedIds: createdApprovalIds }
+        )
+      : [];
+    const allApprovals = await this.prisma.client.approvalRequest.findMany({ where: { artistId, eventId, sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, orderBy: { createdAt: "asc" } });
+    const logisticsAssessment = assessEventLogistics(event, allApprovals);
+    const createdCount = createdApprovalIds.length;
+    await this.auditWrite(artistId, "BandEvent", eventId, "event.logistics_approvals_prepared", actorLabel, actorOperatorId, { policyVersion: EVENT_LOGISTICS_POLICY_VERSION, createdCount, approvalIds: approvals.map((approval) => approval.id), retryChannels: initial.retryableChannels });
+    return { eventId, logisticsAssessment, approvals, createdCount };
+  }
 
   songs(artistId: string) { return this.prisma.client.song.findMany({ where: { artistId }, orderBy: [{ active: "desc" }, { title: "asc" }] }); }
   async createSong(artistId: string, input: SongCreate, actorLabel: string, actorOperatorId: string) { const row = await this.prisma.client.song.create({ data: { artistId, ...input } as Prisma.SongUncheckedCreateInput }); await this.auditWrite(artistId, "Song", row.id, "song.created", actorLabel, actorOperatorId, { title: row.title }); return row; }

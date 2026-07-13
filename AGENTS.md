@@ -18,7 +18,7 @@ StoryBoard is a pnpm monorepo: **Next.js** (`apps/web`) + **NestJS** (`apps/api`
 ## Verify before finish
 
 ```bash
-pnpm typecheck && pnpm lint && pnpm test && pnpm build
+pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm manager:eval
 ```
 
 ## Repo

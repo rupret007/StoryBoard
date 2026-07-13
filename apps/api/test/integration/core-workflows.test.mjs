@@ -26,6 +26,7 @@ const [
   telegramMod,
   mockAdaptersMod,
   managerMod,
+  managerEvaluationMod,
   operationsMod
 ] = await Promise.all([
   load("lib/prisma.js"),
@@ -41,6 +42,7 @@ const [
   load("workflow-automation/telegram-registration.service.js"),
   load("integrations/adapters/mock/mock-adapters.js"),
   load("manager/manager.service.js"),
+  load("manager/manager-evaluation.js"),
   load("operations/operations.service.js")
 ]);
 
@@ -404,7 +406,14 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   ]);
   const operator = await client.operator.create({ data: { email: "manager-owner@test.invalid" } });
   await client.artistMembership.create({ data: { artistId: artist.id, operatorId: operator.id, role: "owner" } });
-  const manager = new managerMod.ManagerService(prisma, audit, { get: () => false });
+  const managerQueue = { enqueueApprovalNotify: async () => undefined };
+  const managerApprovals = new approvalsMod.ApprovalsService(
+    prisma,
+    audit,
+    { resolveForArtist: async () => mockAdaptersMod.mockAdapters },
+    managerQueue
+  );
+  const manager = new managerMod.ManagerService(prisma, audit, { get: () => false }, managerApprovals);
   const intake = await manager.completeIntake(artist.id, {
     profile: { bandMode: "hybrid", homeCity: "Chicago", homeRegion: "IL", homeCountry: "US", genres: ["rock"], revenueSources: [], currentAssets: [], constraints: ["Weeknight work schedules"], educationTopics: [], currency: "USD", twelveMonthAmbition: "Release an EP and book six profitable shows", communicationCadence: "weekly", decisionStyle: "guided" },
     members: [{ name: "Alex", instruments: ["guitar"], roles: ["bandleader"], active: true }]
@@ -788,10 +797,10 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(revisedEvalExample.id, evalExample.id);
   assert.equal(await client.managerEvalExample.count({ where: { artistId: artist.id } }), 1);
   assert.equal(Object.hasOwn(revisedEvalExample.snapshot, "inputFacts"), false);
-  const blockedEvaluation = await manager.runEvaluation(artist.id, "manager_os_v31", operator.email, operator.id);
+  const blockedEvaluation = await manager.runEvaluation(artist.id, managerEvaluationMod.MANAGER_PROMPT_VERSION, operator.email, operator.id);
   assert.equal(blockedEvaluation.passed, false);
   await manager.promoteEvalExample(artist.id, actionable.id, { label: "useful", notes: "Task was completed" }, operator.email, operator.id);
-  const passingEvaluation = await manager.runEvaluation(artist.id, "manager_os_v31", operator.email, operator.id);
+  const passingEvaluation = await manager.runEvaluation(artist.id, managerEvaluationMod.MANAGER_PROMPT_VERSION, operator.email, operator.id);
   assert.equal(passingEvaluation.passed, true);
   assert.equal(await client.managerEvaluationRun.count({ where: { artistId: artist.id } }), 2);
   await assert.rejects(() => manager.promoteEvalExample(foreignArtist.id, actionable.id, { label: "useful" }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
@@ -875,8 +884,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(responseEval.label, "needs_revision");
   assert.equal(responseEval.snapshot.question, "What should we focus on this week?");
   assert.equal(Object.hasOwn(responseEval.snapshot, "inputFacts"), false);
-  assert.equal((await manager.runEvaluation(artist.id, "manager_os_v31", operator.email, operator.id)).passed, false);
-  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: "manager_os_v31", note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
+  assert.equal((await manager.runEvaluation(artist.id, managerEvaluationMod.MANAGER_PROMPT_VERSION, operator.email, operator.id)).passed, false);
+  await assert.rejects(() => manager.resolveResponseEvalExample(artist.id, responseEval.id, { candidateVersion: managerEvaluationMod.MANAGER_PROMPT_VERSION, note: "The response behavior has been corrected." }, operator.email, operator.id), /same Manager version/);
   await assert.rejects(() => manager.promoteResponseEvalExample(foreignArtist.id, firstChat.message.id, { label: "needs_revision", expectedBehavior: "Keep the response inside the foreign workspace." }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   const revisedFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: true }, operator.email, operator.id);
   assert.equal(revisedFeedback.id, negativeFeedback.id);
@@ -884,7 +893,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(usefulResponseEval.id, responseEval.id);
   assert.equal(usefulResponseEval.label, "useful");
   assert.equal(usefulResponseEval.resolvedAt, null);
-  const responseEvaluation = await manager.runEvaluation(artist.id, "manager_os_v31", operator.email, operator.id);
+  const responseEvaluation = await manager.runEvaluation(artist.id, managerEvaluationMod.MANAGER_PROMPT_VERSION, operator.email, operator.id);
   assert.equal(responseEvaluation.passed, true);
   assert.equal(responseEvaluation.metrics.ownerReviewedResponseCount, 2);
   assert.equal(await client.managerResponseEvalExample.count({ where: { artistId: artist.id } }), 2);
@@ -915,7 +924,77 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(await client.bandEvent.count({ where: { artistId: artist.id, opportunityId: opportunity.id } }), 1);
   const event = await client.bandEvent.findUniqueOrThrow({ where: { opportunityId: opportunity.id } });
 
-  const operations = new operationsMod.OperationsService(prisma, audit, {});
+  const operations = new operationsMod.OperationsService(prisma, audit, managerApprovals);
+  const logisticsStartsAt = new Date(Date.now() + 10 * 86400000);
+  logisticsStartsAt.setUTCMinutes(0, 0, 0);
+  const logisticsEndsAt = new Date(logisticsStartsAt.getTime() + 3 * 60 * 60 * 1000);
+  const logisticsEvent = await operations.createEvent(artist.id, {
+    type: "gig",
+    status: "confirmed",
+    title: "Near-term manager logistics show",
+    startsAt: logisticsStartsAt.toISOString(),
+    endsAt: logisticsEndsAt.toISOString(),
+    timezone: "America/Chicago",
+    locationName: "Integration Hall",
+    currency: "USD"
+  }, operator.email, operator.id);
+  assert.equal(logisticsEvent.logisticsAssessment.eligible, true);
+  assert.deepEqual(logisticsEvent.logisticsAssessment.preparableChannels, ["calendar", "drive"]);
+  const logisticsBrief = await manager.generateBrief(artist.id, "weekly", operator.email, operator.id);
+  const logisticsRecommendation = logisticsBrief.recommendations.find((recommendation) =>
+    recommendation.proposedAction?.type === "prepare_event_logistics_approvals" &&
+    recommendation.proposedAction.eventId === logisticsEvent.id
+  );
+  assert.ok(logisticsRecommendation, JSON.stringify(logisticsBrief.output));
+  assert.deepEqual(logisticsRecommendation.proposedAction.channels, ["calendar", "drive"]);
+  assert.match(logisticsRecommendation.nextAction, /Nothing is written to Google until/i);
+  await assert.rejects(
+    () => manager.recommendation(foreignArtist.id, logisticsRecommendation.id, "accepted", {}, operator.email, operator.id),
+    (error) => error?.getStatus?.() === 404
+  );
+  assert.equal(await client.approvalRequest.count({ where: { eventId: logisticsEvent.id } }), 0);
+  const acceptedLogistics = await manager.recommendation(artist.id, logisticsRecommendation.id, "accepted", {}, operator.email, operator.id);
+  assert.equal(acceptedLogistics.outcome, "accepted");
+  assert.equal(acceptedLogistics.outcomeReason, "approval_prepared");
+  assert.equal(acceptedLogistics.eventId, logisticsEvent.id);
+  const logisticsApprovals = await client.approvalRequest.findMany({
+    where: { artistId: artist.id, eventId: logisticsEvent.id, managerRecommendationId: logisticsRecommendation.id },
+    orderBy: { actionType: "asc" }
+  });
+  assert.equal(logisticsApprovals.length, 2);
+  assert.deepEqual(logisticsApprovals.map((approval) => approval.status), ["pending", "pending"]);
+  assert.deepEqual(logisticsApprovals.map((approval) => approval.actionType).sort(), ["calendar_hold_batch", "drive_ensure_folder"]);
+  assert.equal(logisticsApprovals.every((approval) => approval.sourceKey?.startsWith("event_logistics_v1:")), true);
+  await assert.rejects(
+    () => manager.recommendation(artist.id, logisticsRecommendation.id, "accepted", {}, operator.email, operator.id),
+    /already been decided/i
+  );
+  assert.equal(await client.approvalRequest.count({ where: { eventId: logisticsEvent.id } }), 2);
+  for (const approval of logisticsApprovals) {
+    await managerApprovals.approve(artist.id, approval.id, operator.email, operator.id);
+    const executed = await managerApprovals.executeApproved(
+      artist.id,
+      approval.id,
+      operator.email,
+      { actorOperatorId: operator.id }
+    );
+    assert.equal(executed.status, "executed");
+  }
+  const linkedLogisticsEvent = await client.bandEvent.findUniqueOrThrow({ where: { id: logisticsEvent.id } });
+  assert.match(linkedLogisticsEvent.calendarEventId ?? "", /^mock-cal-/);
+  assert.match(linkedLogisticsEvent.driveFolderUrl ?? "", /^https:\/\/drive\.mock\/folder\//);
+  const simulatedLogisticsEvent = await operations.event(artist.id, logisticsEvent.id);
+  assert.equal(simulatedLogisticsEvent.logisticsAssessment.channels.calendar.state, "simulated");
+  assert.equal(simulatedLogisticsEvent.logisticsAssessment.channels.drive.state, "simulated");
+  assert.equal(simulatedLogisticsEvent.logisticsAssessment.complete, false);
+  const completedLogistics = await client.managerRecommendation.findUniqueOrThrow({ where: { id: logisticsRecommendation.id } });
+  assert.equal(completedLogistics.outcome, "blocked");
+  assert.equal(completedLogistics.outcomeReason, "approval_simulated");
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: "approval.created", aggregateId: { in: logisticsApprovals.map((approval) => approval.id) } } }), 2);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: "approval.approved", aggregateId: { in: logisticsApprovals.map((approval) => approval.id) } } }), 2);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: "approval.execution.succeeded", aggregateId: { in: logisticsApprovals.map((approval) => approval.id) } } }), 2);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: logisticsEvent.id, action: { in: ["event.calendar_linked", "event.drive_folder_linked"] } } }), 2);
+  assert.ok(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: logisticsRecommendation.id, action: "manager.recommendation_approval_reconciled" } }) >= 1);
   const projectCaptureChat = await manager.chat(artist.id, { message: 'Create a release project called "Conversation EP" due 2027-03-15' }, operator.email, operator.id);
   assert.equal(projectCaptureChat.recommendation?.proposedAction?.type, "create_conversation_project");
   assert.equal(projectCaptureChat.recommendation?.proposedAction?.projectType, "release");
@@ -1082,6 +1161,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(dayOf.dayOf.nextCheckpoint.notes, "Dietary order confirmed");
   assert.equal(dayOf.dayOf.unresolvedAvailabilityCount, 0);
   assert.equal(dayOf.event.contactId, dayOfContact.id);
+  assert.equal(Object.hasOwn(dayOf.event, "approvals"), false);
+  assert.equal(dayOf.event.logisticsAssessment.eventId, event.id);
   await assert.rejects(() => operations.eventDayOf(foreignArtist.id, event.id), (error) => error?.getStatus?.() === 404);
   assert.deepEqual(await operations.removeEventScheduleItem(artist.id, event.id, mealCheckpoint.id, operator.email, operator.id), { id: mealCheckpoint.id, deleted: true });
   assert.equal((await operations.eventDayOf(artist.id, event.id, new Date("2026-09-18T16:00:00.000Z"))).dayOf.nextCheckpoint.label, "Load-in");

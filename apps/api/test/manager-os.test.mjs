@@ -51,6 +51,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("operations/project-plan.js"),
   loadApi("workflow-automation/workflow-job-processor.service.js")
 ]);
+const eventLogistics = await loadApi("operations/event-logistics.js");
 
 const now = new Date("2026-07-12T12:00:00.000Z");
 function managerFacts(overrides = {}) {
@@ -837,6 +838,9 @@ test("manager action authorization is code-owned and defaults to forbidden", () 
   assert.equal(policy.classifyManagerAction("assign_task"), "internal");
   assert.equal(policy.classifyManagerAction("update_profile_context"), "internal");
   assert.equal(policy.classifyManagerAction("create_draft_record"), "forbidden");
+  assert.equal(policy.classifyManagerAction("prepare_event_logistics_approvals"), "approval_required");
+  assert.equal(policy.managerActionMayPrepareApproval("prepare_event_logistics_approvals"), true);
+  assert.equal(policy.managerActionMayExecuteDirectly("prepare_event_logistics_approvals"), false);
   assert.equal(policy.classifyManagerAction("send_email"), "approval_required");
   assert.equal(policy.classifyManagerAction("financial_action"), "owner_approval_required");
   assert.equal(policy.classifyManagerAction("run_sql"), "forbidden");
@@ -1960,22 +1964,23 @@ test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v31", []);
+  const currentVersion = evaluation.MANAGER_PROMPT_VERSION;
+  const clean = evaluation.runManagerEvaluation(currentVersion, []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v31", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v31", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation(currentVersion, [{ id: "review-a", label: "needs_revision", promptVersion: currentVersion, snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v31", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v31", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: currentVersion, expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation(currentVersion, [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v31", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v31", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v31", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation(currentVersion, [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: currentVersion, resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation(currentVersion, [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 
@@ -2067,6 +2072,43 @@ test("deterministic manager brief ranks real workflow pressure and keeps evidenc
   assert.equal(merged.today.find((item) => item.evidenceIds.includes("event-a")).stableKey, "event-event-a");
   assert.equal(merged.today.find((item) => item.evidenceIds.includes("event-a")).priority, "high");
   assert.ok(brief.risksAndOpportunities.some((item) => item.title === "Member availability conflict"));
+});
+
+test("manager preserves logistics beside readiness and scans past earlier events", () => {
+  const eventWithLogistics = (id, title, startsAt, links = {}) => {
+    const event = {
+      id,
+      title,
+      type: "gig",
+      status: "confirmed",
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 3 * 60 * 60 * 1000),
+      timezone: "America/Chicago",
+      calendarEventId: links.calendarEventId ?? null,
+      driveFolderUrl: links.driveFolderUrl ?? null,
+      participants: []
+    };
+    return { ...event, logisticsAssessment: eventLogistics.assessEventLogistics(event, []) };
+  };
+  const target = eventWithLogistics("event-target", "Target show", new Date("2026-07-20T01:00:00.000Z"));
+  const singleFacts = managerFacts({ events: [target] });
+  const candidates = intelligence.deterministicManagerBriefCandidates(singleFacts, now);
+  const readiness = candidates.today.find((item) => item.stableKey === "event-event-target");
+  assert.ok(readiness);
+  assert.ok(candidates.thisWeek.some((item) => item.proposedAction?.type === "prepare_event_logistics_approvals"));
+  const merged = intelligence.mergeManagerBriefCandidates(candidates, {
+    ...candidates,
+    today: [{ ...readiness, stableKey: "model-target-show", title: "Handle the target show" }],
+    thisWeek: []
+  });
+  assert.ok(merged.today.some((item) => item.stableKey === "event-event-target"));
+  assert.ok(merged.thisWeek.some((item) => item.proposedAction?.type === "prepare_event_logistics_approvals" && item.proposedAction.eventId === target.id));
+
+  const rehearsal = { id: "event-rehearsal", title: "Rehearsal", type: "rehearsal", status: "confirmed", startsAt: new Date("2026-07-13T01:00:00.000Z"), participants: [] };
+  const connected = eventWithLogistics("event-connected", "Connected show", new Date("2026-07-15T01:00:00.000Z"), { calendarEventId: "calendar-a", driveFolderUrl: "https://drive.test/folder-a" });
+  const laterCandidates = intelligence.deterministicManagerBriefCandidates(managerFacts({ events: [rehearsal, connected, target] }), now);
+  const logisticsActions = laterCandidates.thisWeek.flatMap((item) => item.proposedAction?.type === "prepare_event_logistics_approvals" ? [item.proposedAction] : []);
+  assert.deepEqual(logisticsActions.map((action) => action.eventId), [target.id]);
 });
 
 test("deterministic manager chat answers the question asked instead of repeating a generic brief", () => {
@@ -2664,6 +2706,8 @@ test("manager grounding rejects a whole response with invented evidence", () => 
 
 test("operations validation rejects unknown fields, invalid money, and bad settlement splits", () => {
   assert.equal(operationSchemas.eventCreateSchema.safeParse({ type: "gig", title: "Show", surprise: true }).success, false);
+  assert.equal(operationSchemas.eventCreateSchema.safeParse({ type: "gig", title: "Show", timezone: "Mars/Olympus" }).success, false);
+  assert.equal(operationSchemas.eventCreateSchema.safeParse({ type: "gig", title: "Show", timezone: "America/Chicago" }).success, true);
   assert.equal(operationSchemas.invoiceCreateSchema.safeParse({ number: "1", recipientName: "Buyer", subtotalMinor: -1 }).success, false);
   assert.equal(operationSchemas.settlementCreateSchema.safeParse({ eventId: "event-a", splits: [{ bandMemberId: "a", basisPoints: 4000 }, { bandMemberId: "b", basisPoints: 4000 }] }).success, false);
   assert.equal(operationSchemas.paymentRecordSchema.safeParse({ idempotencyKey: "payment-a", amountMinor: 100, method: "check", receivedAt: "2026-07-11T12:00:00.000Z" }).success, true);
@@ -2902,6 +2946,10 @@ test("event patches validate the merged schedule before write or audit", async (
     /Soundcheck must be before doors/i
   );
   await assert.rejects(
+    () => service.patchEvent("artist-a", "event-a", { endsAt: existing.startsAt.toISOString() }, "owner@test", "operator-a"),
+    /Event end must be after its start/i
+  );
+  await assert.rejects(
     () => service.patchEvent("artist-b", "event-a", { locationName: "Foreign edit" }, "owner@test", "operator-b"),
     (error) => error?.getStatus?.() === 404
   );
@@ -2951,4 +2999,129 @@ test("payment recording is idempotent and never double-applies the balance", asy
   const result = await service.recordPayment("artist-a", "invoice-a", { idempotencyKey: "same", amountMinor: 500, currency: "USD", method: "check", receivedAt: "2026-07-11T12:00:00.000Z" }, "owner@test", "operator-a");
   assert.equal(result.id, "payment-a");
   assert.equal(transactions, 0);
+});
+
+test("event logistics fingerprint and source keys bind only authoritative provider inputs", () => {
+  const event = { id: "event:a", type: "gig", title: "Bluebird show", status: "confirmed", startsAt: new Date("2026-09-18T20:00:00.000Z"), endsAt: new Date("2026-09-18T23:00:00.000Z"), timezone: "America/Chicago", calendarEventId: null, driveFolderUrl: null };
+  const fingerprint = eventLogistics.eventLogisticsFingerprint(event);
+  assert.equal(fingerprint.length, 64);
+  assert.equal(eventLogistics.eventLogisticsFingerprint({ ...event, status: "completed", calendarEventId: "provider-a", driveFolderUrl: "https://drive.test/a" }), fingerprint);
+  assert.notEqual(eventLogistics.eventLogisticsFingerprint({ ...event, title: "Bluebird show — late set" }), fingerprint);
+  const sourceKey = eventLogistics.eventLogisticsApprovalSourceKey(event.id, fingerprint, "calendar", 2);
+  assert.deepEqual(eventLogistics.parseEventLogisticsApprovalSourceKey(sourceKey), { policyVersion: "event_logistics_v1", eventId: event.id, eventFingerprint: fingerprint, channel: "calendar", attempt: 2 });
+  assert.equal(eventLogistics.parseEventLogisticsApprovalSourceKey("event_logistics_v1:event:bad:calendar:0"), null);
+});
+
+test("event logistics plans one idempotent pending approval per missing channel", () => {
+  const event = { id: "event-a", type: "gig", opportunityId: "opp-a", title: "Bluebird show", status: "confirmed", startsAt: new Date("2026-09-18T20:00:00.000Z"), endsAt: new Date("2026-09-18T23:00:00.000Z"), timezone: "America/Chicago", calendarEventId: null, driveFolderUrl: null };
+  const plan = eventLogistics.planEventLogisticsApprovals(event, [], { managerRecommendationId: "rec-a" });
+  assert.equal(plan.assessment.eligible, true);
+  assert.deepEqual(plan.assessment.preparableChannels, ["calendar", "drive"]);
+  assert.deepEqual(plan.specs.map((spec) => [spec.channel, spec.actionType, spec.status, spec.attempt]), [["calendar", "calendar_hold_batch", "pending", 1], ["drive", "drive_ensure_folder", "pending", 1]]);
+  assert.equal(plan.specs.every((spec) => spec.eventId === event.id && spec.opportunityId === "opp-a" && spec.managerRecommendationId === "rec-a"), true);
+  assert.deepEqual(plan.specs[0].payload.holds, [{ title: event.title, start: event.startsAt.toISOString(), end: event.endsAt.toISOString(), timeZone: event.timezone, kind: "confirmed" }]);
+  assert.equal(plan.specs[1].payload.folderName, "2026-09-18 Bluebird show");
+  const afterUtcMidnight = eventLogistics.planEventLogisticsApprovals({ ...event, startsAt: new Date("2027-01-02T01:00:00.000Z"), endsAt: new Date("2027-01-02T03:00:00.000Z") }, []);
+  assert.equal(afterUtcMidnight.specs[1].payload.folderName, "2027-01-01 Bluebird show");
+  const action = eventLogistics.eventLogisticsPrepareAction(event, []);
+  assert.deepEqual(action.channels, ["calendar", "drive"]);
+  assert.equal(eventLogistics.eventLogisticsActionMatchesCurrent(action, event, []), true);
+
+  const pending = plan.specs.map((spec, index) => ({ id: `approval-${index}`, eventId: event.id, sourceKey: spec.sourceKey, actionType: spec.actionType, status: "pending" }));
+  const assessed = eventLogistics.assessEventLogistics(event, pending);
+  assert.equal(assessed.channels.calendar.state, "pending");
+  assert.equal(assessed.channels.drive.state, "pending");
+  assert.deepEqual(assessed.sourceApprovalIds, ["approval-0", "approval-1"]);
+  assert.equal(eventLogistics.eventLogisticsPrepareAction(event, pending), null);
+  assert.equal(eventLogistics.eventLogisticsActionMatchesCurrent(action, event, pending), false);
+});
+
+test("event logistics is gig-and-confirmed-only and requires an exact time range and timezone", () => {
+  const event = { id: "event-a", type: "gig", title: "Incomplete show", status: "hold", startsAt: new Date("2026-09-18T20:00:00.000Z"), endsAt: new Date("2026-09-18T19:00:00.000Z"), timezone: null, calendarEventId: null, driveFolderUrl: null };
+  const plan = eventLogistics.planEventLogisticsApprovals(event, []);
+  assert.equal(plan.assessment.eligible, false);
+  assert.deepEqual(plan.assessment.blockingReasons, ["status_not_confirmed", "timezone_missing", "invalid_time_range"]);
+  assert.deepEqual(plan.specs, []);
+  assert.equal(eventLogistics.eventLogisticsPrepareAction(event, []), null);
+  const invalidTimezone = eventLogistics.planEventLogisticsApprovals({ ...event, status: "confirmed", endsAt: new Date("2026-09-18T23:00:00.000Z"), timezone: "Mars/Olympus" }, []);
+  assert.deepEqual(invalidTimezone.assessment.blockingReasons, ["timezone_invalid"]);
+  assert.deepEqual(invalidTimezone.specs, []);
+  const rehearsal = eventLogistics.planEventLogisticsApprovals({ ...event, type: "rehearsal", status: "confirmed", endsAt: new Date("2026-09-18T23:00:00.000Z"), timezone: "America/Chicago" }, []);
+  assert.deepEqual(rehearsal.assessment.blockingReasons, ["type_not_gig"]);
+  assert.deepEqual(rehearsal.specs, []);
+});
+
+test("event logistics retries rejection but quarantines ambiguous provider failure", () => {
+  const event = { id: "event-a", type: "gig", title: "Bluebird show", status: "confirmed", startsAt: new Date("2026-09-18T20:00:00.000Z"), endsAt: new Date("2026-09-18T23:00:00.000Z"), timezone: "America/Chicago", calendarEventId: null, driveFolderUrl: "https://drive.test/folder-a" };
+  const fingerprint = eventLogistics.eventLogisticsFingerprint(event);
+  const rejected = [{ id: "approval-calendar-1", eventId: event.id, sourceKey: eventLogistics.eventLogisticsApprovalSourceKey(event.id, fingerprint, "calendar", 1), actionType: "calendar_hold_batch", status: "rejected" }];
+  const assessment = eventLogistics.assessEventLogistics(event, rejected);
+  assert.deepEqual(assessment.preparableChannels, []);
+  assert.deepEqual(assessment.retryableChannels, ["calendar"]);
+  assert.equal(assessment.channels.drive.state, "complete");
+  assert.deepEqual(eventLogistics.planEventLogisticsApprovals(event, rejected).specs, []);
+  const retried = eventLogistics.planEventLogisticsApprovals(event, rejected, { allowRetryChannels: ["calendar"] });
+  assert.equal(retried.specs.length, 1);
+  assert.equal(retried.specs[0].attempt, 2);
+  const action = eventLogistics.eventLogisticsPrepareAction(event, rejected, { allowRetryChannels: ["calendar"] });
+  assert.deepEqual(action.retryChannels, ["calendar"]);
+  assert.equal(eventLogistics.eventLogisticsActionMatchesCurrent(action, event, rejected), true);
+  const failed = [{ ...rejected[0], status: "failed" }];
+  const failedAssessment = eventLogistics.assessEventLogistics(event, failed);
+  assert.equal(failedAssessment.channels.calendar.state, "failed");
+  assert.deepEqual(failedAssessment.retryableChannels, []);
+  assert.deepEqual(eventLogistics.planEventLogisticsApprovals(event, failed, { allowRetryChannels: ["calendar"] }).specs, []);
+  const simulated = [{
+    ...rejected[0],
+    status: "executed",
+    payload: { executionResult: { calendarMode: "mock" } }
+  }];
+  const simulatedEvent = { ...event, calendarEventId: "mock-cal-1" };
+  const simulatedAssessment = eventLogistics.assessEventLogistics(simulatedEvent, simulated);
+  assert.equal(simulatedAssessment.channels.calendar.state, "simulated");
+  assert.equal(simulatedAssessment.complete, false);
+  assert.deepEqual(simulatedAssessment.retryableChannels, ["calendar"]);
+});
+
+test("event logistics treats changed authoritative event details as stale and replans safely", () => {
+  const event = { id: "event-a", type: "gig", title: "Bluebird show", status: "confirmed", startsAt: new Date("2026-09-18T20:00:00.000Z"), endsAt: new Date("2026-09-18T23:00:00.000Z"), timezone: "America/Chicago", calendarEventId: null, driveFolderUrl: null };
+  const original = eventLogistics.planEventLogisticsApprovals(event, []);
+  const priorCalendar = { id: "approval-old", eventId: event.id, sourceKey: original.specs[0].sourceKey, actionType: "calendar_hold_batch", status: "pending" };
+  const changed = { ...event, startsAt: new Date("2026-09-18T21:00:00.000Z") };
+  const assessed = eventLogistics.assessEventLogistics(changed, [priorCalendar]);
+  assert.equal(assessed.channels.calendar.state, "stale");
+  assert.deepEqual(assessed.preparableChannels, ["calendar", "drive"]);
+  const replanned = eventLogistics.planEventLogisticsApprovals(changed, [priorCalendar]);
+  assert.equal(replanned.specs[0].attempt, 1);
+  assert.notEqual(replanned.specs[0].sourceKey, priorCalendar.sourceKey);
+  const oldAction = eventLogistics.eventLogisticsPrepareAction(event, []);
+  assert.equal(eventLogistics.eventLogisticsActionMatchesCurrent(oldAction, changed, [priorCalendar]), false);
+});
+
+test("Operations prepares external logistics only for gigs", async () => {
+  let creates = 0;
+  let audits = 0;
+  const service = new operationsMod.OperationsService({ client: {
+    bandEvent: { findFirst: async () => ({ id: "event-a", artistId: "artist-a", type: "rehearsal", status: "confirmed", title: "Practice", startsAt: new Date("2026-09-18T20:00:00.000Z"), endsAt: new Date("2026-09-18T22:00:00.000Z"), timezone: "America/Chicago", approvals: [] }) }
+  } }, { log: async () => { audits += 1; } }, { createMany: async () => { creates += 1; return []; } });
+  await assert.rejects(
+    () => service.prepareLogistics("artist-a", "event-a", "member@test", "operator-a"),
+    /Only confirmed gigs/i
+  );
+  assert.equal(creates, 0);
+  assert.equal(audits, 0);
+});
+
+test("event logistics surfaces an executed linked resource as stale without preparing a duplicate", () => {
+  const event = { id: "event-a", type: "gig", title: "Bluebird show", status: "confirmed", startsAt: new Date("2026-09-18T20:00:00.000Z"), endsAt: new Date("2026-09-18T23:00:00.000Z"), timezone: "America/Chicago", calendarEventId: "calendar-a", driveFolderUrl: "https://drive.test/folder-a" };
+  const original = eventLogistics.planEventLogisticsApprovals({ ...event, calendarEventId: null, driveFolderUrl: null }, []);
+  const executed = original.specs.map((spec, index) => ({ id: `approval-${index}`, eventId: event.id, sourceKey: spec.sourceKey, actionType: spec.actionType, status: "executed" }));
+  const changed = { ...event, title: "Bluebird show — rescheduled" };
+  const assessed = eventLogistics.assessEventLogistics(changed, executed);
+  assert.equal(assessed.channels.calendar.state, "stale");
+  assert.equal(assessed.channels.drive.state, "stale");
+  assert.equal(assessed.complete, false);
+  assert.deepEqual(assessed.preparableChannels, []);
+  assert.deepEqual(eventLogistics.planEventLogisticsApprovals(changed, executed).specs, []);
+  assert.equal(eventLogistics.eventLogisticsPrepareAction(changed, executed), null);
 });

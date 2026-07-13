@@ -36,6 +36,7 @@ export class MockGoogleCalendarAdapter implements GoogleCalendarAdapter {
     start: string;
     end: string;
     timeZone?: string;
+    kind?: "hold" | "confirmed";
   }) {
     return {
       eventId: `mock-cal-${Date.now()}`,

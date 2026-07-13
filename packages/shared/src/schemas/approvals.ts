@@ -38,7 +38,8 @@ export const calendarHoldItemSchema = z.object({
   title: z.string().min(1),
   start: z.string().min(1),
   end: z.string().min(1),
-  timeZone: z.string().optional()
+  timeZone: z.string().optional(),
+  kind: z.enum(["hold", "confirmed"]).optional()
 });
 
 export const calendarHoldBatchPayloadSchema = z.object({

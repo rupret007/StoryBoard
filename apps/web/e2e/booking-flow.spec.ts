@@ -1,9 +1,103 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const browserTestWebUrl = process.env.E2E_WEB_URL ?? "http://127.0.0.1:3000";
+const browserTestApiUrl = process.env.E2E_API_URL ?? "http://127.0.0.1:4000";
+
 async function signInForBrowserTest(page: Page) {
-  await page.goto("http://127.0.0.1:4000/auth/dev/login");
+  await page.goto(`${browserTestApiUrl}/auth/dev/login`);
   await expect(page.getByText("Your operational home base")).toBeVisible();
   await expect.poll(async () => (await page.context().cookies()).some((cookie) => cookie.name === "sb_session"), { message: "Dev login must establish the browser session cookie" }).toBe(true);
+}
+
+type BrowserTestMember = { id: string; name: string };
+
+async function activeArtistId(page: Page) {
+  const response = await page.request.get(`${browserTestApiUrl}/auth/me`);
+  expect(response.ok(), await response.text()).toBe(true);
+  const me = await response.json() as { currentArtistId: string | null; memberships: Array<{ artistId: string }> };
+  const artistId = me.currentArtistId ?? me.memberships[0]?.artistId;
+  expect(artistId, "The seeded browser-test operator must own an artist").toBeTruthy();
+  return artistId!;
+}
+
+async function artistApi<T>(page: Page, artistId: string, path: string, method: "GET" | "POST" | "PUT" | "PATCH" = "GET", data?: unknown) {
+  const response = await page.request.fetch(`${browserTestApiUrl}${path}`, {
+    method,
+    headers: {
+      "x-artist-id": artistId,
+      origin: browserTestWebUrl
+    },
+    ...(data === undefined ? {} : { data })
+  });
+  expect(response.ok(), `${method} ${path}: ${await response.text()}`).toBe(true);
+  return response.json() as Promise<T>;
+}
+
+const managerFoundationProfile = {
+  bandMode: "hybrid",
+  careerStage: "Local working band",
+  homeCity: "Chicago",
+  homeRegion: "IL",
+  homeCountry: "US",
+  genres: ["rock", "soul"],
+  businessName: "E2E Band LLC",
+  revenueSources: ["Private events", "Ticketed shows"],
+  currentAssets: ["Finished EP masters", "Live performance video"],
+  constraints: ["Weeknight work schedules"],
+  educationTopics: [],
+  availabilityExpectations: null,
+  budgetToleranceMinor: 50_000,
+  currency: "USD",
+  twelveMonthAmbition: "Release an EP and book six profitable regional shows.",
+  communicationCadence: "weekly",
+  decisionStyle: "guided"
+} as const;
+
+async function ensureManagerFoundation(page: Page, checkIns = false) {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const currentProfile = await artistApi<{ intakeCompletedAt?: string | null } | null>(page, artistId, "/manager/profile");
+  if (!currentProfile?.intakeCompletedAt) {
+    await artistApi(page, artistId, "/manager/intake/complete", "POST", {
+      profile: managerFoundationProfile,
+      members: [
+        { name: "Alex", roles: ["bandleader", "booking"], instruments: ["vocals", "guitar"], active: true },
+        { name: "Morgan", roles: ["production", "finances"], instruments: ["drums"], active: true }
+      ]
+    });
+  } else {
+    await artistApi(page, artistId, "/manager/profile", "PUT", managerFoundationProfile);
+  }
+
+  const existingMembers = await artistApi<BrowserTestMember[]>(page, artistId, "/manager/members");
+  const members: BrowserTestMember[] = [];
+  for (const member of [
+    { name: "Alex", roles: ["bandleader", "booking"], instruments: ["vocals", "guitar"] },
+    { name: "Morgan", roles: ["production", "finances"], instruments: ["drums"] }
+  ]) {
+    const existing = existingMembers.find((candidate) => candidate.name === member.name);
+    const saved = existing
+      ? await artistApi<BrowserTestMember>(page, artistId, `/manager/members/${existing.id}`, "PATCH", { ...member, active: true })
+      : await artistApi<BrowserTestMember>(page, artistId, "/manager/members", "POST", { ...member, active: true });
+    members.push(saved);
+  }
+  await artistApi(page, artistId, "/manager/plan/ensure", "POST", {});
+  if (checkIns) {
+    await artistApi(page, artistId, `/manager/members/${members.find((member) => member.name === "Alex")!.id}/check-ins`, "POST", { status: "available" });
+    await artistApi(page, artistId, `/manager/members/${members.find((member) => member.name === "Morgan")!.id}/check-ins`, "POST", { status: "limited" });
+  }
+  return { artistId, members };
+}
+
+async function ensureQualifiedProspect(page: Page, artistId: string) {
+  const prospects = await artistApi<Array<{ status: string }>>(page, artistId, "/booking-prospects");
+  if (prospects.some((prospect) => prospect.status === "qualified" || prospect.status === "converted")) return;
+  await artistApi(page, artistId, "/booking-prospects", "POST", {
+    kind: "venue",
+    status: "qualified",
+    name: `E2E Manager prospect ${Date.now().toString(36)}`,
+    city: "Chicago"
+  });
 }
 
 test("manual prospect can gain a buyer and enter an approval-ready campaign", async ({ page }) => {
@@ -110,6 +204,7 @@ test("band can build, time, annotate, and reorder a practical setlist", async ({
 test("novice manager intake produces grounded work and band operations records", async ({ page }) => {
   const suffix = Date.now().toString(36);
   await signInForBrowserTest(page);
+  await ensureQualifiedProspect(page, await activeArtistId(page));
   await page.goto("/manager");
   const intake = page.getByRole("heading", { name: "Tell StoryBoard enough to manage the tradeoffs" });
   if (await intake.isVisible().catch(() => false)) {
@@ -193,6 +288,11 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(context.getByText(/75\/100 · Usable/i)).toBeVisible();
   await page.getByRole("button", { name: "Fill missing steps" }).click();
   await expect(planCard.getByText("Grow dependable show revenue", { exact: true })).toHaveCount(1);
+});
+
+test("manager conversations retain context and guide team ownership", async ({ page }) => {
+  await ensureManagerFoundation(page);
+  await page.goto("/manager");
   const newConversation = page.getByRole("button", { name: "New", exact: true });
   if (await newConversation.isVisible().catch(() => false)) await newConversation.click();
   const managerMessage = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
@@ -256,6 +356,16 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(managerMessage).toHaveValue("How does a show settlement work?");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.locator("p.whitespace-pre-wrap").filter({ hasText: "A settlement is the post-show money check" })).toContainText(/In StoryBoard:/);
+});
+
+test("manager feedback and reviewed memory feed the release gate", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await ensureManagerFoundation(page);
+  await page.goto("/manager");
+  const context = page.getByTestId("manager-context");
+  const managerMessage = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
+  const conversationMessages = page.getByTestId("manager-conversation-messages");
+  const planCard = page.getByRole("heading", { name: "90-day plan" }).locator("xpath=ancestor::div[contains(@class,'shadow-')][1]");
   await managerMessage.fill("What do you still need to know about our band?");
   await page.getByRole("button", { name: "Send message" }).click();
   const contextQuestionReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "Context coverage is 75/100" }).last();
@@ -309,13 +419,17 @@ test("novice manager intake produces grounded work and band operations records",
   await recommendationPromoted;
   if (reviewedRecommendationTitle) await expect(recommendationEvalReview).not.toContainText(reviewedRecommendationTitle);
   await expect(page.getByText("Advice reviewed", { exact: true }).locator("xpath=following-sibling::dd")).toHaveText("1");
-  const notUseful = page.getByRole("button", { name: "Not useful" });
-  if (await notUseful.isVisible().catch(() => false)) {
-    await notUseful.click();
-    await expect(page.getByText("dismissed", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Add to eval set" }).click();
-    await expect(page.getByText("in eval set", { exact: true })).toBeVisible();
-  }
+  const dismissedTaskTitle = `Skip this E2E task ${suffix}`;
+  await managerMessage.fill(`Add a task to ${dismissedTaskTitle}`);
+  await page.getByRole("button", { name: "Send message" }).click();
+  const dismissedProposal = page.getByText("Suggested shared task", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+  await expect(dismissedProposal).toContainText(dismissedTaskTitle);
+  const dismissed = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/dismiss") && response.ok());
+  await dismissedProposal.getByRole("button", { name: "Not useful" }).click();
+  await dismissed;
+  await expect(dismissedProposal.getByText("dismissed", { exact: true })).toBeVisible();
+  await dismissedProposal.getByRole("button", { name: "Add to eval set" }).click();
+  await expect(dismissedProposal.getByText("in eval set", { exact: true })).toBeVisible();
   await managerMessage.fill("Where does our money stand?");
   await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
   await page.getByRole("button", { name: "Send message" }).click();
@@ -377,9 +491,17 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v31", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v32", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
+
+});
+
+test("manager decisions and dependencies stay connected to the operating plan", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await ensureManagerFoundation(page);
+  await page.goto("/manager");
+  const managerMessage = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
 
   const decisionTitle = `Choose E2E market ${suffix}`;
   await managerMessage.fill("Should we book Milwaukee or Detroit?");
@@ -458,7 +580,13 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByRole("button", { name: "Send message" }).click();
   const goalPathReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: /goal path|active goal path/i }).last();
   await expect(goalPathReply).toContainText(/does not estimate effort, conversion, duration, or private capacity/i);
+});
 
+test("manager-created gigs become practical day-of workspaces", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await ensureManagerFoundation(page);
+  await page.goto("/manager");
+  const blockedQuestion = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
   const eventTitle = `E2E rehearsal ${suffix}`;
   await blockedQuestion.fill(`Record a confirmed gig called "${eventTitle}" on 2026-09-15 at 7:00 PM at "E2E Working Room"`);
   await page.getByRole("button", { name: "Send message" }).click();
@@ -542,6 +670,13 @@ test("novice manager intake produces grounded work and band operations records",
   const liveCalendarAnswer = page.getByTestId("manager-conversation-messages").locator("p.whitespace-pre-wrap").filter({ hasText: "Here is the live calendar I would manage first:" });
   await expect(liveCalendarAnswer).toContainText(`E2E rehearsal ${suffix}`);
   await expect(liveCalendarAnswer).toContainText(/\d+\/100/);
+});
+
+test("manager-created release projects stay grounded in operations", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await ensureManagerFoundation(page);
+  await page.goto("/manager");
+  const showQuestion = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
   const projectDue = new Date(Date.now() + 120 * 86400000).toISOString().slice(0, 10);
   await showQuestion.fill(`Create a release project called "E2E release ${suffix}" due ${projectDue}`);
   await page.getByRole("button", { name: "Send message" }).click();
@@ -586,7 +721,21 @@ test("novice manager intake produces grounded work and band operations records",
   const projectAnswer = page.getByTestId("manager-conversation-messages").locator("p.whitespace-pre-wrap").filter({ hasText: "Here is the recorded project picture:" });
   await expect(projectAnswer).toContainText(`E2E release ${suffix}`);
   await expect(projectAnswer).toContainText(/\d+\/100/);
+});
 
+test("show finance records produce grounded outcome answers", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  const eventTitle = `E2E finance show ${suffix}`;
+  const localTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const { artistId } = await ensureManagerFoundation(page);
+  await artistApi(page, artistId, "/events", "POST", {
+    type: "gig",
+    status: "confirmed",
+    title: eventTitle,
+    startsAt: new Date(Date.now() + 30 * 86400000).toISOString(),
+    timezone: "America/Chicago",
+    locationName: "E2E Working Room"
+  });
   await page.goto("/operations");
   await page.getByRole("tab", { name: "Deals" }).click();
   await page.getByPlaceholder("Show or deal").fill(`E2E offer ${suffix}`);
@@ -617,32 +766,32 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByText("Balance USD 400.00")).toBeVisible();
 
   const expenseForm = page.getByLabel("Expense event or project").locator("..");
-  await page.getByLabel("Expense event or project").selectOption({ label: `E2E rehearsal ${suffix}` });
+  await page.getByLabel("Expense event or project").selectOption({ label: eventTitle });
   await expenseForm.getByPlaceholder("Expense description").fill("Fuel");
   await expenseForm.getByPlaceholder("Amount (USD)").fill("25");
   await expenseForm.getByRole("button", { name: "Record expense" }).click();
   await expect(page.getByText(/^Fuel/).first()).toBeVisible();
-  await page.getByLabel("Settlement event").selectOption({ label: `E2E rehearsal ${suffix}` });
+  await page.getByLabel("Settlement event").selectOption({ label: eventTitle });
   await page.getByPlaceholder("Gross USD").fill("500");
   await page.getByRole("button", { name: "Calculate" }).click();
   await page.getByRole("button", { name: "Finalize PDF" }).last().click();
   await expect(page.getByText("finalized", { exact: true }).last()).toBeVisible();
 
   await page.getByRole("tab", { name: "Events" }).click();
-  const completedShow = page.locator("article").filter({ hasText: `E2E rehearsal ${suffix}` });
+  const completedShow = page.locator("article").filter({ hasText: eventTitle });
   await completedShow.getByText("Manage readiness details", { exact: true }).click();
   const completedSetAt = new Date(Date.now() - 2 * 3600000);
-  await page.getByLabel(`Event start for E2E rehearsal ${suffix}`).fill(localTime(completedSetAt));
-  await page.getByLabel(`Load-in for E2E rehearsal ${suffix}`).fill(localTime(new Date(completedSetAt.getTime() - 3 * 3600000)));
-  await page.getByLabel(`Soundcheck for E2E rehearsal ${suffix}`).fill(localTime(new Date(completedSetAt.getTime() - 2 * 3600000)));
-  await page.getByLabel(`Doors for E2E rehearsal ${suffix}`).fill(localTime(new Date(completedSetAt.getTime() - 3600000)));
-  await page.getByLabel(`Set time for E2E rehearsal ${suffix}`).fill(localTime(completedSetAt));
-  await page.getByLabel(`Curfew for E2E rehearsal ${suffix}`).fill(localTime(new Date(completedSetAt.getTime() + 3600000)));
-  await page.getByLabel(`Status for E2E rehearsal ${suffix}`).selectOption("completed");
-  await page.getByLabel(`Attendance for E2E rehearsal ${suffix}`).fill("135");
-  await page.getByLabel(`Gross revenue for E2E rehearsal ${suffix}`).fill("500");
-  await page.getByLabel(`Post-show notes for E2E rehearsal ${suffix}`).fill("Strong audience response; tighten the changeover next time.");
-  await page.getByLabel(`Relationship outcome for E2E rehearsal ${suffix}`).fill("Buyer invited a return pitch.");
+  await page.getByLabel(`Event start for ${eventTitle}`).fill(localTime(completedSetAt));
+  await page.getByLabel(`Load-in for ${eventTitle}`).fill(localTime(new Date(completedSetAt.getTime() - 3 * 3600000)));
+  await page.getByLabel(`Soundcheck for ${eventTitle}`).fill(localTime(new Date(completedSetAt.getTime() - 2 * 3600000)));
+  await page.getByLabel(`Doors for ${eventTitle}`).fill(localTime(new Date(completedSetAt.getTime() - 3600000)));
+  await page.getByLabel(`Set time for ${eventTitle}`).fill(localTime(completedSetAt));
+  await page.getByLabel(`Curfew for ${eventTitle}`).fill(localTime(new Date(completedSetAt.getTime() + 3600000)));
+  await page.getByLabel(`Status for ${eventTitle}`).selectOption("completed");
+  await page.getByLabel(`Attendance for ${eventTitle}`).fill("135");
+  await page.getByLabel(`Gross revenue for ${eventTitle}`).fill("500");
+  await page.getByLabel(`Post-show notes for ${eventTitle}`).fill("Strong audience response; tighten the changeover next time.");
+  await page.getByLabel(`Relationship outcome for ${eventTitle}`).fill("Buyer invited a return pitch.");
   await completedShow.getByRole("button", { name: "Save event details" }).click();
   await expect(completedShow.locator("span").filter({ hasText: /^completed$/ })).toBeVisible();
 
@@ -661,7 +810,13 @@ test("novice manager intake produces grounded work and band operations records",
   await page.getByRole("button", { name: "Send message" }).click();
   const outcomeReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "Recorded attendance totals 135" });
   await expect(outcomeReply).toContainText(/finalized net USD 475\.00/);
+});
 
+test("manager task proposals remain idempotent, assignable, and reviewable", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await ensureManagerFoundation(page, true);
+  await page.goto("/manager");
+  const outcomeQuestion = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
   const capturedTaskTitle = `Confirm the E2E rehearsal debrief ${suffix}`;
   await outcomeQuestion.fill(`Add a task to ${capturedTaskTitle} by 2099-12-31`);
   await page.getByRole("button", { name: "Send message" }).click();
@@ -695,4 +850,74 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(capturedTaskRow.getByLabel(`Due date for ${capturedTaskTitle}`)).toHaveValue("2099-12-31");
   await expect(capturedTaskRow.getByLabel(`Owner for ${capturedTaskTitle}`).locator("option:checked")).toHaveText("Morgan");
   await expect(capturedTaskRow.getByLabel(`Status for ${capturedTaskTitle}`).locator("option:checked")).toHaveText("done");
+});
+
+test("confirmed event logistics move through approvals before provider execution", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  const eventTitle = `E2E logistics ${suffix}`;
+  const eventStart = new Date(Date.now() + 90 * 86400000);
+  eventStart.setMinutes(0, 0, 0);
+  const eventEnd = new Date(eventStart.getTime() + 3 * 3600000);
+  const localTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+  await signInForBrowserTest(page);
+  await page.goto("/operations");
+  await page.getByLabel("Title", { exact: true }).fill(eventTitle);
+  await page.getByLabel("Starts", { exact: true }).fill(localTime(eventStart));
+  await page.getByRole("button", { name: "Add event" }).click();
+
+  let eventCard = page.locator("article").filter({ hasText: eventTitle });
+  await expect(eventCard).toBeVisible();
+  await eventCard.getByText("Manage readiness details", { exact: true }).click();
+  await eventCard.getByLabel(`Status for ${eventTitle}`).selectOption("confirmed");
+  await eventCard.getByLabel(`Event end for ${eventTitle}`).fill(localTime(eventEnd));
+  await eventCard.getByLabel(`Event timezone for ${eventTitle}`).fill("America/Chicago");
+  await expect(eventCard.getByRole("button", { name: /Prepare .* approval/ })).toHaveCount(0);
+  const eventSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/events/") && response.ok());
+  await eventCard.getByRole("button", { name: "Save event details" }).click();
+  await eventSaved;
+
+  eventCard = page.locator("article").filter({ hasText: eventTitle });
+  if ((await eventCard.locator("details").getAttribute("open")) === null) await eventCard.getByText("Manage readiness details", { exact: true }).click();
+  const logistics = eventCard.locator('[data-testid^="event-logistics-"]');
+  await expect(logistics.getByText("No external Calendar event is linked yet.", { exact: true })).toBeVisible();
+  await expect(logistics.getByText("No Drive folder is linked yet.", { exact: true })).toBeVisible();
+  const prepared = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/prepare-logistics-approvals") && response.ok());
+  await logistics.getByRole("button", { name: "Prepare Calendar and Drive approvals" }).click();
+  await prepared;
+  await expect(logistics.getByRole("link", { name: "Review existing approvals" })).toBeVisible();
+
+  await page.goto("/approvals");
+  const calendarTitle = `Add ${eventTitle} to Google Calendar`;
+  const driveTitle = `Create Drive folder for ${eventTitle}`;
+  const pendingCard = (title: string) => page.getByRole("heading", { name: title }).locator("xpath=ancestor::*[contains(@class,'border-violet-500')][1]");
+  const readyCard = (title: string) => page.getByRole("heading", { name: title }).locator("xpath=ancestor::*[contains(@class,'border-cyan-500')][1]");
+  for (const title of [calendarTitle, driveTitle]) {
+    const card = pendingCard(title);
+    await expect(card.getByRole("link", { name: "Open event" })).toHaveAttribute("href", /\/operations\/events\//);
+    const approved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/approve") && response.ok());
+    await card.getByRole("button", { name: "Approve" }).click();
+    await approved;
+    await expect(pendingCard(title)).toHaveCount(0);
+    await expect(readyCard(title)).toBeVisible();
+  }
+
+  const calendarExecuted = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/execute") && response.ok());
+  await readyCard(calendarTitle).getByRole("button", { name: "Execute", exact: true }).click();
+  await calendarExecuted;
+  await expect(readyCard(calendarTitle)).toHaveCount(0);
+  const driveExecuted = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/execute") && response.ok());
+  await readyCard(driveTitle).getByRole("button", { name: "Execute", exact: true }).click();
+  await driveExecuted;
+  await expect(readyCard(driveTitle)).toHaveCount(0);
+
+  await page.goto("/operations");
+  eventCard = page.locator("article").filter({ hasText: eventTitle });
+  await eventCard.getByText("Manage readiness details", { exact: true }).click();
+  const completedLogistics = eventCard.locator('[data-testid^="event-logistics-"]');
+  await expect(completedLogistics.getByText("simulated", { exact: true })).toHaveCount(2);
+  await expect(completedLogistics.getByText(/mock execution for local testing/i)).toBeVisible();
+  await expect(completedLogistics.getByText(/Event ID: mock-cal-/)).toBeVisible();
+  await expect(completedLogistics.getByRole("link", { name: "Open Drive folder" })).toHaveAttribute("href", /^https:\/\/drive\.mock\/folder\//);
+  await expect(completedLogistics.getByRole("button", { name: /Prepare .* approval/ })).toBeVisible();
 });

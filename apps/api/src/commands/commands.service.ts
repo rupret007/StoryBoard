@@ -1,5 +1,8 @@
-import { Injectable } from "@nestjs/common";
-import { enqueueResearchRefreshPayloadSchema } from "@storyboard/shared";
+import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  enqueueResearchRefreshPayloadSchema,
+  researchBookingIntelPayloadSchema
+} from "@storyboard/shared";
 import { ApprovalStatus } from "../generated/prisma/enums";
 import { ApprovalsService } from "../approvals/approvals.service";
 import { AuditService } from "../audit/audit.service";
@@ -309,27 +312,20 @@ export class CommandsService {
     adapters: StoryboardAdapterRegistry,
     payload?: Record<string, unknown>
   ) {
-    const artist = await this.prisma.client.artist.findUnique({
+    const parsed = researchBookingIntelPayloadSchema.safeParse(payload ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    const artist = await this.prisma.client.artist.findUniqueOrThrow({
       where: { id: artistId }
     });
-    const payloadCity = payload?.["city"];
-    const payloadArtistName = payload?.["artistName"];
     const city =
-      typeof payloadCity === "string" && payloadCity.trim()
-        ? payloadCity.trim()
-        : artist?.name
-          ? `${artist.name.split(" ")[0] ?? artist.name} market`
-          : "Nashville";
-    const artistNameForBit =
-      typeof payloadArtistName === "string" && payloadArtistName.trim()
-        ? payloadArtistName.trim()
-        : artist?.name ?? "Artist";
-    const resolved = await adapters.bandsintown.resolveArtist(
-      artistNameForBit
-    );
+      parsed.data.city ??
+      `${artist.name.split(" ")[0] ?? artist.name} market`;
+    const resolved = await adapters.bandsintown.resolveArtist(artist.name);
     const events = resolved
       ? await adapters.bandsintown.listUpcomingEvents(resolved.name)
-      : await adapters.bandsintown.listUpcomingEvents(artistNameForBit);
+      : await adapters.bandsintown.listUpcomingEvents(artist.name);
     const tmVenues = await adapters.ticketmaster.searchVenues(city, {
       size: 8
     });
@@ -345,7 +341,7 @@ export class CommandsService {
         ticketmasterVenues: tmVenues,
         ticketmasterEvents: tmEvents,
         note:
-          "Bandsintown is limited to the selected artist's own event context. Ticketmaster or manual entry supplies market discovery.",
+          "Bandsintown is limited to the active StoryBoard artist's own event context. Ticketmaster or manual entry supplies market discovery.",
         providerModes: providerModes(adapters)
       },
       providerModes: providerModes(adapters)

@@ -690,8 +690,9 @@ model ManagerRecommendation {
   task           Task?                        @relation(fields: [taskId], references: [id], onDelete: SetNull)
   decision       ManagerDecision?             @relation(fields: [decisionId], references: [id], onDelete: SetNull)
   memoryFact     ManagerMemoryFact?           @relation(fields: [memoryFactId], references: [id], onDelete: SetNull)
-  project        ArtistProject?                @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  event          BandEvent?                    @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  project        ArtistProject?               @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  event          BandEvent?                   @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  approvals      ApprovalRequest[]
   evalExample    ManagerEvalExample?
 
   @@unique([managerRunId, stableKey])
@@ -1253,23 +1254,33 @@ model BookingReply {
 }
 
 model ApprovalRequest {
-  id                   String                    @id @default(cuid())
-  artistId             String
-  opportunityId        String?
-  title                String
-  status               ApprovalStatus            @default(proposed)
-  actionType           String
-  payload              Json
-  proposedBy           String?
-  approvedBy           String?
-  approvedAt           DateTime?
-  executionAttemptedAt DateTime?
-  createdAt            DateTime                  @default(now())
-  updatedAt            DateTime                  @updatedAt
-  artist               Artist                    @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  opportunity          BookingOpportunity?       @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
-  bookingCampaign      BookingCampaign?          @relation("CampaignApproval")
-  campaignDeliveries   BookingCampaignDelivery[]
+  id                      String                    @id @default(cuid())
+  artistId                String
+  opportunityId           String?
+  eventId                 String?
+  managerRecommendationId String?
+  sourceKey               String?
+  title                   String
+  status                  ApprovalStatus            @default(proposed)
+  actionType              String
+  payload                 Json
+  proposedBy              String?
+  approvedBy              String?
+  approvedAt              DateTime?
+  executionAttemptedAt    DateTime?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  artist                  Artist                    @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  opportunity             BookingOpportunity?       @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  event                   BandEvent?                @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  managerRecommendation   ManagerRecommendation?    @relation(fields: [managerRecommendationId], references: [id], onDelete: SetNull)
+  bookingCampaign         BookingCampaign?          @relation("CampaignApproval")
+  campaignDeliveries      BookingCampaignDelivery[]
+
+  @@unique([artistId, sourceKey])
+  @@index([artistId, status, createdAt])
+  @@index([eventId, actionType, status])
+  @@index([managerRecommendationId])
 }
 
 model AuditEvent {
@@ -1326,63 +1337,64 @@ model IntegrationConnection {
 }
 
 model BandEvent {
-  id                  String              @id @default(cuid())
-  artistId            String
-  opportunityId       String?             @unique
-  venueId             String?
-  contactId           String?
-  projectId           String?
-  setlistId           String?
-  type                BandEventType
-  status              BandEventStatus     @default(draft)
-  title               String
-  startsAt            DateTime?
-  endsAt              DateTime?
-  timezone            String?
-  locationName        String?
-  address             String?
-  loadInAt            DateTime?
-  soundcheckAt        DateTime?
-  doorsAt             DateTime?
-  setAt               DateTime?
-  curfewAt            DateTime?
-  travelNotes         String?
-  hospitalityNotes    String?
-  productionNotes     String?
-  cancellationTerms   String?
-  guaranteeMinor      Int?
-  currency            String              @default("USD")
-  depositMinor        Int?
-  depositDueAt        DateTime?
-  balanceDueAt        DateTime?
-  stagePlotUrl        String?
-  inputListUrl        String?
-  techRiderUrl        String?
-  hospitalityRiderUrl String?
-  driveFolderUrl      String?
-  calendarEventId     String?
-  parkingNotes        String?
-  guestListNotes      String?
-  attendance          Int?
-  grossRevenueMinor   Int?
-  postShowNotes       String?
-  relationshipOutcome String?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
-  artist              Artist              @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  opportunity         BookingOpportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
-  venue               Venue?              @relation(fields: [venueId], references: [id], onDelete: SetNull)
-  contact             Contact?            @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  project             ArtistProject?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  setlist             Setlist?            @relation(fields: [setlistId], references: [id], onDelete: SetNull)
-  participants        EventParticipant[]
-  schedule            EventScheduleItem[]
-  tasks               Task[]
-  deals               DealOffer[]
-  invoices            Invoice[]
-  expenses            Expense[]
-  settlement          Settlement?
+  id                     String                  @id @default(cuid())
+  artistId               String
+  opportunityId          String?                 @unique
+  venueId                String?
+  contactId              String?
+  projectId              String?
+  setlistId              String?
+  type                   BandEventType
+  status                 BandEventStatus         @default(draft)
+  title                  String
+  startsAt               DateTime?
+  endsAt                 DateTime?
+  timezone               String?
+  locationName           String?
+  address                String?
+  loadInAt               DateTime?
+  soundcheckAt           DateTime?
+  doorsAt                DateTime?
+  setAt                  DateTime?
+  curfewAt               DateTime?
+  travelNotes            String?
+  hospitalityNotes       String?
+  productionNotes        String?
+  cancellationTerms      String?
+  guaranteeMinor         Int?
+  currency               String                  @default("USD")
+  depositMinor           Int?
+  depositDueAt           DateTime?
+  balanceDueAt           DateTime?
+  stagePlotUrl           String?
+  inputListUrl           String?
+  techRiderUrl           String?
+  hospitalityRiderUrl    String?
+  driveFolderUrl         String?
+  calendarEventId        String?
+  parkingNotes           String?
+  guestListNotes         String?
+  attendance             Int?
+  grossRevenueMinor      Int?
+  postShowNotes          String?
+  relationshipOutcome    String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  artist                 Artist                  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  opportunity            BookingOpportunity?     @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  venue                  Venue?                  @relation(fields: [venueId], references: [id], onDelete: SetNull)
+  contact                Contact?                @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  project                ArtistProject?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  setlist                Setlist?                @relation(fields: [setlistId], references: [id], onDelete: SetNull)
+  participants           EventParticipant[]
+  schedule               EventScheduleItem[]
+  tasks                  Task[]
+  deals                  DealOffer[]
+  invoices               Invoice[]
+  expenses               Expense[]
+  settlement             Settlement?
   managerRecommendations ManagerRecommendation[]
+  approvals              ApprovalRequest[]
 
   @@index([artistId, status, startsAt])
 }
@@ -1467,26 +1479,26 @@ model SetlistItem {
 }
 
 model ArtistProject {
-  id             String              @id @default(cuid())
-  artistId       String
-  goalId         String?
-  type           ArtistProjectType
-  status         ArtistProjectStatus @default(draft)
-  name           String
-  description    String?
-  startsAt       DateTime?
-  dueAt          DateTime?
-  budgetMinor    Int?
-  currency       String              @default("USD")
-  successMetrics Json                @default("[]")
-  assets         Json                @default("[]")
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  artist         Artist              @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  goal           ManagerGoal?        @relation(fields: [goalId], references: [id], onDelete: SetNull)
-  events         BandEvent[]
-  tasks          Task[]
-  expenses       Expense[]
+  id                     String                  @id @default(cuid())
+  artistId               String
+  goalId                 String?
+  type                   ArtistProjectType
+  status                 ArtistProjectStatus     @default(draft)
+  name                   String
+  description            String?
+  startsAt               DateTime?
+  dueAt                  DateTime?
+  budgetMinor            Int?
+  currency               String                  @default("USD")
+  successMetrics         Json                    @default("[]")
+  assets                 Json                    @default("[]")
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  artist                 Artist                  @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  goal                   ManagerGoal?            @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  events                 BandEvent[]
+  tasks                  Task[]
+  expenses               Expense[]
   managerRecommendations ManagerRecommendation[]
 
   @@index([artistId, status, dueAt])

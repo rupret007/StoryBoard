@@ -121,6 +121,7 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
       if (actionType === "create_conversation_project") setNotice("Project and milestone plan created.");
       if (actionType === "create_conversation_event") setNotice("Event and availability list created.");
       if (actionType === "update_conversation_event_availability") setNotice("Member availability updated.");
+      if (actionType === "prepare_event_logistics_approvals") setNotice("Calendar and Drive approvals prepared for review.");
       router.refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
@@ -128,7 +129,7 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
     setBusy(true); setError(""); setNotice("");
     try {
       await apiFetch<ManagerRecommendation>(`/manager/recommendations/${recommendation.id}/accept`, { method: "POST" });
-      setNotice(recommendation.proposedAction?.type === "generate_event_advance" ? "Show advance created." : recommendation.proposedAction?.type === "generate_project_plan" ? "Milestone plan created." : recommendation.proposedAction?.type === "remember_fact" ? "Band memory saved." : recommendation.proposedAction?.type === "update_profile_context" ? "Band context saved." : recommendation.proposedAction?.type === "create_task" || recommendation.proposedAction?.type === "create_conversation_task" ? "Task added." : recommendation.proposedAction?.type === "create_decision" ? "Decision draft added." : "Recommendation accepted.");
+      setNotice(recommendation.proposedAction?.type === "generate_event_advance" ? "Show advance created." : recommendation.proposedAction?.type === "prepare_event_logistics_approvals" ? "Calendar and Drive approvals prepared for review." : recommendation.proposedAction?.type === "generate_project_plan" ? "Milestone plan created." : recommendation.proposedAction?.type === "remember_fact" ? "Band memory saved." : recommendation.proposedAction?.type === "update_profile_context" ? "Band context saved." : recommendation.proposedAction?.type === "create_task" || recommendation.proposedAction?.type === "create_conversation_task" ? "Task added." : recommendation.proposedAction?.type === "create_decision" ? "Decision draft added." : "Recommendation accepted.");
       router.refresh();
     } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
@@ -218,7 +219,7 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
   }
   async function runEvaluation() {
     setBusy(true); setError("");
-    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v31" } })); }
+    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v32" } })); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function submitMessageFeedback(messageId: string, payload: { helpful: boolean; reason?: string | null; note?: string | null }) {
@@ -712,6 +713,7 @@ function managerActionLabel(actionType?: string | null) {
   if (actionType === "update_profile_context") return "Suggested band context";
   if (actionType === "create_decision") return "Suggested open decision";
   if (actionType === "generate_event_advance") return "Suggested show setup";
+  if (actionType === "prepare_event_logistics_approvals") return "Suggested event logistics approvals";
   if (actionType === "generate_project_plan") return "Suggested project setup";
   if (actionType === "assign_task") return "Suggested task owner";
   return "Suggested internal task";
@@ -722,6 +724,7 @@ function managerActionButton(actionType?: string | null) {
   if (actionType === "update_profile_context") return "Save context";
   if (actionType === "create_decision") return "Add decision draft";
   if (actionType === "generate_event_advance") return "Build advance";
+  if (actionType === "prepare_event_logistics_approvals") return "Prepare approvals";
   if (actionType === "generate_project_plan") return "Build milestone plan";
   if (actionType === "create_conversation_project") return "Create project and plan";
   if (actionType === "create_conversation_event") return "Create event";

@@ -23,6 +23,7 @@ import type { ManagerConversationTaskAssignmentAction } from "./manager-task-ass
 import type { ManagerConversationProjectAction } from "./manager-project-capture";
 import type { ManagerConversationEventAction } from "./manager-event-capture";
 import type { ManagerConversationEventAvailabilityAction } from "./manager-event-availability";
+import { EVENT_LOGISTICS_POLICY_VERSION, type EventLogisticsAssessment, type PrepareEventLogisticsApprovalsAction } from "../operations/event-logistics";
 import { applyManagerResponseAdaptation, managerResponseAdaptationPolicy, type ManagerResponseAdaptationPolicy } from "./manager-response-quality";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -55,7 +56,7 @@ export type ManagerProposedAction = {
   bandMemberId: string;
   checkInId: string | null;
   availability: "available" | "limited" | "unknown";
-} | ManagerProfileContextAction | ManagerConversationTaskAction | ManagerConversationTaskUpdateAction | ManagerConversationTaskAssignmentAction | ManagerConversationProjectAction | ManagerConversationEventAction | ManagerConversationEventAvailabilityAction;
+} | PrepareEventLogisticsApprovalsAction | ManagerProfileContextAction | ManagerConversationTaskAction | ManagerConversationTaskUpdateAction | ManagerConversationTaskAssignmentAction | ManagerConversationProjectAction | ManagerConversationEventAction | ManagerConversationEventAvailabilityAction;
 
 export type ManagerRecommendationDraft = {
   stableKey: string;
@@ -97,7 +98,12 @@ export type ManagerFacts = {
     type: string;
     status: string;
     startsAt: Date | null;
+    endsAt?: Date | null;
+    timezone?: string | null;
     updatedAt?: Date;
+    calendarEventId?: string | null;
+    driveFolderUrl?: string | null;
+    logisticsAssessment?: EventLogisticsAssessment | null;
     participants: { id?: string; response: string; bandMemberId: string; respondedAt?: Date | null }[];
     readiness?: ShowReadiness | null;
     dayOf?: EventDayOfView | null;
@@ -304,6 +310,9 @@ function mergeByKey<T>(base: T[], proposed: T[], key: (value: T) => string) {
 
 function sameRecommendation(left: ManagerRecommendationDraft, right: ManagerRecommendationDraft) {
   if (left.stableKey === right.stableKey) return true;
+  const leftPreparesLogistics = left.proposedAction?.type === "prepare_event_logistics_approvals";
+  const rightPreparesLogistics = right.proposedAction?.type === "prepare_event_logistics_approvals";
+  if (leftPreparesLogistics !== rightPreparesLogistics) return false;
   if (left.workstream !== right.workstream || !left.evidenceIds.length || !right.evidenceIds.length) return false;
   const rightEvidence = new Set(right.evidenceIds);
   return left.evidenceIds.some((id) => rightEvidence.has(id));
@@ -688,6 +697,39 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
       proposedAction: !showDay && upcomingEvent.startsAt && upcomingEvent.readiness?.gaps.some((gap) => gap.code === "advance_missing")
         ? { type: "generate_event_advance", eventId: upcomingEvent.id }
         : null
+    });
+  }
+
+  const upcomingLogisticsEvents = facts.events.filter((event) =>
+    event.type === "gig" &&
+    event.startsAt &&
+    event.startsAt >= now &&
+    event.startsAt.getTime() <= now.getTime() + 21 * DAY_MS
+  );
+  for (const event of upcomingLogisticsEvents) {
+    if (!event.startsAt) continue;
+    const logistics = event.logisticsAssessment;
+    const logisticsApprovalIsWaiting = logistics
+      ? Object.values(logistics.channels).some((channel) => channel.state === "pending" || channel.state === "approved")
+      : false;
+    if (!logistics?.eligible || logistics.complete || logisticsApprovalIsWaiting || !logistics.preparableChannels.length) continue;
+    const channelNames = logistics.preparableChannels.map((channel) => channel === "calendar" ? "Calendar hold" : "Drive folder");
+    addWeek({
+      stableKey: `event-logistics-${event.id}-${logistics.eventFingerprint.slice(0, 20)}`,
+      title: `Prepare ${event.title} logistics`,
+      reason: `${channelNames.join(" and ")} ${channelNames.length === 1 ? "is" : "are"} not connected to this confirmed show yet.`,
+      nextAction: `Accept this recommendation to prepare ${channelNames.length === 1 ? "the" : "separate"} ${channelNames.join(" and ")} approval${channelNames.length === 1 ? "" : "s"}. Nothing is written to Google until a band member approves and executes ${channelNames.length === 1 ? "it" : "each request"}.`,
+      workstream: "live",
+      priority: event.startsAt.getTime() <= now.getTime() + 7 * DAY_MS ? "high" : "med",
+      evidenceIds: [event.id, ...logistics.sourceApprovalIds].slice(0, 8),
+      proposedAction: {
+        type: "prepare_event_logistics_approvals",
+        policyVersion: EVENT_LOGISTICS_POLICY_VERSION,
+        eventId: event.id,
+        eventFingerprint: logistics.eventFingerprint,
+        channels: logistics.preparableChannels,
+        retryChannels: []
+      }
     });
   }
 

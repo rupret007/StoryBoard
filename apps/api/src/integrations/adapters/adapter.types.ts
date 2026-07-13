@@ -41,6 +41,7 @@ export interface CalendarHoldRequest {
   start: string;
   end: string;
   timeZone?: string;
+  kind?: "hold" | "confirmed";
 }
 
 export interface GoogleCalendarAdapter {

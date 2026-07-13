@@ -32,10 +32,15 @@ pnpm install   # runs prepare → builds @storyboard/shared into dist/
 pnpm infra:up
 pnpm db:generate
 pnpm db:migrate
-# optional: pre-link a dev operator to the default artist
+# local-only Dev login: set AUTH_DEV_BYPASS=true in .env, then seed its owner
 pnpm db:seed
 pnpm dev
 ```
+
+Choose one sign-in path before starting: configure the Google operator OAuth
+variables for real sign-in, or set `AUTH_DEV_BYPASS=true` in `.env` and run
+`pnpm db:seed` for the local-only **Dev login**. Do not enable dev bypass on an
+internet-facing deployment.
 
 - Web: http://localhost:3000 — sign in with Google (or dev login when enabled). New operators without memberships go through **onboarding** (create an artist or accept an invite). Owners manage team invites from **Team** in the sidebar. Then: **Manager** intake/brief/chat, dashboard, **Band operations** (events, songs/setlists, projects, offers), CRM, **Find shows**, booking, **Pitch campaigns**, the optional **Booking inbox**, tasks, approvals, weekly summary, notifications, and activity.
 - API: http://localhost:4000/health  
@@ -54,12 +59,20 @@ pnpm container:up
 ```
 
 Open `http://localhost:3000`, then use **Dev login**. The bundle persists data
-in Docker volumes; stop it with `pnpm container:down`. Copy
-`.env.compose.example` to a separate Compose env file to override local
-passwords, session secret, ports, or browser-facing URLs. `NEXT_PUBLIC_API_URL`
-is embedded at web-image build time, so rebuild after changing it. This is a
-local demo profile: a public deployment must disable dev bypass and configure
-Google OAuth, real secrets, and public `WEB_URL`/API URLs.
+in Docker volumes. `pnpm container:up` stays attached so its logs remain
+visible; keep that terminal open, or run
+`docker compose -f docker-compose.app.yml up --build -d --wait` for background
+startup. Stop either form with `pnpm container:down`. To override local
+passwords, the session secret, ports, or browser-facing URLs, copy
+`.env.compose.example` to the gitignored `.env.compose` and pass it explicitly:
+
+```bash
+docker compose --env-file .env.compose -f docker-compose.app.yml up --build
+```
+
+`NEXT_PUBLIC_API_URL` is embedded at web-image build time, so rebuild after
+changing it. This is a local demo profile: a public deployment must disable dev
+bypass and configure Google OAuth, real secrets, and public `WEB_URL`/API URLs.
 
 **Phase 3A:** Operator auth (Google OIDC + optional dev bypass), `Operator` / `ArtistMembership`, session-guarded routes, integration OAuth state bound to the signed-in operator, and audit rows with `actorOperatorId`. See `docs/auth-operators.md`.
 
@@ -75,7 +88,7 @@ Google OAuth, real secrets, and public `WEB_URL`/API URLs.
 
 **Phase 5B:** **Telegram inbound registration** — owners issue short-lived **`POST /workflow/telegram/registration-token`** links; **`POST /integrations/telegram/webhook`** handles **`/start`** payloads only, binds **`telegramChatId`** with one-time **`TelegramRegistrationToken`** rows, full audit trail, optional **`TELEGRAM_WEBHOOK_SECRET`**, and minimal Notifications UI (deep link / copy / manual chat id fallback). Expanded **`pnpm test`** coverage (shared + API). See `docs/telegram-alerts.md`.
 
-**Booking acquisition:** A quick, artist-scoped booking profile unlocks market prospecting and pitch campaigns. **Find shows** searches one city at a time through Ticketmaster Discovery when configured, otherwise states that manual mode is active rather than inventing leads. It stores venue, festival, private-event, and corporate-event prospects; only physical-room prospects create a `Venue` on conversion. **Pitch campaigns** render only a small allowlist of variables, show every personalized email before approval, and create Gmail drafts only after approval execution — never an auto-send. Each executed draft creates one follow-up task seven days later by default. See `docs/domain-model.md` and `docs/developer-runbook.md`.
+**Booking acquisition:** A quick, artist-scoped booking profile unlocks market prospecting and pitch campaigns. **Find shows** searches one city at a time through Ticketmaster Discovery when configured, otherwise states that manual mode is active rather than inventing leads. It stores venue, festival, private-event, and corporate-event prospects; only physical-room prospects create a `Venue` on conversion. **Pitch campaigns** render only a small allowlist of variables and show every personalized email before approval. Draft-only delivery is the default; a campaign may explicitly choose an approval-gated immediate-send batch of at most 25 recipients. Every provider action still requires separate human approval and execution, and unknown delivery is never retried automatically. Successful delivery creates a follow-up task seven days later by default. See `docs/domain-model.md` and `docs/developer-runbook.md`.
 
 **Booking advisor:** The Booking advisor turns sprint, campaign, delivery, outcome, and feedback into reviewable next steps. It remains deterministic when `OPENAI_ENABLED=false`. When enabled, `OPENAI_ADVISOR_CONTEXT=aggregate` (default) sends counts only; the explicit global `full` mode sends artist CRM context to the configured provider. It never sends messages or mutates booking records.
 
@@ -113,12 +126,14 @@ provider inbox data. The OpenAI path must first call the single explicit,
 read-only `read_manager_snapshot` function; code supplies the tenant snapshot
 and records token usage. Any unknown evidence ID rejects the whole model result
 and uses deterministic fallback. Model output cannot invent tools: code permits direct
-acceptance only for low-risk internal task creation and open decision drafts.
+acceptance only for allowlisted, premise-checked internal work; deterministic
+code may prepare an approval but never execute its outside action.
 Decision drafts must be corrected and saved by the band before a separate
 choice can be recorded. Email, calendar, Drive, legal, and financial work
 remains human-reviewed and approval-gated. Accepted recommendations are
-single-use and linked to their task or decision; completing a task or reviewing
-a decision records the outcome automatically. Dismissal reasons and bounded
+single-use and linked to their internal result or prepared approvals;
+task/decision completion and linked approval status record the outcome
+automatically. Dismissal reasons and bounded
 cooldowns keep the Manager from repeating recently rejected or finished work.
 Owners also get a read-only queue of finished recommendations that have not yet
 been reviewed for the regression set. Completion is shown as execution—not
@@ -151,7 +166,7 @@ to deterministic and provider-backed answers through
 action explicit, simplify tone, or ask one evidence-backed missing-premise
 question. Raw correction notes never become instructions, and adaptation cannot
 change facts, citations, recommendations, tools, permissions, or writes.
-Prompt/policy version `manager_os_v31`
+Prompt/policy version `manager_os_v32`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -269,6 +284,19 @@ current ownership, exact check-in premise, and stale-write premise, then
 completes atomically with audit history. Capacity notes remain in the tenant UI
 and never enter model context. The policy does not estimate hours, wellbeing,
 or personal circumstances and does not grant arbitrary tool or provider access.
+For a confirmed upcoming gig with a saved start, end, and IANA timezone, the
+same code-owned Manager brief may propose `event_logistics_v1`. Accepting that
+recommendation prepares separate, artist-scoped Google Calendar and Drive
+approval requests; it does not call Google. A member must still review,
+approve, and execute each request in Approvals. Successful execution writes the
+provider Calendar event ID or Drive folder URL back to the authoritative
+`BandEvent`, and the linked Manager recommendation follows the approvals from
+prepared through completed, rejected, or failed. Event type/status and
+title/time/timezone changes invalidate the old payload before provider
+execution, while source keys keep repeat preparation idempotent. Rejection can
+be explicitly prepared again because no provider call occurred. A provider
+failure is treated as an unknown outside outcome: check Google and reconcile it
+manually rather than risking a duplicate retry.
 The same conversation teaches common band-business concepts without requiring
 a model. Explicit questions about holds, guarantees, door deals, advancing,
 production documents, deposits, agreements, invoices, settlements, member
@@ -390,6 +418,16 @@ before write or audit. Each gig also has a phone-friendly **day-of view** with
 the next checkpoint, an editable custom run of show for travel calls, meals,
 support slots, changeovers, and other checkpoints, contact/map actions, lineup assignments,
 advance-task completion, setlist, production links, and recorded payment state.
+Confirmed gigs with an exact start/end and timezone also show their Calendar
+and Drive connection state. **Prepare approvals** creates or reuses the
+reviewable requests; it never performs the external write. Approve and execute
+those requests in **Approvals**, then return to the gig to see the persisted
+provider reference. If the event's title or schedule changes first, execution
+fails closed and the current details must be prepared again. Mock execution is
+clearly labeled **simulated** because no Google account changed; it can be
+replaced after Google is connected. A failed real-provider attempt is never
+blindly retried because the outside write may have succeeded—check Google and
+reconcile manually to avoid a duplicate.
 When the show is over, the same event editor records attendance, gross revenue,
 what worked or failed, and the buyer/venue relationship outcome. Settlement
 math includes only expenses in the settlement currency; other-currency costs
@@ -414,8 +452,9 @@ templates, immutable
 PDF snapshots, idempotent manual payments, and finalized settlements. Financial
 values are integer minor units with US/USD defaults. Agreement templates are
 starting points only and explicitly not legal advice. Gmail/calendar/Drive
-side effects still require Approvals; generated PDFs remain in StoryBoard until
-the reviewed provider-delivery step is executed.
+side effects still require Approvals. Current deal delivery creates a reviewed
+Gmail draft that references the immutable snapshot; the human must attach the
+PDF. Binary Drive upload and Gmail attachment remain a later adapter package.
 
 **Booking reply loop:** When `GMAIL_REPLY_SYNC_ENABLED=true` and an owner reconnects Google with `gmail.readonly`, the Booking inbox checks only Gmail threads created by StoryBoard campaigns. It stores bounded message metadata/snippets, not full bodies or attachments. AI analysis is a separate per-artist opt-in; selected bodies are fetched transiently and discarded after structured terms are derived. Applying terms and creating a threaded Gmail reply draft both require explicit actions, and drafts still pass through Approvals. Keep reply sync disabled until Google restricted-scope requirements are satisfied.
 
@@ -456,7 +495,10 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm lint` | ESLint (API + web) |
 | `pnpm test` | Unit tests (`@storyboard/shared` + compiled API tests); does not require a database |
 | `pnpm test:integration` | Migrates and tests a dedicated DB named by `STORYBOARD_TEST_DATABASE_URL` (must contain `test`) |
+| `pnpm test:e2e` | Resets an explicit `STORYBOARD_TEST_DATABASE_URL`, builds production artifacts, and runs 12 focused Chromium workflows |
+| `pnpm manager:eval` | Build the API and run the current offline Manager safety/usefulness gate |
 | `pnpm infra:up` / `infra:down` | Docker Postgres + Redis |
+| `pnpm container:up` / `container:down` | Build/start or stop the complete local container bundle |
 | `pnpm db:generate` | `prisma generate` (root config) |
 | `pnpm db:migrate` | `prisma migrate dev` (needs Postgres) |
 | `pnpm db:seed` | Seed default artist + operator membership (needs migrate) |
@@ -466,11 +508,26 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 
 ## Phase 2A providers
 
-Gmail (OAuth draft-only), Bandsintown (the artist's own event context only), and Ticketmaster Discovery (city-first venue/event signals) can run as **real** adapters when env vars are set. Ticketmaster absence or failure puts Find shows in explicit manual mode; it never creates synthetic leads. Approval **execute** creates Gmail drafts only after explicit approval. See `docs/developer-runbook.md`; `GET /integrations/status` (authenticated) reports provider modes.
+Gmail (OAuth compose/send), Bandsintown (the artist's own event context only), and Ticketmaster Discovery (city-first venue/event signals) can run as **real** adapters when env vars are set. Ticketmaster absence or failure puts Find shows in explicit manual mode; it never creates synthetic leads. Gmail drafts and explicitly selected immediate-send batches are created only by a separately approved **Execute** action. See `docs/developer-runbook.md`; `GET /integrations/status` (authenticated) reports provider modes.
 
-## MVP Scope
+## Current Product Scope
 
-- Venue CRM, contact/promoter CRM, booking profiles, market prospects, booking pipeline, approval-gated pitch campaigns, task engine, approval center with post-approval **execution**, command bar, weekly summary, and adapter layer (real Gmail/Bandsintown/Ticketmaster when configured; Calendar, Drive, YouTube, Spotify still mock-first).
+- **Manager OS:** guided band intake, an editable 90-day plan, goals,
+  initiatives, decisions, team context, evidence-grounded daily/weekly briefs,
+  bounded conversation, reviewed internal actions, and an offline evaluation
+  gate.
+- **Booking:** venue/contact CRM, booking profile, one-market prospecting,
+  pipeline, tracked campaign replies, approval-gated pitch campaigns, and
+  follow-up work.
+- **Band operations:** events and availability, show readiness/day-of views,
+  advance tasks, songs/setlists, release/content/tour/business projects, offers,
+  reviewed document snapshots, invoices/manual payments, expenses, and
+  settlements.
+- **Connected work:** an approval center with explicit post-approval execution,
+  audit history, notifications, and mock-safe adapters. Scoped Google accounts
+  can use real Gmail, Calendar, and Drive; Ticketmaster supplies optional market
+  signals, Bandsintown is limited to the artist's own event context, and
+  YouTube/Spotify remain mock-only.
 
 ## Commands API
 

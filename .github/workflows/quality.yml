@@ -56,6 +56,8 @@ jobs:
         run: pnpm lint
       - name: Unit tests
         run: pnpm test
+      - name: Manager safety and usefulness gate
+        run: pnpm manager:eval
       - name: Database integration tests
         env:
           STORYBOARD_TEST_DATABASE_URL: postgresql://storyboard:storyboard@localhost:5432/storyboard_test?schema=public

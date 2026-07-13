@@ -30,11 +30,12 @@ export const executeCommandBodySchema = z
 
 export type ExecuteCommandBody = z.infer<typeof executeCommandBodySchema>;
 
-export const researchBookingIntelPayloadSchema = z.object({
-  city: z.string().optional(),
-  artistName: z.string().optional(),
-  radiusKm: z.number().optional()
-});
+export const researchBookingIntelPayloadSchema = z
+  .object({
+    city: z.string().trim().min(1).optional(),
+    radiusKm: z.number().finite().positive().optional()
+  })
+  .strict();
 
 export const enqueueResearchRefreshPayloadSchema = z.object({
   city: z.string().optional()

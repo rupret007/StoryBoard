@@ -6,6 +6,11 @@
 - `pnpm-workspace.yaml`: workspace package globs
 - `.env.example`: env inventory template
 - `docker-compose.yml`: local PostgreSQL and Redis services
+- `docker-compose.app.yml`: one-command local PostgreSQL, Redis, migration,
+  seed, API, and web bundle
+- `docker-compose.production.yml`: production URL/auth overrides layered onto
+  the app bundle
+- `Dockerfile.api`, `Dockerfile.web`: production multi-stage images
 - `tsconfig.base.json`: shared TypeScript defaults
 - `AGENTS.md`: short instructions for AI coding agents (Codex, etc.)
 - `prisma.config.ts`: Prisma 7 config (loads `.env`)
@@ -18,7 +23,12 @@ The Next.js operator interface. Current responsibilities:
 
 - Dashboard shell with StoryBoard navigation and pending-approval indicator
 - Command bar (`POST /commands/execute`) with structured JSON output
-- Venue and contact CRM, booking pipeline, tasks, approval center
+- Venue and contact CRM, booking pipeline, Find shows, market sprints, pitch
+  campaigns/replies, tasks, and approval center
+- Manager OS intake, briefs, conversation, goals/initiatives/decisions, team
+  context, reviewed actions, and evaluation controls
+- Band operations for events/day-of work, songs/setlists, projects, deals,
+  invoices, expenses, and settlements
 - Weekly summary, **Notifications** (prefs, escalation, **Telegram** link + manual chat id)
 - Team / invites (owners), onboarding, activity feed
 - Shared API client in `src/lib/api.ts` (uses repo-root `.env` via `next.config.ts`)
@@ -34,6 +44,9 @@ The NestJS orchestration backend. Current responsibilities:
 - **Memberships** / invites / onboarding; **auth** (Google OIDC + dev bypass)
 - Prisma via **`PrismaService`** (`apps/api/src/prisma/`)
 - **`AuditService`** on important actions; approval execution paths
+- **Approval lifecycle:** artist/source-key idempotent preparation, tenant-bound
+  event and Manager links, compare-and-set approve/reject/execute, and
+  `event_logistics_v1` result reconciliation in `src/approvals/`
 - **Integrations:** adapter registry, Google OAuth, **Telegram** real/mock adapters
 - **Workflow automation:** BullMQ jobs (`workflow-automation/`, `queue/`), in-app notifications, email drafts, digests, opt-in **Manager cadence**, **Telegram urgent scan**
 - **Manager OS:** tenant snapshots, deterministic briefs/chat, post-show outcome
@@ -54,6 +67,8 @@ The NestJS orchestration backend. Current responsibilities:
   reviewed `manager_project_capture_v1` project-plus-plan creation,
   reviewed `manager_event_capture_v1` timezone-safe event/initial-lineup creation,
   reviewed `manager_event_availability_v1` one-member event responses,
+  deterministic `event_logistics_v1` approval-preparation recommendations for
+  eligible confirmed gigs (provider execution remains in Approvals),
   owner-only `manager_recommendation_eval_review_v1` finished-advice triage,
   per-operator `manager_response_review_v1` answer-review queues,
   owner-only `manager_response_eval_review_v1` release-example triage,
@@ -70,6 +85,7 @@ The NestJS orchestration backend. Current responsibilities:
 - **Band operations:** tenant-safe events, editable custom run-of-show
   checkpoints, availability, readiness/day-of projections, practical
   song/setlist editing with shared `setlist_summary_v1` timing truth,
+  source-keyed Calendar/Drive approval planning in `event-logistics.ts`,
   projects, deal documents, invoices, expenses, and settlements in
   `src/operations/`
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
@@ -98,6 +114,8 @@ Reusable React UI components intended for the web app.
 **`ManagerMessageFeedback`**, reviewable **`ManagerDecision`** outcomes,
 **`WorkflowNotification`**,
 **`TelegramUrgentDedupe`**, and **`TelegramRegistrationToken`**.
+`ApprovalRequest` may link a `BandEvent` and `ManagerRecommendation`; its
+artist-scoped nullable `sourceKey` makes event-logistics preparation idempotent.
 
 Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run **`pnpm db:generate`** after clone or schema change.
 
@@ -105,12 +123,19 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
 
 - `scripts/preflight.mjs` — infra smoke
 - `scripts/audit-artist-references.mjs` — read-only tenant relationship diagnostic
+- `scripts/prepare-test-database.mjs` / `scripts/reset-test-database.mjs` —
+  explicit disposable-database migration and reset; never fall back to the app DB
+- `scripts/run-e2e.mjs` — orchestrates the mock-provider browser environment
+- `scripts/run-manager-evals.mjs` — versioned offline Manager safety/usefulness gate
 
 ## Tests
 
 - **`packages/shared/test/`** — Node test runner for shared schemas and derived
   policies, including setlist timing and Telegram helpers
 - **`apps/api/test/`** — compiled API regressions (the API package **`test`** script runs **`nest build`** first, then `node --test`)
+- **`apps/api/test/integration/`** — opt-in Postgres workflows using only
+  `STORYBOARD_TEST_DATABASE_URL`
+- **`apps/web/e2e/`** — production-build Playwright journeys with mock providers
 
 ## Tooling docs
 

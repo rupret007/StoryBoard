@@ -30,7 +30,9 @@ Compose injects `POSTGRES_*` into the container; your app uses **`DATABASE_URL`*
 4. `pnpm infra:up`
 5. `pnpm db:generate`
 6. `pnpm db:migrate` (applies `prisma/migrations/*` to local Postgres)
-7. `pnpm dev` (or `dev:web` / `dev:api` separately)
+7. Choose authentication: configure Google operator OAuth, or for local-only
+   development set `AUTH_DEV_BYPASS=true` and run `pnpm db:seed`
+8. `pnpm dev` (or `dev:web` / `dev:api` separately)
 
 ## Env variable inventory
 
@@ -38,14 +40,16 @@ Compose injects `POSTGRES_*` into the container; your app uses **`DATABASE_URL`*
 
 - `DATABASE_URL` — PostgreSQL connection string (matches Compose defaults in `.env.example`)
 - `REDIS_URL` — e.g. `redis://localhost:6379`
-- `WEB_URL` — browser origin for CORS allowlist, e.g. `http://localhost:3000`
-- `API_PORT` — e.g. `4000`
 - `SESSION_SECRET` — minimum **8 characters**
 
 ### Core app (optional defaults)
 
 - `NODE_ENV` — typically `development`
-- `WEB_PORT`, `API_URL` — documented for future use; Next dev uses port from script
+- `WEB_URL` — browser origin for CORS/CSRF and redirects; defaults to `http://localhost:3000`
+- `API_PORT` — API listener/Compose host port; defaults to `4000`
+- `WEB_PORT` — Compose host port for the web app; defaults to `3000`
+- `API_URL`, `NEXT_PUBLIC_API_URL` — server/browser API origins used by the web
+  app and Compose; default to `http://localhost:4000` locally
 
 ### OpenAI (optional locally)
 
@@ -58,7 +62,14 @@ Compose injects `POSTGRES_*` into the container; your app uses **`DATABASE_URL`*
 
 ### Integrations (not required for boot)
 
-Placeholders in `.env.example` until adapters are implemented: Google OAuth, Bandsintown, Ticketmaster, YouTube, Spotify, and deferred services.
+- Google operator OAuth signs users in. Per-artist Google OAuth stores encrypted
+  refresh tokens and enables scoped Gmail drafts/sends, Calendar holds, and
+  Drive-folder creation; see `integrations-google-oauth.md`.
+- Ticketmaster provides bounded city-first venue/event signals. Bandsintown is
+  limited to the current artist's own event context. Both fall back safely when
+  credentials are absent.
+- YouTube and Spotify remain mock-only. TikTok, Mailchimp, Twilio, Printful,
+  Shopify, Stripe, and Documenso remain deferred adapters.
 
 ## Migration strategy
 
@@ -71,4 +82,6 @@ Placeholders in `.env.example` until adapters are implemented: Google OAuth, Ban
 - **Docker**: `docker compose ps` (and healthchecks in Compose)
 - **Postgres / Redis**: `pnpm preflight` (after infra is up and `.env` is loaded)
 - **API**: `GET /health`
+- **API dependencies/worker**: `GET /ready` (returns non-2xx when PostgreSQL,
+  Redis, or the enabled queue worker is unavailable)
 - **Web**: open `/` on the dev or production server

@@ -30,7 +30,9 @@ Edit `.env` only as needed. For local boot **without** OpenAI or other live APIs
 
 - Keep `OPENAI_ENABLED=false` (default in `.env.example`)
 - Keep `GMAIL_REPLY_SYNC_ENABLED=false` unless the Google project is prepared for restricted Gmail scopes. Enabling it requires owners to reconnect Google before per-artist synchronization can be enabled.
-- Placeholders like `replace-me` for unused integrations are OK until you implement those adapters
+- Placeholders like `replace-me` are acceptable only for disabled integrations;
+  configure real credentials before enabling Google, Ticketmaster, or
+  Bandsintown behavior
 
 The API validates required vars at startup (see `apps/api/src/config/env.validation.ts`). If boot fails, the error message points you at `.env.example`.
 
@@ -74,8 +76,10 @@ pnpm container:up
 
 It runs Postgres, Redis, forward-only Prisma migrations, the idempotent seed,
 the Nest API (including the current in-process BullMQ worker), and Next.js.
-Open `http://localhost:3000` and use the development login. Stop containers
-without deleting data with `pnpm container:down`; only use
+The command stays attached and shows service logs; keep that terminal open, or
+use `docker compose -f docker-compose.app.yml up --build -d --wait` for
+background startup. Open `http://localhost:3000` and use the development login.
+Stop containers without deleting data with `pnpm container:down`; only use
 `docker compose -f docker-compose.app.yml down -v` when intentionally removing
 local Postgres and Redis data.
 
@@ -96,6 +100,12 @@ copy `.env.compose.example` and pass it explicitly:
 ```bash
 docker compose --env-file .env.compose -f docker-compose.app.yml up --build
 ```
+
+The example also lists optional host-port overrides. For production operator
+sign-in, configure the operator redirect. To let artists connect Gmail,
+Calendar, or Drive, additionally set `GOOGLE_REDIRECT_URI` and a 32-byte
+base64-encoded `INTEGRATION_SECRETS_ENCRYPTION_KEY`; sign-in alone does not
+enable per-artist integrations.
 
 `NEXT_PUBLIC_API_URL` is browser code and is compiled into the web image. Set
 it, `WEB_URL`, and `API_URL` to public HTTPS URLs and rebuild the web image for
@@ -255,7 +265,7 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 
 | Provider | Credentials | Behavior |
 | -------- | ----------- | -------- |
-| Gmail / Calendar / Drive | Per-artist DB connection **or** env `GOOGLE_*` trio (refresh optional if DB only) | Gmail: draft after execute. Calendar: hold events via approval `calendar_hold_batch`. Drive: `drive_ensure_folder` approval. Connect flow: `docs/integrations-google-oauth.md` (`INTEGRATION_SECRETS_ENCRYPTION_KEY` required to persist). |
+| Gmail / Calendar / Drive | Per-artist DB connection **or** env `GOOGLE_*` trio (refresh optional if DB only) | Gmail: draft-only by default, or an explicitly selected approval-gated immediate-send batch of at most 25 recipients. Calendar: hold events via approval `calendar_hold_batch`. Drive: `drive_ensure_folder` approval. Connect flow: `docs/integrations-google-oauth.md` (`INTEGRATION_SECRETS_ENCRYPTION_KEY` required to persist). |
 | Bandsintown | `BANDSINTOWN_APP_ID` | Artist-owned event context only; never market/competitor venue discovery. |
 | Ticketmaster | `TICKETMASTER_API_KEY` | Bounded city-first venue/event signals for Find shows; unavailable mode is manual, with no synthetic rows. |
 
@@ -459,7 +469,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v31`)
+  (owner-only; currently accepts only the code-registered `manager_os_v32`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -534,7 +544,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v31` retains the current operator question and at most 12
+version `manager_os_v32` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -570,7 +580,12 @@ records its topic IDs/provider bypass in the redacted run trace, and never
 creates a recommendation. The external-action refusal runs first. The Manager
 UI builds its **Learn as you go** prompts from `educationTopics`, with safe
 defaults when no topics are saved.
-Generated briefs remain limited to `create_task` proposals.
+Generated briefs remain limited to code-owned, typed proposals: low-risk
+internal task/assignment, show-advance, and project-plan work plus
+`event_logistics_v1` approval preparation. Event logistics acceptance creates
+review rows only; provider execution still requires a separate human action in
+Approvals. Briefs cannot invent tool names, create arbitrary records, or
+execute an outside action.
 Each assistant message links to the exact `ManagerRun` that produced it.
 Members can record one idempotent feedback row per response/operator; feedback
 is tenant-scoped and audited. Only aggregate helpful/correction signals enter
@@ -590,15 +605,19 @@ language, excessive length/formatting, and claims of completed outside actions;
 the deterministic manager answer is used when model output fails the gate.
 Chat may return one reviewable recommendation through the same recommendation
 API. Acceptance permits `create_task`, an open `create_decision` draft, a
-role-grounded `assign_task`, or one of two readiness-bound operations:
-`generate_event_advance` and `generate_project_plan`. Assignment requires the
+role-grounded `assign_task`, or one of two readiness-bound internal operations:
+`generate_event_advance` and `generate_project_plan`. A deterministic brief may
+also offer `prepare_event_logistics_approvals`; accepting it creates reviewable
+Calendar/Drive approvals only, never a provider write. Assignment requires the
 exact current-artist open task to still be unowned or system-labeled plus the
 exact active member selected by the deterministic team-load view; equal role
 matches remain unchosen and urgent recorded workloads are excluded. The
 generators only create source-keyed internal Tasks, require the cited current
 target to belong to the artist, recheck the event/project date, and commit with
-the recommendation claim. These actions cannot call a provider or
-prepare/execute an Approval.
+the recommendation claim. Those internal actions cannot call a provider or
+prepare/execute an Approval. Event-logistics acceptance instead creates or
+reuses source-keyed pending approvals after rechecking the current event
+fingerprint; it still cannot approve, execute, or call the provider.
 For commitment questions, code requires the top recorded pressure item as
 evidence and rejects duplicate task proposals. Generated briefs must keep a
 high-severity commitment first or fall back to deterministic output. The model does not
@@ -724,10 +743,15 @@ that its name contains `test`, then seeds it. Browser coverage therefore
 exercises first-time intake on every run instead of inheriting old test data.
 The runner forces its production build environment internally, so an unrelated
 shell-level `NODE_ENV` cannot invalidate Next.js prerendering.
-The three browser cases form one serial booking-to-operations journey over that
-database. Per-test retries are intentionally disabled because retrying only a
-downstream case would reuse partial state instead of replaying the journey;
-failed runs retain a Playwright trace and must restart from the database reset.
+The 12 focused browser cases establish their own domain prerequisites and cover
+booking, Manager, operations, finance, tasks, and approval-gated event
+logistics without depending on a previous case's records. They still share the
+same reset database, and per-test retries remain intentionally disabled so a
+retry cannot hide state leakage or an idempotency regression. Failed runs
+retain a Playwright trace and should restart from the database reset. If port
+3000 or 4000 is occupied locally, set `E2E_WEB_URL` and/or `E2E_API_URL` to an
+available loopback URL; the runner uses those values consistently for its
+build, servers, redirects, and browser requests.
 The CI container smoke waits for API and web readiness independently, then
 verifies that dev login writes an `sb_session` cookie without following the
 browser redirect.
@@ -735,8 +759,14 @@ browser redirect.
 Operations routes:
 
 - `GET` / `POST` / `PATCH /events`, `GET /events/:id`,
-  `POST /events/from-opportunity/:opportunityId`, participant upsert,
-  advance generation, and logistics approval preparation
+  `POST /events/from-opportunity/:opportunityId`, participant upsert, and
+  advance generation
+- `POST /events/:id/prepare-logistics-approvals` — for a confirmed gig with an
+  exact start, end, and IANA timezone, create or reuse one pending approval for
+  each missing Calendar and/or Drive channel. The route never calls Google.
+  A rejected channel can use this explicit route to create a new reviewed
+  attempt. A failed provider attempt cannot: because the outside write may have
+  succeeded before its response was lost, check Google and reconcile manually.
 - `GET /events/readiness?days=90` and `GET /events/:id/readiness` — bounded,
   tenant-scoped, read-only readiness signals with category scores, confidence,
   evidence IDs, and prioritized gaps; `days` accepts 1–365
@@ -799,6 +829,24 @@ patches are validated against both the submitted fields and the event's saved
 timestamps; load-in, soundcheck, doors, set, and curfew cannot be reordered by
 a partial update. Every successful event or availability write is audited.
 
+The same editor shows the `event_logistics_v1` Calendar and Drive state. A gig
+must be `confirmed` and have `startsAt`, `endsAt`, and `timezone`; the end must
+follow the start. **Prepare approvals** creates or reuses only the one or two
+review records needed for the currently missing/retryable channels.
+After a member approves and executes them from Approvals, the provider Calendar
+event ID and Drive folder URL appear on the event. Preparation is idempotent by
+artist/event/fingerprint/channel/attempt. Confirmed gigs create normal opaque
+Calendar events; legacy `calendar_hold_batch` inputs without the confirmed kind
+remain transparent `HOLD:` events. Mock execution is labeled `simulated` and
+does not claim Google changed; connect Google before preparing a replacement.
+If the event type/status, title,
+start, end, or timezone changes before execution, the approval fails closed and
+current gig data must be reviewed again. A rejected channel may be deliberately
+re-prepared. A failed provider attempt is quarantined because its remote outcome
+may be unknown; inspect Google and repair/link the result manually instead of
+creating a duplicate. If already-linked event details later change, update the
+existing Google record manually; StoryBoard does not create a replacement.
+
 The outcome review is non-persistent derived data. It looks back 7–365 days at
 completed/cancelled gigs and projects, completed tasks, explicit campaign
 results, event invoices/expenses, and settlements. Confidence is premise
@@ -846,8 +894,12 @@ response.
 - `GET` / `PUT /booking-profile` — quick profile draft/readiness. A ready profile
   has a home city, genres, capacity min/max, and booking pitch; press kit and
   live video remain optional.
-- `GET /booking-prospects` / `POST /booking-prospects` / `PATCH /booking-prospects/:id`
-  — artist-scoped venue, festival, private-event, and corporate-event leads.
+- `GET /booking-prospects` / `GET /booking-prospects/:id` /
+  `POST /booking-prospects` / `PATCH /booking-prospects/:id` — artist-scoped
+  venue, festival, private-event, and corporate-event leads.
+- `PUT /booking-prospects/:id/contact` — link an existing artist contact or
+  create the prospect's buyer/promoter contact inline; the operation is
+  tenant-checked, atomic, and audited.
 - `GET /booking-prospects/discover?city=&region=&country=&keyword=` — bounded
   Ticketmaster venue/event signals when configured. Otherwise returns
   `{ mode: "manual" }` and no generated leads.
@@ -862,8 +914,9 @@ response.
   `PATCH /booking-campaigns/:id/recipients/:recipientId` — draft campaign and
   recipient management. Only qualified prospects can be recipients.
 - `POST /booking-campaigns/:id/prepare-approval` — renders and returns every
-  recipient-specific preview, then creates an `outbound_email_batch` approval;
-  it makes no Gmail API call.
+  recipient-specific preview, then creates `outbound_email_batch` for the
+  default draft mode or `outbound_email_send_batch` for explicitly selected
+  immediate delivery; preparation itself makes no Gmail API call.
 
 Campaign templates permit only `{{artistName}}`, `{{contactName}}`,
 `{{prospectName}}`, `{{market}}`, `{{bookingPitch}}`, and `{{pressKitUrl}}`.
@@ -893,11 +946,23 @@ enablement requires the applicable OAuth verification and security review.
 ## Approvals execution
 
 - `GET /approvals/pending` — needs review  
-- `GET /approvals/ready-to-execute` — **approved** rows with executable action types: `outbound_email_batch`, `calendar_hold_batch`, `drive_ensure_folder`
+- `GET /approvals/ready-to-execute` — **approved** rows with executable action types: `outbound_email_batch`, `outbound_email_send_batch`, `calendar_hold_batch`, `drive_ensure_folder`
 - `POST /approvals/:id/approve` — moves pending/proposed → approved (audited)  
+- `POST /approvals/:id/reject` — moves pending/proposed → rejected with an optional reviewed reason (audited)
 - `POST /approvals/:id/execute` — body `{ "dryRun": true }` for preview only (no provider calls; stays **approved**), or omit/`false` to run provider work and set status **executed**/**failed**  
 
 `draft_venue_outreach` and prepared campaign batches store full per-recipient **Gmail** fields in the approval payload; **no** Gmail API call happens until **execute** (avoids pre-approval drafts when using real Gmail). Campaign execution additionally creates its linked follow-up tasks atomically with the executed approval record.
+
+Approve, reject, and execute use compare-and-set transitions. Non-dry execution
+claims `executionAttemptedAt` once before any provider call; a second request
+cannot execute the same approval again. Event-logistics approvals additionally
+carry artist-scoped `sourceKey`, `eventId`, and optional
+`managerRecommendationId`. Execution verifies the current confirmed event and
+reviewed title/time/timezone fingerprint before resolving the side effect.
+Calendar success stores `BandEvent.calendarEventId`; Drive success stores
+`BandEvent.driveFolderUrl`. Linked Manager advice remains accepted while a
+request waits, completes after every channel executes, and becomes dismissed
+or blocked when a request is rejected or fails.
 
 Audited actions include `approval.execution.started`, `approval.execution.dry_run`, `approval.execution.succeeded`, `approval.execution.failed`.
 
@@ -945,6 +1010,7 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
+pnpm manager:eval
 ```
 
 **Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
@@ -958,8 +1024,9 @@ STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/
 
 The command refuses to fall back to `DATABASE_URL`, runs `prisma generate` and
 `prisma migrate deploy` against that explicit test database, and then verifies
-tenant links (including custom event schedule ownership), role enforcement,
-Telegram registration binding, and audit rows.
+tenant links (including custom event schedule ownership and event-bound
+approval ownership), role enforcement, Telegram registration binding, and
+audit rows.
 Before a release, run the read-only relationship diagnostic against the target
 database; it exits non-zero if it finds a mismatch and never changes data:
 
@@ -970,14 +1037,19 @@ pnpm db:audit-relationships
 **Browser workflow test:** Install Chromium once, then point the opt-in runner
 at the same kind of explicit disposable test database. It applies migrations,
 builds the current production artifacts, starts the API/web pair with dev auth
-and mock-safe providers, and verifies profile → prospect → buyer → campaign →
-approval preview. It never falls back to `DATABASE_URL`.
+and mock-safe providers, and verifies booking acquisition, Manager and band
+operations, practical setlists, and confirmed event → logistics approvals →
+approved mock Calendar/Drive execution → persisted event references. It never
+falls back to `DATABASE_URL`.
 
 ```bash
-pnpm --filter @storyboard/web exec playwright install --with-deps chromium
+pnpm --filter @storyboard/web exec playwright install chromium
 STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/storyboard_test?schema=public' \
   pnpm test:e2e
 ```
+
+On Linux CI images, use `playwright install --with-deps chromium` to install
+the operating-system packages as well. macOS needs only the command above.
 
 Optional after infra and `.env` are up:
 
@@ -998,3 +1070,6 @@ pnpm preflight
 - Forward-only migrations in `prisma/migrations/`
 - Never hand-edit applied migration SQL in shared branches
 - Production deploys should use `prisma migrate deploy` (CI/CD), not `migrate dev`
+- `20260714010000_event_logistics_approvals` adds nullable event/recommendation/
+  source-key links and indexes to `ApprovalRequest`; deploy it before using the
+  Manager or Operations event-logistics flow.

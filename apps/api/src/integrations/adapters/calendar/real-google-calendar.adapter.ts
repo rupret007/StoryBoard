@@ -1,6 +1,17 @@
 import { google } from "googleapis";
 import type { CalendarHoldRequest, GoogleCalendarAdapter } from "../adapter.types";
 
+export function googleCalendarEventBody(input: CalendarHoldRequest) {
+  const confirmed = input.kind === "confirmed";
+  const timeZone = input.timeZone ?? "UTC";
+  return {
+    summary: confirmed ? input.title : `HOLD: ${input.title}`,
+    start: { dateTime: input.start, timeZone },
+    end: { dateTime: input.end, timeZone },
+    transparency: confirmed ? "opaque" as const : "transparent" as const
+  };
+}
+
 export class RealGoogleCalendarAdapter implements GoogleCalendarAdapter {
   readonly id = "google-calendar" as const;
   readonly mode = "real" as const;
@@ -16,15 +27,9 @@ export class RealGoogleCalendarAdapter implements GoogleCalendarAdapter {
     const oauth2 = new google.auth.OAuth2(this.clientId, this.clientSecret);
     oauth2.setCredentials({ refresh_token: this.refreshToken });
     const calendar = google.calendar({ version: "v3", auth: oauth2 });
-    const tz = input.timeZone ?? "UTC";
     const res = await calendar.events.insert({
       calendarId: this.calendarId,
-      requestBody: {
-        summary: `HOLD: ${input.title}`,
-        start: { dateTime: input.start, timeZone: tz },
-        end: { dateTime: input.end, timeZone: tz },
-        transparency: "transparent"
-      }
+      requestBody: googleCalendarEventBody(input)
     });
     return {
       eventId: res.data.id ?? "unknown",

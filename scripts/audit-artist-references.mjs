@@ -185,6 +185,40 @@ const checks = [
     `
   },
   {
+    relation: "ApprovalRequest → BookingOpportunity",
+    query: `
+      SELECT a."id" AS "recordId", a."artistId" AS "recordArtistId",
+             a."opportunityId" AS "relatedId", b."artistId" AS "relatedArtistId"
+      FROM "ApprovalRequest" a
+      INNER JOIN "BookingOpportunity" b ON b."id" = a."opportunityId"
+      WHERE a."artistId" <> b."artistId"
+      ORDER BY a."id";
+    `
+  },
+  {
+    relation: "ApprovalRequest → BandEvent",
+    query: `
+      SELECT a."id" AS "recordId", a."artistId" AS "recordArtistId",
+             a."eventId" AS "relatedId", e."artistId" AS "relatedArtistId"
+      FROM "ApprovalRequest" a
+      INNER JOIN "BandEvent" e ON e."id" = a."eventId"
+      WHERE a."artistId" <> e."artistId"
+      ORDER BY a."id";
+    `
+  },
+  {
+    relation: "ApprovalRequest → ManagerRecommendation",
+    query: `
+      SELECT a."id" AS "recordId", a."artistId" AS "recordArtistId",
+             a."managerRecommendationId" AS "relatedId", run."artistId" AS "relatedArtistId"
+      FROM "ApprovalRequest" a
+      INNER JOIN "ManagerRecommendation" r ON r."id" = a."managerRecommendationId"
+      INNER JOIN "ManagerRun" run ON run."id" = r."managerRunId"
+      WHERE a."artistId" <> run."artistId"
+      ORDER BY a."id";
+    `
+  },
+  {
     relation: "BookingCampaignRecipient → Prospect",
     query: `
       SELECT r."id" AS "recordId", k."artistId" AS "recordArtistId",

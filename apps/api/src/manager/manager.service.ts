@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCall, ResponseInputItem } from "openai/resources/responses/responses";
@@ -26,7 +26,10 @@ import { deterministicShowReadiness } from "../operations/event-readiness";
 import { deterministicEventDayOf } from "../operations/event-day-of";
 import { deterministicProjectReadiness, PROJECT_PLAN_VERSION, projectPlanTemplate } from "../operations/project-plan";
 import { SHOW_ADVANCE_VERSION, showAdvanceSourceKey, showAdvanceTaskSpecs } from "../operations/show-advance";
-import { managerActionMayExecuteDirectly } from "./manager-policy";
+import { EVENT_LOGISTICS_POLICY_VERSION, assessEventLogistics, eventLogisticsActionMatchesCurrent, planEventLogisticsApprovals, type PrepareEventLogisticsApprovalsAction } from "../operations/event-logistics";
+import type { ApprovalsService } from "../approvals/approvals.service";
+import { APPROVALS_SERVICE } from "../approvals/approvals.tokens";
+import { managerActionMayExecuteDirectly, managerActionMayPrepareApproval } from "./manager-policy";
 import { applyManagerResponseAdaptation, evaluateManagerResponseQuality, managerResponseAdaptationPolicy, managerResponseGuidance, summarizeManagerResponseFeedback } from "./manager-response-quality";
 import { deterministicManagerOutcomeReview } from "./manager-outcome-review";
 import { deterministicManagerContextHealth } from "./manager-context-health";
@@ -65,6 +68,14 @@ const MANAGER_FACT_AGGREGATES = [
 const taskActionSchema = z.object({ type: z.literal("create_task"), title: z.string().min(1).max(240), dueAt: z.string().datetime({ offset: true }).nullable(), initiativeId: z.string().nullable() }).strict();
 const decisionActionSchema = z.object({ type: z.literal("create_decision"), workstream: z.nativeEnum(ManagerWorkstream), title: z.string().min(1).max(200), context: z.string().max(3000).nullable(), options: z.array(z.object({ label: z.string().min(1).max(200), tradeoff: z.string().min(1).max(1000) }).strict()).min(2).max(6) }).strict().superRefine((input, context) => { const labels = input.options.map((option) => option.label.toLocaleLowerCase()); if (new Set(labels).size !== labels.length) context.addIssue({ code: "custom", path: ["options"], message: "Decision options must have unique labels" }); });
 const eventAdvanceActionSchema = z.object({ type: z.literal("generate_event_advance"), eventId: z.string().min(1) }).strict();
+const eventLogisticsActionSchema = z.object({
+  type: z.literal("prepare_event_logistics_approvals"),
+  policyVersion: z.literal(EVENT_LOGISTICS_POLICY_VERSION),
+  eventId: z.string().min(1),
+  eventFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  channels: z.array(z.enum(["calendar", "drive"])).min(1).max(2),
+  retryChannels: z.array(z.enum(["calendar", "drive"])).max(2)
+}).strict();
 const projectPlanActionSchema = z.object({ type: z.literal("generate_project_plan"), projectId: z.string().min(1) }).strict();
 const rememberFactActionSchema = z.object({ type: z.literal("remember_fact"), key: z.string().regex(/^operator_note_[a-z0-9_]{1,66}$/), label: z.string().min(1).max(120), value: z.string().min(3).max(1000) }).strict();
 const assignTaskActionSchema = z.object({ type: z.literal("assign_task"), taskId: z.string().min(1), bandMemberId: z.string().min(1), checkInId: z.string().min(1).nullable(), availability: z.enum(["available", "limited", "unknown"]) }).strict();
@@ -156,7 +167,7 @@ const conversationEventAvailabilityActionSchema = z.object({
   previousRespondedAt: z.string().datetime({ offset: true }).nullable(),
   response: z.enum(managerEventAvailabilityResponses)
 }).strict().refine((value) => value.previousResponse !== value.response, { path: ["response"], message: "Availability must change" });
-const proposedActionSchema = z.union([taskActionSchema, conversationTaskActionSchema, conversationTaskUpdateActionSchema, conversationTaskAssignmentActionSchema, conversationProjectActionSchema, conversationEventActionSchema, conversationEventAvailabilityActionSchema, decisionActionSchema, eventAdvanceActionSchema, projectPlanActionSchema, rememberFactActionSchema, assignTaskActionSchema, profileContextActionSchema]);
+const proposedActionSchema = z.union([taskActionSchema, conversationTaskActionSchema, conversationTaskUpdateActionSchema, conversationTaskAssignmentActionSchema, conversationProjectActionSchema, conversationEventActionSchema, conversationEventAvailabilityActionSchema, decisionActionSchema, eventAdvanceActionSchema, eventLogisticsActionSchema, projectPlanActionSchema, rememberFactActionSchema, assignTaskActionSchema, profileContextActionSchema]);
 const itemSchema = z.object({ stableKey: z.string().regex(/^[a-z0-9_-]{1,80}$/), title: z.string().min(1).max(200), reason: z.string().min(1).max(800), nextAction: z.string().min(1).max(500), workstream: z.nativeEnum(ManagerWorkstream), priority: z.enum(["low","med","high"]), evidenceIds: z.array(z.string()).max(8), proposedAction: proposedActionSchema.nullable() }).strict();
 const briefSchema = z.object({ summary: z.string().min(1).max(1200), today: z.array(itemSchema).max(5), thisWeek: z.array(itemSchema).max(10), decisionsNeeded: z.array(z.object({ title: z.string(), explanation: z.string(), evidenceIds: z.array(z.string()).max(8) }).strict()).max(8), waitingOn: z.array(z.object({ title: z.string(), dueAt: z.string().nullable(), evidenceIds: z.array(z.string()).max(8) }).strict()).max(10), risksAndOpportunities: z.array(z.object({ title: z.string(), detail: z.string(), confidence: z.number().min(0).max(1), evidenceIds: z.array(z.string()).max(8) }).strict()).max(10) }).strict();
 const chatOutputSchema = z.object({
@@ -190,7 +201,12 @@ function managerTaskAssignmentMembers(members: Array<{ id: string; name: string;
 
 @Injectable()
 export class ManagerService {
-  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly config: ConfigService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly config: ConfigService,
+    @Optional() @Inject(APPROVALS_SERVICE) private readonly approvals?: Pick<ApprovalsService, "createMany" | "notifyCreatedApprovals">
+  ) {}
 
   profile(artistId: string) { return this.prisma.client.artistOperatingProfile.findUnique({ where: { artistId } }); }
   async putProfile(artistId: string, input: ManagerProfileInput, actorLabel: string, actorOperatorId: string, complete = false) {
@@ -959,7 +975,7 @@ export class ManagerService {
       this.prisma.client.managerInitiative.findMany({ where: { artistId, status: { in: [ManagerInitiativeStatus.proposed, ManagerInitiativeStatus.active, ManagerInitiativeStatus.blocked] } }, take: 30 }),
       this.prisma.client.task.findMany({ where: { artistId, OR: [{ status: { not: "done" } }, { initiativeId: { not: null } }] }, include: { bandMember: { select: { id: true, name: true } }, prerequisites: { select: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } } }, dependents: { select: { task: { select: { id: true, title: true, status: true, dueAt: true } } } } }, orderBy: { dueAt: "asc" }, take: 100 }),
       this.prisma.client.bookingOpportunity.findMany({ where: { artistId, stage: { not: "closed" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
-      this.prisma.client.bandEvent.findMany({ where: { artistId, status: { in: ["draft", "hold", "confirmed"] } }, include: { participants: true, tasks: true, schedule: { orderBy: { sortOrder: "asc" } }, setlist: { include: { items: { select: { id: true, itemType: true, label: true, song: { select: { id: true, title: true, durationSeconds: true } } } } } }, deals: { include: { agreements: { select: { id: true, status: true } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } }, orderBy: { startsAt: "asc" }, take: 30 }),
+      this.prisma.client.bandEvent.findMany({ where: { artistId, status: { in: ["draft", "hold", "confirmed"] } }, include: { participants: true, tasks: true, schedule: { orderBy: { sortOrder: "asc" } }, setlist: { include: { items: { select: { id: true, itemType: true, label: true, song: { select: { id: true, title: true, durationSeconds: true } } } } } }, deals: { include: { agreements: { select: { id: true, status: true } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } }, approvals: { where: { sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, select: { id: true, eventId: true, sourceKey: true, actionType: true, status: true, payload: true, createdAt: true, updatedAt: true } } }, orderBy: { startsAt: "asc" }, take: 30 }),
       this.prisma.client.artistProject.findMany({ where: { artistId, status: { in: ["draft", "active", "paused"] } }, include: { tasks: true, expenses: true, events: { select: { id: true } } }, orderBy: { dueAt: "asc" }, take: 30 }),
       this.prisma.client.dealOffer.findMany({ where: { artistId, status: { in: ["draft", "proposed", "negotiating", "accepted"] } }, orderBy: { updatedAt: "desc" }, take: 30 }),
       this.prisma.client.invoice.findMany({ where: { artistId, status: { in: ["issued", "partially_paid", "overdue"] } }, orderBy: { dueAt: "asc" }, take: 30 }),
@@ -977,9 +993,10 @@ export class ManagerService {
     const knowledgeHealth = deterministicManagerKnowledgeHealth({ profile, memoryFacts: memoryFacts.filter((fact) => fact.sensitivity === "normal") });
     const reasoningMemoryFacts = projectManagerMemoryForReasoning(profile, memoryFacts);
     const eventsWithSignals = events.map((event) => {
-      if (event.type !== "gig") return { ...event, readiness: null, dayOf: null };
+      const logisticsAssessment = assessEventLogistics(event, event.approvals);
+      if (event.type !== "gig") return { ...event, readiness: null, dayOf: null, logisticsAssessment };
       const readiness = deterministicShowReadiness(event, members);
-      return { ...event, readiness, dayOf: deterministicEventDayOf(event, readiness, members) };
+      return { ...event, readiness, dayOf: deterministicEventDayOf(event, readiness, members), logisticsAssessment };
     });
     const projectsWithSignals = projects.map((project) => ({ ...project, readiness: deterministicProjectReadiness(project) }));
     const contextHealth = deterministicManagerContextHealth({ profile, members, goals, events, projects, opportunities });
@@ -1031,7 +1048,7 @@ export class ManagerService {
       initiatives: facts.initiatives,
       tasks: facts.tasks.map((row) => ({ id: row.id, title: row.title, status: row.status, ownerLabel: row.ownerLabel, bandMemberId: row.bandMemberId, dueAt: row.dueAt, updatedAt: row.updatedAt, blockedReason: row.blockedReason, waitingOn: row.waitingOn, deferralCount: row.deferralCount, lastDeferredAt: row.lastDeferredAt, opportunityId: row.opportunityId, eventId: row.eventId, projectId: row.projectId, initiativeId: row.initiativeId, prerequisites: row.prerequisites, dependents: row.dependents })),
       opportunities: facts.opportunities.map((row) => ({ id: row.id, title: row.title, stage: row.stage, targetDate: row.targetDate, venueId: row.venueId })),
-      events: facts.events.map((row) => ({ id: row.id, type: row.type, status: row.status, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, venueId: row.venueId, guaranteeMinor: row.guaranteeMinor, depositMinor: row.depositMinor, currency: row.currency, readiness: row.readiness, dayOf: row.dayOf, participants: row.participants.map((participant) => ({ id: participant.id, bandMemberId: participant.bandMemberId, response: participant.response })) })),
+      events: facts.events.map((row) => ({ id: row.id, type: row.type, status: row.status, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, timezone: row.timezone, venueId: row.venueId, guaranteeMinor: row.guaranteeMinor, depositMinor: row.depositMinor, currency: row.currency, calendarEventId: row.calendarEventId, driveFolderUrl: row.driveFolderUrl, logisticsAssessment: row.logisticsAssessment, readiness: row.readiness, dayOf: row.dayOf, participants: row.participants.map((participant) => ({ id: participant.id, bandMemberId: participant.bandMemberId, response: participant.response })) })),
       projects: facts.projects.map((row) => ({ id: row.id, type: row.type, status: row.status, name: row.name, startsAt: row.startsAt, dueAt: row.dueAt, budgetMinor: row.budgetMinor, currency: row.currency, successMetrics: row.successMetrics, readiness: row.readiness })),
       deals: facts.deals.map((row) => ({ id: row.id, eventId: row.eventId, opportunityId: row.opportunityId, status: row.status, title: row.title, offerAmountMinor: row.offerAmountMinor, currency: row.currency, depositMinor: row.depositMinor, depositDueAt: row.depositDueAt, balanceDueAt: row.balanceDueAt, performanceDate: row.performanceDate, expiresAt: row.expiresAt })),
       invoices: facts.invoices.map((row) => ({ id: row.id, dealOfferId: row.dealOfferId, eventId: row.eventId, number: row.number, status: row.status, currency: row.currency, totalMinor: row.totalMinor, paidMinor: row.paidMinor, dueAt: row.dueAt })),
@@ -1136,7 +1153,7 @@ export class ManagerService {
       trace: {
         factsRead: [...this.knownIds(facts)],
         toolsSelected: providerAttempted ? ["read_manager_snapshot"] : [],
-        guardrails: ["known-evidence", "repeat-suppression", "internal-action-allowlist", "approval-boundary", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", ...(options.scheduled ? ["explicit-schedule-opt-in", "local-period-idempotency"] : [])],
+        guardrails: ["known-evidence", "repeat-suppression", "internal-action-allowlist", "approval-boundary", "event-logistics-currentness", "untrusted-record-text", "memory-sensitivity-policy", "authoritative-source-precedence", "knowledge-freshness", "operating-evidence-calibration", "task-prerequisite-sequencing", "goal-to-action-path", "goal-target-semantics", ...(options.scheduled ? ["explicit-schedule-opt-in", "local-period-idempotency"] : [])],
         providerContext: { ...providerPolicy, attempted: providerAttempted, outputUsed: mode === "openai" },
         priorityRanking: prioritized.trace,
         workSequence: { policyVersion: facts.workSequence.policyVersion, status: facts.workSequence.status, readyNow: facts.workSequence.counts.readyNow + facts.workSequence.counts.inProgress, waiting: facts.workSequence.counts.waitingOnPrerequisites, conflicted: facts.workSequence.counts.conflicted },
@@ -1285,7 +1302,7 @@ export class ManagerService {
     return { ok: failed === 0, scanned: rows.length, generated: results.length, failed, notDue, runs: results };
   }
   async recommendation(artistId: string, id: string, outcome: "accepted" | "dismissed" | "completed", feedback: ManagerRecommendationFeedbackInput, actorLabel: string, actorOperatorId: string) {
-    const rec = await this.prisma.client.managerRecommendation.findFirst({ where: { id, managerRun: { artistId } }, include: { task: true, decision: true, memoryFact: true, project: true, event: true, managerRun: { select: { message: { select: { id: true, conversationId: true, createdAt: true } } } } } });
+    const rec = await this.prisma.client.managerRecommendation.findFirst({ where: { id, managerRun: { artistId } }, include: { task: true, decision: true, memoryFact: true, project: true, event: true, approvals: true, managerRun: { select: { message: { select: { id: true, conversationId: true, createdAt: true } } } } } });
     if (!rec) throw new NotFoundException("Manager recommendation not found");
     const allowed: ManagerRecommendationOutcome[] = outcome === "completed"
       ? [ManagerRecommendationOutcome.suggested, ManagerRecommendationOutcome.accepted]
@@ -1293,6 +1310,7 @@ export class ManagerService {
     if (!allowed.includes(rec.outcome)) throw new BadRequestException("Recommendation has already been decided");
     if (outcome === "completed" && rec.task && rec.task.status !== "done") throw new BadRequestException("Complete the linked task before completing this recommendation");
     if (outcome === "completed" && rec.decision && !["reviewed", "superseded"].includes(rec.decision.status)) throw new BadRequestException("Review or supersede the linked decision before completing this recommendation");
+    if (outcome === "completed" && rec.approvals.length && rec.approvals.some((approval) => approval.status !== "executed")) throw new BadRequestException("Execute every linked approval before completing this recommendation");
     if (outcome === "accepted" && feedback.reason && feedback.reason !== "accepted") throw new BadRequestException("Invalid reason for an accepted recommendation");
     if (outcome === "dismissed" && feedback.reason && ["accepted", "action_executed", "task_completed", "decision_reviewed"].includes(feedback.reason)) throw new BadRequestException("Invalid reason for a dismissed recommendation");
     if (outcome === "completed" && feedback.reason && !["action_executed", "task_completed", "decision_reviewed", "already_handled", "other"].includes(feedback.reason)) throw new BadRequestException("Invalid reason for a completed recommendation");
@@ -1317,19 +1335,21 @@ export class ManagerService {
     let conversationEventAvailabilityTarget: { event: ManagerEventAvailabilityEvent; member: ManagerEventAvailabilityMember } | null = null;
     let decisionAction: z.infer<typeof decisionActionSchema> | null = null;
     let eventAdvanceAction: z.infer<typeof eventAdvanceActionSchema> | null = null;
+    let eventLogisticsAction: PrepareEventLogisticsApprovalsAction | null = null;
     let projectPlanAction: z.infer<typeof projectPlanActionSchema> | null = null;
     let rememberFactAction: z.infer<typeof rememberFactActionSchema> | null = null;
     let assignTaskAction: z.infer<typeof assignTaskActionSchema> | null = null;
     let profileContextAction: ManagerProfileContextAction | null = null;
     let profileContextTarget: ManagerContextCaptureProfile | null = null;
     let eventTarget: { id: string; startsAt: Date | null; opportunityId: string | null } | null = null;
+    let eventLogisticsTarget: Awaited<ReturnType<ManagerService["eventLogisticsTarget"]>> | null = null;
     let projectTarget: { id: string; type: string; dueAt: Date | null } | null = null;
     let assignmentTarget: { task: { id: string; title: string; status: string; dueAt: Date | null; ownerLabel: string | null; bandMemberId: string | null }; member: { id: string; name: string }; checkInId: string | null; availability: "available" | "limited" | "unknown" } | null = null;
     let initiativeId: string | null = null;
     let dueAt: Date | null = null;
     if (outcome === "accepted" && rec.proposedAction && typeof rec.proposedAction === "object" && !Array.isArray(rec.proposedAction)) {
       const parsed = proposedActionSchema.safeParse(rec.proposedAction);
-      if (!parsed.success || !managerActionMayExecuteDirectly(parsed.data.type)) throw new BadRequestException("Unsupported manager action");
+      if (!parsed.success || (!managerActionMayExecuteDirectly(parsed.data.type) && !managerActionMayPrepareApproval(parsed.data.type))) throw new BadRequestException("Unsupported manager action");
       if (parsed.data.type === "create_task") {
         taskAction = parsed.data;
         initiativeId = taskAction.initiativeId;
@@ -1443,6 +1463,12 @@ export class ManagerService {
         eventTarget = await this.prisma.client.bandEvent.findFirst({ where: { id: eventAdvanceAction.eventId, artistId }, select: { id: true, startsAt: true, opportunityId: true } });
         if (!eventTarget) throw new NotFoundException("Record not found");
         if (!eventTarget.startsAt) throw new BadRequestException("Event start time is required before generating an advance");
+      } else if (parsed.data.type === "prepare_event_logistics_approvals") {
+        if (!this.approvals) throw new BadRequestException("Approval preparation is unavailable");
+        eventLogisticsAction = parsed.data;
+        eventLogisticsTarget = await this.eventLogisticsTarget(this.prisma.client, artistId, eventLogisticsAction.eventId);
+        if (!eventLogisticsTarget) throw new NotFoundException("Record not found");
+        if (!eventLogisticsActionMatchesCurrent(eventLogisticsAction, eventLogisticsTarget, eventLogisticsTarget.approvals)) throw new BadRequestException("Event logistics changed; refresh and review the recommendation again");
       } else if (parsed.data.type === "generate_project_plan") {
         projectPlanAction = parsed.data;
         projectTarget = await this.prisma.client.artistProject.findFirst({ where: { id: projectPlanAction.projectId, artistId }, select: { id: true, type: true, dueAt: true } });
@@ -1492,8 +1518,10 @@ export class ManagerService {
 
     const immediateAction = eventAdvanceAction ?? projectPlanAction ?? rememberFactAction ?? assignTaskAction ?? profileContextAction ?? conversationTaskUpdateAction ?? conversationTaskAssignmentAction ?? conversationProjectAction ?? conversationEventAction ?? conversationEventAvailabilityAction;
     const finalOutcome = immediateAction ? ManagerRecommendationOutcome.completed : outcome as ManagerRecommendationOutcome;
-    const reason = immediateAction ? "action_executed" : feedback.reason ?? (outcome === "accepted" ? "accepted" : outcome === "completed" ? (rec.task ? "task_completed" : rec.decision ? "decision_reviewed" : "already_handled") : "not_relevant");
+    const reason = immediateAction ? "action_executed" : eventLogisticsAction ? "approval_prepared" : feedback.reason ?? (outcome === "accepted" ? "accepted" : outcome === "completed" ? (rec.task ? "task_completed" : rec.decision ? "decision_reviewed" : "already_handled") : "not_relevant");
     let createdCount = 0;
+    let eventLogisticsApprovalIds: string[] = [];
+    const eventLogisticsCreatedApprovalIds: string[] = [];
     let eventAvailabilityParticipantId: string | null = null;
     const row = await this.prisma.client.$transaction(async (tx) => {
       const claimed = await tx.managerRecommendation.updateMany({
@@ -1506,6 +1534,16 @@ export class ManagerService {
       let memoryFactId = rec.memoryFactId;
       let projectId = rec.projectId;
       let eventId = rec.eventId;
+      if (eventLogisticsAction && eventLogisticsTarget && this.approvals) {
+        const fresh = await this.eventLogisticsTarget(tx, artistId, eventLogisticsAction.eventId);
+        if (!fresh || !eventLogisticsActionMatchesCurrent(eventLogisticsAction, fresh, fresh.approvals)) throw new BadRequestException("Event logistics changed; refresh and review the recommendation again");
+        const plan = planEventLogisticsApprovals(fresh, fresh.approvals, { allowRetryChannels: eventLogisticsAction.retryChannels, managerRecommendationId: id });
+        if (!plan.specs.length || plan.specs.map((spec) => spec.channel).join(",") !== eventLogisticsAction.channels.join(",")) throw new BadRequestException("Event logistics changed; refresh and review the recommendation again");
+        const approvals = await this.approvals.createMany(artistId, plan.specs.map((spec) => ({ ...spec, proposedBy: actorLabel, actorOperatorId })), { tx, collectCreatedIds: eventLogisticsCreatedApprovalIds });
+        eventLogisticsApprovalIds = approvals.map((approval) => approval.id);
+        createdCount = eventLogisticsCreatedApprovalIds.length;
+        eventId = fresh.id;
+      }
       if (taskAction) {
         if (goalPathTask && initiativeId) {
           const currentInitiative = await tx.managerInitiative.findFirst({
@@ -1765,13 +1803,15 @@ export class ManagerService {
       if (projectPlanAction && projectTarget) projectId = projectTarget.id;
       return tx.managerRecommendation.update({ where: { id }, data: { taskId, decisionId, memoryFactId, projectId, eventId } });
     }, { isolationLevel: "Serializable" });
+    if (eventLogisticsCreatedApprovalIds.length && this.approvals) this.approvals.notifyCreatedApprovals(artistId, eventLogisticsCreatedApprovalIds);
     const taskUpdatePrevious = conversationTaskUpdatePrevious as { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null;
     const taskUpdateCurrent = conversationTaskUpdateCurrent as { status: string; dueAt: Date | null; blockedReason: string | null; waitingOn: string | null; deferralCount: number } | null;
-    const actionType = eventAdvanceAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? profileContextAction?.type ?? conversationTaskUpdateAction?.type ?? conversationTaskAssignmentAction?.type ?? conversationProjectAction?.type ?? conversationEventAction?.type ?? conversationEventAvailabilityAction?.type ?? conversationTaskAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
-    const targetId = eventTarget?.id ?? projectTarget?.id ?? row.eventId ?? row.projectId ?? assignmentTarget?.task.id ?? profileContextTarget?.id ?? conversationTaskUpdateTarget?.id ?? conversationTaskAssignmentTarget?.task.id ?? row.taskId ?? row.memoryFactId ?? null;
-    await this.audit.log({ artistId, aggregateType: "ManagerRecommendation", aggregateId: id, action: `manager.recommendation_${finalOutcome}`, actorLabel, actorOperatorId, metadata: { taskId: row.taskId ?? null, decisionId: row.decisionId ?? null, memoryFactId: row.memoryFactId ?? null, projectId: row.projectId ?? null, eventId: row.eventId ?? null, bandMemberId: conversationEventAvailabilityAction?.bandMemberId ?? assignmentTarget?.member.id ?? null, reason, actionType, targetId, createdCount } });
+    const actionType = eventAdvanceAction?.type ?? eventLogisticsAction?.type ?? projectPlanAction?.type ?? rememberFactAction?.type ?? assignTaskAction?.type ?? profileContextAction?.type ?? conversationTaskUpdateAction?.type ?? conversationTaskAssignmentAction?.type ?? conversationProjectAction?.type ?? conversationEventAction?.type ?? conversationEventAvailabilityAction?.type ?? conversationTaskAction?.type ?? taskAction?.type ?? decisionAction?.type ?? null;
+    const targetId = eventTarget?.id ?? eventLogisticsTarget?.id ?? projectTarget?.id ?? row.eventId ?? row.projectId ?? assignmentTarget?.task.id ?? profileContextTarget?.id ?? conversationTaskUpdateTarget?.id ?? conversationTaskAssignmentTarget?.task.id ?? row.taskId ?? row.memoryFactId ?? null;
+    await this.audit.log({ artistId, aggregateType: "ManagerRecommendation", aggregateId: id, action: `manager.recommendation_${finalOutcome}`, actorLabel, actorOperatorId, metadata: { taskId: row.taskId ?? null, decisionId: row.decisionId ?? null, memoryFactId: row.memoryFactId ?? null, projectId: row.projectId ?? null, eventId: row.eventId ?? null, approvalIds: eventLogisticsApprovalIds, bandMemberId: conversationEventAvailabilityAction?.bandMemberId ?? assignmentTarget?.member.id ?? null, reason, actionType, targetId, createdCount } });
     if (outcome === "accepted" && row.decisionId) await this.audit.log({ artistId, aggregateType: "ManagerDecision", aggregateId: row.decisionId, action: "manager.decision_draft_created", actorLabel, actorOperatorId, metadata: { recommendationId: id } });
     if (eventTarget) await this.audit.log({ artistId, aggregateType: "BandEvent", aggregateId: eventTarget.id, action: "event.advance_generated", actorLabel, actorOperatorId, metadata: { version: SHOW_ADVANCE_VERSION, createdCount, recommendationId: id } });
+    if (eventLogisticsTarget) await this.audit.log({ artistId, aggregateType: "BandEvent", aggregateId: eventLogisticsTarget.id, action: "event.logistics_approvals_prepared", actorLabel, actorOperatorId, metadata: { policyVersion: EVENT_LOGISTICS_POLICY_VERSION, approvalIds: eventLogisticsApprovalIds, createdCount, recommendationId: id } });
     if (projectTarget) await this.audit.log({ artistId, aggregateType: "ArtistProject", aggregateId: projectTarget.id, action: "project.plan_generated", actorLabel, actorOperatorId, metadata: { version: PROJECT_PLAN_VERSION, createdCount, recommendationId: id } });
     if (rememberFactAction && row.memoryFactId) await this.audit.log({ artistId, aggregateType: "ManagerMemoryFact", aggregateId: row.memoryFactId, action: "manager.memory_confirmed", actorLabel, actorOperatorId, metadata: { key: rememberFactAction.key, recommendationId: id, sourceType: "operator_confirmation" } });
     if (assignmentTarget) await this.audit.log({ artistId, aggregateType: "Task", aggregateId: assignmentTarget.task.id, action: "task.assigned", actorLabel, actorOperatorId, metadata: { recommendationId: id, previousOwnerLabel: assignmentTarget.task.ownerLabel, bandMemberId: assignmentTarget.member.id, ownerLabel: assignmentTarget.member.name, checkInId: assignmentTarget.checkInId, availability: assignmentTarget.availability } });
@@ -2184,6 +2224,7 @@ export class ManagerService {
       const event = facts.events.find((candidate) => candidate.id === eventId);
       return Boolean(event?.startsAt && event.readiness?.gaps.some((gap) => gap.code === "advance_missing"));
     }
+    if (parsed.data.type === "prepare_event_logistics_approvals") return false;
     const projectId = parsed.data.projectId;
     const project = facts.projects.find((candidate) => candidate.id === projectId);
     return Boolean(project?.dueAt && project.readiness?.status === "needs_plan");
@@ -2253,6 +2294,7 @@ export class ManagerService {
       ...facts.tasks.map((x) => x.id),
       ...facts.opportunities.map((x) => x.id),
       ...facts.events.map((x) => x.id),
+      ...facts.events.flatMap((x) => (x.approvals ?? []).map((approval) => approval.id)),
       ...facts.events.flatMap((x) => x.participants.map((participant) => participant.id)),
       ...facts.events.flatMap((x) => x.tasks.map((task) => task.id)),
       ...facts.events.flatMap((x) => x.setlist ? [x.setlist.id, ...x.setlist.items.map((item) => item.id)] : []),
@@ -2291,6 +2333,12 @@ export class ManagerService {
     };
     visit(this.providerFacts(facts, fullContextEnabled));
     return visible;
+  }
+  private eventLogisticsTarget(client: Pick<Prisma.TransactionClient, "bandEvent">, artistId: string, eventId: string) {
+    return client.bandEvent.findFirst({
+      where: { id: eventId, artistId },
+      include: { approvals: { where: { sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, orderBy: { createdAt: "asc" } } }
+    });
   }
   private async owned(model: "bandMember" | "managerGoal" | "managerInitiative", artistId: string, id: string) { const where = { id, artistId }; const row = model === "bandMember" ? await this.prisma.client.bandMember.findFirst({ where, select: { id: true } }) : model === "managerGoal" ? await this.prisma.client.managerGoal.findFirst({ where, select: { id: true } }) : await this.prisma.client.managerInitiative.findFirst({ where, select: { id: true } }); if (!row) throw new NotFoundException("Record not found"); return row; }
   private briefJsonSchema() { return { type: "object", additionalProperties: false, required: ["summary","today","thisWeek","decisionsNeeded","waitingOn","risksAndOpportunities"], properties: { summary: { type: "string" }, today: { type: "array", maxItems: 5, items: this.itemJsonSchema() }, thisWeek: { type: "array", maxItems: 10, items: this.itemJsonSchema() }, decisionsNeeded: { type: "array", maxItems: 8, items: { type: "object", additionalProperties: false, required: ["title","explanation","evidenceIds"], properties: { title: { type: "string" }, explanation: { type: "string" }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 } } } }, waitingOn: { type: "array", maxItems: 10, items: { type: "object", additionalProperties: false, required: ["title","dueAt","evidenceIds"], properties: { title: { type: "string" }, dueAt: { type: ["string","null"] }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 } } } }, risksAndOpportunities: { type: "array", maxItems: 10, items: { type: "object", additionalProperties: false, required: ["title","detail","confidence","evidenceIds"], properties: { title: { type: "string" }, detail: { type: "string" }, confidence: { type: "number" }, evidenceIds: { type: "array", items: { type: "string" }, maxItems: 8 } } } } } }; }

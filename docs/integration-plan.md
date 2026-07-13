@@ -1,4 +1,7 @@
-# StoryBoard Integration Plan
+# StoryBoard Integration Boundaries
+
+This document describes the current adapter contract and the explicitly
+deferred provider surface. It is not permission to expand provider reads.
 
 ## Integration Philosophy
 
@@ -6,26 +9,27 @@ Every external system must sit behind an adapter boundary in `apps/api`. Domain
 modules should interact with provider-neutral interfaces rather than raw SDKs or
 HTTP payloads.
 
-## MVP Adapters
+## Current Adapters
 
 ### Gmail
 
-- Draft outbound emails
-- Read message threads for relationship context
-- Require approval before send
+- Draft outbound emails and send only explicitly approved immediate batches
+- Read only threads created by StoryBoard booking campaigns; never a general inbox
+- Require approval before every external booking/deal draft or send execution;
+  opted-in internal operator workflow drafts remain a separate notification path
 - Support dry-run previews for proposed messages
 
 ### Google Calendar
 
-- Read availability and event context
-- Propose holds or coordination events
-- Require approval for committed calendar writes
+- Create reviewed holds or coordination events
+- Do not read calendar availability in the current adapter
+- Require approval and a separate Execute action for every calendar write
 
 ### Google Drive
 
-- Store shared documents and assets
-- Reference folders or file IDs from internal records
-- Prefer metadata sync over full binary handling in the first slice
+- Create or reuse reviewed StoryBoard folders and retain provider references
+- Keep binary PDF/file upload deferred; current delivery still requires a human
+  to attach the immutable StoryBoard PDF to the reviewed Gmail draft
 
 ### Bandsintown
 
@@ -39,15 +43,11 @@ HTTP payloads.
 - Treat unavailable credentials or provider failures as explicit manual mode; do
   not create synthetic leads
 
-### YouTube Data API
+### YouTube and Spotify
 
-- Read channel and video metrics
-- Provide release and audience context to summaries
-
-### Spotify Web API
-
-- Read artist profile, catalog, and audience-related metadata
-- Support release context and opportunity scoring
+- Mock-only in the current application
+- Metrics/catalog imports remain deferred until provider access and a validated
+  band workflow justify the data, cost, and compliance surface
 
 ## Later-Phase Adapters
 
@@ -77,9 +77,9 @@ Every adapter should define:
 
 - Store secrets outside source control
 - Keep `.env.example` limited to placeholders
-- Model connection metadata in PostgreSQL
-- Treat encrypted secret storage as an implementation task for the bootstrap or
-  post-bootstrap phase
+- Store per-artist Google connection metadata in PostgreSQL and encrypt token
+  material with `INTEGRATION_SECRETS_ENCRYPTION_KEY`
+- Never commit `.env`, `.env.compose`, refresh tokens, or provider secrets
 
 ## Failure Handling
 

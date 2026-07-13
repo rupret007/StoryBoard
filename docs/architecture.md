@@ -24,7 +24,7 @@ adapter layer rather than leaking into domain modules.
 - `packages/ui`: reusable web UI primitives
 - `Redis + BullMQ`: background jobs and summaries
 
-## MVP API surface (current)
+## Current API surface
 
 Feature modules live under `apps/api/src/` as Nest modules: `venues`, `contacts`,
 `booking` (profiles, prospects, campaigns, replies, and opportunities),
@@ -62,7 +62,7 @@ connection metadata (no secrets).
 `GET /auth/google/callback` implement the connect flow; tokens are encrypted into
 `IntegrationConnection.encryptedSecrets`. See `docs/integrations-google-oauth.md`.
 
-**Operator auth (phase 3A + 3B):** Separate Google OIDC flow for **sign-in** (`openid email profile`): `GET /auth/operator/google/start` → `GET /auth/operator/google/callback`. Session cookie **`sb_session`** holds `operatorId` and optional `currentArtistId`. **`Operator`** and **`ArtistMembership`** (`owner` | `member` | **`viewer`**) gate artist-scoped routes; **mutations** additionally require **member-or-above** where enforced; **integration Google authorize** and **membership admin** require **owner**. **`ArtistMembershipInvite`** supports hashed-token invitations and onboarding (`docs/invitations.md`). Integration authorize signs OAuth `state` with **`operatorId`** and the callback rejects a session mismatch. A global **`CsrfOriginGuard`** checks **`Origin`/`Referer`** against **`WEB_URL`** for unsafe HTTP methods (**OAuth callbacks** and **`POST /integrations/telegram/webhook`** excluded). Unauthenticated access is limited to health/meta, OAuth callbacks, and the Telegram webhook. See `docs/auth-operators.md`.
+**Operator auth (phase 3A + 3B):** Separate Google OIDC flow for **sign-in** (`openid email profile`): `GET /auth/operator/google/start` → `GET /auth/operator/google/callback`. Session cookie **`sb_session`** holds `operatorId` and optional `currentArtistId`. **`Operator`** and **`ArtistMembership`** (`owner` | `member` | **`viewer`**) gate artist-scoped routes; **mutations** additionally require **member-or-above** where enforced; **integration Google authorize** and **membership admin** require **owner**. **`ArtistMembershipInvite`** supports hashed-token invitations and onboarding (`docs/invitations.md`). Integration authorize signs OAuth `state` with **`operatorId`** and the callback rejects a session mismatch. A global **`CsrfOriginGuard`** checks **`Origin`/`Referer`** against **`WEB_URL`** for unsafe HTTP methods (**OAuth callbacks** and **`POST /integrations/telegram/webhook`** excluded). Unauthenticated access is limited to health/meta/readiness, operator OAuth start/callback, the integration OAuth callback, the development login only when its bypass is enabled, and the Telegram webhook. See `docs/auth-operators.md`.
 
 ## Command Bar Execution Model
 
@@ -76,7 +76,7 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
 4. If the action is risky, StoryBoard creates an approval request before any
    external or destructive write.
 5. The action runs in dry-run mode when practical to preview changes (`CommandRun.dryRun`, default true on commands).
-6. **Approved** requests with executable action types run via `POST /approvals/:id/execute`, which performs provider work (e.g. Gmail draft creation), records **executed**/**failed** on `ApprovalRequest`, and writes audit events — never executing unapproved rows.
+6. **Approved** requests with executable action types run via `POST /approvals/:id/execute`, which atomically claims one execution attempt, performs provider work (e.g. Gmail draft creation), records **executed**/**failed** on `ApprovalRequest`, and writes audit events — never executing unapproved rows or replaying a claimed request.
 7. Async work is coordinated through BullMQ when off the request path.
 8. The system returns a clear result to the operator and stores the run record (including `providerModes` when relevant).
 
@@ -318,6 +318,17 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   revalidates the target at acceptance, and atomically claims the recommendation
   with source-keyed Task creation. The action is immediately complete and
   replay-safe; this does not expose arbitrary operations or provider tools.
+- `event_logistics_v1` is a separate approval-preparation capability, not a
+  direct Manager tool. For a confirmed gig with an exact start, end, and IANA
+  timezone, deterministic code may propose a confirmed Calendar event and
+  Drive folder.
+  Recommendation acceptance rechecks the tenant event, authoritative
+  title/time/timezone fingerprint, channel state, and recommendation state,
+  then creates or reuses source-keyed pending `ApprovalRequest` rows. It never
+  resolves an adapter or calls a provider. A member must approve and execute
+  each channel separately. The approval states reconcile the linked
+  recommendation, and successful execution persists the Calendar event ID or
+  Drive folder URL on `BandEvent`.
 - Manager provider context is a code-owned projection, not a prompt request.
   `ArtistOperatingProfile` is the canonical source for band mode, home market,
   ambition, and constraints; profile writes synchronize compatibility memory
@@ -357,6 +368,16 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
 - Event edits reuse strict shared schemas and service-layer artist ownership.
   Timeline validation operates on the merged stored record, preventing a
   partial PATCH from introducing an impossible show-day sequence.
+- Event logistics uses one non-persistent assessment over `BandEvent` plus its
+  source-keyed approvals. Persisted provider references are authoritative
+  completion; pending/approved rows suppress duplicates; a rejected or
+  mock-simulated row can be explicitly prepared again; and event type/status or
+  title/start/end/timezone drift invalidates an earlier request. The execute
+  path checks the current confirmed-gig boundary and fingerprint again after its
+  one-shot claim and before the provider call. Failed or executed-but-unlinked
+  provider attempts are quarantined for manual reconciliation because their
+  remote outcome may be unknown. StoryBoard never silently rewrites a reviewed
+  payload or automatically retries outside work.
 - Custom `EventScheduleItem` writes resolve ownership through the parent event,
   require an exact event/item pair, validate the merged start/end range, and
   audit only bounded operational metadata. The rows feed the existing timeline
@@ -378,8 +399,9 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   Conversation may propose a `create_decision` only when it can parse two
   explicit options. Acceptance creates one linked open draft with unknown
   tradeoffs; a separate member write must establish framing before choice.
-  Brief generation remains limited to `create_task` plus the two readiness-bound
-  event/project generators; it still cannot create a decision or outside action.
+  Brief generation may prepare only the allowlisted internal actions plus the
+  deterministic event-logistics approval proposal described above; it still
+  cannot create a decision or execute an outside action.
 - Manager context health is one deterministic projection over the operating
   profile, working lineup, goals, events, projects, and opportunities. Briefs,
   conversation, and the workspace consume the same four-dimension score and
@@ -423,6 +445,17 @@ rejected it, and when the decision was made. Status values include **executed**
 and **failed** after a post-approval execution attempt (`executionAttemptedAt`
 optional). Dry-run execution previews attach to payload without leaving the
 **approved** state.
+
+`ApprovalRequest.sourceKey` provides artist-scoped idempotency for prepared
+work. Optional `eventId` and `managerRecommendationId` links preserve the
+proposal → human decision → provider result chain without moving ownership out
+of the event or Manager domains. Approve, reject, and execute transitions use
+compare-and-set guards. For event logistics, the provider result and
+`BandEvent.calendarEventId` / `BandEvent.driveFolderUrl` update commit through
+the same application lifecycle. Rejected and mock-simulated requests may be
+explicitly prepared again. Failed or executed-but-unlinked provider attempts
+remain quarantined for manual reconciliation because the outside result may be
+unknown.
 
 ## Queue and Background Work
 

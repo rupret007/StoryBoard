@@ -102,6 +102,7 @@ export function ApprovalsClient({
                   <p className="mt-2 text-xs text-[var(--text-muted)]">
                     Proposed by {a.proposedBy ?? "—"}
                   </p>
+                  <ApprovalEventLink eventId={a.eventId} />
                   <PayloadPreview payload={a.payload} />
                 </div>
                 <div className="flex shrink-0 flex-col gap-2 lg:items-stretch lg:w-48">
@@ -190,6 +191,7 @@ export function ApprovalsClient({
                     <p className="mt-2 text-xs text-[var(--text-muted)]">
                       Approved by {a.approvedBy ?? "—"}
                     </p>
+                    <ApprovalEventLink eventId={a.eventId} />
                     <ExecutionStatusChips payload={a.payload} />
                     <PayloadPreview payload={a.payload} />
                   </div>
@@ -217,6 +219,20 @@ export function ApprovalsClient({
         </section>
       ) : null}
     </div>
+  );
+}
+
+function ApprovalEventLink({ eventId }: { eventId: string | null | undefined }) {
+  if (!eventId) {
+    return null;
+  }
+  return (
+    <a
+      className="sb-btn-secondary mt-3 w-fit"
+      href={`/operations/events/${eventId}`}
+    >
+      Open event
+    </a>
   );
 }
 

@@ -12,6 +12,10 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID is required}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET is required}
       GOOGLE_OPERATOR_REDIRECT_URI: ${GOOGLE_OPERATOR_REDIRECT_URI:?GOOGLE_OPERATOR_REDIRECT_URI is required}
+      # Optional for sign-in-only deployments; both are required before an
+      # artist can connect Gmail, Calendar, or Drive from StoryBoard.
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      INTEGRATION_SECRETS_ENCRYPTION_KEY: ${INTEGRATION_SECRETS_ENCRYPTION_KEY:-}
   seed:
     environment: *production_api_environment
   api:

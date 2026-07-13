@@ -165,7 +165,8 @@ brief and `manager_brief_ready` notification are persisted atomically.
 Assistant messages can reference a reviewable
 `ManagerRecommendation`, but cannot directly perform provider, legal, or
 financial actions. Recommendation outcome reason/note/time support reviewed
-learning; accepted recommendations link to a task or one open decision draft.
+learning; accepted recommendations link to their internal record or to the
+approval requests prepared for reviewed external work.
 Three immediate internal recommendation types reuse existing authorities:
 `generate_event_advance` creates `show_advance_v1` Tasks for a cited event and
 `generate_project_plan` creates `project_plan_v1` Tasks for a cited project.
@@ -173,6 +174,13 @@ Three immediate internal recommendation types reuse existing authorities:
 Their target ownership and date are revalidated, task source keys make replay
 idempotent, and a successful acceptance records `action_executed` and completes
 the recommendation in the same transaction.
+The deterministic `prepare_event_logistics_approvals` action is intentionally
+different: accepting it creates or reuses pending, event-bound Calendar/Drive
+approvals and leaves the recommendation accepted with `approval_prepared`.
+Approval status changes reconcile that recommendation to completed only after
+all linked requests execute, or to dismissed/blocked after rejection/failure.
+The provider-output schema cannot invent this action; it is generated from the
+tenant event and the `event_logistics_v1` projection.
 `ManagerMemoryFact.sensitivity` also controls provider eligibility: `normal`
 may enter redacted context, `sensitive` requires full-context owner consent,
 and `restricted` remains local. `ManagerRun.inputFacts` always stores the
@@ -280,7 +288,7 @@ records. It exposes category scores, confidence, evidence IDs, and prioritized
 gaps so the event workspace and Manager use one explainable readiness policy.
 Show-advance tasks use artist-unique `show_advance_v1:<event>:<step>` source
 keys whether generated from Operations or an accepted Manager recommendation.
-Event timeline writes preserve `startsAt <= endsAt` and the recorded show-day
+Event timeline writes preserve `startsAt < endsAt` and the recorded show-day
 order load-in → soundcheck → doors → set → curfew. Patch validation merges the
 new values with existing values before checking this invariant.
 `EventScheduleItem` stores additional real-world checkpoints such as travel
@@ -293,6 +301,25 @@ readiness result with the ordered timeline, active-member responses, event
 tasks, accepted terms, and unique invoices to identify the current/next
 checkpoint, work pressure, and recorded payment state. It never infers that an
 unrecorded payment, agreement, contact, or schedule fact exists.
+
+`EventLogisticsAssessment` is the non-persistent `event_logistics_v1` view over
+one `BandEvent` and its event-bound approval history. A gig is eligible only
+when it is confirmed and has a valid start, end, and IANA timezone. The
+assessment reports Calendar and Drive independently as not prepared, pending,
+approved, rejected, failed, expired, stale, executed-but-unlinked, simulated,
+or complete.
+Its SHA-256 fingerprint covers
+only the title, start, end, and timezone that will be sent to providers; event
+status is checked separately. Artist-scoped source keys include the policy,
+event, fingerprint, channel, and attempt so repeat preparation is idempotent.
+Calendar/Drive execution rechecks the confirmed-gig boundary, fingerprint, and
+eligibility before the provider call, then persists the returned Calendar event
+ID or Drive folder URL on `BandEvent`. A confirmed gig becomes a normal opaque
+Calendar event; legacy hold batches retain transparent `HOLD:` behavior.
+Changed facts require reviewed current data. Rejected and mock-simulated
+channels can be explicitly prepared again. Failed or executed-but-unlinked
+provider attempts require manual Google reconciliation because their remote
+outcome may be unknown.
 
 `Song` and `Setlist` provide a practical artist-owned library with duration,
 key, BPM, lead vocalist, ordered songs/breaks/notes, and event linkage.
@@ -359,9 +386,12 @@ create/link a buyer contact.
 
 An approval-gated pitch batch and its individual prospect/contact recipients.
 Campaign templates support only `artistName`, `contactName`, `prospectName`,
-`market`, `bookingPitch`, and `pressKitUrl`. Approval execution creates Gmail
-drafts, marks recipients drafted, and creates one linked follow-up task per
-recipient; it never sends an email or advances the booking stage automatically.
+`market`, `bookingPitch`, and `pressKitUrl`. Draft-only campaigns create Gmail
+drafts after approval execution. Campaigns may explicitly choose an immediate
+send batch, capped at 25 ready recipients, but it still requires separate human
+approval and execution. Confirmed delivery creates one linked follow-up task per
+recipient; unknown delivery is not retried automatically, and no mode advances
+the booking stage automatically.
 
 ### Task
 
@@ -402,7 +432,19 @@ claim to know hours, effort, wellbeing, or outside commitments.
 ### ApprovalRequest
 
 Represents a proposed risky action awaiting review. Stores action type, payload,
-status transitions, and approver metadata.
+status transitions, and approver metadata. Optional `eventId` and
+`managerRecommendationId` relationships preserve the source and learning
+lifecycle for Manager-prepared show logistics. Nullable `sourceKey` is unique
+per artist and makes prepared work idempotent without constraining ordinary
+approvals. `executionAttemptedAt` is the compare-and-set claim for the single
+provider attempt; replay does not perform a second external write. Successful
+event-logistics execution also records the provider reference on the related
+`BandEvent`; rejection, failure, expiry, stale payloads, and executed-but-
+unlinked results are never auto-retried. If authoritative event details change
+after execution, the saved link is shown as stale and is not automatically
+re-prepared, avoiding an accidental duplicate provider resource. Rejection and
+mock simulation can be explicitly prepared again; failed or unlinked provider
+outcomes require manual reconciliation.
 
 ### AuditEvent
 
@@ -433,7 +475,7 @@ and encrypted secret references.
 These stages are intentionally operational rather than conversational so the
 system can reason about next steps, deadlines, and approvals.
 
-## MVP Relationships
+## Core Relationships
 
 - An `Artist` has one optional `ArtistBookingProfile` and many `Venue`,
   `Contact`, `BookingProspect`, `BookingOpportunity`, `BookingCampaign`, `Task`,
@@ -443,12 +485,16 @@ system can reason about next steps, deadlines, and approvals.
   `CommandRun` records.
 - A `BookingCampaign` has many recipients; every recipient links one qualified
   prospect and may link a contact, opportunity, and one generated follow-up task.
+- A `BandEvent` may have many source-keyed `ApprovalRequest` attempts and
+  `ManagerRecommendation` links. An event-logistics approval may also point to
+  the recommendation that prepared it; all three records remain owned by the
+  same artist and are checked in the service layer.
 - `AuditEvent` links to aggregate types and IDs generically rather than through
   deep relational coupling.
 
-## First MVP Slice
+## Historical First Slice (delivered)
 
-The first thin slice should prove the architecture end to end:
+The original thin slice proved the architecture end to end:
 
 1. Create a venue
 2. Attach a promoter contact

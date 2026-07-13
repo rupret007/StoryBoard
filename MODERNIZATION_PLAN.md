@@ -1,7 +1,7 @@
 # StoryBoard Modernization Plan
 
 Last reviewed: 2026-07-12
-Baseline for this round: `main` at `1336997`
+Baseline for this round: `main` at `d24e79d`
 
 ## Product and current architecture
 
@@ -1647,6 +1647,81 @@ Implementation and validation:
   hosted verify and container-smoke jobs on published commit `ce31beb`, including
   all four production Chromium journeys.
 
+### P0 — Manager-managed show logistics with safe, observable agency (completed and release-validated 2026-07-12)
+
+Root cause and boundary:
+
+- StoryBoard could diagnose show readiness and already had generic Calendar and
+  Drive approval action types, but the Manager could not connect a confirmed
+  gig to that approval lifecycle. Manual logistics preparation also had no
+  durable event/recommendation provenance, and successful provider execution
+  did not write the Calendar/Drive reference back to the event.
+- Manager acceptance may prepare reviewed work, but it must never be equivalent
+  to provider execution. Calendar and Drive remain separate approvals with a
+  separate human approve-and-execute step. Changed event details, rejection,
+  failure, and concurrent execution must fail closed rather than silently
+  mutating a reviewed payload or retrying an outside action.
+
+Implementation:
+
+- Added the deterministic `event_logistics_v1` assessment and source-key policy.
+  Only a confirmed gig with a valid start, end, and IANA timezone is eligible.
+  Calendar and Drive are assessed independently, and the provider-write
+  fingerprint covers the event title, start, end, and timezone while status is
+  validated separately.
+- Manager briefs may propose the code-owned
+  `prepare_event_logistics_approvals` action. Acceptance rechecks the active
+  artist, recommendation, event fingerprint, eligibility, and current channel
+  state, then creates or reuses pending approval rows. It never resolves an
+  adapter or calls Google. Approval status transitions reconcile the linked
+  recommendation from `approval_prepared` through completed, rejected, or
+  failed.
+- Extended `ApprovalRequest` with nullable `eventId`,
+  `managerRecommendationId`, and artist-unique `sourceKey`; forward migration
+  `20260714010000_event_logistics_approvals` adds the relationships and lookup
+  indexes without rewriting existing approvals or events.
+- Approval prepare/approve/reject/execute paths validate same-artist relations,
+  use source-key idempotency and compare-and-set state transitions, and claim
+  non-dry provider execution once through `executionAttemptedAt`. Event
+  logistics rechecks the reviewed fingerprint before the provider call.
+  Calendar/Drive success persists `BandEvent.calendarEventId` or
+  `BandEvent.driveFolderUrl`. Confirmed gigs create normal opaque Calendar
+  events while legacy hold batches remain transparent. Rejected and
+  mock-simulated channels may be deliberately prepared again. Failed or
+  executed-but-unlinked provider attempts are quarantined for manual Google
+  reconciliation because the remote result may be unknown.
+- Band operations now edits event end/timezone, shows per-channel state and
+  provider references, and prepares approvals. Approvals deep-link to the
+  source event. Browser coverage exercises confirmed event → preparation →
+  approve → execute with mock adapters → persisted references.
+- Event times are displayed and saved in the event's IANA timezone rather than
+  the browser timezone. Invalid zones, zero/reversed ranges, and daylight-saving
+  gaps or overlaps fail before save. Parallel Calendar and Drive completions
+  update independent provider links, and a later event edit exposes the linked
+  resource as stale without preparing a duplicate.
+
+Validation status:
+
+- Expanded database-free policy, adapter, boundary, and concurrency coverage;
+  added a fifth production Chromium journey and migration/integration coverage
+  for event-bound approval ownership,
+  idempotency, stale facts, one-shot execution, provider-result persistence,
+  recommendation reconciliation, and audits.
+- `pnpm db:generate`, typecheck, lint, unit tests, both production builds,
+  `git diff --check`, and `pnpm manager:eval` pass: 163 API tests, 10 shared
+  tests, and all 70 `manager_os_v32` / `manager_evals_v35` golden checks at
+  100% safety.
+- The explicit `storyboard_test` database applied all 38 forward migrations;
+  all 3 integration workflows pass, and the expanded relationship diagnostic
+  reports no integrity issues.
+- All 12 focused production Chromium journeys pass from a reset test database.
+  Each case establishes its own prerequisites; event logistics verifies
+  preparation, separate human approve/execute, mock adapter results, and
+  persisted event references without a long order-dependent Manager journey.
+- The production container bundle rebuilt and passed migration, seed,
+  database/Redis/worker readiness, web HTTP, and dev-session smoke. The bundle
+  is left running with the validated images for local use.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,
@@ -1717,15 +1792,30 @@ Implementation and validation:
 
 ## Release checks
 
-Run `pnpm db:generate`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, and
-`pnpm build`. Run database integration tests only with a disposable database
-identified by `STORYBOARD_TEST_DATABASE_URL`.
+Run `pnpm db:generate`, `pnpm typecheck`, `pnpm lint`, `pnpm test`,
+`pnpm build`, `pnpm manager:eval`, and `git diff --check`. Run database
+integration and Chromium tests only with a disposable database identified by
+`STORYBOARD_TEST_DATABASE_URL`, then run the read-only relationship diagnostic.
+For a release package, also rebuild the application Compose bundle and verify
+API readiness, web HTTP, and local-session creation.
 
 Before release, run a read-only diagnostic for historical relationships whose
 artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-12: Implemented the safe event-logistics agency seam. Confirmed gigs
+  can produce source-keyed Calendar/Drive approval requests from Operations or
+  an accepted deterministic Manager recommendation; neither path calls a
+  provider during preparation. Human approval and one-shot execution remain
+  mandatory, current title/time/timezone is rechecked before the provider
+  call, and successful mock/real adapter results persist back to `BandEvent`.
+  Forward migration `20260714010000_event_logistics_approvals`, pure policy
+  tests, integration coverage, and focused browser coverage were added. Release
+  validation passes 163 API + 10 shared tests, all 3 database workflows across
+  38 migrations, all 12 production Chromium journeys, 70/70 Manager checks at
+  100% safety, the relationship audit with zero issues, both production builds,
+  and the production container readiness/web/session smoke.
 - 2026-07-12: Closed the empty-setlist product gap with an editable running-order
   builder and shared `setlist_summary_v1`. Bands can maintain song timing/key/
   BPM/lead metadata; assemble, reorder, annotate, and activate sets; and see

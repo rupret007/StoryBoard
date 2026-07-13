@@ -1,6 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const root = "../..";
+const webUrl = process.env.E2E_WEB_URL ?? "http://127.0.0.1:3000";
+const apiUrl = process.env.E2E_API_URL ?? "http://127.0.0.1:4000";
+const webPort = new URL(webUrl).port || (webUrl.startsWith("https:") ? "443" : "80");
+const apiPort = new URL(apiUrl).port || (apiUrl.startsWith("https:") ? "443" : "80");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -8,13 +12,13 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   preserveOutput: "always",
-  // These three tests are one serial booking-to-operations journey over the
-  // same explicit database. Retrying only the final test would reuse partially
-  // mutated state rather than replaying the journey, so fail the real attempt.
+  // Each focused case creates its own domain prerequisites, but every case
+  // still shares the same reset database. Fail the real attempt so a retry
+  // cannot hide state leakage or an idempotency regression.
   retries: 0,
   expect: { timeout: process.env.CI ? 10_000 : 5_000 },
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: webUrl,
     screenshot: "only-on-failure",
     trace: "retain-on-failure"
   },
@@ -23,12 +27,13 @@ export default defineConfig({
     {
       command: "pnpm --filter @storyboard/api start",
       cwd: root,
-      url: "http://127.0.0.1:4000/health",
+      url: `${apiUrl}/health`,
       env: {
         ...process.env,
         NODE_ENV: "development",
         AUTH_DEV_BYPASS: "true",
-        WEB_URL: "http://127.0.0.1:3000",
+        API_PORT: apiPort,
+        WEB_URL: webUrl,
         // Keep the dev session host-only. A developer .env commonly scopes it
         // to localhost, which browsers correctly refuse on the 127.0.0.1 E2E origin.
         COOKIE_DOMAIN: ""
@@ -36,9 +41,9 @@ export default defineConfig({
       reuseExistingServer: false
     },
     {
-      command: "pnpm --filter @storyboard/web start",
+      command: `pnpm --filter @storyboard/web exec next start --port ${webPort}`,
       cwd: root,
-      url: "http://127.0.0.1:3000",
+      url: webUrl,
       env: { ...process.env, NODE_ENV: "production" },
       reuseExistingServer: false
     }
