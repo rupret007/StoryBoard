@@ -1416,6 +1416,71 @@ Implementation and validation:
   integrity issues, `git diff --check` passed, and the rebuilt local container
   stack reports ready Postgres/Redis/worker dependencies plus HTTP 200 web.
 
+### P0 — Complete adaptive Manager brief surface (completed 2026-07-12)
+
+Root cause and boundary:
+
+- The API already produced five bounded, evidence-linked brief sections, but
+  the Manager workspace rendered only Today. This hid weekly actions, band
+  decisions, external waits, and risk/opportunity signals and made the product
+  feel substantially less capable than its source of truth.
+- The page also always requested a daily run even when the operating profile
+  selected weekly cadence. Client refreshes could replace an operator's active
+  view rather than preserving their deliberate choice.
+
+Implementation and validation:
+
+- Made `ManagerRun.output` the complete UI presentation contract. The workspace
+  now renders Today, This week, Decisions needed, Waiting on, and Risks and
+  opportunities, with explicit empty-record language and risk confidence
+  labeled as record confidence rather than forecast probability.
+- Initial SSR follows the saved profile cadence. Daily/weekly switching loads
+  the chosen current run, Refresh regenerates that visible cadence, and the
+  client preserves a deliberate selection across unrelated route refreshes
+  while resetting cleanly for another artist.
+- The design clean-rooms Andrea_NanoBot's structured-presentation principle;
+  no code, dependency, runtime, or data was copied. The expanded production
+  Chromium journey caught and verified the first-intake client-state transition
+  and now proves both cadence views plus every brief section. Validation passed
+  131 API + 2 shared tests, all three disposable-Postgres workflows across 35
+  migrations, all three production-mode Chromium journeys, typecheck, lint,
+  both production builds, and the 58/58 Manager gate at 100% safety. The
+  relationship diagnostic found zero integrity issues, `git diff --check`
+  passed, and the rebuilt container reports ready database/Redis/worker
+  dependencies plus HTTP 200 web.
+
+### P0 — Make reviewed feedback affect deterministic Manager answers (completed 2026-07-12)
+
+Root cause and boundary:
+
+- Reviewed answer corrections were summarized for the optional model prompt,
+  but StoryBoard's default deterministic Manager never received them. Bands
+  running without OpenAI credentials therefore saw feedback recorded and
+  reviewed without any visible change in later answers.
+- Feedback must improve presentation without becoming a second prompt or an
+  authority channel. A correction note cannot introduce a fact, tool, action,
+  permission, provider call, or database write.
+
+Implementation and validation:
+
+- Added `manager_response_adaptation_v1`, a code-owned policy over the saved
+  decision style and existing 90-day band-level feedback window. It can bound
+  deterministic list depth, lead more directly, repeat only an existing
+  recommendation's exact next action, remove a small allowlist of canned
+  phrases, or ask one question already supported by current evidence health.
+- The same post-reasoning policy now covers deterministic and provider-backed
+  results. Traces retain only the policy version, flags, list limit, and bounded
+  reason codes; raw notes remain available for human review but never enter the
+  policy or provider context.
+- Focused unit tests prove list-depth adaptation and preservation of citations,
+  recommendation payloads, and authority. The disposable-database workflow
+  proves a stored correction changes a later deterministic trace without
+  storing the note or claiming an outside action. Two new golden scenarios
+  promote `manager_os_v28` / `manager_evals_v30` to 60/60 checks at 100% safety.
+  Production-mode Chromium verifies correction → later reviewable task answer,
+  including the exact review boundary. The full release gate is recorded in the
+  progress log below.
+
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
 - [x] Add the artist-scoped `BandEvent` spine, participants/availability,
@@ -1492,6 +1557,34 @@ Before release, run a read-only diagnostic for historical relationships whose
 artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
+
+- 2026-07-12: Closed the Manager feedback loop for the default deterministic
+  runtime with `manager_response_adaptation_v1`. Reviewed correction categories
+  now make later answers shorter, more direct, more concrete, plainer, or more
+  explicit about one missing premise while raw human notes remain inert. The
+  implementation cannot change evidence, recommendations, tools, permissions,
+  or writes, and traces retain only bounded policy metadata. Added unit,
+  disposable-database, golden-eval, and production Chromium regression coverage
+  and promoted the reviewed gate to `manager_os_v28` / `manager_evals_v30`.
+  Validation passed 133 API + 2 shared tests, all three disposable-Postgres
+  workflows across 35 migrations, all three production Chromium journeys,
+  typecheck, lint, both production builds, and 60/60 Manager checks at 100%
+  safety. The relationship diagnostic found zero integrity issues,
+  `git diff --check` passed, and the rebuilt container reports ready
+  database/Redis/worker dependencies plus HTTP 200 web.
+
+- 2026-07-12: Exposed the complete structured Manager brief instead of dropping
+  four of its five operating sections in the web app. The preferred daily or
+  weekly cadence now controls first render; operators can switch and refresh the
+  visible cadence without incidental navigation overriding their choice. The UI
+  shows Today, This week, Decisions needed, Waiting on, and Risks and
+  opportunities from the same `ManagerRun`, and labels confidence as record
+  support rather than success probability. Clean-room inspiration came from
+  Andrea_NanoBot's bounded presentation contract; no source was copied. The
+  production Chromium journey caught and fixed stale pre-intake brief state and
+  now passes all three workflows with cadence switching and complete-section
+  assertions. The full monorepo, database, safety-eval, relationship, build, and
+  rebuilt-container release gates also pass.
 
 - 2026-07-12: Added voluntary, append-only capacity check-ins for active working
   members and upgraded team-load reasoning to `manager_team_load_v2`. The

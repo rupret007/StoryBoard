@@ -75,6 +75,19 @@ test("novice manager intake produces grounded work and band operations records",
     await page.getByRole("button", { name: "Build my 90-day operating plan" }).click();
   }
   await expect(page.getByText("Today", { exact: true })).toBeVisible();
+  const briefPriorities = page.getByTestId("manager-brief-priorities");
+  const briefReview = page.getByTestId("manager-brief-review");
+  await expect(briefPriorities.getByText("Weekly operating brief", { exact: true })).toBeVisible();
+  await expect(briefReview.getByRole("heading", { name: "Work connected to the operating plan" })).toBeVisible();
+  await expect(briefReview.getByRole("heading", { name: "Decisions needed" })).toBeVisible();
+  await expect(briefReview.getByRole("heading", { name: "Waiting on" })).toBeVisible();
+  await expect(briefReview.getByRole("heading", { name: "Risks and opportunities" })).toBeVisible();
+  await briefPriorities.getByRole("button", { name: "daily" }).click();
+  await expect(briefPriorities.getByText("Daily operating brief", { exact: true })).toBeVisible();
+  await briefPriorities.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Daily manager brief refreshed.", { exact: true })).toBeVisible();
+  await briefPriorities.getByRole("button", { name: "weekly" }).click();
+  await expect(briefPriorities.getByText("Weekly operating brief", { exact: true })).toBeVisible();
   await expect(page.getByTestId("manager-priority-explanation")).toContainText("Ranked first because");
   const cadenceCard = page.getByTestId("manager-cadence");
   await expect(cadenceCard.getByText("On request only", { exact: true })).toBeVisible();
@@ -271,6 +284,11 @@ test("novice manager intake produces grounded work and band operations records",
   const planReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "plan-health score is" });
   await expect(planReply).toBeVisible();
   await expect(planReply).toContainText(/real owner/i);
+  const adaptationProbeTitle = `Review the E2E Manager answer ${suffix}`;
+  await managerMessage.fill(`Add a task to ${adaptationProbeTitle}`);
+  await page.getByRole("button", { name: "Send message" }).click();
+  const adaptedTaskReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "I can add that to the shared band task board" }).last();
+  await expect(adaptedTaskReply).toContainText(/Next: Review the task and add it without a due date/i);
   const releaseGoalCard = planCard.getByText("Complete the next release cycle", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-lg') and contains(@class,'border')][1]");
   const targetDirection = releaseGoalCard.getByLabel("Target means");
   await targetDirection.selectOption("at_most");
@@ -311,7 +329,7 @@ test("novice manager intake produces grounded work and band operations records",
   const runChecks = page.getByRole("button", { name: "Run checks" });
   if (await runChecks.isVisible().catch(() => false)) {
     await runChecks.click();
-    await expect(page.getByText("manager_os_v27", { exact: true })).toBeVisible();
+    await expect(page.getByText("manager_os_v28", { exact: true })).toBeVisible();
     await expect(page.getByText("passed", { exact: true })).toBeVisible();
   }
 

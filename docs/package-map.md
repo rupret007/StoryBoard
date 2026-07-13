@@ -60,8 +60,10 @@ The NestJS orchestration backend. Current responsibilities:
   projection, profile-over-memory source precedence, knowledge freshness and
   conflict projection, explicit review-before-save conversational memory,
   novice-safe code-owned business coaching, evidence-reconciled goal measurement, global
-  explainable pressure ranking, exact-message feedback, and owner-reviewed
-  response release gates in `src/manager/`
+  explainable pressure ranking, exact-message feedback,
+  deterministic/provider presentation adaptation through
+  `manager_response_adaptation_v1`, and owner-reviewed response release gates
+  in `src/manager/`
 - **Band operations:** tenant-safe events, editable custom run-of-show
   checkpoints, availability, readiness/day-of projections, songs/setlists,
   projects, deal documents, invoices, expenses, and settlements in

@@ -333,6 +333,12 @@ Manager routes:
   `POST /manager/decisions/:id/review` records one immutable outcome lesson
 - `GET /manager/brief?cadence=daily|weekly` and
   `POST /manager/brief/generate`
+  The Manager page requests the operating profile's saved cadence on first
+  render and exposes both views. It renders every bounded output section:
+  Today (maximum five), This week, Decisions needed, Waiting on, and Risks and
+  opportunities. Manual cadence selection stays active until the operator
+  changes it or switches artists; Refresh regenerates the cadence currently on
+  screen. Risk percentages are record-confidence labels, not forecasts.
 - `POST /manager/chat`; standalone, unambiguous feedback about the directly
   preceding answer is classified by `manager_natural_feedback_v1`, stored
   through the same audited per-operator feedback record, and acknowledged
@@ -423,7 +429,7 @@ Manager routes:
   after the same owner rates the answer; negative examples require
   `expectedBehavior` and a later code-registered `candidateVersion` to resolve.
 - `GET /manager/evaluations/latest` and `POST /manager/evaluations/run`
-  (owner-only; currently accepts only the code-registered `manager_os_v27`)
+  (owner-only; currently accepts only the code-registered `manager_os_v28`)
 - `POST /manager/recommendations/:id/accept|dismiss|complete`; the optional
   body is `{ "reason": "wrong_priority", "note": "Release comes first" }`
 - `GET` / `PUT /manager/settings` (PUT owner-only)
@@ -498,7 +504,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v27` retains the current operator question and at most 12
+version `manager_os_v28` retains the current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
 structured output, prompt/model version, and latency—not hidden reasoning.
@@ -541,6 +547,14 @@ is tenant-scoped and audited. Only aggregate helpful/correction signals enter
 future response guidance—free-text notes are not injected into prompts.
 Code maps common corrections (`incorrect`, `missed_question`, `too_vague`,
 `too_long`, `wrong_tone`, and `missing_context`) to bounded presentation rules.
+`manager_response_adaptation_v1` applies the relevant rules to future
+deterministic and provider-backed answers for the artist using the existing
+90-day feedback window. It can reduce deterministic list depth, remove a small
+allowlist of canned phrases, repeat the exact current recommendation next step,
+or ask one question already present in evidence health. It never consumes the
+free-text note and cannot create evidence, change a recommendation, invoke a
+tool, or expand authority. `ManagerRun.trace.responseAdaptation` retains only
+the policy version, flags, list limit, and bounded correction reason codes.
 A deterministic post-output gate rejects canned openings, assistant/meta
 language, excessive length/formatting, and claims of completed outside actions;
 the deterministic manager answer is used when model output fails the gate.

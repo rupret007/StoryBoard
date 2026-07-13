@@ -19,7 +19,7 @@ import {
   suppressRepeatedManagerAdvice,
   type ManagerRecommendationDraft
 } from "./manager-intelligence";
-import { calibrateManagerChatResult, deterministicManagerEvidenceHealth } from "./manager-evidence-health";
+import { calibrateManagerChatResult, deterministicManagerEvidenceHealth, managerEvidenceAreaForQuestion } from "./manager-evidence-health";
 import { MANAGER_PROMPT_VERSION, runManagerEvaluation } from "./manager-evaluation";
 import { MANAGER_PLAN_TEMPLATE_VERSION, managerPlanTemplate } from "./manager-plan";
 import { deterministicShowReadiness } from "../operations/event-readiness";
@@ -27,7 +27,7 @@ import { deterministicEventDayOf } from "../operations/event-day-of";
 import { deterministicProjectReadiness, PROJECT_PLAN_VERSION, projectPlanTemplate } from "../operations/project-plan";
 import { SHOW_ADVANCE_VERSION, showAdvanceSourceKey, showAdvanceTaskSpecs } from "../operations/show-advance";
 import { managerActionMayExecuteDirectly } from "./manager-policy";
-import { evaluateManagerResponseQuality, managerResponseGuidance, summarizeManagerResponseFeedback } from "./manager-response-quality";
+import { applyManagerResponseAdaptation, evaluateManagerResponseQuality, managerResponseAdaptationPolicy, managerResponseGuidance, summarizeManagerResponseFeedback } from "./manager-response-quality";
 import { deterministicManagerOutcomeReview } from "./manager-outcome-review";
 import { deterministicManagerContextHealth } from "./manager-context-health";
 import { deterministicManagerCommitmentHealth, managerQuestionAsksAboutCommitments } from "./manager-commitment-health";
@@ -1659,6 +1659,7 @@ export class ManagerService {
     const now = new Date();
     const continuity = resolveManagerConversationContinuity(input.message, history);
     const subjectReference = resolveManagerSubjectReference(input.message, managerSubjectCandidates(facts));
+    const responseAdaptation = managerResponseAdaptationPolicy(facts.profile?.decisionStyle ?? "guided", responseFeedback);
     const naturalFeedbackAnswer = managerNaturalFeedbackAcknowledgement(naturalFeedback);
     const fallback = naturalFeedbackAnswer
       ? { answer: naturalFeedbackAnswer, citations: [], recommendation: null }
@@ -1670,7 +1671,7 @@ export class ManagerService {
         ? { answer: taskUpdate.message, citations: taskUpdate.taskId ? [taskUpdate.taskId] : [], recommendation: taskUpdate.action ? managerConversationTaskUpdateRecommendation(taskUpdate.action) : null }
       : taskAssignmentRoute
         ? { answer: taskAssignment.message, citations: [taskAssignment.taskId, taskAssignment.memberId].filter((value): value is string => Boolean(value)), recommendation: taskAssignment.action ? managerConversationTaskAssignmentRecommendation(taskAssignment.action) : null }
-      : deterministicManagerChat(facts, input.message, now, continuity, subjectReference);
+      : deterministicManagerChat(facts, input.message, now, continuity, subjectReference, responseAdaptation);
     const coachingTopics = managerCoachingTopics(input.message).map((topic) => topic.id);
     const unknownCoachingTopic = managerUnrecognizedCoachingTopic(input.message);
     const coachingRoute = coachingTopics.length > 0 || Boolean(unknownCoachingTopic);
@@ -1730,9 +1731,14 @@ export class ManagerService {
     const calibrated = naturalFeedbackRoute || contextCaptureRoute || taskCaptureRoute || taskUpdateRoute || taskAssignmentRoute
       ? { answer: content, citations, recommendation }
       : calibrateManagerChatResult({ answer: content, citations, recommendation }, facts, input.message);
-    content = calibrated.answer;
-    citations = calibrated.citations;
-    recommendation = calibrated.recommendation;
+    const evidenceArea = managerEvidenceAreaForQuestion(input.message);
+    const missingPremiseQuestion = evidenceArea
+      ? facts.evidenceHealth.areas.find((area) => area.area === evidenceArea && area.state !== "current")?.nextQuestion ?? null
+      : facts.evidenceHealth.status === "thin" ? facts.evidenceHealth.priorityQuestions[0]?.question ?? null : null;
+    const adapted = applyManagerResponseAdaptation(calibrated, responseAdaptation, { missingPremiseQuestion });
+    content = adapted.answer;
+    citations = adapted.citations;
+    recommendation = adapted.recommendation;
     responseQuality = evaluateManagerResponseQuality(content, facts.profile?.decisionStyle ?? "guided");
     const run = await this.prisma.client.managerRun.create({
       data: {
@@ -1762,6 +1768,7 @@ export class ManagerService {
           taskCapture: { policyVersion: MANAGER_TASK_CAPTURE_POLICY_VERSION, status: taskCapture.status, sourceMessageId: taskCapture.action?.sourceMessageId ?? null, dueDatePresent: Boolean(taskCapture.action?.dueDate), duplicateTaskId: taskCapture.duplicateTaskId, providerBypassed: taskCaptureRoute },
           taskUpdate: { policyVersion: MANAGER_TASK_UPDATE_POLICY_VERSION, status: taskUpdate.status, sourceMessageId: taskUpdate.action?.sourceMessageId ?? null, taskId: taskUpdate.taskId, operation: taskUpdate.action?.operation ?? null, providerBypassed: taskUpdateRoute },
           taskAssignment: { policyVersion: MANAGER_TASK_ASSIGNMENT_POLICY_VERSION, status: taskAssignment.status, sourceMessageId: taskAssignment.action?.sourceMessageId ?? null, taskId: taskAssignment.taskId, memberId: taskAssignment.memberId, availability: taskAssignment.action?.availability ?? null, checkInId: taskAssignment.action?.checkInId ?? null, providerBypassed: taskAssignmentRoute },
+          responseAdaptation: responseAdaptation,
           responseQuality,
           responseFeedbackSignals: summarizeManagerResponseFeedback(responseFeedback)
         },

@@ -94,6 +94,12 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   User corrections update sourced memory. Delivered answers link to the exact
   run, and explicit response feedback changes only a small code-owned mapping
   of presentation rules; correction notes are never treated as instructions.
+  `manager_response_adaptation_v1` applies that mapping after both deterministic
+  and provider-backed reasoning. It may bound list depth, lead more directly,
+  repeat an already-authorized recommendation's exact next action, simplify a
+  small allowlist of canned phrases, or ask one current evidence-health
+  question. It cannot alter evidence, facts, actions, risk, permissions, or
+  provider boundaries. The trace records only policy flags and reason codes.
   `manager_natural_feedback_v1` may bind a narrow, standalone verdict only to
   the directly preceding answer in the same tenant conversation. It reuses the
   audited feedback upsert, bypasses the provider, excludes its acknowledgement
@@ -215,6 +221,13 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   ranking drives Manager Today, Waiting on, risks, chat, and UI. Model briefs
   cannot displace a high-severity commitment, and blocker questions cannot
   propose duplicate work.
+- `ManagerRun.output` is the presentation contract for the Manager workspace.
+  The client renders all five bounded sections—Today, This week, Decisions
+  needed, Waiting on, and Risks and opportunities—instead of reducing a run to
+  its first priority. Initial server rendering follows the operating profile's
+  daily/weekly preference; an operator can switch or refresh the visible
+  cadence without an unrelated route refresh replacing that choice. Risk
+  confidence is explicitly record confidence, never outcome probability.
 - Task sequencing is an explicit artist-scoped graph rather than a prompt
   inference. `TaskDependency` records a dependent task and one prerequisite;
   task service preflight rejects foreign IDs, self-links, cycles, conflicting

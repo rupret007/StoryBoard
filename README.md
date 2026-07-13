@@ -85,7 +85,12 @@ records band mode, market, lineup, constraints, and ambition; creates an
 editable 90-day plan with two measurable goals, linked initiatives, and six
 dated first actions tailored to original, cover/event, or hybrid work; and
 produces a daily/weekly brief grounded in
-artist-owned records. Manager conversations retain bounded recent threads,
+artist-owned records. The workspace preserves the full structured brief:
+Today, This week, Decisions needed, Waiting on, and Risks and opportunities.
+It opens the band's saved daily/weekly preference, lets the operator switch
+views deliberately, and refreshes the cadence currently on screen. A confidence
+label describes StoryBoard record coverage, not the probability of success.
+Manager conversations retain bounded recent threads,
 resume after reload, and can be revisited from the conversation-history picker
 without mixing context between threads. They answer common questions about
 priorities, shows, booking, availability, approvals, and money from the
@@ -140,7 +145,13 @@ Feedback, promotion, resolution, and version activation remain separate; no
 rating or queue read activates a new version. A
 deterministic response gate rejects canned assistant phrasing,
 implementation/meta language, excessive length, and claims that StoryBoard
-already performed an outside action. Prompt/policy version `manager_os_v27`
+already performed an outside action. Reviewed band-level corrections also apply
+to deterministic and provider-backed answers through
+`manager_response_adaptation_v1`: they can shorten lists, make an existing next
+action explicit, simplify tone, or ask one evidence-backed missing-premise
+question. Raw correction notes never become instructions, and adaptation cannot
+change facts, citations, recommendations, tools, permissions, or writes.
+Prompt/policy version `manager_os_v28`
 and its offline eval suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only

@@ -35,6 +35,14 @@ reads return at most 50. Every delivered assistant message may link its exact
 helpful/correction verdict per response and operator. Free-text corrections are
 retained for human review but are not sent back through model instructions;
 only bounded reason aggregates affect code-owned response presentation.
+`manager_response_adaptation_v1` is a non-persistent, band-level projection of
+those aggregates plus the operating profile's decision style. It applies the
+same bounded presentation contract to deterministic and provider-backed
+answers. A too-long signal can reduce deterministic list depth; vague or missed
+answers can repeat only the exact existing recommendation next action; tone can
+remove only known canned phrases; missing-context can ask only a current
+evidence-health question. It does not modify citations, recommendation payloads,
+facts, permissions, or writes, and its trace contains no correction note.
 `manager_natural_feedback_v1` is a non-persistent resolver over those same
 records: an explicit verdict may target only the immediately preceding
 assistant message. Its explanation stays in `ManagerMessageFeedback.note` and
@@ -152,6 +160,12 @@ Model and deterministic candidates with the same stable key or overlapping
 workstream evidence are merged before ranking. `ManagerRun.trace` stores the
 bounded factor codes, impacts, and omitted candidate summaries that explain the
 result; the recommendation rows remain the executable review boundary.
+The five arrays in `ManagerRun.output` form one bounded operating brief rather
+than independent authorities. The web view renders Today, This week, Decisions
+needed, Waiting on, and Risks and opportunities from the same run and switches
+daily/weekly runs without copying records into another source of truth.
+Confidence on a risk/opportunity item describes supporting StoryBoard records,
+not a predicted outcome.
 Conversation-created decisions have `needsFraming=true`, cannot be chosen until
 a member saves real options/tradeoffs, and complete the linked recommendation
 only after an outcome review. Task completion is attributed automatically.

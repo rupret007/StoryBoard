@@ -10,7 +10,7 @@ import { managerQuestionAsksAboutCommitments, type ManagerCommitmentHealth } fro
 import { assessManagerMemoryCapture } from "./manager-memory-capture";
 import { deterministicManagerCoaching } from "./manager-coaching";
 import { managerQuestionAsksAboutTeamLoad, type ManagerTeamLoad } from "./manager-team-load";
-import { calibrateManagerChatResult, type ManagerEvidenceHealth } from "./manager-evidence-health";
+import { calibrateManagerChatResult, managerEvidenceAreaForQuestion, type ManagerEvidenceHealth } from "./manager-evidence-health";
 import { managerQuestionAsksAboutWorkSequence, type ManagerWorkSequence } from "./manager-work-sequence";
 import { managerQuestionAsksAboutGoalPath, type ManagerGoalPath } from "./manager-goal-path";
 import { deterministicManagerGoalTarget, type ManagerGoalTargetAssessment } from "./manager-goal-target";
@@ -20,6 +20,7 @@ import type { ManagerProfileContextAction } from "./manager-context-capture";
 import type { ManagerConversationTaskAction } from "./manager-task-capture";
 import type { ManagerConversationTaskUpdateAction } from "./manager-task-update";
 import type { ManagerConversationTaskAssignmentAction } from "./manager-task-assignment";
+import { applyManagerResponseAdaptation, managerResponseAdaptationPolicy, type ManagerResponseAdaptationPolicy } from "./manager-response-quality";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -927,7 +928,8 @@ function deterministicManagerChatBase(
   question: string,
   now = new Date(),
   continuity?: ManagerConversationContinuity,
-  subjectReference?: ManagerSubjectReference
+  subjectReference?: ManagerSubjectReference,
+  responsePolicy: ManagerResponseAdaptationPolicy = managerResponseAdaptationPolicy(facts.profile?.decisionStyle ?? "guided")
 ): ManagerChatResult {
   const brief = suppressRepeatedManagerAdvice(deterministicManagerBrief(facts, now), facts.recommendationHistory, now);
   const proposedDecisionDraft = decisionDraftFromQuestion(question);
@@ -1035,7 +1037,7 @@ function deterministicManagerChatBase(
 
   if (knowledgeQuestion && facts.knowledgeHealth) {
     const health = facts.knowledgeHealth;
-    const attention = health.items.filter((item) => item.state !== "current").slice(0, 3);
+    const attention = health.items.filter((item) => item.state !== "current").slice(0, Math.min(3, responsePolicy.itemLimit));
     const lines = attention.map((item) => `• ${item.key.replaceAll("_", " ")} — ${item.reason}`);
     return {
       answer: `${health.summary} Knowledge health is ${health.score}/100; that measures consistency, confirmation, confidence, and age—not whether the band is doing well.${lines.length ? `\n\nCheck these first:\n${lines.join("\n")}\n\n${health.nextAction}` : " Nothing currently needs reconfirmation."}`,
@@ -1066,7 +1068,7 @@ function deterministicManagerChatBase(
       ? `Recorded attendance totals ${review.live.attendanceTotal} across ${review.live.attendanceRecordedShows} show${review.live.attendanceRecordedShows === 1 ? "" : "s"}.`
       : "No completed show has recorded attendance.";
     const booking = review.activity.booking.booked ? ` ${review.activity.booking.booked} campaign prospect${review.activity.booking.booked === 1 ? " was" : "s were"} explicitly marked booked.` : "";
-    const lessonLines = review.recordedLessons.slice(0, 2).map((lesson) => {
+    const lessonLines = review.recordedLessons.slice(0, Math.min(2, responsePolicy.itemLimit)).map((lesson) => {
       const note = lesson.postShowNotes ? `the post-show note says “${snippet(lesson.postShowNotes, 160)}”` : null;
       const relationship = lesson.relationshipOutcome ? `the relationship outcome says “${snippet(lesson.relationshipOutcome, 120)}”` : null;
       return `For ${lesson.title}, ${[note, relationship].filter(Boolean).join("; ")}.`;
@@ -1123,7 +1125,7 @@ function deterministicManagerChatBase(
   if (teamLoadQuestion && facts.teamLoad) {
     const load = facts.teamLoad;
     const rows = load.members.slice().sort((left, right) => right.overdue - left.overdue || right.blocked - left.blocked || right.dueWithinHorizon - left.dueWithinHorizon || right.openTasks - left.openTasks || left.name.localeCompare(right.name));
-    const lines = rows.slice(0, 5).map((member) => `• ${member.name} — ${member.openTasks} open; ${member.dueWithinHorizon} due within ${load.horizonDays} days${member.overdue ? `; ${member.overdue} overdue` : ""}${member.blocked ? `; ${member.blocked} blocked` : ""}; capacity check-in ${member.availability}.`);
+    const lines = rows.slice(0, responsePolicy.itemLimit).map((member) => `• ${member.name} — ${member.openTasks} open; ${member.dueWithinHorizon} due within ${load.horizonDays} days${member.overdue ? `; ${member.overdue} overdue` : ""}${member.blocked ? `; ${member.blocked} blocked` : ""}; capacity check-in ${member.availability}.`);
     const suggestion = load.suggestions[0];
     const recommendation: ManagerRecommendationDraft | null = suggestion ? {
       stableKey: `assign_${suggestion.taskId}_${suggestion.memberId}`.slice(0, 80),
@@ -1144,8 +1146,8 @@ function deterministicManagerChatBase(
 
   if (workSequenceQuestion && facts.workSequence) {
     const sequence = facts.workSequence;
-    const ready = sequence.readyNow.slice(0, 4);
-    const waiting = sequence.waiting.slice(0, 4);
+    const ready = sequence.readyNow.slice(0, responsePolicy.itemLimit);
+    const waiting = sequence.waiting.slice(0, responsePolicy.itemLimit);
     const readyLines = ready.map((item) => `• ${item.title} — ${item.reason}${item.ownerLabel ? ` Owner: ${item.ownerLabel}.` : " No owner is recorded."}`);
     const waitingLines = waiting.map((item) => `• ${item.title} — ${item.reason}`);
     return {
@@ -1160,7 +1162,7 @@ function deterministicManagerChatBase(
     const namedPaths = subject?.kind === "goal"
       ? facts.goalPath.goals.filter((path) => path.goalId === subject.id)
       : facts.goalPath.goals.filter((path) => normalizedQuestion.includes(path.goalTitle.toLocaleLowerCase()));
-    const paths = (namedPaths.length ? namedPaths : facts.goalPath.goals).slice(0, 3);
+    const paths = (namedPaths.length ? namedPaths : facts.goalPath.goals).slice(0, responsePolicy.itemLimit);
     const lines = paths.map((path) => `• ${path.goalTitle} — ${path.reason} ${path.nextAction}`);
     return {
       answer: `${facts.goalPath.summary}${lines.length ? `\n\n${lines.join("\n")}` : ""}\n\nThis path uses recorded goals, initiatives, measurements, tasks, and prerequisites. It does not estimate effort, conversion, duration, or private capacity.`,
@@ -1172,7 +1174,7 @@ function deterministicManagerChatBase(
   if (commitmentQuestion && facts.commitmentHealth) {
     const pressure = (subject?.kind === "task"
       ? facts.commitmentHealth.items.filter((item) => item.taskId === subject.id)
-      : facts.commitmentHealth.items.filter((item) => item.state !== "active")).slice(0, 3);
+      : facts.commitmentHealth.items.filter((item) => item.state !== "active")).slice(0, responsePolicy.itemLimit);
     const lines = pressure.map((item) => `• ${item.title} — ${item.reasons.join(" ")} ${item.ownerLabel ? `Owner: ${item.ownerLabel}.` : "No owner is recorded."}`);
     return {
       answer: subject?.kind === "task"
@@ -1189,7 +1191,7 @@ function deterministicManagerChatBase(
     const activeProjects = subject?.kind === "project"
       ? facts.projects.filter((project) => project.id === subject.id)
       : facts.projects.filter((project) => !["completed", "cancelled"].includes(project.status));
-    const lines = activeProjects.slice(0, 5).map((project) => project.readiness
+    const lines = activeProjects.slice(0, responsePolicy.itemLimit).map((project) => project.readiness
       ? `• ${project.name} — ${project.readiness.status.replaceAll("_", " ")} at ${project.readiness.score}/100; ${project.readiness.nextMilestone ? `next: ${project.readiness.nextMilestone.title}` : project.readiness.nextAction}`
       : `• ${project.name} — ${project.status}${project.dueAt ? `; due ${eventDate(project.dueAt)}` : "; no due date recorded"}`);
     const recommendation = subject?.kind === "project"
@@ -1265,7 +1267,7 @@ function deterministicManagerChatBase(
   if (liveQuestion) {
     const upcoming = (subject?.kind === "event"
       ? facts.events.filter((event) => event.id === subject.id)
-      : facts.events.filter((event) => event.startsAt && event.startsAt >= now)).slice(0, 3);
+      : facts.events.filter((event) => event.startsAt && event.startsAt >= now)).slice(0, responsePolicy.itemLimit);
     const lines = upcoming.map((event) => {
       const showDay = event.dayOf && event.startsAt && event.startsAt.getTime() <= now.getTime() + DAY_MS;
       if (event.readiness) {
@@ -1324,7 +1326,7 @@ function deterministicManagerChatBase(
   }
 
   const recommendation = matchingRecommendation(brief);
-  const top = brief.today.slice(0, 3);
+  const top = brief.today.slice(0, responsePolicy.itemLimit);
   return {
     answer: top.length
       ? `I would keep this simple. ${brief.summary}\n\n${top.map((item, index) => `${index + 1}. ${item.title} — ${item.nextAction}`).join("\n")}\n\nI am basing that on what is recorded now. Anything happening outside StoryBoard may change the order.`
@@ -1339,7 +1341,13 @@ export function deterministicManagerChat(
   question: string,
   now = new Date(),
   continuity?: ManagerConversationContinuity,
-  subjectReference?: ManagerSubjectReference
+  subjectReference?: ManagerSubjectReference,
+  responsePolicy: ManagerResponseAdaptationPolicy = managerResponseAdaptationPolicy(facts.profile?.decisionStyle ?? "guided")
 ): ManagerChatResult {
-  return calibrateManagerChatResult(deterministicManagerChatBase(facts, question, now, continuity, subjectReference), facts, question);
+  const calibrated = calibrateManagerChatResult(deterministicManagerChatBase(facts, question, now, continuity, subjectReference, responsePolicy), facts, question);
+  const area = managerEvidenceAreaForQuestion(question);
+  const missingPremiseQuestion = area
+    ? facts.evidenceHealth?.areas.find((item) => item.area === area && item.state !== "current")?.nextQuestion ?? null
+    : facts.evidenceHealth?.status === "thin" ? facts.evidenceHealth.priorityQuestions[0]?.question ?? null : null;
+  return applyManagerResponseAdaptation(calibrated, responsePolicy, { missingPremiseQuestion });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
-import { Activity, Archive, BrainCircuit, Check, ClipboardList, GitCompareArrows, ListChecks, MessageSquareText, Pencil, Plus, RefreshCw, Route, Save, Send, ShieldCheck, Target, ThumbsDown, ThumbsUp, TrendingUp, UsersRound, X } from "lucide-react";
+import { Activity, Archive, BrainCircuit, CalendarRange, Check, CircleAlert, CircleHelp, ClipboardList, Clock3, GitCompareArrows, ListChecks, MessageSquareText, Pencil, Plus, RefreshCw, Route, Save, Send, ShieldCheck, Target, ThumbsDown, ThumbsUp, TrendingUp, UsersRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -37,6 +37,10 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
   const [recommendationEvalReview, setRecommendationEvalReview] = useState(initialRecommendationEvalReview);
   const [responseReview, setResponseReview] = useState(initialResponseReview);
   const [responseEvalReview, setResponseEvalReview] = useState(initialResponseEvalReview);
+  const [brief, setBrief] = useState(initialBrief);
+  const [briefCadence, setBriefCadence] = useState<"daily" | "weekly">(initialBrief?.cadence === "weekly" ? "weekly" : initialProfile?.communicationCadence === "weekly" ? "weekly" : "daily");
+  const briefArtistId = useRef(activeArtistId);
+  const briefCadenceChosen = useRef(false);
   useEffect(() => setGoals(initialGoals), [initialGoals]);
   useEffect(() => setGoalMeasurements(initialGoalMeasurements), [initialGoalMeasurements]);
   useEffect(() => setProfile(initialProfile), [initialProfile]);
@@ -54,6 +58,16 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
   useEffect(() => setRecommendationEvalReview(initialRecommendationEvalReview), [initialRecommendationEvalReview]);
   useEffect(() => setResponseReview(initialResponseReview), [initialResponseReview]);
   useEffect(() => setResponseEvalReview(initialResponseEvalReview), [initialResponseEvalReview]);
+  useEffect(() => {
+    const artistChanged = briefArtistId.current !== activeArtistId;
+    if (artistChanged) {
+      briefArtistId.current = activeArtistId;
+      briefCadenceChosen.current = false;
+    }
+    if (!artistChanged && briefCadenceChosen.current && initialBrief?.cadence !== briefCadence) return;
+    setBrief(initialBrief);
+    setBriefCadence(initialBrief?.cadence === "weekly" ? "weekly" : initialProfile?.communicationCadence === "weekly" ? "weekly" : "daily");
+  }, [activeArtistId, briefCadence, initialBrief, initialProfile?.communicationCadence]);
   useEffect(() => {
     if (conversationArtistId.current !== activeArtistId) {
       conversationArtistId.current = activeArtistId;
@@ -200,7 +214,7 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
   }
   async function runEvaluation() {
     setBusy(true); setError("");
-    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v27" } })); }
+    try { setEvaluation(await apiFetch<ManagerEvaluationRun>("/manager/evaluations/run", { method: "POST", json: { candidateVersion: "manager_os_v28" } })); }
     catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
   async function submitMessageFeedback(messageId: string, payload: { helpful: boolean; reason?: string | null; note?: string | null }) {
@@ -271,10 +285,25 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
       setConversationId(selected.id); setMessages(selected.messages);
     } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
   }
+  async function switchBriefCadence(cadence: "daily" | "weekly") {
+    if (cadence === briefCadence && brief) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      setBrief(await apiFetch<ManagerRun>(`/manager/brief?cadence=${cadence}`));
+      setBriefCadence(cadence);
+      briefCadenceChosen.current = true;
+    } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
+  }
+  async function refreshBrief() {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      setBrief(await apiFetch<ManagerRun>("/manager/brief/generate", { method: "POST", json: { cadence: briefCadence } }));
+      setNotice(`${briefCadence === "weekly" ? "Weekly" : "Daily"} manager brief refreshed.`);
+    } catch (err) { setError(err instanceof Error ? err.message : "Request failed"); } finally { setBusy(false); }
+  }
   function newConversation() { setConversationId(null); setMessages([]); setQuestion(""); setError(""); }
   if (!profile?.intakeCompletedAt) return <Intake busy={busy} error={error} onSubmit={async (payload) => act("/manager/intake/complete", payload)} />;
-  const output = initialBrief?.output;
-  const firstPriorityFactors = initialBrief?.trace?.priorityRanking?.today[0]?.factors
+  const firstPriorityFactors = brief?.trace?.priorityRanking?.today[0]?.factors
     .filter((factor) => factor.impact > 0 && !factor.code.startsWith("declared_") && factor.code !== "recorded_evidence")
     .slice(0, 3) ?? [];
   const coachingPrompts = profile.educationTopics.length
@@ -284,8 +313,9 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
   return <div className="space-y-8">
     {error ? <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200" role="alert">{error}</div> : null}
     {notice ? <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100" role="status">{notice}</div> : null}
-    <div className="grid gap-4 md:grid-cols-3"><SurfaceCard className="md:col-span-2"><div className="flex items-start justify-between gap-4"><div><p className="sb-kicker">Today</p><h2 className="mt-2 text-xl font-semibold">{output?.summary ?? "Generate your first grounded manager brief."}</h2>{firstPriorityFactors.length ? <p data-testid="manager-priority-explanation" className="mt-2 text-xs text-[var(--text-muted)]">Ranked first because {firstPriorityFactors.map((factor) => factor.detail).join(" · ")}.</p> : null}</div><button className="sb-btn-secondary shrink-0" disabled={busy} onClick={() => void act("/manager/brief/generate", { cadence: "daily" })}><RefreshCw className="h-4 w-4" /> Refresh</button></div><div className="mt-6 space-y-3">{output?.today.map((item, index) => <div key={`${item.title}-${index}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-4"><div className="flex items-start gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent-muted)] text-xs font-bold text-[var(--accent)]">{index + 1}</span><div><h3 className="font-medium">{item.title}</h3><p className="mt-1 text-sm text-[var(--text-secondary)]">{item.reason}</p><p className="mt-2 text-sm font-medium text-[var(--text-primary)]">Next: {item.nextAction}</p></div></div></div>)}{!output?.today.length ? <EmptyState title="No brief yet" description="Generate a brief after completing intake." icon={<BrainCircuit className="h-6 w-6" />} /> : null}</div></SurfaceCard>
+    <div className="grid gap-4 md:grid-cols-3"><ManagerBriefPriorityCard brief={brief} cadence={briefCadence} busy={busy} priorityFactors={firstPriorityFactors} onCadence={switchBriefCadence} onRefresh={refreshBrief} />
       <SurfaceCard><p className="sb-kicker">Operating context</p><dl className="mt-4 space-y-3 text-sm"><div><dt className="text-[var(--text-muted)]">Band mode</dt><dd className="font-medium capitalize">{profile.bandMode.replace("_", " / ")}</dd></div><div><dt className="text-[var(--text-muted)]">Home market</dt><dd>{[profile.homeCity, profile.homeRegion, profile.homeCountry].filter(Boolean).join(", ") || "Unknown"}</dd></div><div><dt className="text-[var(--text-muted)]">Lineup</dt><dd>{members.length} active member{members.length === 1 ? "" : "s"}</dd></div><div><dt className="text-[var(--text-muted)]">12-month ambition</dt><dd>{profile.twelveMonthAmbition ?? "Not set"}</dd></div></dl></SurfaceCard></div>
+    {brief ? <ManagerBriefReview brief={brief} /> : null}
     {contextHealth ? <BandContextCard profile={profile} members={members} health={contextHealth} busy={busy} onSaveProfile={saveProfile} onAddMember={addBandMember} onUpdateMember={updateBandMember} /> : null}
     {initialEvidenceHealth ? <EvidenceHealthCard health={initialEvidenceHealth} /> : null}
     {initialGoalPath ? <GoalPathCard path={initialGoalPath} /> : null}
@@ -306,8 +336,73 @@ export function ManagerClient({ activeArtistId, initialProfile, initialMembers, 
         <form className="mt-4 flex items-end gap-2" onSubmit={(event) => void chat(event)}><label className="sr-only" htmlFor="manager-question">Message your manager</label><textarea id="manager-question" className="sb-input min-h-12 flex-1 resize-y" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask about priorities, shows, booking, money, or the band..." maxLength={10000} rows={2} /><button className="sb-btn-primary min-h-12 shrink-0" disabled={busy || !question.trim()} aria-label="Send message"><Send className="h-4 w-4" /><span className="hidden sm:inline">Send</span></button></form></SurfaceCard></div>
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]"><SurfaceCard><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">What your manager remembers</h2><p className="mt-1 text-sm text-[var(--text-muted)]">Operating-profile facts stay authoritative. Other saved facts must remain confirmed and current.</p></div>{knowledgeHealth ? <span data-testid="manager-knowledge-health"><Badge variant={knowledgeHealth.status === "healthy" ? "success" : knowledgeHealth.status === "conflicted" ? "danger" : "neutral"}>{knowledgeHealth.score}/100 · {friendlyReason(knowledgeHealth.status)}</Badge></span> : null}</div>{knowledgeHealth ? <p className="mt-3 text-xs text-[var(--text-secondary)]">{knowledgeHealth.summary}</p> : null}<div className="mt-4 space-y-3">{memory.map((fact) => <MemoryFactEditor key={fact.id} fact={fact} assessment={knowledgeByFactId.get(fact.id) ?? null} busy={busy} onSave={(value) => patchMemory(fact.id, { value })} onConfirm={() => patchMemory(fact.id, { confirmed: true })} onArchive={() => patchMemory(fact.id, { archived: true })} />)}{!memory.length ? <p className="rounded-xl border border-dashed border-[var(--border)] p-4 text-sm text-[var(--text-muted)]">No saved memory yet. Complete intake to establish the band’s working context.</p> : null}</div></SurfaceCard>
       <SurfaceCard><p className="sb-kicker">Last {learning?.windowDays ?? 90} days</p><h2 className="mt-2 font-semibold">Learning from your choices</h2><p className="mt-2 text-sm text-[var(--text-muted)]">Feedback changes repetition and response style. It never expands authority or rewrites StoryBoard’s rules or code.</p><dl className="mt-5 grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg border border-[var(--border)] p-3"><dt className="text-[var(--text-muted)]">Used</dt><dd className="mt-1 text-xl font-semibold">{(learning?.accepted ?? 0) + (learning?.completed ?? 0)}</dd></div><div className="rounded-lg border border-[var(--border)] p-3"><dt className="text-[var(--text-muted)]">Completed</dt><dd className="mt-1 text-xl font-semibold">{learning?.completed ?? 0}</dd></div><div className="rounded-lg border border-[var(--border)] p-3"><dt className="text-[var(--text-muted)]">Answers rated</dt><dd className="mt-1 text-xl font-semibold">{learning?.responseFeedback.total ?? 0}</dd></div><div className="rounded-lg border border-[var(--border)] p-3"><dt className="text-[var(--text-muted)]">Helpful answers</dt><dd className="mt-1 text-xl font-semibold">{learning?.responseFeedback.helpfulRate == null ? "—" : `${Math.round(learning.responseFeedback.helpfulRate * 100)}%`}</dd></div><div className="rounded-lg border border-[var(--border)] p-3"><dt className="text-[var(--text-muted)]">Advice reviewed</dt><dd className="mt-1 text-xl font-semibold">{learning?.recommendationReviews.total ?? 0}</dd></div><div className="rounded-lg border border-[var(--border)] p-3"><dt className="text-[var(--text-muted)]">Useful advice</dt><dd className="mt-1 text-xl font-semibold">{learning?.recommendationReviews.usefulRate == null ? "—" : `${Math.round(learning.recommendationReviews.usefulRate * 100)}%`}</dd></div></dl>{learning?.responseFeedback.reasons[0] ? <p className="mt-4 text-xs text-[var(--text-muted)]">Most common answer correction: {friendlyReason(learning.responseFeedback.reasons[0].reason)} ({learning.responseFeedback.reasons[0].count})</p> : learning?.dismissalReasons[0] ? <p className="mt-4 text-xs text-[var(--text-muted)]">Most common recommendation correction: {friendlyReason(learning.dismissalReasons[0].reason)} ({learning.dismissalReasons[0].count})</p> : null}{recommendationEvalReview ? <RecommendationEvalReviewInbox queue={recommendationEvalReview} busy={busy} onPromote={promoteRecommendationEval} /> : null}{responseReview ? <ResponseReviewInbox queue={responseReview} busy={busy} onFeedback={submitMessageFeedback} /> : null}{responseEvalReview ? <ResponseEvalReviewInbox queue={responseEvalReview} busy={busy} onPromote={promoteResponseEval} /> : null}{evalExamples ? <div className="mt-5 border-t border-[var(--border)] pt-4"><div className="flex items-center justify-between gap-3"><div><p className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="h-4 w-4 text-[var(--accent)]" /> Intelligence release gate</p><p className="mt-1 text-xs text-[var(--text-muted)]">{evalExamples.length + (responseEvalExamples?.length ?? 0)} owner-reviewed example{evalExamples.length + (responseEvalExamples?.length ?? 0) === 1 ? "" : "s"}; no version activates itself.</p></div><button className="sb-btn-secondary shrink-0" disabled={busy} onClick={() => void runEvaluation()}>Run checks</button></div>{evaluation ? <div className="mt-3 rounded-lg border border-[var(--border)] p-3 text-xs"><div className="flex items-center justify-between"><span>{evaluation.candidateVersion}</span><Badge variant={evaluation.passed ? "success" : "danger"}>{evaluation.passed ? "passed" : "blocked"}</Badge></div><p className="mt-2 text-[var(--text-muted)]">{evaluation.metrics.passed}/{evaluation.metrics.total} checks passed · safety {Math.round(evaluation.metrics.safetyPassRate * 100)}%</p><p className="mt-1 text-[var(--text-muted)]">Reviewed recommendations: {evaluation.metrics.ownerReviewedRecommendationCount} · reviewed answers: {evaluation.metrics.ownerReviewedResponseCount}</p></div> : null}</div> : null}</SurfaceCard></div>
-    {initialBrief?.recommendations?.length ? <SurfaceCard><h2 className="font-semibold">Reviewable recommendations</h2><p className="mt-1 text-sm text-[var(--text-muted)]">Accepted work is not suggested again while its task is open. Recently completed or dismissed advice gets a cooldown.</p><div className="mt-4 divide-y divide-[var(--border)]">{initialBrief.recommendations.map((rec) => <div key={rec.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center"><div className="flex-1"><div className="flex items-center gap-2"><p className="font-medium">{rec.title}</p><Badge variant={rec.priority === "high" ? "danger" : "neutral"}>{rec.priority}</Badge></div><p className="mt-1 text-sm text-[var(--text-secondary)]">{rec.nextAction}</p>{rec.proposedAction?.type === "remember_fact" ? <p className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-2 text-xs">{rec.proposedAction.value}</p> : null}{rec.outcomeReason ? <p className="mt-1 text-xs text-[var(--text-muted)]">Outcome: {friendlyReason(rec.outcomeReason)}</p> : null}</div>{rec.outcome === "suggested" ? dismissTarget === rec.id ? <div className="flex flex-wrap items-center gap-2"><label className="sr-only" htmlFor={`dismiss-${rec.id}`}>Why is this not useful?</label><select id={`dismiss-${rec.id}`} className="sb-select min-w-40" value={dismissReason} onChange={(event) => setDismissReason(event.target.value)}><option value="not_relevant">Not relevant</option><option value="already_handled">Already handled</option><option value="wrong_priority">Wrong priority</option><option value="bad_timing">Bad timing</option><option value="missing_context">Missing context</option><option value="other">Other</option></select><button className="sb-btn-secondary" disabled={busy} onClick={() => void dismissRecommendation(rec.id, dismissReason)}>Save</button><button className="sb-btn-ghost" disabled={busy} onClick={() => setDismissTarget(null)}><X className="h-4 w-4" /> Cancel</button></div> : <div className="flex gap-2"><button className="sb-btn-secondary" disabled={busy} onClick={() => setDismissTarget(rec.id)}>Dismiss</button><button className="sb-btn-primary" disabled={busy} onClick={() => void acceptBriefRecommendation(rec)}><Check className="h-4 w-4" /> {managerActionButton(rec.proposedAction?.type)}</button></div> : <div className="flex flex-wrap items-center gap-2"><Badge variant={rec.outcome === "dismissed" ? "neutral" : "success"}>{rec.outcome}</Badge>{evalExamples ? evalExamples.some((example) => example.recommendationId === rec.id) ? <Badge variant="violet">in eval set</Badge> : <button className="sb-btn-ghost" disabled={busy} onClick={() => void promoteEval(rec.id, rec.outcome)}>Add to eval set</button> : null}</div>}</div>)}</div></SurfaceCard> : null}
+    {brief?.recommendations?.length ? <SurfaceCard><h2 className="font-semibold">Reviewable recommendations</h2><p className="mt-1 text-sm text-[var(--text-muted)]">Accepted work is not suggested again while its task is open. Recently completed or dismissed advice gets a cooldown.</p><div className="mt-4 divide-y divide-[var(--border)]">{brief.recommendations.map((rec) => <div key={rec.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center"><div className="flex-1"><div className="flex items-center gap-2"><p className="font-medium">{rec.title}</p><Badge variant={rec.priority === "high" ? "danger" : "neutral"}>{rec.priority}</Badge></div><p className="mt-1 text-sm text-[var(--text-secondary)]">{rec.nextAction}</p>{rec.proposedAction?.type === "remember_fact" ? <p className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-2 text-xs">{rec.proposedAction.value}</p> : null}{rec.outcomeReason ? <p className="mt-1 text-xs text-[var(--text-muted)]">Outcome: {friendlyReason(rec.outcomeReason)}</p> : null}</div>{rec.outcome === "suggested" ? dismissTarget === rec.id ? <div className="flex flex-wrap items-center gap-2"><label className="sr-only" htmlFor={`dismiss-${rec.id}`}>Why is this not useful?</label><select id={`dismiss-${rec.id}`} className="sb-select min-w-40" value={dismissReason} onChange={(event) => setDismissReason(event.target.value)}><option value="not_relevant">Not relevant</option><option value="already_handled">Already handled</option><option value="wrong_priority">Wrong priority</option><option value="bad_timing">Bad timing</option><option value="missing_context">Missing context</option><option value="other">Other</option></select><button className="sb-btn-secondary" disabled={busy} onClick={() => void dismissRecommendation(rec.id, dismissReason)}>Save</button><button className="sb-btn-ghost" disabled={busy} onClick={() => setDismissTarget(null)}><X className="h-4 w-4" /> Cancel</button></div> : <div className="flex gap-2"><button className="sb-btn-secondary" disabled={busy} onClick={() => setDismissTarget(rec.id)}>Dismiss</button><button className="sb-btn-primary" disabled={busy} onClick={() => void acceptBriefRecommendation(rec)}><Check className="h-4 w-4" /> {managerActionButton(rec.proposedAction?.type)}</button></div> : <div className="flex flex-wrap items-center gap-2"><Badge variant={rec.outcome === "dismissed" ? "neutral" : "success"}>{rec.outcome}</Badge>{evalExamples ? evalExamples.some((example) => example.recommendationId === rec.id) ? <Badge variant="violet">in eval set</Badge> : <button className="sb-btn-ghost" disabled={busy} onClick={() => void promoteEval(rec.id, rec.outcome)}>Add to eval set</button> : null}</div>}</div>)}</div></SurfaceCard> : null}
   </div>;
+}
+
+function ManagerBriefPriorityCard({ brief, cadence, busy, priorityFactors, onCadence, onRefresh }: {
+  brief: ManagerRun | null;
+  cadence: "daily" | "weekly";
+  busy: boolean;
+  priorityFactors: { detail: string }[];
+  onCadence: (cadence: "daily" | "weekly") => Promise<void>;
+  onRefresh: () => Promise<void>;
+}) {
+  const output = brief?.output;
+  return <div className="md:col-span-2" data-testid="manager-brief-priorities"><SurfaceCard>
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div><p className="sb-kicker">{cadence === "weekly" ? "Weekly operating brief" : "Daily operating brief"}</p><h2 className="mt-2 text-xl font-semibold">{output?.summary ?? "Generate your first grounded manager brief."}</h2>{priorityFactors.length ? <p data-testid="manager-priority-explanation" className="mt-2 text-xs text-[var(--text-muted)]">Ranked first because {priorityFactors.map((factor) => factor.detail).join(" · ")}.</p> : null}</div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2" aria-label="Manager brief cadence">
+        <div className="flex rounded-lg border border-[var(--border)] p-1">
+          {(["daily", "weekly"] as const).map((option) => <button key={option} type="button" className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize transition ${cadence === option ? "bg-[var(--accent-muted)] text-[var(--accent)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`} aria-pressed={cadence === option} disabled={busy} onClick={() => void onCadence(option)}>{option}</button>)}
+        </div>
+        <button type="button" className="sb-btn-secondary" disabled={busy} onClick={() => void onRefresh()}><RefreshCw className="h-4 w-4" /> Refresh</button>
+      </div>
+    </div>
+    <div className="mt-6 space-y-3">
+      <div className="flex items-center gap-2"><Target className="h-4 w-4 text-[var(--accent)]" /><h3 className="font-semibold">Today</h3><Badge variant="neutral">{output?.today.length ?? 0}/5</Badge></div>
+      {output?.today.map((item, index) => <div key={`${item.title}-${index}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-4"><div className="flex items-start gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--accent-muted)] text-xs font-bold text-[var(--accent)]">{index + 1}</span><div><h3 className="font-medium">{item.title}</h3><p className="mt-1 text-sm text-[var(--text-secondary)]">{item.reason}</p><p className="mt-2 text-sm font-medium text-[var(--text-primary)]">Next: {item.nextAction}</p></div></div></div>)}
+      {!output?.today.length ? <EmptyState title="No brief yet" description="Generate a brief after completing intake." icon={<BrainCircuit className="h-6 w-6" />} /> : null}
+    </div>
+  </SurfaceCard></div>;
+}
+
+function ManagerBriefReview({ brief }: { brief: ManagerRun }) {
+  const output = brief.output;
+  return <div data-testid="manager-brief-review" className="space-y-4">
+    <SurfaceCard>
+      <div className="flex items-start gap-3"><div className="rounded-lg bg-[var(--accent-muted)] p-2 text-[var(--accent)]"><CalendarRange className="h-4 w-4" /></div><div><p className="sb-kicker">This week</p><h2 className="mt-1 font-semibold">Work connected to the operating plan</h2><p className="mt-1 text-sm text-[var(--text-muted)]">These are bounded next actions from the same evidence used for Today, not a second task list.</p></div></div>
+      {output.thisWeek.length ? <div className="mt-4 grid gap-3 lg:grid-cols-2">{output.thisWeek.map((item, index) => <div key={`${item.title}-${index}`} className="rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-4"><div className="flex items-start gap-3"><span className="mt-0.5 text-xs font-semibold text-[var(--accent)]">{index + 1}</span><div><h3 className="text-sm font-medium">{item.title}</h3><p className="mt-1 text-xs text-[var(--text-secondary)]">{item.reason}</p><p className="mt-2 text-xs font-medium">Next: {item.nextAction}</p></div></div></div>)}</div> : <BriefSectionEmpty>There is no additional weekly action in the current StoryBoard brief.</BriefSectionEmpty>}
+    </SurfaceCard>
+    <div className="grid gap-4 lg:grid-cols-3">
+      <BriefSignalCard icon={<CircleHelp className="h-4 w-4" />} title="Decisions needed" count={output.decisionsNeeded.length}>
+        {output.decisionsNeeded.length ? output.decisionsNeeded.map((item, index) => <BriefSignalRow key={`${item.title}-${index}`} title={item.title} detail={item.explanation} />) : <BriefSectionEmpty>No open decision or approval is recorded here.</BriefSectionEmpty>}
+      </BriefSignalCard>
+      <BriefSignalCard icon={<Clock3 className="h-4 w-4" />} title="Waiting on" count={output.waitingOn.length}>
+        {output.waitingOn.length ? output.waitingOn.map((item, index) => <BriefSignalRow key={`${item.title}-${index}`} title={item.title} detail={item.dueAt ? `Checkpoint ${briefDate(item.dueAt)}` : "No checkpoint date recorded"} />) : <BriefSectionEmpty>No dependency, reply, or outside party is recorded as waiting.</BriefSectionEmpty>}
+      </BriefSignalCard>
+      <BriefSignalCard icon={<CircleAlert className="h-4 w-4" />} title="Risks and opportunities" count={output.risksAndOpportunities.length}>
+        {output.risksAndOpportunities.length ? output.risksAndOpportunities.map((item, index) => <BriefSignalRow key={`${item.title}-${index}`} title={item.title} detail={item.detail} footer={`Record confidence ${Math.round(item.confidence * 100)}%`} />) : <BriefSectionEmpty>No additional risk or opportunity signal is recorded.</BriefSectionEmpty>}
+      </BriefSignalCard>
+    </div>
+  </div>;
+}
+
+function BriefSignalCard({ icon, title, count, children }: { icon: React.ReactNode; title: string; count: number; children: React.ReactNode }) {
+  return <SurfaceCard><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2 text-[var(--text-primary)]"><span className="text-[var(--accent)]">{icon}</span><h2 className="font-semibold">{title}</h2></div><Badge variant="neutral">{count}</Badge></div><div className="mt-4 space-y-3">{children}</div></SurfaceCard>;
+}
+
+function BriefSignalRow({ title, detail, footer }: { title: string; detail: string; footer?: string }) {
+  return <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3"><p className="text-sm font-medium">{title}</p><p className="mt-1 text-xs text-[var(--text-secondary)]">{detail}</p>{footer ? <p className="mt-2 text-[0.68rem] uppercase tracking-wide text-[var(--text-muted)]">{footer}</p> : null}</div>;
+}
+
+function BriefSectionEmpty({ children }: { children: React.ReactNode }) {
+  return <p className="mt-4 rounded-lg border border-dashed border-[var(--border)] p-3 text-sm text-[var(--text-muted)]">{children}</p>;
+}
+
+function briefDate(value: string) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "date unavailable" : parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 function outcomeMoney(minor: number, currency: string) {

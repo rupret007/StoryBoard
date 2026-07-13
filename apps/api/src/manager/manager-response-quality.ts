@@ -10,6 +10,19 @@ export type ManagerResponseQuality = {
   violations: string[];
 };
 
+export const MANAGER_RESPONSE_ADAPTATION_POLICY_VERSION = "manager_response_adaptation_v1" as const;
+
+export type ManagerResponseAdaptationPolicy = {
+  policyVersion: typeof MANAGER_RESPONSE_ADAPTATION_POLICY_VERSION;
+  decisionStyle: "concise" | "guided" | "detailed";
+  itemLimit: number;
+  leadWithAnswer: boolean;
+  requireConcreteNextAction: boolean;
+  usePlainTone: boolean;
+  askForMissingPremise: boolean;
+  appliedReasons: string[];
+};
+
 const MAX_WORDS = { concise: 140, guided: 260, detailed: 500 } as const;
 
 function wordCount(value: string) {
@@ -75,4 +88,48 @@ export function managerResponseGuidance(rows: ManagerResponseFeedbackSignal[]) {
   return selected.length
     ? `Recent explicit response feedback adds these code-owned presentation rules: ${selected.join(" ")}`
     : "No response-specific correction is established yet; follow the configured decision style.";
+}
+
+export function managerResponseAdaptationPolicy(decisionStyle: string, rows: ManagerResponseFeedbackSignal[] = []): ManagerResponseAdaptationPolicy {
+  const style: ManagerResponseAdaptationPolicy["decisionStyle"] = decisionStyle === "concise" || decisionStyle === "detailed" ? decisionStyle : "guided";
+  const reasons = summarizeManagerResponseFeedback(rows).reasons.map((item) => item.reason);
+  const has = (reason: string) => reasons.includes(reason);
+  const baseLimit = style === "concise" ? 2 : style === "detailed" ? 6 : 4;
+  return {
+    policyVersion: MANAGER_RESPONSE_ADAPTATION_POLICY_VERSION,
+    decisionStyle: style,
+    itemLimit: has("too_long") ? Math.min(baseLimit, 2) : baseLimit,
+    leadWithAnswer: has("missed_question"),
+    requireConcreteNextAction: has("too_vague") || has("missed_question"),
+    usePlainTone: has("wrong_tone"),
+    askForMissingPremise: has("missing_context"),
+    appliedReasons: reasons.filter((reason) => ["missed_question", "too_vague", "too_long", "wrong_tone", "missing_context"].includes(reason)).slice(0, 5)
+  };
+}
+
+function normalized(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
+export function applyManagerResponseAdaptation<T extends { answer: string; recommendation: { nextAction: string } | null }>(
+  result: T,
+  policy: ManagerResponseAdaptationPolicy,
+  options: { missingPremiseQuestion?: string | null } = {}
+): T {
+  let answer = result.answer.trim();
+  if (policy.leadWithAnswer || policy.usePlainTone) {
+    answer = answer
+      .replace(/^I would keep this simple\.\s*/i, "")
+      .replace(/\bMy next move would be:\s*/gi, "Next: ")
+      .replace(/\bI am basing that on what is recorded now\.\s*/gi, "That order uses the current StoryBoard record. ");
+  }
+  const nextAction = result.recommendation?.nextAction?.trim();
+  if (policy.requireConcreteNextAction && nextAction && !normalized(answer).includes(normalized(nextAction))) {
+    answer = `${answer}\n\nNext: ${nextAction}`;
+  }
+  const missingPremise = options.missingPremiseQuestion?.trim();
+  if (policy.askForMissingPremise && missingPremise && !normalized(answer).includes(normalized(missingPremise))) {
+    answer = `${answer}\n\nBefore leaning on that: ${missingPremise}`;
+  }
+  return answer === result.answer ? result : { ...result, answer };
 }

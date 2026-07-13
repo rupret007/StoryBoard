@@ -1122,7 +1122,7 @@ test("manager feedback and memory correction payloads are strict", () => {
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "useful" }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision", expectedBehavior: "Lead with the recorded balance." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalPromotionSchema.safeParse({ label: "needs_revision" }).success, false);
-  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v27", note: "Reviewed the corrected behavior against this case." }).success, true);
+  assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "manager_os_v28", note: "Reviewed the corrected behavior against this case." }).success, true);
   assert.equal(managerSchemas.managerResponseEvalResolutionSchema.safeParse({ candidateVersion: "latest", note: "Too vague" }).success, false);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "available", effectiveUntil: "2026-07-20T12:00:00.000Z" }).success, true);
   assert.equal(managerSchemas.bandMemberCheckInCreateSchema.safeParse({ status: "busy" }).success, false);
@@ -1174,6 +1174,42 @@ test("explicit response feedback becomes bounded presentation guidance without c
   assert.doesNotMatch(guidance, /send|execute|approve/i);
 });
 
+test("reviewed response corrections adapt deterministic presentation without changing facts or authority", () => {
+  const rows = [
+    { helpful: false, reason: "too_long" },
+    { helpful: false, reason: "too_vague" },
+    { helpful: false, reason: "wrong_tone" },
+    { helpful: false, reason: "missing_context" }
+  ];
+  const policy = responseQuality.managerResponseAdaptationPolicy("detailed", rows);
+  assert.equal(policy.policyVersion, "manager_response_adaptation_v1");
+  assert.equal(policy.itemLimit, 2);
+  assert.equal(policy.requireConcreteNextAction, true);
+  assert.equal(policy.usePlainTone, true);
+  assert.equal(policy.askForMissingPremise, true);
+  const result = responseQuality.applyManagerResponseAdaptation({
+    answer: "I would keep this simple. The booking board needs attention. My next move would be: review the real pipeline.",
+    citations: ["opportunity-a"],
+    recommendation: { nextAction: "Qualify the Chicago prospect before opening another market.", proposedAction: null }
+  }, policy, { missingPremiseQuestion: "Which buyer was contacted most recently?" });
+  assert.doesNotMatch(result.answer, /I would keep this simple|My next move would be/i);
+  assert.match(result.answer, /Next: Qualify the Chicago prospect/i);
+  assert.match(result.answer, /Before leaning on that: Which buyer was contacted most recently\?/i);
+  assert.deepEqual(result.citations, ["opportunity-a"]);
+  assert.equal(result.recommendation.proposedAction, null);
+});
+
+test("deterministic Manager answer depth follows the saved style and reviewed too-long correction", () => {
+  const members = ["Alex", "Morgan", "Jordan", "Casey", "Riley"].map((name, index) => ({ id: `member-${index}`, name, roles: [], instruments: [] }));
+  const load = teamLoad.deterministicManagerTeamLoad({ members, tasks: [], now });
+  const facts = managerFacts({ members, teamLoad: load });
+  const concise = responseQuality.managerResponseAdaptationPolicy("detailed", [{ helpful: false, reason: "too_long" }]);
+  const answer = intelligence.deterministicManagerChat(facts, "How is the team workload distributed?", now, undefined, undefined, concise);
+  assert.equal((answer.answer.match(/^• .*capacity check-in/gm) ?? []).length, 2);
+  assert.deepEqual(answer.citations, load.evidenceIds.slice(0, 10));
+  assert.equal(answer.recommendation, null);
+});
+
 test("manager response feedback is exact-message, tenant-safe, idempotent, and audited", async () => {
   let upserts = 0; let audits = 0;
   const client = {
@@ -1207,7 +1243,7 @@ test("manager recommendation outcome review keeps finished results bounded witho
     outcomeNote: null,
     outcomeAt,
     createdAt: outcomeAt,
-    promptVersion: "manager_os_v27",
+    promptVersion: "manager_os_v28",
     cadence: "daily",
     task: { id: "task-a", title: "Finish the work", status: "done" },
     decision: null,
@@ -1251,7 +1287,7 @@ test("manager recommendation outcome review reads only finished, unpromoted advi
           outcomeNote: null,
           outcomeAt: new Date("2026-07-12T11:00:00.000Z"),
           createdAt: new Date("2026-07-10T11:00:00.000Z"),
-          managerRun: { promptVersion: "manager_os_v27", cadence: "daily" },
+          managerRun: { promptVersion: "manager_os_v28", cadence: "daily" },
           task: { id: "task-a", title: "Finish the real task", status: "done" },
           decision: null
         }];
@@ -1281,7 +1317,7 @@ test("manager response review selects recent unrated answers across conversation
     answer: `Answer ${messageId}`,
     citations: [],
     actionTypes: [],
-    promptVersion: "manager_os_v27",
+    promptVersion: "manager_os_v28",
     mode: "deterministic",
     createdAt,
     ...overrides
@@ -1322,7 +1358,7 @@ test("manager response review reads only the active artist and current operator'
           proposedActions: [],
           createdAt: new Date("2026-07-12T11:00:00.000Z"),
           conversation: { title: "What needs attention?" },
-          managerRun: { promptVersion: "manager_os_v27", mode: "deterministic" },
+          managerRun: { promptVersion: "manager_os_v28", mode: "deterministic" },
           feedback: where.feedback.some ? [{ helpful: true, reason: null, note: null, updatedAt: new Date("2026-07-12T11:05:00.000Z") }] : [],
           responseEval: null
         }];
@@ -1628,22 +1664,22 @@ test("goal progress synchronization is evidence-bound, idempotent, tenant-scoped
 });
 
 test("offline manager evaluation gates the current policy and honors owner revision labels", () => {
-  const clean = evaluation.runManagerEvaluation("manager_os_v27", []);
+  const clean = evaluation.runManagerEvaluation("manager_os_v28", []);
   assert.equal(clean.passed, true);
   assert.equal(clean.metrics.goldenPassRate, 1);
   assert.equal(clean.metrics.safetyPassRate, 1);
-  const blocked = evaluation.runManagerEvaluation("manager_os_v27", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v27", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
+  const blocked = evaluation.runManagerEvaluation("manager_os_v28", [{ id: "review-a", label: "needs_revision", promptVersion: "manager_os_v28", snapshot: { stableKey: "goal-goal-a", workstream: "live" } }]);
   assert.equal(blocked.passed, false);
   assert.equal(blocked.metrics.ownerReviewedPassRate, 0);
   const responseSnapshot = { question: "What should we do next?", answer: "Start with the overdue venue follow-up today. Alex owns the next step.", responseStyle: "guided", citations: ["task-a"], feedback: { helpful: true, reason: null, note: null } };
-  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v27", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
-  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v27", [], [usefulResponse]);
+  const usefulResponse = { id: "response-useful", label: "useful", promptVersion: "manager_os_v28", expectedBehavior: null, resolutionVersion: null, resolvedAt: null, snapshot: responseSnapshot, inputFacts: { tasks: [{ id: "task-a" }] } };
+  const withUsefulResponse = evaluation.runManagerEvaluation("manager_os_v28", [], [usefulResponse]);
   assert.equal(withUsefulResponse.passed, true);
   assert.equal(withUsefulResponse.metrics.ownerReviewedResponseCount, 1);
   const unresolvedResponse = { ...usefulResponse, id: "response-revision", label: "needs_revision", expectedBehavior: "Lead with the recorded balance and name one next step.", snapshot: { ...responseSnapshot, feedback: { helpful: false, reason: "too_vague", note: "Lead with the balance" } } };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v27", [], [unresolvedResponse]).passed, false);
-  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v27", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
-  assert.equal(evaluation.runManagerEvaluation("manager_os_v27", [], [resolvedResponse]).passed, true);
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v28", [], [unresolvedResponse]).passed, false);
+  const resolvedResponse = { ...unresolvedResponse, promptVersion: "manager_os_v18", resolutionVersion: "manager_os_v28", resolvedAt: new Date("2026-07-12T12:00:00.000Z") };
+  assert.equal(evaluation.runManagerEvaluation("manager_os_v28", [], [resolvedResponse]).passed, true);
   assert.throws(() => evaluation.runManagerEvaluation("manager_os_future", []), /Unknown manager candidate version/);
 });
 
