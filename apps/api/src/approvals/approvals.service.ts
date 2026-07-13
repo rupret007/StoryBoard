@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import {
   calendarHoldBatchPayloadSchema,
+  bookingReplyConfirmPayloadSchema,
   driveEnsureFolderPayloadSchema,
   outboundEmailBatchPayloadSchema
 } from "@storyboard/shared";
@@ -16,6 +17,7 @@ import {
   AuditSeverity,
   BookingCampaignDeliveryStatus,
   BookingCampaignRecipientStatus,
+  BookingStage,
   ManagerRecommendationOutcome
 } from "../generated/prisma/enums";
 import type { ApprovalRequest, Prisma } from "../generated/prisma/client";
@@ -87,6 +89,7 @@ type ApprovalTransactionClient = Pick<
   | "approvalReconciliation"
   | "auditEvent"
   | "bandEvent"
+  | "bookingReply"
   | "bookingOpportunity"
   | "managerRecommendation"
 >;
@@ -217,6 +220,14 @@ function parseDriveFolder(payload: unknown): string {
     throw new BadRequestException(p.error.flatten());
   }
   return p.data.folderName;
+}
+
+function parseBookingReplyConfirmation(payload: unknown) {
+  const p = bookingReplyConfirmPayloadSchema.safeParse(payload);
+  if (!p.success) {
+    throw new BadRequestException(p.error.flatten());
+  }
+  return p.data;
 }
 
 @Injectable()
@@ -919,6 +930,127 @@ export class ApprovalsService {
     });
   }
 
+  private async finalizeBookingReplyConfirmation(
+    artistId: string,
+    approvalId: string,
+    replyId: string,
+    opportunityId: string,
+    basePayload: Record<string, unknown>,
+    actorLabel: string,
+    actorOperatorId: string | null
+  ) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const reply = await tx.bookingReply.findFirst({
+        where: { id: replyId, artistId },
+        select: { id: true, termsAppliedAt: true, opportunityId: true }
+      });
+      if (!reply) {
+        throw new NotFoundException("Reply not found");
+      }
+      if (reply.opportunityId !== opportunityId) {
+        throw new BadRequestException("Reply is no longer linked to that opportunity");
+      }
+      if (!reply.termsAppliedAt) {
+        throw new BadRequestException("Apply terms before confirming the booking");
+      }
+
+      const opportunity = await tx.bookingOpportunity.findFirst({
+        where: { id: opportunityId, artistId },
+        include: { venue: true }
+      });
+      if (!opportunity) {
+        throw new NotFoundException("Booking opportunity not found");
+      }
+
+      const previouslyConfirmed = opportunity.stage === BookingStage.confirmed;
+      const updatedOpportunity = previouslyConfirmed
+        ? opportunity
+        : await tx.bookingOpportunity.update({
+            where: { id: opportunity.id },
+            data: { stage: BookingStage.confirmed },
+            include: { venue: true }
+          });
+
+      const event = await tx.bandEvent.upsert({
+        where: { opportunityId: updatedOpportunity.id },
+        create: {
+          artistId,
+          opportunityId: updatedOpportunity.id,
+          venueId: updatedOpportunity.venueId,
+          type: "gig",
+          status: "confirmed",
+          title: updatedOpportunity.title,
+          startsAt: updatedOpportunity.targetDate,
+          locationName: updatedOpportunity.venue?.name ?? null
+        },
+        update: {
+          status: "confirmed",
+          venueId: updatedOpportunity.venueId,
+          title: updatedOpportunity.title,
+          startsAt: updatedOpportunity.targetDate,
+          locationName: updatedOpportunity.venue?.name ?? null
+        }
+      });
+
+      const executionResult = {
+        at: new Date().toISOString(),
+        opportunityId: updatedOpportunity.id,
+        eventId: event.id,
+        replyId,
+        wasAlreadyConfirmed: previouslyConfirmed
+      };
+
+      if (!previouslyConfirmed) {
+        await tx.auditEvent.create({
+          data: {
+            artistId,
+            severity: AuditSeverity.info,
+            aggregateType: "BookingOpportunity",
+            aggregateId: updatedOpportunity.id,
+            action: "booking.stage_changed",
+            actorLabel,
+            actorOperatorId,
+            metadata: { from: opportunity.stage, to: BookingStage.confirmed }
+          }
+        });
+      }
+
+      const approval = await tx.approvalRequest.update({
+        where: { id: approvalId },
+        data: {
+          status: ApprovalStatus.executed,
+          payload: {
+            ...basePayload,
+            executionResult
+          } as object
+        }
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          artistId,
+          severity: AuditSeverity.info,
+          aggregateType: "BookingReply",
+          aggregateId: reply.id,
+          action: "booking_reply.confirmed",
+          actorLabel,
+          actorOperatorId,
+          metadata: executionResult
+        }
+      });
+
+      await this.reconcileApprovalRecommendation(
+        tx,
+        artistId,
+        approvalId,
+        actorLabel,
+        actorOperatorId
+      );
+
+      return approval;
+    });
+  }
+
   private approvalPagination(input: ApprovalListPagination = {}) {
     const limit = Number.isInteger(input.limit as number)
       ? (input.limit as number)
@@ -1581,6 +1713,10 @@ export class ApprovalsService {
     const basePayload = isRecord(approvalRow.payload)
       ? { ...approvalRow.payload }
       : {};
+    const bookingReplyConfirmationPayload =
+      approvalRow.actionType === "booking_reply_confirm"
+        ? parseBookingReplyConfirmation(approvalRow.payload)
+        : null;
 
     if (dryRun) {
       const adapters = await this.registryResolver.resolveForArtist(artistId);
@@ -1609,6 +1745,11 @@ export class ApprovalsService {
         preview = {
           folderName,
           driveMode: adapters.drive.mode
+        };
+      } else if (approvalRow.actionType === "booking_reply_confirm") {
+        preview = {
+          opportunityId: bookingReplyConfirmationPayload!.opportunityId,
+          replyId: bookingReplyConfirmationPayload!.replyId
         };
       }
       const nextPayload = {
@@ -1697,6 +1838,34 @@ export class ApprovalsService {
     try {
       const logisticsSource = this.eventLogisticsSourceFor(approvalRow);
       const adapters = await this.registryResolver.resolveForArtist(artistId);
+      if (approvalRow.actionType === "booking_reply_confirm") {
+        const payload = parseBookingReplyConfirmation(approvalRow.payload);
+        const updated = await this.finalizeBookingReplyConfirmation(
+          artistId,
+          id,
+          payload.replyId,
+          payload.opportunityId,
+          basePayload,
+          actorLabel,
+          actorOperatorId
+        );
+        await this.audit.log({
+          artistId,
+          aggregateType: "ApprovalRequest",
+          aggregateId: id,
+          severity: AuditSeverity.info,
+          action: "approval.execution.succeeded",
+          actorLabel,
+          actorOperatorId,
+          metadata: {
+            actionType: approvalRow.actionType,
+            opportunityId: payload.opportunityId,
+            replyId: payload.replyId
+          }
+        });
+        this.notifyApproval(artistId, id, "executed");
+        return updated;
+      }
       if (approvalRow.actionType === "outbound_email_send_batch") {
         const outbound = parseOutboundPayload(approvalRow.payload);
         if (outbound.drafts.length > 25) throw new BadRequestException("A send batch may contain at most 25 recipients");

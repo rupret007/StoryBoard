@@ -15,9 +15,19 @@ const [approvalsMod, logisticsMod] = await Promise.all([
   load("operations/event-logistics.js")
 ]);
 
-function fakeHarness({ approval, event = null, recommendation = null, failSuccessAudit = false, driveExecution = null } = {}) {
+function fakeHarness({
+  approval,
+  event = null,
+  opportunity = null,
+  reply = null,
+  recommendation = null,
+  failSuccessAudit = false,
+  driveExecution = null
+} = {}) {
   const approvals = new Map(approval ? [[approval.id, approval]] : []);
   const events = new Map(event ? [[event.id, event]] : []);
+  const opportunities = new Map(opportunity ? [[opportunity.id, { ...opportunity, stage: opportunity.stage ?? "target" }]] : []);
+  const replies = new Map(reply ? [[reply.id, reply]] : []);
   const recommendations = new Map(
     recommendation ? [[recommendation.id, recommendation]] : []
   );
@@ -88,10 +98,50 @@ function fakeHarness({ approval, event = null, recommendation = null, failSucces
       const row = [...events.values()].find((candidate) => matches(candidate, where));
       return row ? { ...row } : null;
     },
+    upsert: async ({ where, create, update }) => {
+      const existing = [...events.values()].find(
+        (candidate) => candidate.opportunityId === where.opportunityId
+      );
+      if (existing) {
+        Object.assign(existing, update);
+        return { ...existing };
+      }
+      const row = {
+        id: `event-${events.size + 1}`,
+        ...create
+      };
+      events.set(row.id, row);
+      return { ...row };
+    },
     updateMany: async ({ where, data }) => {
       const rows = [...events.values()].filter((row) => matches(row, where));
       for (const row of rows) Object.assign(row, data, { updatedAt: new Date(row.updatedAt.getTime() + 1) });
       return { count: rows.length };
+    }
+  };
+  const bookingOpportunityDelegate = {
+    count: async ({ where }) => {
+      if (!where?.id?.in) {
+        return [...opportunities.values()].filter((candidate) => candidate.artistId === where.artistId).length;
+      }
+      return [...opportunities.values()].filter((candidate) => where.id.in.includes(candidate.id) && candidate.artistId === where.artistId).length;
+    },
+    findFirst: async ({ where }) => {
+      const row = [...opportunities.values()].find((candidate) => candidate.id === where.id && candidate.artistId === where.artistId);
+      if (!row) return null;
+      return { ...row };
+    },
+    update: async ({ where, data }) => {
+      const row = [...opportunities.values()].find((candidate) => candidate.id === where.id);
+      if (!row) throw new Error("missing opportunity");
+      Object.assign(row, data);
+      return { ...row };
+    }
+  };
+  const bookingReplyDelegate = {
+    findFirst: async ({ where }) => {
+      const row = [...replies.values()].find((candidate) => candidate.id === where.id && candidate.artistId === where.artistId);
+      return row ? { ...row } : null;
     }
   };
   const managerRecommendationDelegate = {
@@ -143,7 +193,8 @@ function fakeHarness({ approval, event = null, recommendation = null, failSucces
     },
     auditEvent: { create: async ({ data }) => (auditEvents.push(data), data) },
     bandEvent: bandEventDelegate,
-    bookingOpportunity: { count: async () => 0 },
+    bookingOpportunity: bookingOpportunityDelegate,
+    bookingReply: bookingReplyDelegate,
     managerRecommendation: managerRecommendationDelegate,
     $transaction: async (callback) => callback(client)
   };
@@ -166,7 +217,7 @@ function fakeHarness({ approval, event = null, recommendation = null, failSucces
     { resolveForArtist: async () => adapters },
     { enqueueApprovalNotify: async (input) => notifications.push(input) }
   );
-  return { service, approvals, events, recommendations, auditEvents, notifications, providerCalls, reconciliationReceipts };
+  return { service, approvals, opportunities, events, recommendations, auditEvents, notifications, providerCalls, reconciliationReceipts };
 }
 
 function approvalRow(overrides = {}) {
@@ -346,6 +397,93 @@ test("an approved non-executable record never consumes an execution claim", asyn
     ),
     false
   );
+});
+
+test("booking reply confirmation execution confirms opportunity and upserts gig event", async () => {
+  const opportunity = {
+    id: "opp-1",
+    artistId: "artist-1",
+    title: "Studio Room Fridays",
+    stage: "outreach",
+    targetDate: new Date("2027-04-02T01:00:00.000Z"),
+    venueId: "venue-1",
+    venue: { id: "venue-1", name: "The Room" }
+  };
+  const reply = {
+    id: "reply-1",
+    artistId: "artist-1",
+    opportunityId: "opp-1",
+    termsAppliedAt: new Date().toISOString()
+  };
+  const approval = approvalRow({
+    id: "approval-1",
+    status: "approved",
+    actionType: "booking_reply_confirm",
+    payload: {
+      replyId: reply.id,
+      opportunityId: opportunity.id
+    },
+    opportunityId: opportunity.id
+  });
+  const harness = fakeHarness({ approval, opportunity, reply });
+  const { opportunities } = harness;
+
+  const result = await harness.service.executeApproved(
+    "artist-1",
+    approval.id,
+    "owner@test.invalid"
+  );
+
+  assert.equal(result.status, "executed");
+  const persistedOpportunity = opportunities.get(opportunity.id);
+  assert.equal(persistedOpportunity?.stage, "confirmed");
+  assert.equal(result.payload.executionResult.opportunityId, opportunity.id);
+  assert.equal(harness.auditEvents.some((row) => row.action === "booking_reply.confirmed"), true);
+  const eventRows = [...harness.events.values()];
+  assert.equal(eventRows.length, 1);
+  assert.equal(eventRows[0].opportunityId, opportunity.id);
+  assert.equal(eventRows[0].status, "confirmed");
+  assert.equal(eventRows[0].locationName, "The Room");
+  assert.equal(harness.auditEvents.some((row) => row.action === "booking.stage_changed"), true);
+});
+
+test("booking reply confirmation execution fails if reply terms were not applied", async () => {
+  const opportunity = {
+    id: "opp-1",
+    artistId: "artist-1",
+    title: "Studio Room Fridays",
+    stage: "outreach",
+    targetDate: new Date("2027-04-02T01:00:00.000Z"),
+    venueId: null
+  };
+  const reply = {
+    id: "reply-1",
+    artistId: "artist-1",
+    opportunityId: "opp-1",
+    termsAppliedAt: null
+  };
+  const approval = approvalRow({
+    id: "approval-1",
+    status: "approved",
+    actionType: "booking_reply_confirm",
+    payload: {
+      replyId: reply.id,
+      opportunityId: opportunity.id
+    },
+    opportunityId: opportunity.id
+  });
+  const harness = fakeHarness({ approval, opportunity, reply });
+
+  const result = await harness.service.executeApproved(
+    "artist-1",
+    approval.id,
+    "owner@test.invalid"
+  );
+
+  assert.equal(result.status, "failed");
+  assert.equal(opportunity.stage, "outreach");
+  assert.equal(harness.events.size, 0);
+  assert.equal(result.payload.executionError.includes("Apply terms before confirming"), true);
 });
 
 test("event logistics rejects a stale fingerprint before provider work", async () => {

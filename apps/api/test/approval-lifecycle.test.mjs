@@ -553,7 +553,7 @@ test("legacy ready-to-execute endpoint uses the shared executable predicate", as
   const readyQuery = queries.find((entry) => entry.op === "findMany").query;
   assert.deepEqual(
     readyQuery.where.actionType.in.sort(),
-    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch"].sort()
+    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch", "booking_reply_confirm"].sort()
   );
   assert.equal(readyQuery.where.executionAttemptedAt, null);
   assert.deepEqual(result.map((item) => item.id), ["ready"]);
@@ -637,6 +637,6 @@ test("list and ready-to-execute endpoints apply limits and preserve bounded read
   );
   assert.deepEqual(
     readyQuery.where.actionType.in.sort(),
-    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch"].sort()
+    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch", "booking_reply_confirm"].sort()
   );
 });

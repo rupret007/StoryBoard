@@ -16,7 +16,8 @@ export const APPROVAL_EXECUTABLE_ACTION_TYPES = [
   "outbound_email_batch",
   "outbound_email_send_batch",
   "calendar_hold_batch",
-  "drive_ensure_folder"
+  "drive_ensure_folder",
+  "booking_reply_confirm"
 ] as const;
 
 export const APPROVAL_LIFECYCLE_RELEVANT_STATUSES = [

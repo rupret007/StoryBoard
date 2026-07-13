@@ -30,8 +30,9 @@ export const outboundEmailBatchPayloadSchema = z.object({
         .min(1),
       deliveryMode: z.enum(["draft_only", "send_on_execution"]).optional()
     })
-    .strict()
-    .optional()
+      .strict()
+      .optional(),
+  bookingReplyId: z.string().optional()
 });
 
 export const calendarHoldItemSchema = z.object({
@@ -50,6 +51,11 @@ export const driveEnsureFolderPayloadSchema = z.object({
   folderName: z.string().min(1)
 });
 
+export const bookingReplyConfirmPayloadSchema = z.object({
+  replyId: z.string().min(1),
+  opportunityId: z.string().min(1)
+}).strict();
+
 export type OutboundEmailBatchPayload = z.infer<
   typeof outboundEmailBatchPayloadSchema
 >;
@@ -58,4 +64,7 @@ export type CalendarHoldBatchPayload = z.infer<
 >;
 export type DriveEnsureFolderPayload = z.infer<
   typeof driveEnsureFolderPayloadSchema
+>;
+export type BookingReplyConfirmPayload = z.infer<
+  typeof bookingReplyConfirmPayloadSchema
 >;

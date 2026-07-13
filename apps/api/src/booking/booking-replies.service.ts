@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
@@ -12,6 +13,15 @@ import { PrismaService } from "../prisma/prisma.service";
 const ANALYSIS_PROMPT_VERSION = "booking-reply-v1";
 const ACTIVE_SINCE_MS = 180 * 86400000;
 const analysisSchema = z.object({ intent: z.nativeEnum(BookingReplyIntent), summary: z.string().min(1).max(2000), proposedDate: z.string().datetime({ offset: true }).nullable(), proposedFeeMinor: z.number().int().nonnegative().nullable(), proposedCurrency: z.string().trim().min(3).max(3).nullable(), proposedVenue: z.string().max(500).nullable(), materialConditions: z.string().max(5000).nullable(), questions: z.array(z.string().max(1000)).max(10), recommendedNextAction: z.string().min(1).max(2000), suggestedReplySubject: z.string().min(1).max(200), suggestedReplyBody: z.string().min(1).max(20000), confidence: z.number().min(0).max(1), evidence: z.array(z.string().max(500)).max(5) }).strict();
+
+function bookingReplyConfirmSourceKey(replyId: string, opportunityId: string) {
+  const payload = JSON.stringify({ replyId, opportunityId });
+  const fingerprint = createHash("sha256")
+    .update(payload)
+    .digest("hex")
+    .slice(0, 16);
+  return `booking_reply_confirmation:${replyId}:${opportunityId}:${fingerprint}`;
+}
 
 @Injectable()
 export class BookingRepliesService {
@@ -115,5 +125,30 @@ export class BookingRepliesService {
     if (!to) throw new BadRequestException("The campaign recipient has no contact email");
     const approval = await this.approvals.create(artistId, { title: `Draft reply to ${reply.recipient.prospect.name}`, actionType: "outbound_email_batch", payload: { drafts: [{ message: { to, subject: input.subject, body: input.body, threadId: reply.providerThreadId } }], bookingReplyId: id }, opportunityId: reply.opportunityId, proposedBy: actorLabel, status: ApprovalStatus.pending, actorOperatorId });
     return { approval, preview: { to, subject: input.subject, body: input.body } };
+  }
+
+  async prepareConfirmation(artistId: string, id: string, actorLabel: string, actorOperatorId: string) {
+    const reply = await this.get(artistId, id);
+    if (!reply.opportunityId) {
+      throw new BadRequestException("Link an opportunity before confirming this reply");
+    }
+    if (!reply.termsAppliedAt) {
+      throw new BadRequestException("Apply terms before confirming this booking");
+    }
+    const opportunity = await this.prisma.client.bookingOpportunity.findFirst({ where: { id: reply.opportunityId, artistId } });
+    if (!opportunity) {
+      throw new NotFoundException("Booking opportunity not found");
+    }
+    const approval = await this.approvals.create(artistId, {
+      title: `Confirm booking reply for ${reply.recipient.prospect.name}`,
+      actionType: "booking_reply_confirm",
+      payload: { replyId: reply.id, opportunityId: opportunity.id },
+      sourceKey: bookingReplyConfirmSourceKey(reply.id, opportunity.id),
+      opportunityId: opportunity.id,
+      proposedBy: actorLabel,
+      status: ApprovalStatus.pending,
+      actorOperatorId
+    });
+    return { approval, preview: { replyId: reply.id, opportunityId: opportunity.id } };
   }
 }
