@@ -1,13 +1,23 @@
 # Bootstrap Scripts
 
-This directory is reserved for local bootstrap automation.
+StoryBoard does not currently keep executable bootstrap scripts in this
+subdirectory. Supported setup is composed from versioned root workspace
+commands so local development, CI, and the container bundle use the same
+building blocks.
 
-Planned scripts:
+From the repository root, use:
 
-- `install-deps`
-- `wait-for-infra`
-- `seed-dev`
-- `verify-env`
+```bash
+pnpm install
+pnpm infra:up
+pnpm db:generate
+pnpm db:migrate
+pnpm db:seed
+pnpm preflight
+```
 
-These are intentionally not implemented in phase one so the repository remains a
-scaffold and documentation baseline.
+For the complete production-built local demo, use `pnpm container:up` instead.
+See [`../../docs/developer-runbook.md`](../../docs/developer-runbook.md) for the
+required environment and authentication choices. The executable validation and
+database helpers live directly under `scripts/` and are catalogued in
+[`../../docs/package-map.md`](../../docs/package-map.md).

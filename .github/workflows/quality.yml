@@ -82,7 +82,9 @@ jobs:
       - name: Verify API readiness and local development login
         run: |
           curl --fail --retry 12 --retry-all-errors --retry-delay 1 http://127.0.0.1:4000/ready
-          curl --fail --retry 30 --retry-all-errors --retry-delay 1 --output /dev/null http://127.0.0.1:3000/
+          curl --fail --retry 30 --retry-all-errors --retry-delay 1 http://127.0.0.1:3000/ --output landing.html
+          grep -q 'href="http://localhost:4000/auth/dev/login"' landing.html
+          ! grep -q 'href="http://api:4000/auth/' landing.html
           curl --fail --cookie-jar cookies.txt --output /dev/null http://127.0.0.1:4000/auth/dev/login
           grep -q 'sb_session' cookies.txt
       - name: Show service logs on failure

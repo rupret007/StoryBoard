@@ -2,17 +2,18 @@
 
 All third-party systems must sit behind adapter interfaces in this boundary.
 
-Current MVP adapter targets:
+Current adapter surface:
 
-- Gmail
-- Google Calendar
-- Google Drive
-- Bandsintown
-- Ticketmaster
-- YouTube
-- Spotify
+- Gmail drafts and explicitly approved bounded sends
+- Google Calendar holds/events
+- Google Drive folder creation and lookup
+- Bandsintown artist-owned event context
+- Ticketmaster city-first venue and event discovery
+- YouTube and Spotify mock-only placeholders
 
-Later adapters can be added without leaking provider details into domain modules.
+Real versus mock capability is resolved centrally from artist-scoped Google
+connections or deployment configuration. Later adapters can be added without
+leaking provider details into domain modules.
 
 ## Manager OS boundaries
 

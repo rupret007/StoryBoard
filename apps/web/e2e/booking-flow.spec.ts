@@ -11,7 +11,11 @@ function dateTimeLocalInZone(value: Date, timeZone: string) {
 }
 
 async function signInForBrowserTest(page: Page) {
-  await page.goto(`${browserTestApiUrl}/auth/dev/login`);
+  await page.goto(browserTestWebUrl);
+  const devLogin = page.getByRole("link", { name: "Dev login (local only)" });
+  await expect(devLogin).toBeVisible();
+  await expect(devLogin).toHaveAttribute("href", `${browserTestApiUrl}/auth/dev/login`);
+  await devLogin.click();
   await expect(page.getByText("Your operational home base")).toBeVisible();
   await expect.poll(async () => (await page.context().cookies()).some((cookie) => cookie.name === "sb_session"), { message: "Dev login must establish the browser session cookie" }).toBe(true);
 }

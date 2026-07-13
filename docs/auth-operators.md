@@ -51,21 +51,26 @@ Enforced in the API via **`RolePolicyService`** (not a generic permissions engin
 
 ## Local development without Google
 
-1. Set `AUTH_DEV_BYPASS=true` and `NODE_ENV=development` (enforced: bypass is rejected in production).
-2. Visit **`GET /auth/dev/login`** on the API (the web sign-in screen links to it in development).
+1. Set `AUTH_DEV_BYPASS=true` and run the API with `NODE_ENV=development`
+   (enforced: the API rejects bypass in production).
+2. Visit **`GET /auth/dev/login`** on the API. The web sign-in screen shows the
+   local-only link when `AUTH_DEV_BYPASS=true`, including in the
+   production-built local container demo.
 3. Works if the operator **exists**. With **no** memberships, use onboarding or seed for convenience.
 
 ## Protected routes
 
 All artist-scoped HTTP routes require a valid session and membership **except**:
 
-- `GET /health`, `GET /meta`
+- `GET /health`, `GET /ready`, `GET /meta`
 - `GET /auth/operator/google/start`, `GET /auth/operator/google/callback` (state-bound), `GET /auth/dev/login`
 - `GET /auth/google/callback` (integration OAuth return)
+- `POST /integrations/telegram/webhook` (optionally authenticated by
+  `X-Telegram-Bot-Api-Secret-Token`; accepts `/start` registration only)
 
 ## CSRF posture (minimal)
 
-- Global **`CsrfOriginGuard`**: for **`POST` / `PUT` / `PATCH` / `DELETE`**, **`Origin` or `Referer`** must match **`WEB_URL`** in production (plus **`http://localhost:3000`** in development). OAuth callbacks listed above are excluded.
+- Global **`CsrfOriginGuard`**: for **`POST` / `PUT` / `PATCH` / `DELETE`**, **`Origin` or `Referer`** must match **`WEB_URL`** in production (plus **`http://localhost:3000`** in development). OAuth callbacks and the Telegram webhook listed above are excluded; the webhook uses its optional provider secret instead.
 - **Deferred**: double-submit CSRF tokens, rotating sessions on every mutation, `__Host-` cookie prefixes for single-host deploys, per-route exclusions for machine clients.
 
 ## Audit actor identity

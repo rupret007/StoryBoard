@@ -32,8 +32,7 @@ export type ExecuteCommandBody = z.infer<typeof executeCommandBodySchema>;
 
 export const researchBookingIntelPayloadSchema = z
   .object({
-    city: z.string().trim().min(1).optional(),
-    radiusKm: z.number().finite().positive().optional()
+    city: z.string().trim().min(1).optional()
   })
   .strict();
 

@@ -2,7 +2,7 @@
   "name": "storyboard",
   "version": "0.1.0",
   "private": true,
-  "description": "StoryBoard monorepo scaffold for an AI-assisted operating system for bands and artists.",
+  "description": "AI-assisted operating system for bands and artists.",
   "packageManager": "pnpm@10.32.0",
   "engines": {
     "node": "22.22.x",

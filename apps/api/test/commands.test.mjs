@@ -93,6 +93,12 @@ test("booking-intel payload rejects arbitrary artist lookup", async () => {
     }).success,
     false
   );
+  assert.equal(
+    commandSchemaMod.researchBookingIntelPayloadSchema.safeParse({
+      radiusKm: 100
+    }).success,
+    false
+  );
 
   const calls = {
     resolved: [],

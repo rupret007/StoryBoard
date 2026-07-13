@@ -2,6 +2,15 @@
 # This is an override template: provide public HTTPS URLs, Google OAuth settings,
 # a strong session secret, and a non-default database password in .env.production.
 services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    # Database access stays on the private Compose network in this template.
+    ports: !reset []
+  redis:
+    # Redis has no application-level password in the current bundle, so never
+    # inherit the local demo's host-published port for a public deployment.
+    ports: !reset []
   migrate:
     environment: &production_api_environment
       NODE_ENV: production
@@ -26,5 +35,6 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
     environment:
       NODE_ENV: production
+      AUTH_DEV_BYPASS: "false"
       API_URL: ${API_URL:?API_URL is required}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}

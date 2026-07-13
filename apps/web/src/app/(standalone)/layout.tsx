@@ -9,7 +9,7 @@ export default async function StandaloneLayout({
     await serverApiFetch("/auth/me", { cache: "no-store" });
   } catch (e) {
     if (e instanceof ApiHttpError && e.status === 401) {
-      const showDev = process.env.NODE_ENV === "development";
+      const showDev = process.env.AUTH_DEV_BYPASS === "true";
       return <SignInGate showDevLogin={showDev} />;
     }
   }

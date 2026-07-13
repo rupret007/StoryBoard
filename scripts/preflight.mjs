@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "dotenv/config";
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { join } from "node:path";

@@ -17,8 +17,6 @@ const envSchema = z
       .transform((value) => value === "true"),
     OPENAI_API_KEY: z.string().optional(),
     OPENAI_MODEL: z.string().optional(),
-    OPENAI_COMMAND_MODEL: z.string().optional(),
-    OPENAI_SUMMARY_MODEL: z.string().optional(),
     OPENAI_ADVISOR_CONTEXT: z.enum(["aggregate", "full"]).default("aggregate"),
     OPENAI_MANAGER_MODEL: z.string().optional(),
     BOOKING_ADVISOR_AUTOMATION_ENABLED: z.string().optional().transform((value) => value === "true"),
@@ -33,7 +31,6 @@ const envSchema = z
     GOOGLE_DRIVE_ROOT_FOLDER_ID: z.string().optional(),
     INTEGRATION_SECRETS_ENCRYPTION_KEY: z.string().optional(),
     ENABLE_QUEUE_WORKER: z.string().optional(),
-    GMAIL_USER_EMAIL: z.string().optional(),
     BANDSINTOWN_APP_ID: z.string().optional(),
     TICKETMASTER_API_KEY: z.string().optional(),
     GOOGLE_OPERATOR_REDIRECT_URI: z

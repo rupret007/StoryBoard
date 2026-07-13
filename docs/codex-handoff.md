@@ -1,6 +1,6 @@
 # StoryBoard — agent handoff (Codex / Cursor / others)
 
-This document orients an autonomous coding agent so work continues without losing context. **Authoritative run instructions** remain in [`developer-runbook.md`](developer-runbook.md) and the root [`README.md`](../README.md).
+This document orients an autonomous coding agent so work continues without losing context. **Authoritative run instructions** remain in [`developer-runbook.md`](developer-runbook.md) and the root [`README.md`](../README.md); use the [`documentation index`](README.md) to find narrower references.
 
 ## Product and remote
 
@@ -27,7 +27,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Events, availability, show advance, songs/setlists, projects | Done; structured operations workspace, actionable gig editor, phone day-of view with editable custom run-of-show checkpoints, practical ordered setlist/song editing, shared `setlist_summary_v1` timing truth, evidence-backed show-readiness scoring, and event-bound Calendar/Drive state with explicit approval preparation shipped |
 | Release/content/tour/business execution | Done; idempotent dated milestone templates, owners/status, metrics/assets/budget, derived readiness, focused workspace, and Manager integration shipped |
 | Offers, reviewed templates, PDF snapshots, invoices/manual payments, settlements | Internal workflow done; binary Drive/Gmail attachment and provider payment/signature adapters deferred |
-| One-command local container bundle | Done (Docker Compose v2; internal web→API service URL verified; allocate 2 GB) |
+| One-command local container bundle | Done (Docker Compose v2; internal server fetches and host-visible auth links are separated and verified; allocate 2 GB) |
 | Approvals + execution (Gmail drafts, calendar holds, drive folder) | Done; event logistics uses source-keyed preparation, one-shot execution claims, stale event checks, persisted provider references, and Manager outcome reconciliation |
 | Command bar + `POST /commands/execute` (NL + structured intents) | Done |
 | Operator auth (Google OIDC), session cookie, memberships (`owner` / `member` / `viewer`) | Done |
@@ -37,7 +37,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | Compiled `node:test` contains 163 API cases plus 10 shared cases, including `event_logistics_v1` fingerprint, source-key, confirmed-gig eligibility, reviewed rejection/simulation replacement, ambiguous-failure quarantine, stale-event policy, parallel Calendar/Drive completion, one-shot approval execution, confirmed-versus-hold Calendar bodies, active-artist-only Bandsintown context, IANA-zone conversion, and daylight-saving gap/overlap coverage. All 3 opt-in Postgres workflows pass across 38 forward migrations and cover tenant links, role/audit boundaries, Manager workflows, event/project/deal operations, and provider-safe approval execution. All 12 focused Chromium journeys pass from a reset explicit test database; the cases establish their own prerequisites and cover booking, Manager, operations, finance, tasks, and confirmed gig → Calendar/Drive approval preparation → human approve/execute with mock adapters → visibly simulated event references. The offline `manager_os_v32` / `manager_evals_v35` gate passes all 70 golden checks at 100% safety. The relationship diagnostic reports no integrity issues, and the production container bundle passes migrations, seed, database/Redis/worker readiness, web HTTP, and local-session smoke. |
+| Tests | Compiled `node:test` contains 163 API cases plus 10 shared cases, including `event_logistics_v1` fingerprint, source-key, confirmed-gig eligibility, reviewed rejection/simulation replacement, ambiguous-failure quarantine, stale-event policy, parallel Calendar/Drive completion, one-shot approval execution, confirmed-versus-hold Calendar bodies, active-artist-only Bandsintown context, IANA-zone conversion, and daylight-saving gap/overlap coverage. All 3 opt-in Postgres workflows pass across 38 forward migrations and cover tenant links, role/audit boundaries, Manager workflows, event/project/deal operations, and provider-safe approval execution. All 12 focused Chromium journeys pass from a reset explicit test database; every case signs in through the visible host-resolvable landing-page link, establishes its own prerequisites, and covers booking, Manager, operations, finance, tasks, and confirmed gig → Calendar/Drive approval preparation → human approve/execute with mock adapters → visibly simulated event references. The offline `manager_os_v32` / `manager_evals_v35` gate passes all 70 golden checks at 100% safety. The relationship diagnostic reports no integrity issues, and the production container bundle passes migrations, seed, database/Redis/worker readiness, web HTTP, public-link assertions, and local-session smoke. |
 
 ## Non-goals to preserve (unless product changes)
 
@@ -88,15 +88,12 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 2. **Learning validation:** Review real band context, responsibilities, workload and task-sequence questions, operating-evidence questions, novice coaching questions, knowledge-refresh questions, explicit conversational memory proposals, natural answer verdicts, reviewed context answers, reviewed shared-task creation, update, and assignment requests, grounded short follow-ups, named-record questions and collisions, goal-measurement source choices and drift, goal target directions/finality, goal-to-action paths, competing-priority ordering, commitments, decisions, and accepted show/project setup and event-availability actions with working bands; compare expected results with observed show/project/business facts. Add or adjust role vocabulary, coaching concepts, measurement kinds, `manager_priority_v1` weights, `manager_work_sequence_v1` ordering, `manager_goal_path_v1` path rules, `manager_goal_target_v1` semantics, `manager_conversation_continuity_v1` phrases/identity rules, `manager_natural_feedback_v1` phrase families, `manager_context_capture_v1` field parsers, `manager_task_capture_v1` carrier/date rules, `manager_task_update_v1` carrier/operation rules, `manager_task_assignment_v1` carrier/name/availability rules, `manager_project_capture_v1` carrier/type/date rules, `manager_event_capture_v1` carrier/type/timezone rules, `manager_event_availability_v1` carrier/member/event/response rules, `manager_subject_reference_v1` matching rules, `manager_plan_health_v2` states, `manager_evidence_v1` review windows, or `manager_knowledge_v1` review windows only from reviewed operator evidence, never from a synthetic score alone; do not infer causality from one result or auto-activate a version. `manager_os_v32` is the current code-registered version.
 3. **Connected delivery:** Add binary Drive/Gmail document delivery only after real provider acceptance testing. Keep external work approval-gated; do not add scraping, general inbox access, or autonomous sends.
 4. **Runtime/tests:** Define queue-worker deployment, cursor pagination/query limits, and metrics before horizontal scale. Add mobile/offline resilience only after real day-of field testing.
-5. **Hosted CI health:** GitHub run `29226338604` confirmed container smoke and
-   every static, unit, evaluation, database, and build gate. Its browser stage
-   exposed one test-fixture assumption about the runner's UTC timezone. Event
-   inputs now use the recorded IANA timezone, the saved outcome is verified
-   before navigation, and all 12 focused cases pass from a reset database with
-   `CI=true` and `TZ=UTC` under the unchanged 30-second per-test default.
-   GitHub also warns that
-   `actions/checkout@v4` targets deprecated Node 20; update that action in a
-   dedicated CI-maintenance change rather than mixing it into product work.
+5. **Hosted CI health:** Before product work, confirm the current `main`
+   [Quality workflow](https://github.com/rupret007/StoryBoard/actions/workflows/quality.yml)
+   is green. The current browser fixtures use the recorded IANA timezone and
+   pass with `CI=true` and `TZ=UTC`; keep those invariants when adding event
+   journeys. Treat runner-action upgrades as dedicated CI maintenance rather
+   than mixing them into product behavior.
 
 ## Cursor-only artifacts
 

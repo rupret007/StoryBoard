@@ -1,5 +1,8 @@
 # Package Map
 
+For documentation by task, start with [`README.md`](README.md). This file maps
+the implementation layout rather than repeating setup or product guidance.
+
 ## Root
 
 - `package.json`: workspace scripts and baseline metadata

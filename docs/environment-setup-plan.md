@@ -1,8 +1,11 @@
-# StoryBoard Environment Setup Plan
+# StoryBoard Environment Setup
 
 ## Objective
 
-Reliable local bootstrap: Docker Compose for Postgres and Redis, `pnpm` for the monorepo, Prisma 7 for schema and migrations, and validated API configuration.
+This is the implemented local bootstrap contract: Docker Compose for Postgres
+and Redis, `pnpm` for the monorepo, Prisma 7 for schema and migrations, and
+validated API configuration. For the end-to-end command sequence and
+troubleshooting, use [`developer-runbook.md`](developer-runbook.md).
 
 ## Prisma 7 layout
 
@@ -55,10 +58,16 @@ Compose injects `POSTGRES_*` into the container; your app uses **`DATABASE_URL`*
 
 - `OPENAI_ENABLED` — set `false` to skip requiring a real key
 - `OPENAI_API_KEY` — required only when `OPENAI_ENABLED=true`
-- `OPENAI_MODEL`, `OPENAI_COMMAND_MODEL`, `OPENAI_SUMMARY_MODEL` — optional
+- `OPENAI_MODEL` — optional Booking advisor and booking-reply analysis model
+- `OPENAI_MANAGER_MODEL` — optional Manager brief/chat model; defaults to the
+  code-registered balanced reasoning model
 - `OPENAI_ADVISOR_CONTEXT` — `aggregate` by default; `full` sends artist CRM
   context to the configured OpenAI provider for the Booking advisor. This is a
   deployment-wide choice, not an artist-level setting.
+- `BOOKING_ADVISOR_AUTOMATION_ENABLED` — deployment gate for owner-configured
+  advisor automation
+- `MANAGER_SCHEDULE_SCAN_MS` — optional Manager schedule scan interval; minimum
+  one minute and 15 minutes by default
 
 ### Integrations (not required for boot)
 

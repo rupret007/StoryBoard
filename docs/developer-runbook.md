@@ -114,7 +114,10 @@ any public deployment. Production must set `NODE_ENV=production`, disable
 the local demo profile is not appropriate for an internet-facing deployment.
 Server-rendered requests prefer `INTERNAL_API_URL`; the local container bundle
 sets it to `http://api:4000` so web-to-API traffic stays on the Compose network
-while browsers continue using `NEXT_PUBLIC_API_URL`.
+while browsers continue using `NEXT_PUBLIC_API_URL`. The production override
+also requires a non-default `POSTGRES_PASSWORD` and removes the host-published
+Postgres and Redis ports; those services remain reachable by the application on
+the private Compose network.
 Use `docker-compose.production.yml` as the production override template:
 
 ```bash
@@ -252,10 +255,15 @@ The body is JSON validated with Zod. Provide **either** natural language **`text
 | `draft_venue_outreach` | — | Draft email previews + **approval** row (no send) |
 | `rank_venues_by_fit` | — | Rank only stored artist-owned venues by `fitScore` |
 | `draft_release_checklist` | — | Checklist steps + **approval** row |
-| `research_booking_intel` | `{ "city"?, "artistName"? }` | Read-only artist event context from Bandsintown plus Ticketmaster intel (`providerModes` in result) |
+| `research_booking_intel` | `{ "city"?: string }` optional | Read-only active-artist event context from Bandsintown plus Ticketmaster intel (`providerModes` in result) |
 | `enqueue_research_refresh` | `{ "city"?: string }` optional | Enqueues BullMQ job `research.refresh` on `storyboard-enrichment` when Redis is up |
 
 Optional body field **`dryRun`** (boolean, default **`true`**): stored on `CommandRun`; keeps commands non-destructive unless you pass `dryRun: false`.
+
+The strict `research_booking_intel` payload derives the artist name from the
+active tenant and accepts only an optional non-empty city. It rejects unknown
+fields rather than allowing callers to select another artist or imply an
+unsupported search radius.
 
 **Natural language (examples, not exhaustive):** pending approvals; “overdue” / “follow up” (due-based), or “7” / “seven” with follow-up (stale 7d); booking pipeline / health; draft + outreach/email/venue; venue + rank/fit/driving; release + checklist; enqueue + research/refresh; research / bandsintown / ticketmaster / show calendar.
 
@@ -307,8 +315,9 @@ document templates.
 Manager routes:
 
 - `GET` / `PUT /manager/profile`; `POST /manager/intake/complete`
-- `GET` / `POST` / `PATCH /manager/members`, `/manager/goals`, and
-  `/manager/initiatives`
+- `GET` / `POST /manager/members`, `/manager/goals`, and
+  `/manager/initiatives`; `PATCH /manager/members/:id`,
+  `/manager/goals/:id`, and `/manager/initiatives/:id`
 - `GET /manager/plan-health`; `GET` / `POST /manager/goals/:id/progress`
 - `GET /manager/goal-measurements` — current `manager_goal_measurement_v1`
   projection for every goal, including source, observed/recorded values, drift,
@@ -752,13 +761,15 @@ retain a Playwright trace and should restart from the database reset. If port
 3000 or 4000 is occupied locally, set `E2E_WEB_URL` and/or `E2E_API_URL` to an
 available loopback URL; the runner uses those values consistently for its
 build, servers, redirects, and browser requests.
-The CI container smoke waits for API and web readiness independently, then
-verifies that dev login writes an `sb_session` cookie without following the
-browser redirect.
+The CI container smoke waits for API and web readiness independently, verifies
+that the landing page renders a host-resolvable Dev login URL rather than the
+internal Compose hostname, and then verifies that dev login writes an
+`sb_session` cookie. Playwright follows that same visible link in every focused
+browser journey.
 
 Operations routes:
 
-- `GET` / `POST` / `PATCH /events`, `GET /events/:id`,
+- `GET` / `POST /events`, `GET` / `PATCH /events/:id`,
   `POST /events/from-opportunity/:opportunityId`, participant upsert, and
   advance generation
 - `POST /events/:id/prepare-logistics-approvals` — for a confirmed gig with an
@@ -775,21 +786,22 @@ Operations routes:
 - `POST /events/:id/schedule`, `PATCH /events/:id/schedule/:itemId`, and
   `DELETE /events/:id/schedule/:itemId` — strict, tenant-scoped custom
   run-of-show checkpoints; owner/member writes only
-- `GET` / `POST` / `PATCH /songs`, `/setlists`, and `/projects`. Setlist reads
+- `GET` / `POST /songs`, `/setlists`, and `/projects`; item updates use
+  `PATCH /songs/:id`, `/setlists/:id`, and `/projects/:id`. Setlist reads
   include the derived `setlist_summary_v1` timing summary; writes replace the
   submitted ordered item list atomically after validating every song belongs
   to the active artist.
 - `GET /projects/readiness`, `GET /projects/:id/readiness`, and
   `POST /projects/:id/generate-plan` — explainable active-project health plus
   idempotent type-specific milestone generation
-- `GET` / `POST` / `PATCH /deals`, document generation, and approval-gated
-  delivery preparation
+- `GET` / `POST /deals`, `PATCH /deals/:id`, document generation, and
+  approval-gated delivery preparation
 - `GET` / `POST /document-templates`, `PUT /document-templates/:id/activate`
   (owner-only writes)
-- `GET` / `POST` / `PATCH /invoices`,
+- `GET` / `POST /invoices`, `PATCH /invoices/:id`,
   `POST /invoices/:id/record-payment`
-- `GET` / `POST` / `PATCH /expenses` for event/project costs
-- `GET` / `POST` / `PATCH /settlements`,
+- `GET` / `POST /expenses`, `PATCH /expenses/:id` for event/project costs
+- `GET` / `POST /settlements`, `PATCH /settlements/:id`,
   `POST /settlements/:id/finalize`
 
 All relationships are re-checked in the service layer. Cross-artist IDs return
@@ -906,10 +918,10 @@ response.
 - `POST /booking-prospects/:id/convert` — qualified prospect → idempotent target
   opportunity. Only a `venue` prospect creates a physical `Venue`; private and
   corporate leads remain venue-less and can create/link a buyer contact.
-- `GET` / `POST` / `PATCH /market-sprints` and `GET /market-sprints/:id` — a
+- `GET` / `POST /market-sprints` and `GET` / `PATCH /market-sprints/:id` — a
   city-focused booking workspace. Sprints link prospects and campaigns and
   return funnel counts plus overdue campaign follow-ups.
-- `GET` / `POST` / `PATCH /booking-campaigns` and
+- `GET` / `POST /booking-campaigns`, `PATCH /booking-campaigns/:id`, and
   `POST /booking-campaigns/:id/recipients` /
   `PATCH /booking-campaigns/:id/recipients/:recipientId` — draft campaign and
   recipient management. Only qualified prospects can be recipients.

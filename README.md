@@ -5,6 +5,13 @@ designed to reflect how real band management works: venue relationships, booking
 workflow, scheduling, release coordination, approvals, show operations, and
 business follow-through.
 
+To try the complete local product, use [Run the local container bundle](#run-the-local-container-bundle).
+For source development, follow [Run locally](#run-locally-from-zero) and the
+[`developer-runbook`](docs/developer-runbook.md). The
+[`documentation index`](docs/README.md) maps product, architecture, operations,
+integration, and agent handoff material without requiring readers to scan this
+entire file.
+
 ## Locked Stack
 
 - `pnpm` workspace monorepo (Node `22.22.x`, pnpm `10.x`)
@@ -72,7 +79,9 @@ docker compose --env-file .env.compose -f docker-compose.app.yml up --build
 
 `NEXT_PUBLIC_API_URL` is embedded at web-image build time, so rebuild after
 changing it. This is a local demo profile: a public deployment must disable dev
-bypass and configure Google OAuth, real secrets, and public `WEB_URL`/API URLs.
+bypass and configure Google OAuth, real secrets, a non-default database
+password, and public `WEB_URL`/API URLs. The production Compose override removes
+host-published Postgres and Redis ports.
 
 **Phase 3A:** Operator auth (Google OIDC + optional dev bypass), `Operator` / `ArtistMembership`, session-guarded routes, integration OAuth state bound to the signed-in operator, and audit rows with `actorOperatorId`. See `docs/auth-operators.md`.
 
@@ -536,14 +545,13 @@ Gmail (OAuth compose/send), Bandsintown (the artist's own event context only), a
 
 ## Read Next
 
-- `AGENTS.md` — concise rules for coding agents
-- `docs/codex-handoff.md` — handoff: what is shipped, where code lives, next-work ideas
-- `docs/architecture.md`
-- `docs/domain-model.md`
-- `docs/integration-plan.md`
-- `docs/environment-setup-plan.md`
-- `docs/developer-runbook.md`
-- `docs/workflow-automation.md`
-- `docs/telegram-alerts.md`
-- `docs/package-map.md`
-- `.cursor/plans/storyboard-master-plan.md` (historical roadmap; cross-check README phases)
+- [`docs/README.md`](docs/README.md) — documentation index by task
+- [`AGENTS.md`](AGENTS.md) — concise rules for coding agents
+- [`docs/codex-handoff.md`](docs/codex-handoff.md) — current delivery snapshot,
+  code entry points, quality gate, and remaining work
+- [`docs/developer-runbook.md`](docs/developer-runbook.md) — authoritative setup,
+  validation, and release procedures
+- [`docs/architecture.md`](docs/architecture.md) and
+  [`docs/domain-model.md`](docs/domain-model.md) — system and data boundaries
+- [`.cursor/plans/storyboard-master-plan.md`](.cursor/plans/storyboard-master-plan.md)
+  — historical roadmap only; do not treat it as current scope

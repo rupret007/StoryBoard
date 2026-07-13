@@ -37,12 +37,12 @@ export default async function AppLayout({
   }
 
   if (needsSignIn || !me) {
-    const showDev = process.env.NODE_ENV === "development";
+    const showDev = process.env.AUTH_DEV_BYPASS === "true";
     return <SignInGate showDevLogin={showDev} />;
   }
 
   if (me.memberships.length === 0) {
-    const showDev = process.env.NODE_ENV === "development";
+    const showDev = process.env.AUTH_DEV_BYPASS === "true";
     return <OnboardingGate showDevHint={showDev} />;
   }
 

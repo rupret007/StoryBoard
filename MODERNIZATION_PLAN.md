@@ -1806,6 +1806,25 @@ artist IDs disagree. Do not repair or delete such data automatically.
 
 ## Progress log
 
+- 2026-07-13: Completed a code-backed documentation and runnable-release audit.
+  Added a task-oriented documentation index, replaced stale scaffold/future
+  language in package READMEs, corrected Manager/operations/booking route shapes,
+  documented owner-only Google connection and public readiness/Telegram routes,
+  and removed unused environment knobs plus the accepted-but-ignored booking
+  research radius. The audit reproduced the local container's broken sign-in:
+  server rendering leaked `http://api:4000` into browser links while production
+  rendering hid Dev login. Browser-visible links now use only the public API
+  origin, the demo exposes Dev login only when its API bypass is explicitly
+  enabled, production disables it, all 12 Playwright journeys enter through the
+  visible landing-page link, and container CI rejects internal-hostname links.
+  `pnpm preflight` now loads the repo `.env`. The production Compose override
+  requires a database password and keeps Postgres/Redis off host-published ports.
+  Validation passed Prisma generation, typecheck, lint, 163 API + 10 shared
+  tests, both production builds, 70/70 Manager checks, all 3 database workflows
+  across 38 migrations, all 12 Chromium journeys, zero relationship-audit
+  issues, local/production Compose contract assertions, Markdown link checks,
+  and a rebuilt container landing/login/session/readiness smoke on ports
+  3100/4100. No Prisma migration was required.
 - 2026-07-12: Implemented the safe event-logistics agency seam. Confirmed gigs
   can produce source-keyed Calendar/Drive approval requests from Operations or
   an accepted deterministic Manager recommendation; neither path calls a

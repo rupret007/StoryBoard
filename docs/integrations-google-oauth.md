@@ -23,7 +23,7 @@ This document describes the **integration** Google OAuth flow (Calendar / Gmail 
 
 ## Flow
 
-1. Signed-in operator opens **`GET {API_URL}/integrations/google/authorize?artistId={id}`** (StoryBoard UI exposes a link; route requires session + **membership** for `artistId`).
+1. Signed-in operator opens **`GET {API_URL}/integrations/google/authorize?artistId={id}`** (StoryBoard UI exposes a link; route requires session + an **owner membership** for `artistId`).
 2. User signs in and consents; Google redirects to **`GET {API_URL}/auth/google/callback?code=…&state=…`**.
 3. API validates `state` (HMAC with `SESSION_SECRET`, includes `operatorId` — must match session), exchanges `code`, **upserts** `IntegrationConnection` with `provider = "google"`, `status = "active"`, and encrypted secrets `{ blob: … }`.
 4. User is redirected to **`WEB_URL/?googleConnected=1`** (or `googleError=…` on failure).

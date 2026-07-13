@@ -2,5 +2,11 @@
 
 Shared React UI building blocks for StoryBoard.
 
-This package is intentionally small in phase one and will grow as the operator
-interface becomes more componentized.
+It contains presentation-focused primitives such as page headers, surface
+cards, metrics, badges, command-center cards, and empty states. It must not
+depend on API implementation code or own data fetching.
+
+```bash
+pnpm --filter @storyboard/ui typecheck
+pnpm --filter @storyboard/ui build
+```

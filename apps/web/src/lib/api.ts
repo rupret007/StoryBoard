@@ -1,16 +1,39 @@
+function firstConfiguredUrl(...values: Array<string | undefined>): string | null {
+  for (const value of values) {
+    const configured = value?.trim();
+    if (configured) return configured.replace(/\/$/, "");
+  }
+  return null;
+}
+
+/**
+ * API origin safe to render into browser-visible links.
+ *
+ * INTERNAL_API_URL is intentionally excluded: it may be a private service
+ * hostname (for example `http://api:4000` inside Docker Compose) that the
+ * operator's browser cannot resolve.
+ */
+export function publicApiBaseUrl(): string {
+  return (
+    firstConfiguredUrl(
+      process.env.NEXT_PUBLIC_API_URL,
+      process.env.API_URL
+    ) ?? "http://localhost:4000"
+  );
+}
+
 export function apiBaseUrl(): string {
   if (typeof window === "undefined") {
     return (
-      process.env.INTERNAL_API_URL ??
-      process.env.API_URL ??
-      process.env.NEXT_PUBLIC_API_URL ??
+      firstConfiguredUrl(
+        process.env.INTERNAL_API_URL,
+        process.env.API_URL,
+        process.env.NEXT_PUBLIC_API_URL
+      ) ??
       "http://localhost:4000"
     );
   }
-  return (
-    process.env.NEXT_PUBLIC_API_URL ??
-    "http://localhost:4000"
-  );
+  return publicApiBaseUrl();
 }
 
 export type ApiFetchInit = Omit<RequestInit, "body"> & {
