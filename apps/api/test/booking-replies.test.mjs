@@ -116,6 +116,9 @@ function serviceFixture({
           (row) => row.id === where.id && row.artistId === where.artistId
         ) ?? null
     },
+    bandEvent: {
+      findUnique: async () => null
+    },
     auditEvent: {
       create: async ({ data }) => {
         state.audits.push(data);
@@ -281,8 +284,47 @@ test("prepare confirmation requires applied terms", async () => {
   );
 });
 
+test("prepare confirmation rejects closed opportunities", async () => {
+  const fixture = serviceFixture({
+    existingOpportunity: { id: "opp-a", artistId: "artist-a", stage: "closed" }
+  });
+  fixture.service.approvals = {
+    create: async () => {
+      throw new Error("should not be called");
+    }
+  };
+  const { service, state } = fixture;
+  state.replies.push({
+    id: "reply-a",
+    artistId: "artist-a",
+    recipientId: "recipient-a",
+    opportunityId: "opp-a",
+    providerThreadId: "thread-a",
+    fromEmail: "buyer@example.test",
+    termsAppliedAt: new Date().toISOString(),
+    recipient: {
+      prospect: { id: "prospect-a", name: "A Buyer" },
+      campaign: { id: "campaign-a", name: "Show campaign" },
+      opportunity: { id: "opp-a", name: "Venue Show", artistId: "artist-a", stage: "closed" },
+      contact: { id: "contact-a", fullName: "A Buyer", email: "buyer@example.test" }
+    }
+  });
+  await assert.rejects(
+    () => service.prepareConfirmation("artist-a", "reply-a", "owner@test.invalid", "operator-a"),
+    /closed opportunity/i
+  );
+});
+
 test("prepare confirmation creates idempotent approval payload", async () => {
-  const fixture = serviceFixture();
+  const fixture = serviceFixture({
+    existingOpportunity: {
+      id: "opp-a",
+      artistId: "artist-a",
+      stage: "offer",
+      targetDate: null,
+      venueId: null
+    }
+  });
   const { service, state } = fixture;
 
   state.replies.push({
@@ -318,5 +360,11 @@ test("prepare confirmation creates idempotent approval payload", async () => {
   assert.equal(first.approval.actionType, "booking_reply_confirm");
   assert.equal(first.approval.payload.replyId, "reply-a");
   assert.equal(first.approval.payload.opportunityId, "opp-a");
+  assert.equal(first.preview.opportunityStage, "offer");
+  assert.equal(first.preview.opportunityId, "opp-a");
+  assert.deepEqual(first.preview.readinessNotes, [
+    "No target date is stored yet; the confirmed show will stay un-dated.",
+    "No linked venue is stored; the confirmed show will remain location-neutral."
+  ]);
   assert.equal(state.approvals.length, 1);
 });

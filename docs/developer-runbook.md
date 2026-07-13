@@ -1099,7 +1099,9 @@ reconnect Google with `gmail.readonly` and opt the artist into tracked replies:
 - `POST /booking-replies/:id/apply-terms` — explicitly apply reviewed facts to the linked opportunity.
 - `POST /booking-replies/:id/prepare-confirmation` — validate reviewed terms and prepare an
   approval that marks the linked opportunity as confirmed and upserts a gig event
-  (reviewed, idempotent).
+  (reviewed, idempotent). Closed opportunities are rejected, idempotent
+  re-prepare uses the same approval id, and the preview includes venue/date
+  readiness notes plus the current stage for human confirmation.
 - `POST /booking-replies/:id/prepare-approval` — prepare a threaded Gmail draft through Approvals; never sends.
 
 The periodic worker uses `GMAIL_REPLY_SYNC_REPEAT_MS` (15 minutes by default),

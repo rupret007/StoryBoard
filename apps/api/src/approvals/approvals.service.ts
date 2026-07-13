@@ -961,6 +961,9 @@ export class ApprovalsService {
       if (!opportunity) {
         throw new NotFoundException("Booking opportunity not found");
       }
+      if (opportunity.stage === BookingStage.closed) {
+        throw new BadRequestException("Cannot confirm a closed opportunity");
+      }
 
       const previouslyConfirmed = opportunity.stage === BookingStage.confirmed;
       const updatedOpportunity = previouslyConfirmed

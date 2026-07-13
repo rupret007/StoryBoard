@@ -3,7 +3,13 @@ import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableE
 import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
 import { z } from "zod";
-import { ApprovalStatus, BookingCampaignRecipientStatus, BookingReplyIntent, BookingReplyProcessingStatus } from "../generated/prisma/enums";
+import {
+  ApprovalStatus,
+  BookingCampaignRecipientStatus,
+  BookingReplyIntent,
+  BookingReplyProcessingStatus,
+  BookingStage
+} from "../generated/prisma/enums";
 import { ApprovalsService } from "../approvals/approvals.service";
 import { AuditService } from "../audit/audit.service";
 import { AdapterRegistryResolver } from "../integrations/adapter-registry.resolver";
@@ -139,6 +145,13 @@ export class BookingRepliesService {
     if (!opportunity) {
       throw new NotFoundException("Booking opportunity not found");
     }
+    if (opportunity.stage === BookingStage.closed) {
+      throw new BadRequestException("Cannot confirm a closed opportunity");
+    }
+    const existingEvent = await this.prisma.client.bandEvent.findUnique({
+      where: { opportunityId: opportunity.id },
+      select: { id: true, status: true }
+    });
     const approval = await this.approvals.create(artistId, {
       title: `Confirm booking reply for ${reply.recipient.prospect.name}`,
       actionType: "booking_reply_confirm",
@@ -149,6 +162,22 @@ export class BookingRepliesService {
       status: ApprovalStatus.pending,
       actorOperatorId
     });
-    return { approval, preview: { replyId: reply.id, opportunityId: opportunity.id } };
+    const readinessNotes: string[] = [];
+    if (!opportunity.targetDate) {
+      readinessNotes.push("No target date is stored yet; the confirmed show will stay un-dated.");
+    }
+    if (!opportunity.venueId) {
+      readinessNotes.push("No linked venue is stored; the confirmed show will remain location-neutral.");
+    }
+    return {
+      approval,
+      preview: {
+        replyId: reply.id,
+        opportunityId: opportunity.id,
+        opportunityStage: opportunity.stage,
+        existingEventId: existingEvent?.id ?? null,
+        readinessNotes
+      }
+    };
   }
 }

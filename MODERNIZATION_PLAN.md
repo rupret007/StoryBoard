@@ -98,6 +98,7 @@ mock-safe provider adapters.
 - [x] Add explicit per-artist AI email-analysis consent. Full message bodies are fetched transiently for a selected reply; only structured analysis, confidence, and proposed deal facts are retained.
 - [x] Require members to apply extracted terms explicitly and route threaded reply drafts through the existing approval center. No reply is automatically sent and no opportunity stage changes automatically.
 - [x] Add reply-to-opportunity confirmation preparation: validate reviewed terms, prepare `booking_reply_confirm` approval, execute idempotently to confirm opportunities, and upsert a `BandEvent` with audited linkage.
+- [x] Make stage transitions explicit and safe: `closed` opportunities cannot be confirmed, `confirmed` is terminal, and repeated confirmation calls remain idempotent and do not duplicate events.
 - [ ] Enable in production only after Google restricted-scope verification, security/privacy review, and real Gmail acceptance testing. `GMAIL_REPLY_SYNC_ENABLED` remains false by default.
 
 ### P0 — Manager brain and guided operating system (completed 2026-07-11)
@@ -2227,6 +2228,14 @@ artist IDs disagree. Do not repair or delete such data automatically.
   issues, local/production Compose contract assertions, Markdown link checks,
   and a rebuilt container landing/login/session/readiness smoke on ports
   3100/4100. No Prisma migration was required.
+- 2026-07-13: Hardened booking-reply confirmation and booking-opportunity transitions.
+  `booking_opportunities.updateStage` now enforces a bounded transition policy:
+  `confirmed` is terminal and every closed-stage write is blocked; the API
+  re-checks and skips no-op writes, avoiding duplicate audit entries. Booking
+  reply confirmation now rejects closed opportunities before approval creation and
+  includes explicit `opportunityStage` plus `readinessNotes` (missing date/venue)
+  in the preview. Validation passed root typecheck, lint, full test suite,
+  production builds, and manager eval.
 - 2026-07-12: Implemented the safe event-logistics agency seam. Confirmed gigs
   can produce source-keyed Calendar/Drive approval requests from Operations or
   an accepted deterministic Manager recommendation; neither path calls a

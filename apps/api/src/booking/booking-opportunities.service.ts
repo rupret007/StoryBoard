@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "../generated/prisma/client";
 import { BookingStage } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
@@ -14,6 +14,52 @@ export class BookingOpportunitiesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService
   ) {}
+
+  private readonly stageTransitionPolicy: Record<
+    BookingStage,
+    readonly BookingStage[]
+  > = {
+    [BookingStage.target]: [
+      BookingStage.outreach,
+      BookingStage.conversation,
+      BookingStage.offer,
+      BookingStage.hold,
+      BookingStage.confirmed,
+      BookingStage.closed
+    ],
+    [BookingStage.outreach]: [
+      BookingStage.conversation,
+      BookingStage.offer,
+      BookingStage.hold,
+      BookingStage.confirmed,
+      BookingStage.closed
+    ],
+    [BookingStage.conversation]: [
+      BookingStage.offer,
+      BookingStage.hold,
+      BookingStage.confirmed,
+      BookingStage.closed
+    ],
+    [BookingStage.offer]: [
+      BookingStage.hold,
+      BookingStage.confirmed,
+      BookingStage.closed
+    ],
+    [BookingStage.hold]: [
+      BookingStage.offer,
+      BookingStage.confirmed,
+      BookingStage.closed
+    ],
+    [BookingStage.confirmed]: [BookingStage.closed],
+    [BookingStage.closed]: []
+  };
+
+  private assertValidStageTransition(from: BookingStage, to: BookingStage) {
+    if (from === to) return;
+    if (!this.stageTransitionPolicy[from].includes(to)) {
+      throw new BadRequestException("Invalid booking stage transition");
+    }
+  }
 
   list(artistId: string) {
     return this.prisma.client.bookingOpportunity.findMany({
@@ -87,9 +133,32 @@ export class BookingOpportunitiesService {
     actorOperatorId?: string | null
   ) {
     const existing = await this.get(artistId, id);
+    this.assertValidStageTransition(existing.stage, stage);
+    if (existing.stage === stage) {
+      return existing;
+    }
     const { row, event } = await this.prisma.client.$transaction(async (tx) => {
       const updated = await tx.bookingOpportunity.update({ where: { id }, data: { stage }, include: { venue: true } });
-      const linkedEvent = stage === BookingStage.confirmed ? await tx.bandEvent.upsert({ where: { opportunityId: updated.id }, create: { artistId, opportunityId: updated.id, venueId: updated.venueId, type: "gig", status: "confirmed", title: updated.title, startsAt: updated.targetDate, locationName: updated.venue?.name ?? null }, update: { status: "confirmed" } }) : null;
+      const linkedEvent = stage === BookingStage.confirmed ? await tx.bandEvent.upsert({
+        where: { opportunityId: updated.id },
+        create: {
+          artistId,
+          opportunityId: updated.id,
+          venueId: updated.venueId,
+          type: "gig",
+          status: "confirmed",
+          title: updated.title,
+          startsAt: updated.targetDate,
+          locationName: updated.venue?.name ?? null
+        },
+        update: {
+          status: "confirmed",
+          venueId: updated.venueId,
+          title: updated.title,
+          startsAt: updated.targetDate,
+          locationName: updated.venue?.name ?? null
+        }
+      }) : null;
       return { row: updated, event: linkedEvent };
     });
     if (event) {

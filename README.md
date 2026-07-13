@@ -589,7 +589,9 @@ PDF. Binary Drive upload and Gmail attachment remain a later adapter package.
 Owners can additionally execute a validated booking-confirmation flow from a reply:
 `POST /booking-replies/:id/prepare-confirmation` validates reviewed terms and
 prepares a `booking_reply_confirm` approval; execution confirms the linked
-opportunity and idempotently upserts a confirmed gig event.
+opportunity and idempotently upserts a confirmed gig event. Confirmations are
+rejected for closed opportunities, and the preview now includes the
+current-opportunity stage plus readiness notes for missing date or venue data.
 
 Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/environment-setup-plan.md`.
 
