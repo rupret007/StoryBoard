@@ -1643,7 +1643,9 @@ Implementation and validation:
   diagnostic reports zero integrity issues. A container image containing the
   exact current application code rebuilt successfully, found no pending
   migration, reports ready database, Redis, and worker dependencies, and serves
-  the web app with HTTP 200.
+  the web app with HTTP 200. GitHub Quality run `29221171373` then passed the
+  hosted verify and container-smoke jobs on published commit `ce31beb`, including
+  all four production Chromium journeys.
 
 ### P0 — Events, projects, music, and internal deal operations (completed 2026-07-11)
 
