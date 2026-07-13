@@ -1718,6 +1718,8 @@ Validation status:
   Each case establishes its own prerequisites; event logistics verifies
   preparation, separate human approve/execute, mock adapter results, and
   persisted event references without a long order-dependent Manager journey.
+  The suite also passes with `CI=true` and `TZ=UTC`; date-time inputs are
+  formatted in each event's IANA timezone rather than the runner's timezone.
 - The production container bundle rebuilt and passed migration, seed,
   database/Redis/worker readiness, web HTTP, and dev-session smoke. The bundle
   is left running with the validated images for local use.

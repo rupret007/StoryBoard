@@ -1,7 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
+import { instantToDateTimeLocal } from "@storyboard/shared";
 
 const browserTestWebUrl = process.env.E2E_WEB_URL ?? "http://127.0.0.1:3000";
 const browserTestApiUrl = process.env.E2E_API_URL ?? "http://127.0.0.1:4000";
+
+function dateTimeLocalInZone(value: Date, timeZone: string) {
+  const result = instantToDateTimeLocal(value, timeZone);
+  if (!result.ok) throw new Error(result.message);
+  return result.value;
+}
 
 async function signInForBrowserTest(page: Page) {
   await page.goto(`${browserTestApiUrl}/auth/dev/login`);
@@ -615,7 +622,8 @@ test("manager-created gigs become practical day-of workspaces", async ({ page })
 
   await page.goto("/operations");
   const eventStart = new Date("2026-09-16T00:00:00.000Z");
-  const localEventStart = new Date(eventStart.getTime() - eventStart.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const localTime = (date: Date) => dateTimeLocalInZone(date, "America/Chicago");
+  const localEventStart = localTime(eventStart);
   await expect(page.getByText(eventTitle, { exact: true })).toBeVisible();
   await expect(page.getByText(/not show-ready yet/i)).toBeVisible();
   await expect(page.getByText(/confidence/i).first()).toBeVisible();
@@ -626,7 +634,6 @@ test("manager-created gigs become practical day-of workspaces", async ({ page })
   await expect(page.getByLabel(`Availability for Alex at E2E rehearsal ${suffix}`)).toHaveValue("available");
   await expect(page.getByLabel(`Availability for Morgan at E2E rehearsal ${suffix}`)).toHaveValue("available");
   await page.getByLabel(`Location name for E2E rehearsal ${suffix}`).fill("E2E Working Room");
-  const localTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   await page.getByLabel(`Load-in for E2E rehearsal ${suffix}`).fill(localTime(new Date(eventStart.getTime() - 3 * 3600000)));
   await page.getByLabel(`Soundcheck for E2E rehearsal ${suffix}`).fill(localTime(new Date(eventStart.getTime() - 2 * 3600000)));
   await page.getByLabel(`Doors for E2E rehearsal ${suffix}`).fill(localTime(new Date(eventStart.getTime() - 1 * 3600000)));
@@ -726,9 +733,9 @@ test("manager-created release projects stay grounded in operations", async ({ pa
 test("show finance records produce grounded outcome answers", async ({ page }) => {
   const suffix = Date.now().toString(36);
   const eventTitle = `E2E finance show ${suffix}`;
-  const localTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const localTime = (date: Date) => dateTimeLocalInZone(date, "America/Chicago");
   const { artistId } = await ensureManagerFoundation(page);
-  await artistApi(page, artistId, "/events", "POST", {
+  const financeEvent = await artistApi<{ id: string }>(page, artistId, "/events", "POST", {
     type: "gig",
     status: "confirmed",
     title: eventTitle,
@@ -792,7 +799,10 @@ test("show finance records produce grounded outcome answers", async ({ page }) =
   await page.getByLabel(`Gross revenue for ${eventTitle}`).fill("500");
   await page.getByLabel(`Post-show notes for ${eventTitle}`).fill("Strong audience response; tighten the changeover next time.");
   await page.getByLabel(`Relationship outcome for ${eventTitle}`).fill("Buyer invited a return pitch.");
+  const eventSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().endsWith(`/events/${financeEvent.id}`) && response.ok());
   await completedShow.getByRole("button", { name: "Save event details" }).click();
+  const savedEvent = await (await eventSaved).json() as { attendance: number | null; grossRevenueMinor: number | null; status: string };
+  expect(savedEvent).toMatchObject({ attendance: 135, grossRevenueMinor: 50_000, status: "completed" });
   await expect(completedShow.locator("span").filter({ hasText: /^completed$/ })).toBeVisible();
 
   await page.goto("/manager");
@@ -858,7 +868,7 @@ test("confirmed event logistics move through approvals before provider execution
   const eventStart = new Date(Date.now() + 90 * 86400000);
   eventStart.setMinutes(0, 0, 0);
   const eventEnd = new Date(eventStart.getTime() + 3 * 3600000);
-  const localTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const localTime = (date: Date) => dateTimeLocalInZone(date, "America/Chicago");
 
   await signInForBrowserTest(page);
   await page.goto("/operations");

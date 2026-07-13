@@ -88,14 +88,13 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 2. **Learning validation:** Review real band context, responsibilities, workload and task-sequence questions, operating-evidence questions, novice coaching questions, knowledge-refresh questions, explicit conversational memory proposals, natural answer verdicts, reviewed context answers, reviewed shared-task creation, update, and assignment requests, grounded short follow-ups, named-record questions and collisions, goal-measurement source choices and drift, goal target directions/finality, goal-to-action paths, competing-priority ordering, commitments, decisions, and accepted show/project setup and event-availability actions with working bands; compare expected results with observed show/project/business facts. Add or adjust role vocabulary, coaching concepts, measurement kinds, `manager_priority_v1` weights, `manager_work_sequence_v1` ordering, `manager_goal_path_v1` path rules, `manager_goal_target_v1` semantics, `manager_conversation_continuity_v1` phrases/identity rules, `manager_natural_feedback_v1` phrase families, `manager_context_capture_v1` field parsers, `manager_task_capture_v1` carrier/date rules, `manager_task_update_v1` carrier/operation rules, `manager_task_assignment_v1` carrier/name/availability rules, `manager_project_capture_v1` carrier/type/date rules, `manager_event_capture_v1` carrier/type/timezone rules, `manager_event_availability_v1` carrier/member/event/response rules, `manager_subject_reference_v1` matching rules, `manager_plan_health_v2` states, `manager_evidence_v1` review windows, or `manager_knowledge_v1` review windows only from reviewed operator evidence, never from a synthetic score alone; do not infer causality from one result or auto-activate a version. `manager_os_v32` is the current code-registered version.
 3. **Connected delivery:** Add binary Drive/Gmail document delivery only after real provider acceptance testing. Keep external work approval-gated; do not add scraping, general inbox access, or autonomous sends.
 4. **Runtime/tests:** Define queue-worker deployment, cursor pagination/query limits, and metrics before horizontal scale. Add mobile/offline resilience only after real day-of field testing.
-5. **Hosted CI health:** GitHub run `29221171373` on pushed commit `ce31beb`
-   passed verification and container smoke, including all four production
-   Chromium journeys. The later docs-only run `29221338901` exposed that the
-   former all-in-one Manager journey could exceed Playwright's unchanged
-   30-second per-test default. That journey is now split into independently
-   prepared focused cases; all 12 browser cases pass locally from a reset test
-   database without a timeout increase. Inspect the newest `main` run after
-   publishing. GitHub also warns that
+5. **Hosted CI health:** GitHub run `29226338604` confirmed container smoke and
+   every static, unit, evaluation, database, and build gate. Its browser stage
+   exposed one test-fixture assumption about the runner's UTC timezone. Event
+   inputs now use the recorded IANA timezone, the saved outcome is verified
+   before navigation, and all 12 focused cases pass from a reset database with
+   `CI=true` and `TZ=UTC` under the unchanged 30-second per-test default.
+   GitHub also warns that
    `actions/checkout@v4` targets deprecated Node 20; update that action in a
    dedicated CI-maintenance change rather than mixing it into product work.
 
