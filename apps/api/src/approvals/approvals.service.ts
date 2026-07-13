@@ -36,6 +36,7 @@ import {
   APPROVAL_EXECUTION_LEASE_MS,
   APPROVAL_LIFECYCLE_POLICY_VERSION,
   APPROVAL_LIFECYCLE_RELEVANT_STATUSES,
+  APPROVAL_EXECUTABLE_ACTION_TYPES,
   approvalActionIsExecutable,
   approvalExecutionLeaseIsActive,
   partitionApprovalLifecycle,
@@ -54,6 +55,18 @@ type OutboundDraftPayload = {
   venueId?: string;
   message: GmailDraft;
 };
+
+type ApprovalListPagination = {
+  limit?: number;
+  offset?: number;
+};
+
+const APPROVAL_LIST_DEFAULT_LIMIT = 100;
+const APPROVAL_LIST_MAX_LIMIT = 200;
+const APPROVAL_RECONCILIATION_FINAL_OUTCOMES = [
+  ApprovalReconciliationOutcome.external_effect_observed,
+  ApprovalReconciliationOutcome.no_external_effect_observed
+] as const;
 
 export type ApprovalCreateSpec = {
   title: string;
@@ -906,23 +919,142 @@ export class ApprovalsService {
     });
   }
 
-  list(artistId: string, status?: ApprovalStatus) {
+  private approvalPagination(input: ApprovalListPagination = {}) {
+    const limit = Number.isInteger(input.limit as number)
+      ? (input.limit as number)
+      : APPROVAL_LIST_DEFAULT_LIMIT;
+    const offset = Number.isInteger(input.offset as number)
+      ? (input.offset as number)
+      : 0;
+    return {
+      take: Math.min(APPROVAL_LIST_MAX_LIMIT, Math.max(1, limit)),
+      skip: Math.max(0, offset)
+    };
+  }
+
+  private async workQueueCounts(artistId: string, observedAt: Date) {
+    const leaseWindowStart = new Date(
+      observedAt.getTime() - APPROVAL_EXECUTION_LEASE_MS
+    );
+    const finalOutcomes = APPROVAL_RECONCILIATION_FINAL_OUTCOMES;
+    const terminalReconciliation = {
+      reconciliations: {
+        some: {
+          outcome: { in: [...finalOutcomes] },
+          artistId
+        }
+      }
+    };
+    const nonTerminalReconciliation = {
+      reconciliations: {
+        none: {
+          outcome: { in: [...finalOutcomes] },
+          artistId
+        }
+      }
+    };
+
+    const [
+      pendingDecisionCount,
+      readyToExecuteCount,
+      executionInProgressCount,
+      needsReconciliationCount,
+      reconciledCount,
+      approvedNotExecutableCount
+    ] = await Promise.all([
+      this.prisma.client.approvalRequest.count({
+        where: {
+          artistId,
+          status: { in: [ApprovalStatus.proposed, ApprovalStatus.pending] }
+        }
+      }),
+      this.prisma.client.approvalRequest.count({
+        where: {
+          artistId,
+          status: ApprovalStatus.approved,
+          actionType: { in: [...APPROVAL_EXECUTABLE_ACTION_TYPES] },
+          executionAttemptedAt: null
+        }
+      }),
+      this.prisma.client.approvalRequest.count({
+        where: {
+          artistId,
+          status: ApprovalStatus.approved,
+          executionAttemptedAt: { gte: leaseWindowStart }
+        }
+      }),
+      this.prisma.client.approvalRequest.count({
+        where: {
+          artistId,
+          OR: [
+            {
+              status: ApprovalStatus.failed,
+              ...nonTerminalReconciliation
+            },
+            {
+              status: ApprovalStatus.approved,
+              executionAttemptedAt: { lte: leaseWindowStart },
+              ...nonTerminalReconciliation
+            }
+          ]
+        }
+      }),
+      this.prisma.client.approvalRequest.count({
+        where: {
+          artistId,
+          status: { in: [ApprovalStatus.approved, ApprovalStatus.failed] },
+          ...terminalReconciliation
+        }
+      }),
+      this.prisma.client.approvalRequest.count({
+        where: {
+          artistId,
+          status: ApprovalStatus.approved,
+          executionAttemptedAt: null,
+          actionType: { notIn: [...APPROVAL_EXECUTABLE_ACTION_TYPES] }
+        }
+      })
+    ]);
+
+    return {
+      pendingDecision: pendingDecisionCount,
+      readyToExecute: readyToExecuteCount,
+      executionInProgress: executionInProgressCount,
+      needsReconciliation: needsReconciliationCount,
+      reconciled: reconciledCount,
+      approvedNotExecutable: approvedNotExecutableCount,
+      attentionTotal:
+        pendingDecisionCount +
+        readyToExecuteCount +
+        needsReconciliationCount
+    };
+  }
+
+  list(artistId: string, status?: ApprovalStatus, pagination: ApprovalListPagination = {}) {
+    const queryWindow = this.approvalPagination(pagination);
     return this.prisma.client.approvalRequest.findMany({
       where: {
         artistId,
         ...(status ? { status } : {})
       },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
+      ...queryWindow
     });
   }
 
-  async workQueue(artistId: string, canMutate: boolean) {
+  async workQueue(
+    artistId: string,
+    canMutate: boolean,
+    pagination: ApprovalListPagination = {}
+  ) {
     const observedAt = new Date();
     const capabilities = {
       canDecide: canMutate,
       canExecute: canMutate,
       canReconcile: canMutate
     };
+    const queryWindow = this.approvalPagination(pagination);
+    const completeCounts = await this.workQueueCounts(artistId, observedAt);
     const rows = await this.prisma.client.approvalRequest.findMany({
       where: {
         artistId,
@@ -955,7 +1087,9 @@ export class ApprovalsService {
           }
         }
       },
-      orderBy: { createdAt: "asc" }
+      orderBy: { createdAt: "asc" },
+      skip: queryWindow.skip,
+      take: queryWindow.take
     });
     const items = rows.flatMap((row) => {
       const item = projectApprovalLifecycleItem(row, capabilities, observedAt);
@@ -967,14 +1101,13 @@ export class ApprovalsService {
       executionInProgress,
       needsReconciliation,
       reconciled,
-      approvedNotExecutable,
-      counts
+      approvedNotExecutable
     } = partitionApprovalLifecycle(items, observedAt);
     return {
       policyVersion: APPROVAL_LIFECYCLE_POLICY_VERSION,
       observedAt: observedAt.toISOString(),
       capabilities,
-      counts,
+      counts: completeCounts,
       pendingDecision,
       readyToExecute,
       executionInProgress,
@@ -984,27 +1117,35 @@ export class ApprovalsService {
     };
   }
 
-  pending(artistId: string) {
+  pending(artistId: string, pagination: ApprovalListPagination = {}) {
+    const queryWindow = this.approvalPagination(pagination);
     return this.prisma.client.approvalRequest.findMany({
       where: {
         artistId,
         status: { in: [ApprovalStatus.proposed, ApprovalStatus.pending] }
       },
-      orderBy: { createdAt: "asc" }
+      orderBy: { createdAt: "asc" },
+      ...queryWindow
     });
   }
 
   /** Approved items that can still be executed */
-  async readyToExecute(artistId: string) {
+  async readyToExecute(
+    artistId: string,
+    pagination: ApprovalListPagination = {}
+  ) {
+    const queryWindow = this.approvalPagination(pagination);
     const rows = await this.prisma.client.approvalRequest.findMany({
       where: {
         artistId,
         status: ApprovalStatus.approved,
+        actionType: { in: [...APPROVAL_EXECUTABLE_ACTION_TYPES] },
         executionAttemptedAt: null
       },
-      orderBy: { approvedAt: "asc" }
+      orderBy: { approvedAt: "asc" },
+      ...queryWindow
     });
-    return rows.filter((row) => approvalActionIsExecutable(row.actionType));
+    return rows;
   }
 
   async get(artistId: string, id: string) {

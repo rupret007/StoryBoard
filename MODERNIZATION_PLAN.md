@@ -2089,11 +2089,12 @@ Validation status:
 
 ### P1 — Bounded approval reads and database-client warning (next)
 
-- [ ] Add explicit database bounds and a compatible pagination contract for
+- [x] Add explicit database bounds and a compatible pagination contract for
   the approval work queue and other global list/summary reads before artist
   histories can grow without limit. Preserve reconciliation-first ordering and
   complete attention counts.
-- [ ] Move the legacy `GET /approvals/ready-to-execute` action-type restriction
+  into both API and work-queue projections.
+- [x] Move the legacy `GET /approvals/ready-to-execute` action-type restriction
   into its database predicate for bounded retrieval. Keep
   `approval_lifecycle_v2` as the final shared classifier/authorization guard so
   database filtering cannot become a second policy source.
@@ -2148,6 +2149,15 @@ artist IDs disagree. Do not repair or delete such data automatically.
   the 82/82 Manager gate at 100% safety, all 5/5 database workflows across 40
   migrations, 15/15 Chromium journeys, schema-drift and relationship
   diagnostics, and rebuilt-container authenticated smoke.
+
+- 2026-07-13: Added bounded reads and unified executable filtering for approval
+  list/pending/ready/work-queue APIs. `GET /approvals`,
+  `GET /approvals/pending`, `GET /approvals/ready-to-execute`, and
+  `GET /approvals/work-queue` now enforce a 1–200 `limit`, `offset`, and a
+  shared status/action executable predicate at both API and query level. Counts
+  remain complete (`attentionTotal` preserved), and final validation passed the
+  complete root quality gate, 236 API assertions, both production builds, and the
+  full 82-check `manager_evals_v38` / `manager_os_v33` safety gate.
 
 - 2026-07-13: Closed the execution/reconciliation race by projecting a fresh
   approved one-shot claim as `execution_in_progress` for one hour. That sixth

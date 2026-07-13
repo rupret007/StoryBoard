@@ -128,19 +128,34 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Approval query bounds:** Add explicit limits and a compatible pagination
-   contract for the work queue/global summaries. Move the legacy
-   `ready-to-execute` action restriction into its database predicate while
-   retaining `approval_lifecycle_v2` as the final shared policy guard.
-2. **Database client warning:** Trace the concurrent-`client.query()`
+1. **Database client warning:** Trace the concurrent-`client.query()`
    deprecation emitted by `pg@8.14.1` during integration/browser execution and
    remove it before considering `pg@9`; do not change transaction semantics to
    silence the warning.
-3. **Product validation:** Run scheduled/on-demand Manager briefs, plan health, conversation, show advance, reviewed event-logistics approvals, and manual deal/settlement workflows with real original and cover bands. Confirm the chosen local cadence is useful rather than noisy; verify Calendar/Drive results against a real connected Google account before production use, capture reviewed examples when recommendations are useful, wrong, or missing context, and do not tune from synthetic scores alone.
-4. **Learning validation:** Review real band context, responsibilities, workload and task-sequence questions, operating-evidence questions, novice coaching questions, knowledge-refresh questions, explicit conversational memory proposals, natural answer verdicts, reviewed context answers, reviewed shared-task creation, update, assignment, and durable follow-through with working bands; compare expected results with observed show/project/business facts. Add or adjust code-owned policies only from reviewed operator evidence, never from a synthetic score alone; do not infer causality from one result or auto-activate a version. `manager_os_v33` / `manager_evals_v38` is the current code-registered contract.
-5. **Connected delivery:** Add binary Drive/Gmail document delivery only after real provider acceptance testing. Keep external work approval-gated; do not add scraping, general inbox access, or autonomous sends.
-6. **Runtime/tests:** Define queue-worker deployment, broader cursor pagination/query limits, and metrics before horizontal scale. Add mobile/offline resilience only after real day-of field testing.
-7. **Hosted CI health:** Before product work, confirm the current `main`
+2. **Product validation:** Run scheduled/on-demand Manager briefs, plan health,
+   conversation, show advance, reviewed event-logistics approvals, and manual
+   deal/settlement workflows with real original and cover bands. Confirm the
+   chosen local cadence is useful rather than noisy; verify Calendar/Drive results
+   against a real connected Google account before production use, capture reviewed
+   examples when recommendations are useful, wrong, or missing context, and do
+   not tune from synthetic scores alone.
+3. **Learning validation:** Review real band context, responsibilities, workload
+   and task-sequence questions, operating-evidence questions, novice coaching
+   questions, knowledge-refresh questions, explicit conversational memory
+   proposals, natural answer verdicts, reviewed context answers, reviewed
+   shared-task creation, update, assignment, and durable follow-through with
+   working bands; compare expected results with observed show/project/business
+   facts. Add or adjust code-owned policies only from reviewed operator
+   evidence, never from a synthetic score alone; do not infer causality from one
+   result or auto-activate a version. `manager_os_v33` / `manager_evals_v38` is
+   the current code-registered contract.
+4. **Connected delivery:** Add binary Drive/Gmail document delivery only after
+   real provider acceptance testing. Keep external work approval-gated; do not add
+   scraping, general inbox access, or autonomous sends.
+5. **Runtime/tests:** Define queue-worker deployment, broader cursor
+   pagination/query limits, and metrics before horizontal scale. Add mobile/offline
+   resilience only after real day-of field testing.
+6. **Hosted CI health:** Before product work, confirm the current `main`
    [Quality workflow](https://github.com/rupret007/StoryBoard/actions/workflows/quality.yml)
    is green. The current browser fixtures use the recorded IANA timezone and
    pass with `CI=true` and `TZ=UTC`; keep those invariants when adding event

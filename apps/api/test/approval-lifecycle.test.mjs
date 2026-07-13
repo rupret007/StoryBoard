@@ -79,6 +79,156 @@ function row(id, status, overrides = {}) {
   };
 }
 
+function getInFilter(whereClause) {
+  if (whereClause?.in) return whereClause.in;
+  if (typeof whereClause === "string") return [whereClause];
+  return null;
+}
+
+function matchValue(value, filter) {
+  if (filter === undefined) {
+    return true;
+  }
+  if (filter === null) {
+    return value === null;
+  }
+  if (typeof filter !== "object") {
+    return value === filter;
+  }
+  if (Array.isArray(filter.in)) {
+    return filter.in.includes(value);
+  }
+  if (Array.isArray(filter.notIn)) {
+    return !filter.notIn.includes(value);
+  }
+  if (filter.gte || filter.lte) {
+    if (value == null) return false;
+    const after = filter.gte ? value >= filter.gte : true;
+    const before = filter.lte ? value <= filter.lte : true;
+    return after && before;
+  }
+  return true;
+}
+
+function outcomeInReconciliations(rows, outcomeFilter, artistId) {
+  if (!outcomeFilter?.in || outcomeFilter.in.length === 0) {
+    return false;
+  }
+  const accepted = new Set(outcomeFilter.in);
+  return rows.some(
+    (row) =>
+      (!artistId || row.artistId == null || row.artistId === artistId) &&
+      accepted.has(row.outcome)
+  );
+}
+
+function reconciliationMatches(candidate, clause, invert = false) {
+  if (!clause) {
+    return true;
+  }
+  const hasOutcome = outcomeInReconciliations(
+    candidate.reconciliations,
+    clause.outcome,
+    candidate.artistId
+  );
+  return invert ? !hasOutcome : hasOutcome;
+}
+
+function rowMatchesWhere(candidate, where = {}) {
+  if (where.artistId !== undefined && candidate.artistId !== where.artistId) {
+    return false;
+  }
+  const statusFilter = getInFilter(where.status);
+  if (statusFilter && !statusFilter.includes(candidate.status)) {
+    return false;
+  }
+  if (
+    where.status &&
+    typeof where.status !== "object" &&
+    candidate.status !== where.status
+  ) {
+    return false;
+  }
+  if (!matchValue(candidate.actionType, where.actionType)) {
+    return false;
+  }
+  if (!matchValue(candidate.executionAttemptedAt, where.executionAttemptedAt)) {
+    return false;
+  }
+  if (where.reconciliations) {
+    const checkSome = where.reconciliations.some;
+    const checkNone = where.reconciliations.none;
+    if (
+      checkSome &&
+      !reconciliationMatches(candidate, checkSome, false)
+    ) {
+      return false;
+    }
+    if (
+      checkNone &&
+      !reconciliationMatches(candidate, checkNone, true)
+    ) {
+      return false;
+    }
+  }
+  if (Array.isArray(where.OR)) {
+    if (!where.OR.some((clause) => rowMatchesWhere(candidate, clause))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function applyOrdering(rows, orderBy) {
+  if (!orderBy) {
+    return [...rows];
+  }
+  const field = Object.keys(orderBy)[0];
+  const direction = orderBy[field];
+  if (!field) return [...rows];
+  if (!field || !direction) {
+    return [...rows];
+  }
+  return [...rows].sort((left, right) => {
+    const leftValue = left[field];
+    const rightValue = right[field];
+    if (leftValue === rightValue) return 0;
+    const comparison = leftValue < rightValue ? -1 : 1;
+    return direction === "desc" ? -comparison : comparison;
+  });
+}
+
+function applyPagination(rows, query) {
+  const start = Math.max(0, Number(query.skip) || 0);
+  const take = Math.max(1, Number(query.take) || rows.length);
+  return rows.slice(start, start + take);
+}
+
+function includeCampaignDeliveries(candidate, includeQuery) {
+  if (!includeQuery?.campaignDeliveries) return candidate.campaignDeliveries;
+  return candidate.campaignDeliveries.filter(
+    (delivery) =>
+      !includeQuery.campaignDeliveries.where ||
+      delivery.artistId === includeQuery.campaignDeliveries.where.artistId
+  );
+}
+
+function includeReconciliations(candidate, includeQuery) {
+  if (!includeQuery?.reconciliations) return candidate.reconciliations;
+  const where = includeQuery.reconciliations.where;
+  const sorted = [...candidate.reconciliations].sort(
+    (left, right) => right.createdAt - left.createdAt
+  );
+  const filtered = sorted.filter((entry) =>
+    !where ||
+    ((!where.artistId || entry.artistId == null || entry.artistId === where.artistId) &&
+      (!where.outcome || where.outcome.in?.includes(entry.outcome)))
+  );
+  return includeQuery.reconciliations.take
+    ? filtered.slice(0, includeQuery.reconciliations.take)
+    : filtered;
+}
+
 test("approval_lifecycle_v2 classifies one-shot claims and durable reconciliation", () => {
   assert.equal(
     lifecycle.APPROVAL_LIFECYCLE_POLICY_VERSION,
@@ -207,27 +357,21 @@ function serviceHarness(rows) {
   const client = {
     approvalRequest: {
       findMany: async (query) => {
-        queries.push(query);
-        const statuses = query.where.status?.in ??
-          (typeof query.where.status === "string" ? [query.where.status] : null);
-        return rows
-          .filter(
-            (candidate) =>
-              candidate.artistId === query.where.artistId &&
-              (!statuses || statuses.includes(candidate.status)) &&
-              (query.where.executionAttemptedAt !== null ||
-                candidate.executionAttemptedAt === null)
-          )
+        queries.push({ op: "findMany", query });
+        const filtered = rows
+          .filter((candidate) => rowMatchesWhere(candidate, query.where))
           .map((candidate) => ({
             ...candidate,
-            campaignDeliveries: query.include?.campaignDeliveries
-              ? candidate.campaignDeliveries.filter(
-                  (delivery) =>
-                    delivery.artistId ===
-                    query.include.campaignDeliveries.where.artistId
-                )
-              : candidate.campaignDeliveries
+            campaignDeliveries: includeCampaignDeliveries(candidate, query.include),
+            reconciliations: includeReconciliations(candidate, query.include)
           }));
+        return applyPagination(applyOrdering(filtered, query.orderBy), query);
+      },
+      count: async (query) => {
+        queries.push({ op: "count", query });
+        return rows.filter((candidate) =>
+          rowMatchesWhere(candidate, query.where)
+        ).length;
       }
     }
   };
@@ -347,15 +491,27 @@ test("work queue is tenant-scoped, capability-aware, and summarizes mixed delive
       .some((item) => item.id === "other-artist"),
     false
   );
-  assert.equal(queries[0].where.artistId, "artist-1");
+  const queueQuery = queries.find((entry) => entry.op === "findMany").query;
+  assert.equal(queueQuery.where.artistId, "artist-1");
   assert.deepEqual(
-    [...queries[0].where.status.in].sort(),
+    [...queueQuery.where.status.in].sort(),
     ["approved", "failed", "pending", "proposed"]
   );
   assert.equal(
-    queries[0].include.campaignDeliveries.where.artistId,
+    queueQuery.include.campaignDeliveries.where.artistId,
     "artist-1"
   );
+  const countQueries = queries
+    .filter((entry) => entry.op === "count")
+    .map((entry) => entry.query.where.artistId);
+  assert.deepEqual(countQueries, [
+    "artist-1",
+    "artist-1",
+    "artist-1",
+    "artist-1",
+    "artist-1",
+    "artist-1"
+  ]);
 });
 
 test("viewer work queue preserves visibility while disabling every mutation", async () => {
@@ -388,11 +544,99 @@ test("viewer work queue preserves visibility while disabling every mutation", as
 });
 
 test("legacy ready-to-execute endpoint uses the shared executable predicate", async () => {
-  const { service } = serviceHarness([
+  const { service, queries } = serviceHarness([
     row("ready", "approved"),
     row("nonexec", "approved", { actionType: "release_checklist_draft" }),
     row("claimed", "approved", { executionAttemptedAt: now })
   ]);
   const result = await service.readyToExecute("artist-1");
+  const readyQuery = queries.find((entry) => entry.op === "findMany").query;
+  assert.deepEqual(
+    readyQuery.where.actionType.in.sort(),
+    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch"].sort()
+  );
+  assert.equal(readyQuery.where.executionAttemptedAt, null);
   assert.deepEqual(result.map((item) => item.id), ["ready"]);
+});
+
+test("list and ready-to-execute endpoints apply limits and preserve bounded ready set", async () => {
+  const rows = [
+    row("pending-old", "pending", {
+      createdAt: new Date("2026-07-14T09:00:00.000Z")
+    }),
+    row("pending-new", "pending", {
+      createdAt: new Date("2026-07-14T10:00:00.000Z")
+    }),
+    row("approved-exec", "approved", {
+      createdAt: new Date("2026-07-14T11:00:00.000Z"),
+      approvedAt: new Date("2026-07-14T11:05:00.000Z")
+    }),
+    row("approved-nonexec", "approved", {
+      actionType: "release_checklist_draft",
+      createdAt: new Date("2026-07-14T12:00:00.000Z"),
+      approvedAt: new Date("2026-07-14T12:05:00.000Z")
+    }),
+    row("approved-claimed", "approved", {
+      createdAt: new Date("2026-07-14T13:00:00.000Z"),
+      approvedAt: new Date("2026-07-14T13:05:00.000Z"),
+      executionAttemptedAt: now
+    })
+  ];
+  const { service, queries } = serviceHarness(rows);
+
+  const list = await service.list("artist-1", undefined, {
+    limit: 2,
+    offset: 1
+  });
+  const pending = await service.pending("artist-1", {
+    limit: 1,
+    offset: 1
+  });
+  const ready = await service.readyToExecute("artist-1", {
+    limit: 1,
+    offset: 0
+  });
+  const queue = await service.workQueue("artist-1", true, {
+    limit: 2,
+    offset: 1
+  });
+
+  assert.equal(list.length, 2);
+  assert.equal(pending.length, 1);
+  assert.deepEqual(pending[0].id, "pending-new");
+  assert.equal(ready.length, 1);
+  assert.equal(ready[0].id, "approved-exec");
+  assert.equal(queue.pendingDecision.length, 1);
+  assert.ok(queue.readyToExecute.length <= 1);
+  assert.equal(queue.counts.readyToExecute, 1);
+
+  const listQuery = queries
+    .filter((entry) => entry.op === "findMany")
+    .find((entry) => entry.query.orderBy?.createdAt === "desc").query;
+  const pendingQuery = queries
+    .filter((entry) => entry.op === "findMany")
+    .find((entry) => entry.query.orderBy?.createdAt === "asc" && entry.query.where.status?.in?.includes("pending")).query;
+  const readyQuery = queries
+    .filter((entry) => entry.op === "findMany")
+    .find((entry) => entry.query.orderBy?.approvedAt === "asc").query;
+  assert.deepEqual(
+    { take: listQuery.take, skip: listQuery.skip },
+    { take: 2, skip: 1 }
+  );
+  assert.deepEqual(
+    { take: pendingQuery.take, skip: pendingQuery.skip },
+    { take: 1, skip: 1 }
+  );
+  assert.deepEqual(
+    { take: readyQuery.take, skip: readyQuery.skip },
+    { take: 1, skip: 0 }
+  );
+  assert.equal(
+    readyQuery.where.executionAttemptedAt === null,
+    true
+  );
+  assert.deepEqual(
+    readyQuery.where.actionType.in.sort(),
+    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch"].sort()
+  );
 });

@@ -11,6 +11,7 @@ import {
   UseGuards
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
+import { z } from "zod";
 import { CurrentOperator } from "../auth/current-operator.decorator";
 import { MembershipService } from "../auth/membership.service";
 import { RolePolicyService } from "../auth/role-policy.service";
@@ -22,6 +23,34 @@ import {
 } from "../generated/prisma/enums";
 import { ApprovalsService } from "./approvals.service";
 import { approvalReconciliationInputSchema } from "./approval-reconciliation";
+
+const approvalStatusSchema = z.nativeEnum(ApprovalStatus);
+const listPaginationSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+  offset: z.coerce.number().int().min(0).default(0)
+});
+
+function parseApprovalStatus(rawStatus?: string) {
+  if (rawStatus === undefined) {
+    return undefined;
+  }
+  const parsed = approvalStatusSchema.safeParse(rawStatus);
+  if (!parsed.success) {
+    throw new BadRequestException("Invalid approval status");
+  }
+  return parsed.data;
+}
+
+function parseApprovalListPagination(limitRaw?: string, offsetRaw?: string) {
+  const parsed = listPaginationSchema.safeParse({
+    limit: limitRaw,
+    offset: offsetRaw
+  });
+  if (!parsed.success) {
+    throw new BadRequestException("Invalid approval list pagination");
+  }
+  return parsed.data;
+}
 
 @Controller("approvals")
 @UseGuards(SessionAuthGuard)
@@ -49,43 +78,56 @@ export class ApprovalsController {
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
     @Headers("x-artist-id") artistHeader?: string,
-    @Query("status") status?: ApprovalStatus
+    @Query("status") status?: string,
+    @Query("limit") limitRaw?: string,
+    @Query("offset") offsetRaw?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
-    return this.approvals.list(artistId, status);
+    const pagination = parseApprovalListPagination(limitRaw, offsetRaw);
+    return this.approvals.list(artistId, parseApprovalStatus(status), pagination);
   }
 
   @Get("pending")
   async pending(
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
-    @Headers("x-artist-id") artistHeader?: string
+    @Headers("x-artist-id") artistHeader?: string,
+    @Query("limit") limitRaw?: string,
+    @Query("offset") offsetRaw?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
-    return this.approvals.pending(artistId);
+    const pagination = parseApprovalListPagination(limitRaw, offsetRaw);
+    return this.approvals.pending(artistId, pagination);
   }
 
   @Get("ready-to-execute")
   async readyToExecute(
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
-    @Headers("x-artist-id") artistHeader?: string
+    @Headers("x-artist-id") artistHeader?: string,
+    @Query("limit") limitRaw?: string,
+    @Query("offset") offsetRaw?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
-    return this.approvals.readyToExecute(artistId);
+    const pagination = parseApprovalListPagination(limitRaw, offsetRaw);
+    return this.approvals.readyToExecute(artistId, pagination);
   }
 
   @Get("work-queue")
   async workQueue(
     @CurrentOperator() operator: RequestOperator,
     @Req() req: FastifyRequest,
-    @Headers("x-artist-id") artistHeader?: string
+    @Headers("x-artist-id") artistHeader?: string,
+    @Query("limit") limitRaw?: string,
+    @Query("offset") offsetRaw?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     const role = await this.roles.getRole(operator.id, artistId);
+    const pagination = parseApprovalListPagination(limitRaw, offsetRaw);
     return this.approvals.workQueue(
       artistId,
-      role !== ArtistMembershipRole.viewer
+      role !== ArtistMembershipRole.viewer,
+      pagination
     );
   }
 

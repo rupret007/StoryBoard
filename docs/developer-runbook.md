@@ -1126,8 +1126,14 @@ enablement requires the applicable OAuth verification and security review.
   `approvedNotExecutable`. Every item returns `canRetry=false`, plus source links
   and campaign-delivery status counts when applicable. Viewers can read the
   queue, but its approve/reject/execute/reconcile capabilities are all false.
-- `GET /approvals/pending` — needs review  
-- `GET /approvals/ready-to-execute` — **approved** rows with executable action types: `outbound_email_batch`, `outbound_email_send_batch`, `calendar_hold_batch`, `drive_ensure_folder`
+  Supports `limit` (1–200, default 100) and `offset` (default 0).
+- `GET /approvals/pending` — needs review; supports `limit` (1–200, default 100)
+  and `offset` (default 0).
+- `GET /approvals/ready-to-execute` — **approved** rows with executable action
+  types: `outbound_email_batch`, `outbound_email_send_batch`,
+  `calendar_hold_batch`, `drive_ensure_folder`. Supports `limit` (1–200, default
+  100) and `offset` (default 0), and keeps executability in the database
+  predicate.
 - `GET /approvals/:id/reconciliations` — bounded append-only history (at most
   50 receipts), resolution state, and role-derived capabilities. Viewers may
   read it.
