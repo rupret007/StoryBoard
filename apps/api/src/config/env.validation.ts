@@ -93,6 +93,34 @@ const envSchema = z
         path: ["AUTH_DEV_BYPASS"]
       });
     }
+    if (data.NODE_ENV === "production") {
+      if (data.SESSION_SECRET.length < 32) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "SESSION_SECRET must be at least 32 characters in production",
+          path: ["SESSION_SECRET"]
+        });
+      }
+      if (
+        /replace-me|change-me|changeme/i.test(data.SESSION_SECRET) ||
+        /^(secret|password|session-secret)$/i.test(data.SESSION_SECRET)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "SESSION_SECRET cannot use a documented placeholder in production",
+          path: ["SESSION_SECRET"]
+        });
+      }
+      if (data.TELEGRAM_BOT_TOKEN?.trim() && !data.TELEGRAM_WEBHOOK_SECRET) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "TELEGRAM_WEBHOOK_SECRET is required in production when TELEGRAM_BOT_TOKEN is set",
+          path: ["TELEGRAM_WEBHOOK_SECRET"]
+        });
+      }
+    }
     if (!data.OPENAI_ENABLED) {
       return;
     }

@@ -3,6 +3,8 @@ import { ConfigService } from "@nestjs/config";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { google } from "googleapis";
 import { AuthService } from "../auth/auth.service";
+import { MembershipService } from "../auth/membership.service";
+import { RolePolicyService } from "../auth/role-policy.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { StoryboardQueueService } from "../queue/storyboard-queue.service";
 import { SecretBox } from "./crypto/secret-box";
@@ -19,6 +21,8 @@ export class GoogleOAuthCallbackController {
     private readonly prisma: PrismaService,
     private readonly secretBox: SecretBox,
     private readonly auth: AuthService,
+    private readonly membership: MembershipService,
+    private readonly roles: RolePolicyService,
     private readonly queue: StoryboardQueueService
   ) {}
 
@@ -53,6 +57,12 @@ export class GoogleOAuthCallbackController {
     const operator = await this.auth.operatorFromRequestCookies(req);
     if (!operator || operator.id !== st.operatorId) {
       return failRedirect("session_mismatch");
+    }
+    try {
+      await this.membership.assertMembership(operator.id, st.artistId);
+      await this.roles.assertOwner(operator.id, st.artistId);
+    } catch {
+      return failRedirect("not_authorized");
     }
     const clientId = this.config.get<string | undefined>("GOOGLE_CLIENT_ID");
     const clientSecret = this.config.get<string | undefined>(

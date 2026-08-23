@@ -319,29 +319,69 @@ export class CommandsService {
     const artist = await this.prisma.client.artist.findUniqueOrThrow({
       where: { id: artistId }
     });
-    const city =
-      parsed.data.city ??
-      `${artist.name.split(" ")[0] ?? artist.name} market`;
-    const resolved = await adapters.bandsintown.resolveArtist(artist.name);
-    const events = resolved
-      ? await adapters.bandsintown.listUpcomingEvents(resolved.name)
-      : await adapters.bandsintown.listUpcomingEvents(artist.name);
-    const tmVenues = await adapters.ticketmaster.searchVenues(city, {
-      size: 8
-    });
-    const tmEvents = await adapters.ticketmaster.searchEvents(city, {
-      size: 8
-    });
+    const city = parsed.data.city?.trim() || null;
+    const bandsintownConfigured = adapters.bandsintown.mode === "real";
+    const ticketmasterConfigured = adapters.ticketmaster.mode === "real";
+
+    let bandsintownArtist: Awaited<
+      ReturnType<StoryboardAdapterRegistry["bandsintown"]["resolveArtist"]>
+    > | null = null;
+    let bandsintownUpcomingEvents: Awaited<
+      ReturnType<StoryboardAdapterRegistry["bandsintown"]["listUpcomingEvents"]>
+    > = [];
+    if (bandsintownConfigured) {
+      const resolved = await adapters.bandsintown.resolveArtist(artist.name);
+      bandsintownArtist = resolved;
+      bandsintownUpcomingEvents = resolved
+        ? await adapters.bandsintown.listUpcomingEvents(resolved.name)
+        : await adapters.bandsintown.listUpcomingEvents(artist.name);
+    }
+
+    let ticketmasterVenues: Awaited<
+      ReturnType<StoryboardAdapterRegistry["ticketmaster"]["searchVenues"]>
+    > = [];
+    let ticketmasterEvents: Awaited<
+      ReturnType<StoryboardAdapterRegistry["ticketmaster"]["searchEvents"]>
+    > = [];
+    if (ticketmasterConfigured && city) {
+      ticketmasterVenues = await adapters.ticketmaster.searchVenues(city, {
+        size: 8
+      });
+      ticketmasterEvents = await adapters.ticketmaster.searchEvents(city, {
+        size: 8
+      });
+    }
+
+    const notes: string[] = [];
+    if (bandsintownConfigured) {
+      notes.push(
+        "Bandsintown is limited to the active StoryBoard artist's own event context."
+      );
+    } else {
+      notes.push(
+        "Bandsintown is not configured. No synthetic artist tour dates are shown."
+      );
+    }
+    if (!ticketmasterConfigured) {
+      notes.push(
+        "Ticketmaster is not configured. Add prospects from Find shows or manually; no synthetic market leads are shown."
+      );
+    } else if (!city) {
+      notes.push("Ticketmaster market discovery requires an explicit city.");
+    } else {
+      notes.push("Ticketmaster supplies market discovery for the requested city.");
+    }
+
     return {
       intent: "research_booking_intel",
       result: {
         city,
-        bandsintownArtist: resolved,
-        bandsintownUpcomingEvents: events,
-        ticketmasterVenues: tmVenues,
-        ticketmasterEvents: tmEvents,
-        note:
-          "Bandsintown is limited to the active StoryBoard artist's own event context. Ticketmaster or manual entry supplies market discovery.",
+        mode: ticketmasterConfigured && city ? "ticketmaster" : "manual",
+        bandsintownArtist,
+        bandsintownUpcomingEvents,
+        ticketmasterVenues,
+        ticketmasterEvents,
+        note: notes.join(" "),
         providerModes: providerModes(adapters)
       },
       providerModes: providerModes(adapters)

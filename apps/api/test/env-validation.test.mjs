@@ -29,3 +29,75 @@ test("Gmail reply synchronization remains disabled unless explicitly enabled", (
   assert.equal(envMod.validateEnv(base()).GMAIL_REPLY_SYNC_ENABLED, false);
   assert.equal(envMod.validateEnv(base({ GMAIL_REPLY_SYNC_ENABLED: "true" })).GMAIL_REPLY_SYNC_ENABLED, true);
 });
+
+test("development still accepts the documented local session placeholder", () => {
+  const config = envMod.validateEnv(base({
+    NODE_ENV: "development",
+    SESSION_SECRET: "replace-me"
+  }));
+  assert.equal(config.SESSION_SECRET, "replace-me");
+});
+
+test("production rejects weak or placeholder session secrets", () => {
+  assert.throws(
+    () => envMod.validateEnv(base({ NODE_ENV: "production", SESSION_SECRET: "replace-me" })),
+    /SESSION_SECRET/
+  );
+  assert.throws(
+    () => envMod.validateEnv(base({ NODE_ENV: "production", SESSION_SECRET: "shortsecret" })),
+    /SESSION_SECRET/
+  );
+  assert.throws(
+    () => envMod.validateEnv(base({
+      NODE_ENV: "production",
+      SESSION_SECRET: "local-demo-session-secret-change-me"
+    })),
+    /SESSION_SECRET/
+  );
+});
+
+test("production accepts a high-entropy session secret", () => {
+  const secret = "production-session-secret-32chars!!";
+  const config = envMod.validateEnv(base({
+    NODE_ENV: "production",
+    SESSION_SECRET: secret
+  }));
+  assert.equal(config.SESSION_SECRET, secret);
+});
+
+test("production cannot enable AUTH_DEV_BYPASS", () => {
+  assert.throws(
+    () => envMod.validateEnv(base({
+      NODE_ENV: "production",
+      SESSION_SECRET: "production-session-secret-32chars!!",
+      AUTH_DEV_BYPASS: "true"
+    })),
+    /AUTH_DEV_BYPASS/
+  );
+});
+
+test("production requires a Telegram webhook secret when the bot token is set", () => {
+  assert.throws(
+    () => envMod.validateEnv(base({
+      NODE_ENV: "production",
+      SESSION_SECRET: "production-session-secret-32chars!!",
+      TELEGRAM_BOT_TOKEN: "123:token"
+    })),
+    /TELEGRAM_WEBHOOK_SECRET/
+  );
+  const config = envMod.validateEnv(base({
+    NODE_ENV: "production",
+    SESSION_SECRET: "production-session-secret-32chars!!",
+    TELEGRAM_BOT_TOKEN: "123:token",
+    TELEGRAM_WEBHOOK_SECRET: "webhook-secret"
+  }));
+  assert.equal(config.TELEGRAM_WEBHOOK_SECRET, "webhook-secret");
+});
+
+test("development can keep Telegram inbound optional without a webhook secret", () => {
+  const config = envMod.validateEnv(base({
+    NODE_ENV: "development",
+    TELEGRAM_BOT_TOKEN: "123:token"
+  }));
+  assert.equal(config.TELEGRAM_WEBHOOK_SECRET, undefined);
+});

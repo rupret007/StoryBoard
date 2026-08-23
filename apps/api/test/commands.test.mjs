@@ -22,8 +22,10 @@ const [commandsMod, commandSchemaMod] = await Promise.all([
   loadShared("schemas/command-execute.js")
 ]);
 
-function makeAdapters(calls) {
+function makeAdapters(calls, modes = {}) {
   const passive = { mode: "mock" };
+  const bandsintownMode = modes.bandsintown ?? "real";
+  const ticketmasterMode = modes.ticketmaster ?? "mock";
   return {
     gmail: passive,
     calendar: passive,
@@ -31,32 +33,32 @@ function makeAdapters(calls) {
     youtube: passive,
     spotify: passive,
     bandsintown: {
-      mode: "real",
+      mode: bandsintownMode,
       resolveArtist: async (name) => {
         calls.resolved.push(name);
         return { id: "bit-owned", name };
       },
       listUpcomingEvents: async (name) => {
         calls.events.push(name);
-        return [];
+        return [{ id: "real-bit-e1", title: `${name} — recorded date`, venueName: "Owned Room" }];
       }
     },
     ticketmaster: {
-      mode: "mock",
+      mode: ticketmasterMode,
       searchVenues: async (city) => {
         calls.venueCities.push(city);
-        return [];
+        return [{ id: "tm-venue-1", name: `TM ${city} Arena (mock)`, city }];
       },
       searchEvents: async (city) => {
         calls.eventCities.push(city);
-        return [];
+        return [{ id: "tm-event-1", name: `${city} Mock Showcase` }];
       }
     }
   };
 }
 
-function makeService(calls) {
-  const adapters = makeAdapters(calls);
+function makeService(calls, modes) {
+  const adapters = makeAdapters(calls, modes);
   return new commandsMod.CommandsService(
     {
       client: {
@@ -150,10 +152,74 @@ test("booking intel uses only the active artist for Bandsintown context", async 
 
   assert.deepEqual(calls.resolved, ["Owned Band"]);
   assert.deepEqual(calls.events, ["Owned Band"]);
-  assert.deepEqual(calls.venueCities, ["Austin"]);
-  assert.deepEqual(calls.eventCities, ["Austin"]);
+  assert.deepEqual(calls.venueCities, []);
+  assert.deepEqual(calls.eventCities, []);
   assert.equal(result.result.city, "Austin");
+  assert.equal(result.result.mode, "manual");
+  assert.deepEqual(result.result.ticketmasterVenues, []);
+  assert.deepEqual(result.result.ticketmasterEvents, []);
   assert.match(result.result.note, /active StoryBoard artist/i);
+  assert.match(result.result.note, /no synthetic market leads/i);
   assert.equal(calls.commandRuns, 1);
   assert.equal(calls.audits, 1);
+});
+
+test("booking intel does not invent mock Ticketmaster or Bandsintown rows", async () => {
+  const calls = {
+    resolved: [],
+    events: [],
+    venueCities: [],
+    eventCities: [],
+    commandRuns: 0,
+    audits: 0
+  };
+  const service = makeService(calls, { bandsintown: "mock", ticketmaster: "mock" });
+  const result = await service.execute(
+    "artist-a",
+    {
+      intent: "research_booking_intel",
+      payload: { city: "Austin" }
+    },
+    "operator@test.invalid",
+    "operator-a"
+  );
+
+  assert.deepEqual(calls.resolved, []);
+  assert.deepEqual(calls.events, []);
+  assert.deepEqual(calls.venueCities, []);
+  assert.deepEqual(calls.eventCities, []);
+  assert.equal(result.result.mode, "manual");
+  assert.equal(result.result.bandsintownArtist, null);
+  assert.deepEqual(result.result.bandsintownUpcomingEvents, []);
+  assert.deepEqual(result.result.ticketmasterVenues, []);
+  assert.deepEqual(result.result.ticketmasterEvents, []);
+  assert.match(result.result.note, /no synthetic artist tour dates/i);
+  assert.match(result.result.note, /no synthetic market leads/i);
+});
+
+test("booking intel searches Ticketmaster only when the real adapter is configured", async () => {
+  const calls = {
+    resolved: [],
+    events: [],
+    venueCities: [],
+    eventCities: [],
+    commandRuns: 0,
+    audits: 0
+  };
+  const service = makeService(calls, { bandsintown: "real", ticketmaster: "real" });
+  const result = await service.execute(
+    "artist-a",
+    {
+      intent: "research_booking_intel",
+      payload: { city: "Austin" }
+    },
+    "operator@test.invalid",
+    "operator-a"
+  );
+
+  assert.deepEqual(calls.venueCities, ["Austin"]);
+  assert.deepEqual(calls.eventCities, ["Austin"]);
+  assert.equal(result.result.mode, "ticketmaster");
+  assert.equal(result.result.ticketmasterVenues.length, 1);
+  assert.match(result.result.note, /requested city/i);
 });

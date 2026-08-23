@@ -1323,7 +1323,7 @@ test("accepted conversational assignment is source-bound, capacity-aware, optimi
   const source = { id: "message-owner", content: 'Assign "Confirm rehearsal" to Morgan', createdAt: new Date("2026-07-12T12:00:00.000Z") };
   const originalUpdatedAt = new Date("2026-07-12T11:00:00.000Z");
   let task = { id: "task-a", artistId: "artist-a", title: "Confirm rehearsal", status: "todo", updatedAt: originalUpdatedAt, bandMemberId: null, ownerLabel: null };
-  const originalCheckIn = { id: "checkin-a", status: "limited", note: "One more task", effectiveUntil: new Date("2026-07-20T12:00:00.000Z"), createdAt: new Date("2026-07-12T10:00:00.000Z") };
+  const originalCheckIn = { id: "checkin-a", status: "limited", note: "One more task", effectiveUntil: new Date("2099-01-01T12:00:00.000Z"), createdAt: new Date("2026-07-12T10:00:00.000Z") };
   let member = { id: "member-a", artistId: "artist-a", name: "Morgan", active: true, checkIns: [originalCheckIn] };
   const captured = taskAssignment.resolveManagerTaskAssignment({ message: source.content, sourceMessageId: source.id, sourceMessageCreatedAt: source.createdAt, tasks: [task], members: [{ id: member.id, name: member.name, checkInId: originalCheckIn.id, availability: "limited" }] });
   assert.equal(captured.status, "ready");
@@ -3482,6 +3482,45 @@ test("manager chat refuses direct outside action and offers only reviewable inte
   assert.match(result.answer, /won't send, sign, pay, publish, or execute/i);
   assert.match(result.answer, /Approvals/);
   assert.ok(!result.recommendation || result.recommendation.proposedAction?.type === "create_task");
+});
+
+test("empty seed chat stays honest about missing setlists, songs, and booking targets", () => {
+  const emptySeed = managerFacts({
+    artist: { id: "artist-a", name: "My Artist" },
+    profile: { id: "profile-a", intakeCompletedAt: null, decisionStyle: "guided", twelveMonthAmbition: null },
+    members: [],
+    goals: [],
+    opportunities: [],
+    events: [],
+    prospects: []
+  });
+  const setlist = intelligence.deterministicManagerChat(emptySeed, "What's our setlist?", now);
+  assert.match(setlist.answer, /no upcoming shows, rehearsals, or other band events/i);
+  assert.doesNotMatch(setlist.answer, /opener|closer|vault|travis|rad dad/i);
+  assert.ok(!setlist.recommendation || setlist.recommendation.proposedAction == null || setlist.recommendation.proposedAction.type === "create_task");
+
+  const pitch = intelligence.deterministicManagerChat(emptySeed, "Who should we pitch in Milwaukee?", now);
+  assert.match(pitch.answer, /0 active opportunities/i);
+  assert.match(pitch.answer, /no recorded booking action/i);
+  assert.doesNotMatch(pitch.answer, /travis|rad dad|mock hall|ticketmaster/i);
+  assert.ok(!pitch.recommendation || pitch.recommendation.proposedAction == null || pitch.recommendation.proposedAction.type === "create_task");
+});
+
+test("post-show review questions are not treated as social publish requests", () => {
+  const review = outcomeReview.deterministicManagerOutcomeReview({
+    windowDays: 90,
+    through: now,
+    events: [{ id: "event-a", title: "Friday show", status: "completed", startsAt: new Date("2026-07-10T01:00:00.000Z"), updatedAt: now, currency: "USD", attendance: 120, grossRevenueMinor: 150000, postShowNotes: "Strong audience response", relationshipOutcome: "Buyer invited a return pitch", settlement: { id: "settlement-a", status: "finalized", currency: "USD", grossMinor: 150000, expenseMinor: 25000, netMinor: 125000 }, expenses: [{ id: "expense-a", currency: "USD", amountMinor: 25000 }], invoices: [] }],
+    projects: [], completedTasks: [], campaignRecipients: []
+  });
+  const answer = intelligence.deterministicManagerChat(managerFacts({ outcomeReview: review }), "What post-show lessons did we learn?", now);
+  assert.match(answer.answer, /120/);
+  assert.ok(answer.citations.includes("event-a"));
+  assert.doesNotMatch(answer.answer, /won't send, sign, pay, publish, or execute/i);
+  assert.equal(answer.recommendation, null);
+
+  const publish = intelligence.deterministicManagerChat(managerFacts(), "Please post this recap to social", now);
+  assert.match(publish.answer, /won't send, sign, pay, publish, or execute/i);
 });
 
 test("manager bridges recorded show and project planning gaps to the existing internal generators", () => {
