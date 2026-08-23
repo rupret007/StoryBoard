@@ -3559,6 +3559,25 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   assert.doesNotMatch(demo.answer, /usually from a local Vault|harbor lights|everyday|parked demo|auto-pitch travis/i);
   assert.equal(demo.recommendation, null);
 
+  const showNightOnVault = intelligence.deterministicManagerChat(managerFacts({
+    songs: [
+      { id: "vault:catalog_import_v1:JS-0001", title: "Harbor Lights", active: true, sourceKey: "vault:catalog_import_v1:JS-0001" },
+      { id: "vault:catalog_import_v1:ST-0014", title: "Everyday", active: true, sourceKey: "vault:catalog_import_v1:ST-0014" }
+    ],
+    setlists: [
+      { id: "vault:catalog_import_v1:set:setlist-ready", name: "Vault default-live", status: "draft", itemCount: 2, sourceKey: "vault:catalog_import_v1:set:setlist-ready" },
+      { id: "shownight:catalog_import_v1:set:rad-dad", name: "Rad Dad — official set", status: "draft", itemCount: 2, sourceKey: "shownight:catalog_import_v1:set:rad-dad" }
+    ]
+  }), "What's our setlist?", now);
+  assert.match(showNightOnVault.answer, /Harbor Lights/);
+  assert.match(showNightOnVault.answer, /Everyday/);
+  assert.match(showNightOnVault.answer, /Vault default-live/);
+  assert.match(showNightOnVault.answer, /Rad Dad — official set/);
+  assert.match(showNightOnVault.answer, /Show Night running-order setlist/i);
+  assert.match(showNightOnVault.answer, /not a live catalog or a fourth live band/i);
+  assert.doesNotMatch(showNightOnVault.answer, /usually from a local Vault|parked demo/i);
+  assert.equal(showNightOnVault.recommendation, null);
+
   const pitch = intelligence.deterministicManagerChat(emptySeed, "Who should we pitch in Milwaukee?", now);
   assert.match(pitch.answer, /0 active opportunities/i);
   assert.match(pitch.answer, /complete the guided manager setup|no recorded booking action/i);
@@ -4344,6 +4363,28 @@ test("catalog status after demo seed names practice data and refuses a Vault imp
   assert.match(status.message, /SEED_DEMO_OPS|practice/i);
   assert.match(status.message, /not a live catalog/i);
   assert.match(status.message, /not a Vault import/i);
+  assert.doesNotMatch(status.message, /usually from a local Vault/i);
+});
+
+test("catalog status after Vault titles plus a Show Night setlist names the mix and refuses a Vault-only claim", async () => {
+  const service = new operationsMod.OperationsService({
+    client: {
+      song: { findMany: async () => [{ sourceKey: "vault:catalog_import_v1:JS-0001" }, { sourceKey: "vault:catalog_import_v1:ST-0014" }] },
+      setlist: { findMany: async () => [
+        { sourceKey: "vault:catalog_import_v1:set:setlist-ready" },
+        { sourceKey: "shownight:catalog_import_v1:set:rad-dad" }
+      ] }
+    }
+  }, { log: async () => undefined }, {});
+  const status = await service.catalogStatus("artist-a");
+  assert.equal(status.empty, false);
+  assert.equal(status.source, "mixed");
+  assert.equal(status.vaultSongCount, 2);
+  assert.equal(status.showNightSongCount, 0);
+  assert.equal(status.showNightSetlistCount, 1);
+  assert.match(status.message, /2 from Vault/i);
+  assert.match(status.message, /1 Show Night running-order setlist/i);
+  assert.match(status.message, /not a live catalog or a fourth live band/i);
   assert.doesNotMatch(status.message, /usually from a local Vault/i);
 });
 

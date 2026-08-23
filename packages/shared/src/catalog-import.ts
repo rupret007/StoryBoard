@@ -274,7 +274,22 @@ export type CatalogRecordProvenance = {
   showNightSongCount: number;
   demoSongCount: number;
   manualSongCount: number;
+  vaultSetlistCount: number;
+  showNightSetlistCount: number;
+  demoSetlistCount: number;
+  manualSetlistCount: number;
 };
+
+/** Band operations Vault-slice intro is honest only for an empty table or a Vault-only library. */
+export function catalogWorkspaceUsesVaultFraming(status: Pick<CatalogRecordProvenance, "source">) {
+  return status.source === "none" || status.source === "vault";
+}
+
+export const CATALOG_NON_VAULT_LIBRARY_INTRO =
+  "These recorded rows are not a Vault import. Vault remains the catalog; default import is still the published setlist_ready_default_import / default_live slice (`pnpm catalog:import`). Add here only for a Band operations correction. Durations stay unknown until someone records them.";
+
+export const CATALOG_NON_VAULT_EMPTY_SETLIST_HINT =
+  "No setlist is recorded. Create one here from the songs on this artist. That is not a Vault import or a second catalog.";
 
 export type SongCatalogStatus = CatalogRecordProvenance & {
   policyVersion: typeof CATALOG_IMPORT_POLICY_VERSION;
@@ -758,33 +773,59 @@ export function catalogSourceKind(sourceKey?: string | null): Exclude<CatalogRec
   return "manual";
 }
 
-export function catalogRecordProvenance(songs: { sourceKey?: string | null }[]): CatalogRecordProvenance {
-  let vaultSongCount = 0;
-  let showNightSongCount = 0;
-  let demoSongCount = 0;
-  let manualSongCount = 0;
-  for (const song of songs) {
-    const kind = catalogSourceKind(song.sourceKey);
-    if (kind === "vault") vaultSongCount += 1;
-    else if (kind === "show_night") showNightSongCount += 1;
-    else if (kind === "demo") demoSongCount += 1;
-    else manualSongCount += 1;
+function countCatalogKinds(rows: { sourceKey?: string | null }[]) {
+  let vault = 0;
+  let showNight = 0;
+  let demo = 0;
+  let manual = 0;
+  for (const row of rows) {
+    const kind = catalogSourceKind(row.sourceKey);
+    if (kind === "vault") vault += 1;
+    else if (kind === "show_night") showNight += 1;
+    else if (kind === "demo") demo += 1;
+    else manual += 1;
   }
-  const present = (
+  return { vault, showNight, demo, manual };
+}
+
+export function catalogRecordProvenance(
+  songs: { sourceKey?: string | null }[],
+  setlists: { sourceKey?: string | null }[] = []
+): CatalogRecordProvenance {
+  const songKinds = countCatalogKinds(songs);
+  const setlistKinds = countCatalogKinds(setlists);
+  const songPresent = (
     [
-      vaultSongCount ? "vault" : null,
-      showNightSongCount ? "show_night" : null,
-      demoSongCount ? "demo" : null,
-      manualSongCount ? "manual" : null
+      songKinds.vault ? "vault" : null,
+      songKinds.showNight ? "show_night" : null,
+      songKinds.demo ? "demo" : null,
+      songKinds.manual ? "manual" : null
     ] as const
   ).filter((value): value is Exclude<CatalogRecordSource, "none" | "mixed"> => Boolean(value));
+  // A Band operations setlist (null sourceKey) is a running order, not a second catalog.
+  // Show Night / demo / Vault setlists can still make a single-source song table mixed.
+  const extraCatalogSetlistKinds = (
+    [
+      setlistKinds.vault && !songKinds.vault ? "vault" : null,
+      setlistKinds.showNight && !songKinds.showNight ? "show_night" : null,
+      setlistKinds.demo && !songKinds.demo ? "demo" : null
+    ] as const
+  ).filter((value): value is Exclude<CatalogRecordSource, "none" | "mixed" | "manual"> => Boolean(value));
   return {
-    source: songs.length === 0 ? "none" : present.length === 1 ? present[0]! : "mixed",
+    source: songs.length === 0
+      ? "none"
+      : songPresent.length === 1 && extraCatalogSetlistKinds.length === 0
+        ? songPresent[0]!
+        : "mixed",
     songCount: songs.length,
-    vaultSongCount,
-    showNightSongCount,
-    demoSongCount,
-    manualSongCount
+    vaultSongCount: songKinds.vault,
+    showNightSongCount: songKinds.showNight,
+    demoSongCount: songKinds.demo,
+    manualSongCount: songKinds.manual,
+    vaultSetlistCount: setlistKinds.vault,
+    showNightSetlistCount: setlistKinds.showNight,
+    demoSetlistCount: setlistKinds.demo,
+    manualSetlistCount: setlistKinds.manual
   };
 }
 
@@ -809,7 +850,16 @@ function catalogStatusMessage(provenance: CatalogRecordProvenance): string {
     provenance.vaultSongCount ? `${provenance.vaultSongCount} from Vault` : null,
     provenance.showNightSongCount ? `${provenance.showNightSongCount} from Show Night` : null,
     provenance.demoSongCount ? `${provenance.demoSongCount} practice/demo` : null,
-    provenance.manualSongCount ? `${provenance.manualSongCount} Band operations` : null
+    provenance.manualSongCount ? `${provenance.manualSongCount} Band operations` : null,
+    provenance.showNightSetlistCount && !provenance.showNightSongCount
+      ? `${provenance.showNightSetlistCount} Show Night running-order setlist${provenance.showNightSetlistCount === 1 ? "" : "s"}`
+      : null,
+    provenance.demoSetlistCount && !provenance.demoSongCount
+      ? `${provenance.demoSetlistCount} practice/demo setlist${provenance.demoSetlistCount === 1 ? "" : "s"}`
+      : null,
+    provenance.vaultSetlistCount && !provenance.vaultSongCount
+      ? `${provenance.vaultSetlistCount} Vault setlist${provenance.vaultSetlistCount === 1 ? "" : "s"}`
+      : null
   ].filter((part): part is string => Boolean(part));
   return `${countLabel} (${parts.join(", ")}). Vault rows follow the published setlist_ready_default_import / default_live slice on the current artist; Show Night, practice/demo, and one-off rows are not a live catalog or a fourth live band.`;
 }
@@ -818,7 +868,7 @@ export function describeSongCatalogStatus(input: {
   songs: { sourceKey?: string | null }[];
   setlists: { sourceKey?: string | null }[];
 }): SongCatalogStatus {
-  const provenance = catalogRecordProvenance(input.songs);
+  const provenance = catalogRecordProvenance(input.songs, input.setlists);
   return {
     policyVersion: CATALOG_IMPORT_POLICY_VERSION,
     empty: provenance.songCount === 0,

@@ -52,7 +52,8 @@ Stalemate, Trailer Swift, and Something Dirty catalogs stay parked unless
 HTTP `POST /songs/import` and `VAULT_CATALOG_PATH` accept local JSON only;
 remote catalog URLs are rejected. `SEED_DEMO_OPS` practice rows, Show Night
 running-order imports, and Band operations one-offs keep their own
-provenance; Manager and `GET /songs/status` never call them a Vault import.
+provenance; Manager and `GET /songs/status` never call them a Vault import,
+including when a Show Night running-order setlist sits on Vault-titled songs.
 
 Details: [`docs/catalog-import.md`](docs/catalog-import.md).
 

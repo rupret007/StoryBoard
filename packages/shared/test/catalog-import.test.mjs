@@ -315,6 +315,49 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.match(mixedStatus.message, /1 from Vault/i);
   assert.match(mixedStatus.message, /1 practice\/demo/i);
   assert.match(mixedStatus.message, /not a live catalog or a fourth live band/i);
+
+  const vaultSongsManualSetlist = shared.describeSongCatalogStatus({
+    songs: [{ sourceKey: "vault:catalog_import_v1:JS-0001" }],
+    setlists: [{ sourceKey: null }]
+  });
+  assert.equal(vaultSongsManualSetlist.source, "vault");
+  assert.equal(vaultSongsManualSetlist.manualSetlistCount, 1);
+  assert.equal(shared.catalogWorkspaceUsesVaultFraming(vaultSongsManualSetlist), true);
+
+  const overlappingShowNight = {
+    event: { name: "Rad Dad + Friends", venue: "Example Room", dateLong: "Saturday, September 19, 2026" },
+    radDadSet: [
+      { number: 1, song: "Harbor Lights →", transition: true, special: false },
+      { number: 2, song: "Everyday", transition: false, special: false }
+    ]
+  };
+  const overlapPlan = shared.planCatalogImport({ vault: vaultFixture, showNight: overlappingShowNight });
+  assert.deepEqual(overlapPlan.songs.map((song) => song.title), ["Harbor Lights", "Sidewalk Radio", "Everyday"]);
+  assert.equal(overlapPlan.songs.every((song) => song.origin === "vault"), true);
+  assert.equal(overlapPlan.setlists.length, 2);
+  assert.equal(overlapPlan.setlists[0]?.name, "Vault default-live");
+  assert.equal(overlapPlan.setlists[1]?.name, "Rad Dad — official set");
+  const overlapStatus = shared.describeSongCatalogStatus({
+    songs: overlapPlan.songs.map((song) => ({ sourceKey: song.sourceKey })),
+    setlists: overlapPlan.setlists.map((setlist) => ({ sourceKey: setlist.sourceKey }))
+  });
+  assert.equal(overlapStatus.source, "mixed");
+  assert.equal(overlapStatus.vaultSongCount, 3);
+  assert.equal(overlapStatus.showNightSongCount, 0);
+  assert.equal(overlapStatus.showNightSetlistCount, 1);
+  assert.match(overlapStatus.message, /3 from Vault/i);
+  assert.match(overlapStatus.message, /1 Show Night running-order setlist/i);
+  assert.match(overlapStatus.message, /not a live catalog or a fourth live band/i);
+  assert.equal(shared.catalogWorkspaceUsesVaultFraming(overlapStatus), false);
+  assert.match(shared.CATALOG_NON_VAULT_LIBRARY_INTRO, /not a Vault import/i);
+  assert.doesNotMatch(shared.CATALOG_NON_VAULT_LIBRARY_INTRO, /Stalemate or hybrid row in that slice stays here/i);
+
+  const demoLibrary = shared.describeSongCatalogStatus({
+    songs: [{ sourceKey: "seed:demo:opener" }],
+    setlists: [{ sourceKey: "seed:demo:setlist" }]
+  });
+  assert.equal(shared.catalogWorkspaceUsesVaultFraming(demoLibrary), false);
+  assert.match(shared.CATALOG_NON_VAULT_EMPTY_SETLIST_HINT, /not a Vault import/i);
 });
 
 test("catalog:import CLI dry-runs the local sample and refuses remote URLs", () => {
