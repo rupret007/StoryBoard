@@ -1043,6 +1043,20 @@ function questionHas(question: string, words: RegExp) {
   return words.test(question.toLowerCase());
 }
 
+function questionAsksForExternalAction(question: string) {
+  if (
+    questionHas(
+      question,
+      /\b(send|email|message|publish|pay|sign|execute|accept the contract|call them)\b/
+    )
+  ) {
+    return true;
+  }
+  // "post" is a social/publish verb; "post-show" is an operations noun.
+  const withoutPostShow = question.replace(/\bpost[- ]show\b/gi, " ");
+  return questionHas(withoutPostShow, /\bpost\b/);
+}
+
 export function managerQuestionAsksAboutPlanHealth(question: string) {
   return /\b(goal|plan|progress|on track|off track|realistic|strategy|90-day|90 day|target|under budget|over budget)\b/i.test(question);
 }
@@ -1061,7 +1075,7 @@ function deterministicManagerChatBase(
 ): ManagerChatResult {
   const brief = suppressRepeatedManagerAdvice(deterministicManagerBrief(facts, now), facts.recommendationHistory, now);
   const proposedDecisionDraft = decisionDraftFromQuestion(question);
-  const externalRequest = questionHas(question, /\b(send|email|message|post|publish|pay|sign|execute|accept the contract|call them)\b/);
+  const externalRequest = questionAsksForExternalAction(question);
   const subject = subjectReference?.status === "resolved" ? subjectReference.subject : null;
   const moneyQuestion = ["deal", "invoice", "settlement"].includes(subject?.kind ?? "") || questionHas(question, /\b(money|invoice|paid|payment|deposit|deal|settlement|settle|profit|revenue|expense|cash)\b/);
   const liveQuestion = subject?.kind === "event" || questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/);

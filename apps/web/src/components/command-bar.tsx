@@ -61,7 +61,7 @@ export function CommandBar({ artistId }: { artistId?: string }) {
         <Terminal className="h-4 w-4 text-[var(--accent)]" aria-hidden />
         <span className="text-sm font-semibold">Command</span>
         <span className="rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-          dry-run first
+          approvals first
         </span>
       </div>
       <form

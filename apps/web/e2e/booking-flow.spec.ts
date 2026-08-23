@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { instantToDateTimeLocal } from "@storyboard/shared";
+import { dateTimeLocalToIso, instantToDateTimeLocal } from "@storyboard/shared";
 
 const browserTestWebUrl = process.env.E2E_WEB_URL ?? "http://127.0.0.1:3000";
 const browserTestApiUrl = process.env.E2E_API_URL ?? "http://127.0.0.1:4000";
@@ -8,6 +8,16 @@ function dateTimeLocalInZone(value: Date, timeZone: string) {
   const result = instantToDateTimeLocal(value, timeZone);
   if (!result.ok) throw new Error(result.message);
   return result.value;
+}
+
+function futureChicagoShow(daysAhead = 45) {
+  const timeZone = "America/Chicago";
+  const probe = instantToDateTimeLocal(new Date(Date.now() + daysAhead * 86400000), timeZone);
+  if (!probe.ok) throw new Error(probe.message);
+  const chatDate = probe.value.slice(0, 10);
+  const iso = dateTimeLocalToIso(`${chatDate}T19:00`, timeZone);
+  if (!iso.ok) throw new Error(iso.message);
+  return { chatDate, eventStart: new Date(iso.value) };
 }
 
 async function signInForBrowserTest(page: Page) {
@@ -629,7 +639,10 @@ test("manager-created gigs become practical day-of workspaces", async ({ page })
   await page.goto("/manager");
   const blockedQuestion = page.getByPlaceholder("Ask about priorities, shows, booking, money, or the band...");
   const eventTitle = `E2E rehearsal ${suffix}`;
-  await blockedQuestion.fill(`Record a confirmed gig called "${eventTitle}" on 2026-09-15 at 7:00 PM at "E2E Working Room"`);
+  // Advance checklist includes a 30-day task. A hardcoded 2026-09-15 show made
+  // that task overdue after 2026-08-16 and broke Quality e2e.
+  const { chatDate, eventStart } = futureChicagoShow(45);
+  await blockedQuestion.fill(`Record a confirmed gig called "${eventTitle}" on ${chatDate} at 7:00 PM at "E2E Working Room"`);
   await page.getByRole("button", { name: "Send message" }).click();
   const eventProposal = page.getByText("Suggested band event", { exact: true }).last().locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
   await expect(eventProposal).toContainText(`Event: ${eventTitle}`);
@@ -655,7 +668,6 @@ test("manager-created gigs become practical day-of workspaces", async ({ page })
   await expect(page.getByText("Member availability updated.", { exact: true })).toBeVisible();
 
   await page.goto("/operations");
-  const eventStart = new Date("2026-09-16T00:00:00.000Z");
   const localTime = (date: Date) => dateTimeLocalInZone(date, "America/Chicago");
   const localEventStart = localTime(eventStart);
   await expect(page.getByText(eventTitle, { exact: true })).toBeVisible();
