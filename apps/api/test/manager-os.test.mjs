@@ -2727,6 +2727,30 @@ test("manager goal paths reuse real prerequisites and never create orphan goal w
   assert.equal(monitoring.counts.targetMonitoring, 1);
   const monitoringBrief = intelligence.deterministicManagerBrief(managerFacts({ goals: capGoals, initiatives: capInitiatives, tasks: [], workSequence: workSequence.deterministicManagerWorkSequence([], now), goalPath: monitoring }), now);
   assert.equal(monitoringBrief.thisWeek.find((item) => item.stableKey === "goal-path-goal-cap-target_monitoring")?.proposedAction, null);
+
+  const liveNow = new Date();
+  const liveGoals = [{ id: "goal-live", title: "Launch the tested release", workstream: "releases", status: "active", deadline: new Date(liveNow.getTime() + 90 * 86400000), currentValue: 0, targetValue: 1 }];
+  const liveInitiatives = [{ id: "initiative-live", goalId: "goal-live", title: "Tested release path", status: "active", dueAt: new Date(liveNow.getTime() + 75 * 86400000) }];
+  const liveTasks = [
+    { id: "task-live-proof", title: "Confirm the release date", status: "todo", dueAt: null, initiativeId: null },
+    { id: "task-live-announce", title: "Schedule the release announcement", status: "todo", dueAt: new Date(liveNow.getTime() + 60 * 86400000), initiativeId: "initiative-live", prerequisites: [{ prerequisiteTask: { id: "task-live-proof", title: "Confirm the release date", status: "todo", dueAt: null } }] }
+  ];
+  const liveSequence = workSequence.deterministicManagerWorkSequence(liveTasks, liveNow);
+  const livePath = goalPath.deterministicManagerGoalPath({ goals: liveGoals, measurements: [], initiatives: liveInitiatives, tasks: liveTasks, workSequence: liveSequence }, liveNow);
+  assert.equal(livePath.goals[0].status, "ready");
+  assert.equal(livePath.goals[0].nextTask.taskId, "task-live-proof");
+  const liveAnswer = intelligence.deterministicManagerChat(managerFacts({ goals: liveGoals, initiatives: liveInitiatives, tasks: liveTasks, workSequence: liveSequence, goalPath: livePath }), "What is the next move for our Launch the tested release goal?", liveNow);
+  assert.match(liveAnswer.answer, /Confirm the release date/);
+  assert.doesNotMatch(liveAnswer.answer, /contradictory dates or task order/i);
+  const expiredPath = goalPath.deterministicManagerGoalPath({
+    goals: [{ ...liveGoals[0], id: "goal-expired", deadline: new Date(liveNow.getTime() - 8 * 86400000) }],
+    measurements: [],
+    initiatives: [{ ...liveInitiatives[0], goalId: "goal-expired" }],
+    tasks: liveTasks,
+    workSequence: liveSequence
+  }, liveNow);
+  assert.equal(expiredPath.goals[0].status, "conflicted");
+  assert.equal(expiredPath.goals[0].contradictions[0].code, "goal_deadline_passed");
 });
 
 test("manager knowledge health detects conflict and staleness while enforcing profile precedence", () => {

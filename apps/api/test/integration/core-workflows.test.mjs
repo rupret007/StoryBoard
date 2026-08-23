@@ -1928,10 +1928,13 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(evidenceChat.recommendation, null);
   const evidenceRun = await client.managerRun.findUniqueOrThrow({ where: { id: evidenceChat.message.managerRunId } });
   assert.equal(evidenceRun.trace.evidenceHealth.policyVersion, "manager_evidence_v1");
-  const sequenceGoal = await manager.createGoal(artist.id, { workstream: "releases", title: "Launch the tested release", targetValue: 1, targetUnit: "release", currentValue: 0, measurementKind: "manual", deadline: "2026-08-15T00:00:00.000Z", status: "active" }, operator.email, operator.id);
-  const sequenceInitiative = await manager.createInitiative(artist.id, { goalId: sequenceGoal.id, workstream: "releases", title: "Tested release path", dueAt: "2026-08-10T00:00:00.000Z" }, operator.email, operator.id);
+  // Keep task < initiative < goal in the future. Hardcoded 2026-08-15 dates made
+  // goal-path report a passed deadline after that day and broke Quality CI.
+  const sequenceAnchor = Date.now();
+  const sequenceGoal = await manager.createGoal(artist.id, { workstream: "releases", title: "Launch the tested release", targetValue: 1, targetUnit: "release", currentValue: 0, measurementKind: "manual", deadline: new Date(sequenceAnchor + 90 * 86400000).toISOString(), status: "active" }, operator.email, operator.id);
+  const sequenceInitiative = await manager.createInitiative(artist.id, { goalId: sequenceGoal.id, workstream: "releases", title: "Tested release path", dueAt: new Date(sequenceAnchor + 75 * 86400000).toISOString() }, operator.email, operator.id);
   const sequencePrerequisite = await taskService.create(artist.id, { title: "Confirm the release date" }, operator.email, operator.id);
-  const sequenceDownstream = await client.task.create({ data: { artistId: artist.id, title: "Schedule the release announcement", dueAt: new Date("2026-08-01T00:00:00.000Z"), initiativeId: sequenceInitiative.id } });
+  const sequenceDownstream = await client.task.create({ data: { artistId: artist.id, title: "Schedule the release announcement", dueAt: new Date(sequenceAnchor + 60 * 86400000), initiativeId: sequenceInitiative.id } });
   await taskService.addPrerequisite(artist.id, sequenceDownstream.id, sequencePrerequisite.id, operator.email, operator.id);
   const sequence = await manager.workSequence(artist.id);
   assert.equal(sequence.policyVersion, "manager_work_sequence_v1");
