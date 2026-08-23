@@ -1,24 +1,27 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "generated": "2026-08-23",
   "catalog_version": "1.6",
   "primary_consumer": "StoryBoard",
   "counts": {
-    "entities": 6,
-    "originals": 5,
+    "entities": 8,
+    "originals": 6,
     "scored": 0,
     "ai_upload_ok": 0,
-    "storyboard_default_live": 0,
+    "storyboard_default_live": 3,
     "storyboard_parked": 2,
-    "storyboard_not_live_band": 3,
-    "setlist_ready": 3,
-    "setlist_ready_default_import": 0
+    "storyboard_not_live_band": 0,
+    "storyboard_not_setlist_ready": 1,
+    "storyboard_booker": 1,
+    "storyboard_cover": 1,
+    "setlist_ready": 4,
+    "setlist_ready_default_import": 3
   },
   "lanes": {
     "flagship": "ST-0001",
     "quick_win": "JS-0001",
     "experimental": "JS-0002",
-    "on_deck": "JS-0004",
+    "on_deck": "JS-0128",
     "opus": "JS-0107"
   },
   "storyboard": {
@@ -31,26 +34,28 @@
     "storyliner_role": "promo only",
     "no_fourth_live_band": true,
     "do_not_invent_live_band": true,
-    "reads": ["id", "title", "project", "is_original", "key", "bpm", "import_scope"],
-    "does_not_read": ["bpm_int", "bpm_raw", "vault_ref", "vault_id", "source_key", "potential", "played_live"],
+    "booker_policy": "travis_books",
+    "reads": ["id", "title", "project", "is_original", "key", "bpm", "bpm_int", "vault_id", "vault_ref", "played_live"],
+    "does_not_read": ["bpm_raw", "source_key", "potential", "import_scope"],
     "field_map": {
       "title": "title",
       "musicalKey": "key",
-      "bpm": "bpm",
-      "sourceKey": "vault:catalog_import_v1:{id}",
-      "notes": "constructed: source {id} · {project} · original|not original",
-      "active": "always true on import — not is_original"
+      "bpm": "bpm_int",
+      "sourceKey": "vault:catalog_import_v1:{vault_id ?? id}",
+      "notes": "vault_ref",
+      "active": "is_original !== false"
     },
     "leave_null": ["durationSeconds", "leadVocalist", "genre", "lyricsUrl", "chartUrl"],
-    "merge_key": "vault:catalog_import_v1:{id}",
-    "live_catalog_projects": ["Rad Dad"],
+    "merge_key": "vault:catalog_import_v1:{vault_id ?? id}",
+    "live_catalog_projects": ["Rad Dad", "Jeff Story"],
     "parked_catalog_projects": ["Stalemate", "Trailer Swift", "Something Dirty"],
-    "default_import": "Rad Dad rows only. This sample labels no song as Rad Dad — live_presence is not artist_project.",
+    "booker_catalog_projects": ["Travis", "Travis Story"],
+    "default_import": "Published setlist_ready_default_import / import_scope=default_live. Live repertoire is Rad Dad + Jeff Story + recorded Rad Dad plays, gated by setlist_ready. Parked catalogs stay parked. Covers stay out. Travis books.",
     "setlist": {
       "seed_from": "setlist_ready",
       "default_import_from": "setlist_ready_default_import",
       "item_type": "song",
-      "link_by": "vault:catalog_import_v1:{id}",
+      "link_by": "vault:catalog_import_v1:{vault_id ?? id}",
       "jeff_owns_order": true,
       "do_not_invent": ["breaks", "running_order", "lead_vocalist", "duration"]
     },
@@ -67,7 +72,7 @@
       "source_key": "vault:catalog_import_v1:JS-0001",
       "title": "Harbor Lights",
       "project": "Jeff Story",
-      "import_scope": "not_live_band",
+      "import_scope": "default_live",
       "is_original": true,
       "writers": ["Example Writer"],
       "key": "G",
@@ -84,7 +89,7 @@
       "source_key": "vault:catalog_import_v1:JS-0002",
       "title": "Sidewalk Radio",
       "project": "Something Dirty / Stalemate / Rad Dad",
-      "import_scope": "not_live_band",
+      "import_scope": "default_live",
       "is_original": true,
       "writers": ["Example Writer"],
       "key": "A",
@@ -93,6 +98,38 @@
       "bpm_int": null,
       "duration_seconds": null,
       "played_live": ["Rad Dad (2026-05)"]
+    },
+    {
+      "id": "ST-0014",
+      "vault_id": "ST-0014",
+      "vault_ref": "vault:ST-0014",
+      "source_key": "vault:catalog_import_v1:ST-0014",
+      "title": "Everyday",
+      "project": "Stalemate",
+      "import_scope": "default_live",
+      "is_original": true,
+      "key": "E",
+      "bpm": 96,
+      "bpm_raw": "96",
+      "bpm_int": 96,
+      "duration_seconds": null,
+      "played_live": ["Rad Dad (2026-05)"]
+    },
+    {
+      "id": "JS-0128",
+      "vault_id": "JS-0128",
+      "vault_ref": "vault:JS-0128",
+      "source_key": "vault:catalog_import_v1:JS-0128",
+      "title": "It's Alright",
+      "project": "Jeff Story",
+      "import_scope": "not_setlist_ready",
+      "is_original": true,
+      "key": "C",
+      "bpm": 110,
+      "bpm_raw": "110",
+      "bpm_int": 110,
+      "duration_seconds": null,
+      "played_live": ["(band practice tape) (2025-10)"]
     },
     {
       "id": "ST-0001",
@@ -134,7 +171,7 @@
       "source_key": "vault:catalog_import_v1:TR-0001",
       "title": "Booking Calendar Blues",
       "project": "Travis Story",
-      "import_scope": "not_live_band",
+      "import_scope": "travis_books",
       "is_original": true,
       "key": "C",
       "bpm": 100,
@@ -144,20 +181,20 @@
       "played_live": []
     },
     {
-      "id": "CV-0001",
-      "vault_id": "CV-0001",
-      "vault_ref": "vault:CV-0001",
-      "source_key": "vault:catalog_import_v1:CV-0001",
+      "id": "ST-0002",
+      "vault_id": "ST-0002",
+      "vault_ref": "vault:ST-0002",
+      "source_key": "vault:catalog_import_v1:ST-0002",
       "title": "Cover Example",
-      "project": "Jeff Story",
-      "import_scope": "not_live_band",
+      "project": "Stalemate",
+      "import_scope": "cover_not_active",
       "is_original": false,
       "key": "C",
       "bpm": 214,
       "bpm_raw": "214 (cut)",
       "bpm_int": 214,
       "duration_seconds": null,
-      "played_live": []
+      "played_live": ["Rad Dad (2026-05)"]
     }
   ],
   "setlist_ready": [
@@ -167,7 +204,8 @@
       "key": "G",
       "project": "Jeff Story",
       "bpm": 118,
-      "import_scope": "not_live_band",
+      "bpm_int": 118,
+      "import_scope": "default_live",
       "vault_ref": "vault:JS-0001"
     },
     {
@@ -176,8 +214,19 @@
       "key": "A",
       "project": "Something Dirty / Stalemate / Rad Dad",
       "bpm": null,
-      "import_scope": "not_live_band",
+      "bpm_int": null,
+      "import_scope": "default_live",
       "vault_ref": "vault:JS-0002"
+    },
+    {
+      "id": "ST-0014",
+      "title": "Everyday",
+      "key": "E",
+      "project": "Stalemate",
+      "bpm": 96,
+      "bpm_int": 96,
+      "import_scope": "default_live",
+      "vault_ref": "vault:ST-0014"
     },
     {
       "id": "ST-0001",
@@ -185,12 +234,44 @@
       "key": "Am",
       "project": "Stalemate",
       "bpm": null,
+      "bpm_int": null,
       "import_scope": "parked_catalog",
       "vault_ref": "vault:ST-0001"
     }
   ],
-  "setlist_ready_default_import": [],
+  "setlist_ready_default_import": [
+    {
+      "id": "JS-0001",
+      "title": "Harbor Lights",
+      "key": "G",
+      "project": "Jeff Story",
+      "bpm": 118,
+      "bpm_int": 118,
+      "import_scope": "default_live",
+      "vault_ref": "vault:JS-0001"
+    },
+    {
+      "id": "JS-0002",
+      "title": "Sidewalk Radio",
+      "key": "A",
+      "project": "Something Dirty / Stalemate / Rad Dad",
+      "bpm": null,
+      "bpm_int": null,
+      "import_scope": "default_live",
+      "vault_ref": "vault:JS-0002"
+    },
+    {
+      "id": "ST-0014",
+      "title": "Everyday",
+      "key": "E",
+      "project": "Stalemate",
+      "bpm": 96,
+      "bpm_int": 96,
+      "import_scope": "default_live",
+      "vault_ref": "vault:ST-0014"
+    }
+  ],
   "notes": {
-    "storyboard_import": "PRIMARY PATH: StoryBoard imports THIS file. Default live is Rad Dad only. This sample has zero Rad Dad rows. Do not invent a second catalog."
+    "storyboard_import": "PRIMARY PATH: StoryBoard imports THIS file. Default live is the published setlist_ready_default_import slice (Jeff Story, hybrid Rad Dad plays, and live-ready Stalemate such as Everyday). Parked ST-0001 and cover ST-0002 stay out. Do not invent a second catalog or a fourth live band."
   }
 }

@@ -1247,7 +1247,7 @@ function deterministicManagerChatBase(
 
   if (managerQuestionAsksAboutWriterProjectAsLiveBand(question)) {
     return {
-      answer: "Jeff Story is a Vault writer project, not the live band. Default import is Rad Dad only. live_presence is not artist_project, and a hybrid or parked label is not a fourth live band. Import a local app_api.json; do not invent a live catalog from writer rows.",
+      answer: "Jeff Story is already part of Vault's default live repertoire with Rad Dad. StoryBoard consumes the published setlist_ready_default_import / default_live slice from a local app_api.json — it does not invent a catalog or a fourth live band. Parked catalogs stay parked unless an operator opts in. Import locally; nothing posts from this conversation.",
       citations: [],
       recommendation: null
     };
@@ -1255,7 +1255,7 @@ function deterministicManagerChatBase(
 
   if (managerQuestionAsksAboutFourthBand(question)) {
     return {
-      answer: "StoryBoard imports onto the current artist only. The live catalog is Rad Dad. Stalemate, Trailer Swift, and Something Dirty stay parked unless an operator opts in with --include-parked, and that is not a fourth live band. Import a local Vault file; do not invent another artist.",
+      answer: "StoryBoard imports onto the current artist only. The live catalog is Vault's published default-live slice (Rad Dad + Jeff Story + recorded Rad Dad plays, gated by setlist_ready). Stalemate, Trailer Swift, and Something Dirty stay parked unless an operator opts in with --include-parked, and that is not a fourth live band. Import a local Vault file; do not invent another artist.",
       citations: [],
       recommendation: null
     };
@@ -1508,7 +1508,7 @@ function deterministicManagerChatBase(
     const activeSongs = songs.filter((song) => song.active !== false);
     if (!songs.length && !setlists.length) {
       return {
-        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Vault is the sole catalog; default import is Rad Dad rows from a local app_api.json (`pnpm catalog:import`, dry-run by default; `--apply` writes). Writer projects and parked catalogs stay out unless an operator opts in. That empty table is not a second catalog. StoryBoard never fetches a remote catalog.",
+        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Vault is the sole catalog; default import is the published setlist_ready_default_import / default_live slice (Rad Dad + Jeff Story + recorded Rad Dad plays, gated by setlist_ready) from a local app_api.json (`pnpm catalog:import`, dry-run by default; `--apply` writes). That empty table is not a second catalog. StoryBoard never fetches a remote catalog.",
         citations: [],
         recommendation: null
       };
