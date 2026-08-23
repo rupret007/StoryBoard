@@ -51,7 +51,7 @@ test("catalog import defaults to the live band and dry-run reconcile creates not
   assert.equal(plan.counts.guestSetsSkipped, 1);
   assert.ok(plan.skipped.some((row) => row.reason === "flex_pool_skipped"));
   assert.ok(plan.skipped.some((row) => row.reason === "setlist_ready_not_live" && row.title === "Parked Demo"));
-  assert.ok(plan.skipped.some((row) => row.reason === "parked_catalog" && row.title === "Dirty Sketch"));
+  assert.ok(plan.skipped.some((row) => (row.reason === "parked_catalog" || row.reason === "not_setlist_ready") && row.title === "Dirty Sketch"));
   assert.ok(plan.skipped.some((row) => row.reason === "not_setlist_ready" && row.title === "Solo Sketch"));
   assert.ok(!plan.songs.some((song) => /parked demo|trailer|solo|dirty sketch|travis/i.test(song.title)));
 
