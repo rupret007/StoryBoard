@@ -271,6 +271,52 @@ test("live Vault schema 3 sample uses the published default-live slice and field
   assert.ok(!nullBpm.warnings.some((warning) => /not a valid app_api/i.test(warning)));
 });
 
+test("catalog status names Vault, Show Night, demo, and manual rows without calling non-Vault songs a Vault import", () => {
+  assert.equal(shared.catalogSourceKind("vault:catalog_import_v1:JS-0001"), "vault");
+  assert.equal(shared.catalogSourceKind("shownight:catalog_import_v1:song:rad-dad:harbor-lights"), "show_night");
+  assert.equal(shared.catalogSourceKind("seed:demo:opener"), "demo");
+  assert.equal(shared.catalogSourceKind(null), "manual");
+
+  const demoStatus = shared.describeSongCatalogStatus({
+    songs: [{ sourceKey: "seed:demo:opener" }, { sourceKey: "seed:demo:closer" }],
+    setlists: [{ sourceKey: "seed:demo:setlist" }]
+  });
+  assert.equal(demoStatus.source, "demo");
+  assert.equal(demoStatus.demoSongCount, 2);
+  assert.match(demoStatus.message, /SEED_DEMO_OPS|practice/i);
+  assert.match(demoStatus.message, /not a live catalog/i);
+  assert.match(demoStatus.message, /not a Vault import/i);
+  assert.doesNotMatch(demoStatus.message, /usually from a local Vault/i);
+
+  const showNightStatus = shared.describeSongCatalogStatus({
+    songs: [{ sourceKey: "shownight:catalog_import_v1:song:rad-dad:harbor-lights" }],
+    setlists: [{ sourceKey: "shownight:catalog_import_v1:set:rad-dad" }]
+  });
+  assert.equal(showNightStatus.source, "show_night");
+  assert.match(showNightStatus.message, /Show Night/i);
+  assert.match(showNightStatus.message, /not a fourth live band/i);
+  assert.match(showNightStatus.message, /not a second catalog/i);
+
+  const manualStatus = shared.describeSongCatalogStatus({
+    songs: [{ sourceKey: null }],
+    setlists: []
+  });
+  assert.equal(manualStatus.source, "manual");
+  assert.match(manualStatus.message, /Band operations/i);
+  assert.match(manualStatus.message, /not a Vault import/i);
+
+  const mixedStatus = shared.describeSongCatalogStatus({
+    songs: [{ sourceKey: "vault:catalog_import_v1:JS-0001" }, { sourceKey: "seed:demo:opener" }],
+    setlists: []
+  });
+  assert.equal(mixedStatus.source, "mixed");
+  assert.equal(mixedStatus.vaultSongCount, 1);
+  assert.equal(mixedStatus.demoSongCount, 1);
+  assert.match(mixedStatus.message, /1 from Vault/i);
+  assert.match(mixedStatus.message, /1 practice\/demo/i);
+  assert.match(mixedStatus.message, /not a live catalog or a fourth live band/i);
+});
+
 test("catalog:import CLI dry-runs the local sample and refuses remote URLs", () => {
   const script = join(dir, "../../../scripts/import-catalog.mjs");
   const sample = join(dir, "fixtures/vault-app-api.sample.json");
