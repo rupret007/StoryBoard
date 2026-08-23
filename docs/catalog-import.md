@@ -132,4 +132,6 @@ a clean `bpm` integer, then a leading 2–3 digit tempo; notes come from
 `vault_ref`. Duration and lead vocalist stay null. `GET /songs/status`
 reports an empty table as a missing Vault import, not as a second catalog. After
 rows exist it names Vault, Show Night, `SEED_DEMO_OPS`, Band operations, or a
-mix — and never calls non-Vault songs a Vault import.
+mix — including a Show Night or demo setlist on Vault-titled songs — and never
+calls non-Vault songs or running orders a Vault import. Band operations keeps
+the Vault-slice intro only for an empty table or a Vault-only library.
