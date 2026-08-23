@@ -24,6 +24,7 @@ Dry-run is the default. This command never fetches a remote catalog and never
 creates booking pitches, contacts, or a second artist.
 
 Usage:
+  pnpm catalog:import
   pnpm catalog:import -- --source ./app_api.json
   pnpm catalog:import -- --source ./master_catalog.json
   pnpm catalog:import -- --source ./app_api.json --show-night ./show.json
@@ -31,6 +32,7 @@ Usage:
 
 Options:
   --source <path>          Local Vault data/app_api.json or data/master_catalog.json
+                           (default: the checked-in app_api.json shape sample)
   --show-night <path>      Local Show Night content/show.json
   --artist <slug>          Artist slug (default: default)
   --include-parked         Also import Stalemate / Trailer Swift / Something Dirty
@@ -79,6 +81,10 @@ function assertLocalPath(value, label) {
   shared.assertLocalCatalogPath(value, label);
 }
 
+function defaultSamplePath() {
+  return resolve(here, "..", shared.VAULT_SAMPLE_CATALOG_RELATIVE_PATH);
+}
+
 async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
 }
@@ -121,8 +127,8 @@ async function applyPlan(artistSlug, reconciliation) {
         const now = new Date();
         await client.query(
           `INSERT INTO "Song" ("id","artistId","title","musicalKey","bpm","notes","sourceKey","active","createdAt","updatedAt")
-           VALUES ($1,$2,$3,$4,$5,$6,$7,true,$8,$9)`,
-          [id, artistId, song.title, song.musicalKey, song.bpm, song.notes, song.sourceKey, now, now]
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [id, artistId, song.title, song.musicalKey, song.bpm, song.notes, song.sourceKey, song.active !== false, now, now]
         );
         idBySourceKey.set(song.sourceKey, id);
         idByTitle.set(song.title.toLocaleLowerCase(), id);
@@ -179,7 +185,7 @@ async function main() {
   try {
     assertLocalPath(options.source, "--source");
     assertLocalPath(options.showNight, "--show-night");
-    if (!options.source && !options.showNight) throw new Error("Provide --source and/or --show-night");
+    if (!options.source && !options.showNight) options.source = defaultSamplePath();
     const vault = options.source ? await readJson(resolve(options.source)) : undefined;
     const showNight = options.showNight ? await readJson(resolve(options.showNight)) : undefined;
     const plan = shared.planCatalogImport({

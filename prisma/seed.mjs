@@ -1,8 +1,11 @@
 import "dotenv/config";
+import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import pg from "pg";
 import { randomBytes } from "crypto";
+
+const SAMPLE_CATALOG = resolve("packages/shared/test/fixtures/vault-app-api.sample.json");
 
 function cuidLike() {
   const t = Date.now().toString(36);
@@ -83,8 +86,8 @@ async function main() {
     }
 
     const vaultImport = importLocalVaultCatalog();
-    if (vaultImport.skipped) {
-      console.log("Song table left empty. The catalog lives in AI-Music-Vault. Set VAULT_CATALOG_PATH or run pnpm catalog:import.");
+    if (vaultImport.empty) {
+      console.log(vaultImport.message);
     }
 
     console.log("Seed OK:", { artistId, operatorId, email: seedEmail, demoOps: demo, vaultImport });
@@ -94,17 +97,34 @@ async function main() {
 }
 
 function importLocalVaultCatalog() {
-  const source = process.env.VAULT_CATALOG_PATH?.trim();
-  if (!source) return { skipped: true, reason: "VAULT_CATALOG_PATH unset" };
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source) || source.startsWith("//")) {
+  const requested = process.env.VAULT_CATALOG_PATH?.trim();
+  if (requested && (/^[a-z][a-z0-9+.-]*:\/\//i.test(requested) || requested.startsWith("//"))) {
     throw new Error("VAULT_CATALOG_PATH must be a local file path, not a URL");
+  }
+  const source = requested || SAMPLE_CATALOG;
+  if (!existsSync(source)) {
+    return {
+      empty: true,
+      skipped: true,
+      reason: requested ? "VAULT_CATALOG_PATH missing" : "sample fixture missing",
+      message: "Song table left empty. Vault is the catalog. Place a local app_api.json and run pnpm catalog:import."
+    };
   }
   const apply = /^(1|true|yes)$/i.test(process.env.VAULT_CATALOG_APPLY ?? "");
   const args = [resolve("scripts/import-catalog.mjs"), "--source", resolve(source)];
   if (apply) args.push("--apply");
   const result = spawnSync(process.execPath, args, { stdio: "inherit", env: process.env });
   if (result.status !== 0) throw new Error("Vault catalog import failed");
-  return { skipped: false, applied: apply, source: resolve(source) };
+  return {
+    empty: !apply,
+    skipped: false,
+    applied: apply,
+    source: resolve(source),
+    usedSample: !requested,
+    message: apply
+      ? `Applied Vault catalog from ${resolve(source)}.`
+      : `Song table left empty after a Vault dry-run of ${resolve(source)}. Re-run with VAULT_CATALOG_APPLY=true or pnpm catalog:import -- --apply to write. This empty table is not a second catalog.`
+  };
 }
 
 async function seedGenericDemoOps(client, artistId) {

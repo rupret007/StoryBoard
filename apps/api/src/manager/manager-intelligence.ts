@@ -1071,12 +1071,18 @@ export function managerQuestionAsksAboutCatalog(question: string) {
   return /\b(setlists?|song library|song catalog|vault|app_api|master_catalog|what songs|our songs|import (?:the )?(?:catalog|songs)|show night)\b/i.test(question);
 }
 
+export function managerQuestionAsksAboutPromoCopy(question: string) {
+  const withoutPostShow = question.replace(/\bpost[- ]show\b/gi, " ");
+  return /\b(caption|storyliner|auto[- ]?post|instagram|tiktok|facebook post|tweet)\b/i.test(withoutPostShow)
+    || /\b(social (?:post|caption|copy)|write (?:a |the )?(?:caption|post)|post (?:this |the |.{0,40} )?to social)\b/i.test(withoutPostShow);
+}
+
 export function managerQuestionAsksAboutBookerPitch(question: string) {
-  return /\btravis\b/i.test(question) && /\b(pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send)\b/i.test(question);
+  return /\btravis\b/i.test(question) && /\b(pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send|email|contact)\b/i.test(question);
 }
 
 export function managerQuestionAsksAboutFourthBand(question: string) {
-  if (/\b(fourth (?:live )?band|another (?:live )?band|new (?:live )?band)\b/i.test(question)) return true;
+  if (/\b(?:fourth|4th|another|new)(?: live)? band\b/i.test(question)) return true;
   return /\b(stalemate|trailer swift|something dirty)\b/i.test(question)
     && /\b(live|band|import|catalog|setlist|artist|create|add)\b/i.test(question);
 }
@@ -1218,12 +1224,11 @@ function deterministicManagerChatBase(
     };
   }
 
-  if (externalRequest) {
-    const recommendation = matchingRecommendation(brief);
+  if (managerQuestionAsksAboutPromoCopy(question) || (externalRequest && /\b(social|caption|storyliner|instagram|tiktok)\b/i.test(question))) {
     return {
-      answer: `I can help prepare that, but I won't send, sign, pay, publish, or execute outside work from this conversation. Those actions need the exact payload reviewed in Approvals.\n\nThe useful next move is to prepare the internal work first${recommendation ? `: ${recommendation.nextAction}` : "."}`,
-      citations: recommendation?.evidenceIds ?? [],
-      recommendation: recommendation?.proposedAction ? recommendation : null
+      answer: "StoryBoard is the band-business OS: booking, setlists, invoices, and recorded ops. StoryLiner is promo-only. I won't send, sign, pay, publish, or execute a caption or social post from this conversation.",
+      citations: [],
+      recommendation: null
     };
   }
 
@@ -1237,9 +1242,18 @@ function deterministicManagerChatBase(
 
   if (managerQuestionAsksAboutFourthBand(question)) {
     return {
-      answer: "StoryBoard imports onto the current artist only. The live catalog is Rad Dad. Stalemate, Trailer Swift, and Something Dirty stay parked unless an operator opts in, and that is not a fourth live band. Import a local Vault file; do not invent another artist.",
+      answer: "StoryBoard imports onto the current artist only. The live catalog is Rad Dad. Stalemate, Trailer Swift, and Something Dirty stay parked unless an operator opts in with --include-parked, and that is not a fourth live band. Import a local Vault file; do not invent another artist.",
       citations: [],
       recommendation: null
+    };
+  }
+
+  if (externalRequest) {
+    const recommendation = matchingRecommendation(brief);
+    return {
+      answer: `I can help prepare that, but I won't send, sign, pay, publish, or execute outside work from this conversation. Those actions need the exact payload reviewed in Approvals.\n\nThe useful next move is to prepare the internal work first${recommendation ? `: ${recommendation.nextAction}` : "."}`,
+      citations: recommendation?.evidenceIds ?? [],
+      recommendation: recommendation?.proposedAction ? recommendation : null
     };
   }
 

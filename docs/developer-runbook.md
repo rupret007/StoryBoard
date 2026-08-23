@@ -965,14 +965,16 @@ contacts (10), deal/payment (20), advance (15), and performance preparation
 premises lower confidence, and proximity raises unresolved gaps to higher
 urgency. Manager briefs and chat consume this same result.
 
-The default seed leaves the song table empty unless `VAULT_CATALOG_PATH` points
-at a local Vault `app_api.json` or `master_catalog.json`. Vault import is the
-default way to populate songs: `pnpm catalog:import` (dry-run by default),
-`VAULT_CATALOG_APPLY=true` on seed, or `POST /songs/import`. Paths and payloads
-must be local JSON; remote catalog URLs are rejected. Details:
+The default seed dry-runs the checked-in Vault `app_api.json` shape and leaves
+the song table empty unless `VAULT_CATALOG_APPLY=true`. Point
+`VAULT_CATALOG_PATH` at a local Vault `app_api.json` or `master_catalog.json`
+to plan that file instead. Vault is the catalog; StoryBoard imports it with
+`pnpm catalog:import` (dry-run by default), seed apply, or `POST /songs/import`.
+`GET /songs/status` reports an empty table as a missing import. Paths and
+payloads must be local JSON; remote catalog URLs are rejected. Details:
 [`catalog-import.md`](catalog-import.md) and [`APPS.md`](../APPS.md).
 `SEED_DEMO_OPS=true` can add generic demo songs/invoice rows for local UI
-practice; it is not the live catalog.
+practice; prefer Vault import. It does not load a live catalog.
 
 Open **Music & setlists** in Band operations to correct duration/key and build
 running orders after Vault import. Song duration uses `m:ss` in the UI and remains

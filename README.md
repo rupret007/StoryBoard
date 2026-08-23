@@ -645,7 +645,7 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm db:generate` | `prisma generate` (root config) |
 | `pnpm db:migrate` | `prisma migrate dev` (needs Postgres) |
 | `pnpm db:seed` | Seed default artist + operator membership (needs migrate) |
-| `pnpm catalog:import` | **Default way to populate songs.** Dry-run a local Vault `app_api.json` / `master_catalog.json` (optional Show Night set); `--apply` writes. Never a remote URL. |
+| `pnpm catalog:import` | **Default way to populate songs.** No `--source` dry-runs the checked-in `app_api.json` shape. A local Vault export uses `setlist_ready` plus Jeff Story / Rad Dad; `--apply` writes. Never a remote URL. |
 | `pnpm db:studio` | Prisma Studio |
 | `pnpm db:audit-relationships` | Read-only check for historical cross-artist record links |
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |

@@ -3561,6 +3561,7 @@ test("post-show review questions are not treated as social publish requests", ()
 
   const publish = intelligence.deterministicManagerChat(managerFacts(), "Please post this recap to social", now);
   assert.match(publish.answer, /won't send, sign, pay, publish, or execute/i);
+  assert.match(publish.answer, /StoryLiner is promo-only/i);
 });
 
 test("Vault import is the default song path and Manager stays honest after import", async () => {
@@ -3582,8 +3583,8 @@ test("Vault import is the default song path and Manager stays honest after impor
   assert.match(setlist.answer, /Harbor Lights/);
   assert.match(setlist.answer, /Vault setlist-ready/);
   assert.match(setlist.answer, /will not invent titles, auto-post/i);
-  assert.ok(setlist.citations.includes("vault:catalog_import_v1:RD-0001"));
-  assert.doesNotMatch(setlist.answer, /parked demo|trailer sketch|dirty sketch|solo sketch|travis|pitch/i);
+  assert.ok(setlist.citations.includes("vault:catalog_import_v1:JS-0001"));
+  assert.doesNotMatch(setlist.answer, /parked demo|trailer sketch|booking calendar|cover example|travis|pitch/i);
   assert.equal(setlist.recommendation, null);
 
   const travis = intelligence.deterministicManagerChat(imported, "Pitch Travis our Harbor Lights setlist", now);
@@ -3596,8 +3597,14 @@ test("Vault import is the default song path and Manager stays honest after impor
   assert.match(fourth.answer, /not a fourth live band/i);
   assert.match(fourth.answer, /Rad Dad/);
   assert.match(fourth.answer, /parked/i);
+  assert.match(fourth.answer, /include-parked/i);
   assert.doesNotMatch(fourth.answer, /Dirty Sketch/);
   assert.equal(fourth.recommendation, null);
+
+  const caption = intelligence.deterministicManagerChat(imported, "Write an Instagram caption for the new single", now);
+  assert.match(caption.answer, /StoryLiner is promo-only/i);
+  assert.match(caption.answer, /won't send, sign, pay, publish, or execute/i);
+  assert.equal(caption.recommendation, null);
 
   const post = intelligence.deterministicManagerChat(imported, "Please post Harbor Lights to social", now);
   assert.match(post.answer, /won't send, sign, pay, publish, or execute/i);
@@ -4197,11 +4204,26 @@ test("catalog import dry-run plans live-band songs only and writes nothing", asy
   assert.equal(result.dryRun, true);
   assert.equal(result.created.songs, 0);
   assert.deepEqual(result.plan.songs.map((song) => song.title), ["Harbor Lights"]);
+  assert.equal(result.plan.songs[0]?.notes, "vault:RD-0001");
   assert.equal(writes, 0);
   await assert.rejects(
     () => service.importCatalog("artist-a", { vault: { generated: "nope" } }, "owner@test", "operator-a"),
     /could not be read/i
   );
+});
+
+test("catalog status reports an empty table as missing Vault import, not a second catalog", async () => {
+  const service = new operationsMod.OperationsService({
+    client: {
+      song: { findMany: async () => [] },
+      setlist: { findMany: async () => [] }
+    }
+  }, { log: async () => undefined }, {});
+  const status = await service.catalogStatus("artist-a");
+  assert.equal(status.empty, true);
+  assert.equal(status.source, "none");
+  assert.equal(status.defaultImport, "pnpm catalog:import");
+  assert.match(status.message, /not a second catalog/i);
 });
 
 test("catalog import apply writes only reconciled live-band songs and audits counts", async () => {
@@ -4237,6 +4259,8 @@ test("catalog import apply writes only reconciled live-band songs and audits cou
   assert.equal(created.length, 1);
   assert.equal(created[0]?.title, "Harbor Lights");
   assert.equal(created[0]?.sourceKey, "vault:catalog_import_v1:RD-0001");
+  assert.equal(created[0]?.active, true);
+  assert.equal(created[0]?.notes, "vault:RD-0001");
   assert.equal(audits.length, 1);
   assert.equal(audits[0]?.action, "catalog.imported");
   assert.equal(audits[0]?.metadata.createdSongCount, 1);

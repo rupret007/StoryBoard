@@ -20,24 +20,29 @@ catalog, a promo publisher, or a rehearsal room.
 2. On a machine that already has those **local** files, dry-run then apply:
 
    ```bash
+   pnpm catalog:import
    pnpm catalog:import -- --source /path/to/app_api.json
    pnpm catalog:import -- --source /path/to/master_catalog.json
    pnpm catalog:import -- --source /path/to/app_api.json --show-night /path/to/show.json --apply --artist default
    ```
 
-   Seed can reuse the same file: `VAULT_CATALOG_PATH=/path/to/app_api.json`
-   (dry-run) and `VAULT_CATALOG_APPLY=true` to write. HTTP equivalent:
-   `POST /songs/import` (`dryRun` defaults true).
+   `pnpm catalog:import` with no `--source` dry-runs the checked-in
+   `app_api.json` shape. Seed does the same when `VAULT_CATALOG_PATH` is
+   unset. Point `VAULT_CATALOG_PATH` at a local Vault export and set
+   `VAULT_CATALOG_APPLY=true` to write. HTTP equivalent: `POST /songs/import`
+   (`dryRun` defaults true). Remote catalog URLs are rejected.
 3. StoryBoard then has Vault songs plus Vault `setlist_ready` (live-band rows
-   only) for Band operations and Manager chat. It will not invent titles,
-   auto-pitch Travis, auto-post, or create another artist.
+   only) for Band operations and Manager chat. It maps `title` / `key` /
+   `bpm_int` / `is_original` / `vault_ref` and leaves duration and lead
+   vocalist null. It will not invent titles, write captions, auto-post,
+   auto-pitch Travis, or create another artist.
 
-Default import is **Rad Dad / live band only**. **Travis books** — he is the
-human booker, not a pitch target. Stalemate, Trailer Swift, and Something Dirty
-stay parked unless `--include-parked`. Guest sets stay off unless
-`--include-guest-sets`, and they still land on the current artist. That is not
-a fourth live band. HTTP `POST /songs/import` and `VAULT_CATALOG_PATH` accept
-local JSON only; remote catalog URLs are rejected.
+Default import is **setlist_ready plus Jeff Story / Rad Dad**. **Travis books**
+— he is the human booker, not a pitch target. Stalemate, Trailer Swift, and
+Something Dirty stay parked unless `--include-parked`. Guest sets stay off
+unless `--include-guest-sets`, and they still land on the current artist. That
+is not a fourth live band. HTTP `POST /songs/import` and `VAULT_CATALOG_PATH`
+accept local JSON only; remote catalog URLs are rejected.
 
 Details: [`docs/catalog-import.md`](docs/catalog-import.md).
 
@@ -45,6 +50,6 @@ Details: [`docs/catalog-import.md`](docs/catalog-import.md).
 
 Do not describe StoryBoard as a parallel catalog, a place to re-enter the 150
 songs by hand, or a replacement for Vault scores/rights. An empty song table
-after seed is intentional until Vault is imported.
+after seed is an explicit missing import, not a second catalog.
 
 Do not fold StoryLiner or WebJam into this repo.
