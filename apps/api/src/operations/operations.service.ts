@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
-import { eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, summarizeSetlist } from "@storyboard/shared";
+import { eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, summarizeSetlist, catalogImportRequestSchema, planCatalogImport, reconcileCatalogImport } from "@storyboard/shared";
 import type { Prisma } from "../generated/prisma/client";
 import { ApprovalStatus, InvoiceStatus, SettlementStatus } from "../generated/prisma/enums";
 import { ApprovalsService } from "../approvals/approvals.service";
@@ -33,6 +33,15 @@ type ExpenseCreate = z.infer<typeof expenseCreateSchema>;
 type ExpensePatch = z.infer<typeof expensePatchSchema>;
 type SettlementCreate = z.infer<typeof settlementCreateSchema>;
 type SettlementPatch = z.infer<typeof settlementPatchSchema>;
+type CatalogImportInput = z.infer<typeof catalogImportRequestSchema>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function prismaErrorCode(error: unknown) {
+  return isRecord(error) && typeof error.code === "string" ? error.code : null;
+}
 
 const dateFields = new Set(["startsAt","endsAt","loadInAt","soundcheckAt","doorsAt","setAt","curfewAt","depositDueAt","balanceDueAt","dueAt","performanceDate","expiresAt"]);
 const eventDetailInclude = (artistId: string) => ({
@@ -233,7 +242,78 @@ export class OperationsService {
   async patchSong(artistId: string, id: string, input: SongPatch, actorLabel: string, actorOperatorId: string) { const row = await this.prisma.client.song.findFirst({ where: { id, artistId } }); if (!row) throw new NotFoundException("Song not found"); const updated = await this.prisma.client.song.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "Song", id, "song.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) }); return updated; }
   async setlists(artistId: string) { const rows = await this.prisma.client.setlist.findMany({ where: { artistId }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } }, orderBy: { updatedAt: "desc" } }); return rows.map((row) => ({ ...row, summary: summarizeSetlist(row.items) })); }
   private async validateSongs(artistId: string, items: SetlistCreate["items"]) { const ids = items.flatMap((item) => item.songId ? [item.songId] : []); if (!ids.length) return; const count = await this.prisma.client.song.count({ where: { artistId, id: { in: [...new Set(ids)] } } }); if (count !== new Set(ids).size) throw new NotFoundException("Song not found"); }
-  async createSetlist(artistId: string, input: SetlistCreate, actorLabel: string, actorOperatorId: string) { await this.validateSongs(artistId, input.items); const row = await this.prisma.client.setlist.create({ data: { artistId, name: input.name, status: input.status, notes: input.notes ?? null, items: { create: input.items.map((item, sortOrder) => ({ ...item, songId: item.songId ?? null, label: item.label ?? null, transitionNotes: item.transitionNotes ?? null, sortOrder })) } }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } } }); await this.auditWrite(artistId, "Setlist", row.id, "setlist.created", actorLabel, actorOperatorId, { itemCount: row.items.length }); return { ...row, summary: summarizeSetlist(row.items) }; }
+  async createSetlist(artistId: string, input: SetlistCreate, actorLabel: string, actorOperatorId: string) { await this.validateSongs(artistId, input.items); const row = await this.prisma.client.setlist.create({ data: { artistId, name: input.name, status: input.status, notes: input.notes ?? null, sourceKey: input.sourceKey ?? null, items: { create: input.items.map((item, sortOrder) => ({ ...item, songId: item.songId ?? null, label: item.label ?? null, transitionNotes: item.transitionNotes ?? null, sortOrder })) } }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } } }); await this.auditWrite(artistId, "Setlist", row.id, "setlist.created", actorLabel, actorOperatorId, { itemCount: row.items.length }); return { ...row, summary: summarizeSetlist(row.items) }; }
+  async importCatalog(artistId: string, input: CatalogImportInput, actorLabel: string, actorOperatorId: string) {
+    const plan = planCatalogImport(input);
+    if (plan.songs.length === 0 && plan.setlists.length === 0 && plan.counts.vaultSongsSeen === 0 && plan.counts.showNightSongsSeen === 0 && plan.warnings.length) {
+      throw new BadRequestException({ message: "Catalog payload could not be read", warnings: plan.warnings });
+    }
+    const [existingSongs, existingSetlists] = await Promise.all([
+      this.prisma.client.song.findMany({ where: { artistId }, select: { id: true, title: true, sourceKey: true } }),
+      this.prisma.client.setlist.findMany({ where: { artistId }, select: { id: true, sourceKey: true } })
+    ]);
+    const reconciliation = reconcileCatalogImport(plan, { songs: existingSongs, setlists: existingSetlists });
+    if (input.dryRun !== false) {
+      return { dryRun: true, policyVersion: plan.policyVersion, plan, reconciliation, created: { songs: 0, setlists: 0 } };
+    }
+    const created = await this.prisma.client.$transaction(async (tx) => {
+      const createdSongs = [];
+      for (const song of reconciliation.createSongs) {
+        createdSongs.push(await tx.song.create({
+          data: {
+            artistId,
+            title: song.title,
+            musicalKey: song.musicalKey,
+            bpm: song.bpm,
+            notes: song.notes,
+            sourceKey: song.sourceKey,
+            active: true
+          }
+        }));
+      }
+      const idBySourceKey = new Map(existingSongs.filter((song) => song.sourceKey).map((song) => [song.sourceKey!, song.id]));
+      const idByTitle = new Map(existingSongs.map((song) => [song.title.toLocaleLowerCase(), song.id]));
+      for (const song of createdSongs) {
+        idBySourceKey.set(song.sourceKey ?? "", song.id);
+        idByTitle.set(song.title.toLocaleLowerCase(), song.id);
+      }
+      for (const skipped of reconciliation.skipSongs) {
+        const existing = existingSongs.find((song) => song.sourceKey === skipped.sourceKey)
+          ?? existingSongs.find((song) => song.title.toLocaleLowerCase() === (skipped.title ?? "").toLocaleLowerCase());
+        if (existing) idBySourceKey.set(skipped.sourceKey, existing.id);
+      }
+      const createdSetlists = [];
+      for (const setlist of reconciliation.createSetlists) {
+        createdSetlists.push(await tx.setlist.create({
+          data: {
+            artistId,
+            name: setlist.name,
+            status: setlist.status,
+            notes: setlist.notes,
+            sourceKey: setlist.sourceKey,
+            items: {
+              create: setlist.items.flatMap((item, sortOrder) => {
+                const songId = idBySourceKey.get(item.songSourceKey) ?? idByTitle.get(item.label.toLocaleLowerCase());
+                if (!songId) return [];
+                return [{ songId, itemType: item.itemType, label: item.label, transitionNotes: item.transitionNotes, sortOrder }];
+              })
+            }
+          }
+        }));
+      }
+      return { songs: createdSongs, setlists: createdSetlists };
+    });
+    await this.auditWrite(artistId, "Artist", artistId, "catalog.imported", actorLabel, actorOperatorId, {
+      policyVersion: plan.policyVersion,
+      createdSongCount: created.songs.length,
+      createdSetlistCount: created.setlists.length,
+      skippedSongCount: reconciliation.skipSongs.length,
+      skippedSetlistCount: reconciliation.skipSetlists.length,
+      parkedSkipped: plan.counts.parkedSkipped,
+      guestSetsSkipped: plan.counts.guestSetsSkipped
+    });
+    return { dryRun: false, policyVersion: plan.policyVersion, plan, reconciliation, created: { songs: created.songs.length, setlists: created.setlists.length } };
+  }
   async patchSetlist(artistId: string, id: string, input: SetlistPatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("setlist", artistId, id); if (input.items) await this.validateSongs(artistId, input.items); const row = await this.prisma.client.$transaction(async (tx) => { if (input.items) { await tx.setlistItem.deleteMany({ where: { setlistId: id } }); await tx.setlistItem.createMany({ data: input.items.map((item, sortOrder) => ({ setlistId: id, songId: item.songId ?? null, itemType: item.itemType, label: item.label ?? null, transitionNotes: item.transitionNotes ?? null, sortOrder })) }); } return tx.setlist.update({ where: { id }, data: { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.status !== undefined ? { status: input.status } : {}), ...(input.notes !== undefined ? { notes: input.notes } : {}) }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } } }); }); await this.auditWrite(artistId, "Setlist", id, "setlist.updated", actorLabel, actorOperatorId, { fields: Object.keys(input), itemCount: row.items.length }); return { ...row, summary: summarizeSetlist(row.items) }; }
 
   async projects(artistId: string, now = new Date()) { const rows = await this.prisma.client.artistProject.findMany({ where: { artistId }, include: projectDetailInclude, orderBy: [{ status: "asc" }, { dueAt: "asc" }] }); return rows.map((project) => ({ ...project, readiness: deterministicProjectReadiness(project, now) })); }
@@ -257,7 +337,17 @@ export class OperationsService {
 
   invoices(artistId: string) { return this.prisma.client.invoice.findMany({ where: { artistId }, include: { payments: true, dealOffer: true, event: true }, orderBy: { updatedAt: "desc" } }); }
   private async validateInvoiceRelations(artistId: string, input: InvoiceCreate | InvoicePatch) { if (input.dealOfferId) await this.assertArtistRecord("deal", artistId, input.dealOfferId); if (input.eventId) await this.assertArtistRecord("event", artistId, input.eventId); }
-  async createInvoice(artistId: string, input: InvoiceCreate, actorLabel: string, actorOperatorId: string) { await this.validateInvoiceRelations(artistId, input); const row = await this.prisma.client.invoice.create({ data: { artistId, ...cleanDates(input), totalMinor: input.subtotalMinor + input.taxMinor } as Prisma.InvoiceUncheckedCreateInput }); await this.auditWrite(artistId, "Invoice", row.id, "invoice.created", actorLabel, actorOperatorId, { number: row.number, totalMinor: row.totalMinor }); return row; }
+  async createInvoice(artistId: string, input: InvoiceCreate, actorLabel: string, actorOperatorId: string) {
+    await this.validateInvoiceRelations(artistId, input);
+    try {
+      const row = await this.prisma.client.invoice.create({ data: { artistId, ...cleanDates(input), totalMinor: input.subtotalMinor + input.taxMinor } as Prisma.InvoiceUncheckedCreateInput });
+      await this.auditWrite(artistId, "Invoice", row.id, "invoice.created", actorLabel, actorOperatorId, { number: row.number, totalMinor: row.totalMinor });
+      return row;
+    } catch (error) {
+      if (prismaErrorCode(error) === "P2002") throw new ConflictException("Invoice number already exists for this artist");
+      throw error;
+    }
+  }
   async patchInvoice(artistId: string, id: string, input: InvoicePatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("invoice", artistId, id); await this.validateInvoiceRelations(artistId, input); const existing = await this.prisma.client.invoice.findUniqueOrThrow({ where: { id } }); const subtotal = input.subtotalMinor ?? existing.subtotalMinor; const tax = input.taxMinor ?? existing.taxMinor; if (subtotal + tax < existing.paidMinor) throw new BadRequestException("Invoice total cannot be less than recorded payments"); const row = await this.prisma.client.invoice.update({ where: { id }, data: { ...cleanDates(input), totalMinor: subtotal + tax } }); await this.auditWrite(artistId, "Invoice", id, "invoice.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) }); return row; }
   async recordPayment(artistId: string, invoiceId: string, input: PaymentInput, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("invoice", artistId, invoiceId); const existing = await this.prisma.client.paymentRecord.findUnique({ where: { artistId_idempotencyKey: { artistId, idempotencyKey: input.idempotencyKey } } }); if (existing) { if (existing.invoiceId !== invoiceId || existing.amountMinor !== input.amountMinor) throw new BadRequestException("Idempotency key was already used for a different payment"); return existing; } const invoice = await this.prisma.client.invoice.findUniqueOrThrow({ where: { id: invoiceId } }); if (input.currency !== invoice.currency) throw new BadRequestException("Payment currency must match invoice currency"); if (invoice.paidMinor + input.amountMinor > invoice.totalMinor) throw new BadRequestException("Payment exceeds invoice balance"); const result = await this.prisma.client.$transaction(async (tx) => { const payment = await tx.paymentRecord.create({ data: { artistId, invoiceId, idempotencyKey: input.idempotencyKey, amountMinor: input.amountMinor, currency: input.currency, method: input.method, reference: input.reference ?? null, evidenceUrl: input.evidenceUrl ?? null, receivedAt: new Date(input.receivedAt) } }); const paidMinor = invoice.paidMinor + input.amountMinor; await tx.invoice.update({ where: { id: invoiceId }, data: { paidMinor, status: paidMinor === invoice.totalMinor ? InvoiceStatus.paid : InvoiceStatus.partially_paid } }); return payment; }); await this.auditWrite(artistId, "PaymentRecord", result.id, "invoice.payment_recorded", actorLabel, actorOperatorId, { invoiceId, amountMinor: input.amountMinor, idempotencyKey: input.idempotencyKey }); return result; }
 

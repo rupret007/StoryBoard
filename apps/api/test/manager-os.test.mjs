@@ -3519,9 +3519,22 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
     prospects: []
   });
   const setlist = intelligence.deterministicManagerChat(emptySeed, "What's our setlist?", now);
-  assert.match(setlist.answer, /no upcoming shows, rehearsals, or other band events/i);
-  assert.doesNotMatch(setlist.answer, /opener|closer|vault|travis|rad dad/i);
-  assert.ok(!setlist.recommendation || setlist.recommendation.proposedAction == null || setlist.recommendation.proposedAction.type === "create_task");
+  assert.match(setlist.answer, /no songs or setlists are recorded/i);
+  assert.match(setlist.answer, /will not invent a catalog/i);
+  assert.doesNotMatch(setlist.answer, /opener|closer|travis|rad dad|harbor lights/i);
+  assert.equal(setlist.recommendation, null);
+
+  const songs = intelligence.deterministicManagerChat(emptySeed, "What songs are in the vault?", now);
+  assert.match(songs.answer, /no songs or setlists are recorded/i);
+  assert.doesNotMatch(songs.answer, /travis|rad dad|manic|basket case/i);
+
+  const recorded = intelligence.deterministicManagerChat(managerFacts({
+    songs: [{ id: "song-harbor", title: "Harbor Lights", active: true, musicalKey: "G" }],
+    setlists: [{ id: "setlist-demo", name: "Demo set", status: "draft", itemCount: 2 }]
+  }), "What songs do we have?", now);
+  assert.match(recorded.answer, /Harbor Lights/);
+  assert.ok(recorded.citations.includes("song-harbor"));
+  assert.doesNotMatch(recorded.answer, /travis|pitch/i);
 
   const pitch = intelligence.deterministicManagerChat(emptySeed, "Who should we pitch in Milwaukee?", now);
   assert.match(pitch.answer, /0 active opportunities/i);
@@ -4118,6 +4131,110 @@ test("Operations prepares external logistics only for gigs", async () => {
   );
   assert.equal(creates, 0);
   assert.equal(audits, 0);
+});
+
+test("catalog import dry-run plans live-band songs only and writes nothing", async () => {
+  let writes = 0;
+  const service = new operationsMod.OperationsService({
+    client: {
+      song: { findMany: async () => [], create: async () => { writes += 1; } },
+      setlist: { findMany: async () => [], create: async () => { writes += 1; } },
+      $transaction: async () => { writes += 1; }
+    }
+  }, { log: async () => { writes += 1; } }, {});
+  const result = await service.importCatalog("artist-a", {
+    vault: {
+      songs: [
+        { id: "RD-0001", title: "Harbor Lights", project: "Rad Dad", key: "G", bpm: 118 },
+        { id: "ST-0001", title: "Parked Demo", project: "Stalemate", key: "Am" }
+      ]
+    },
+    dryRun: true
+  }, "owner@test", "operator-a");
+  assert.equal(result.dryRun, true);
+  assert.equal(result.created.songs, 0);
+  assert.deepEqual(result.plan.songs.map((song) => song.title), ["Harbor Lights"]);
+  assert.equal(writes, 0);
+  await assert.rejects(
+    () => service.importCatalog("artist-a", { vault: { generated: "nope" } }, "owner@test", "operator-a"),
+    /could not be read/i
+  );
+});
+
+test("catalog import apply writes only reconciled live-band songs and audits counts", async () => {
+  const created = [];
+  const audits = [];
+  const tx = {
+    song: {
+      create: async ({ data }) => {
+        created.push(data);
+        return { id: `song-${created.length}`, ...data };
+      }
+    },
+    setlist: { create: async ({ data }) => ({ id: "setlist-1", ...data }) }
+  };
+  const service = new operationsMod.OperationsService({
+    client: {
+      song: { findMany: async () => [] },
+      setlist: { findMany: async () => [] },
+      $transaction: async (fn) => fn(tx)
+    }
+  }, { log: async (entry) => { audits.push(entry); } }, {});
+  const result = await service.importCatalog("artist-a", {
+    vault: {
+      songs: [
+        { id: "RD-0001", title: "Harbor Lights", project: "Rad Dad", key: "G", bpm: 118 },
+        { id: "ST-0001", title: "Parked Demo", project: "Stalemate", key: "Am" }
+      ]
+    },
+    dryRun: false
+  }, "owner@test", "operator-a");
+  assert.equal(result.dryRun, false);
+  assert.equal(result.created.songs, 1);
+  assert.equal(created.length, 1);
+  assert.equal(created[0]?.title, "Harbor Lights");
+  assert.equal(created[0]?.sourceKey, "vault:catalog_import_v1:RD-0001");
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0]?.action, "catalog.imported");
+  assert.equal(audits[0]?.metadata.createdSongCount, 1);
+  assert.equal(audits[0]?.metadata.parkedSkipped, 1);
+  assert.ok(!JSON.stringify(audits[0]?.metadata).includes("Harbor Lights"));
+});
+
+test("duplicate invoice numbers fail closed instead of throwing a raw unique error", async () => {
+  const error = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+  const service = new operationsMod.OperationsService({
+    client: { invoice: { create: async () => { throw error; } } }
+  }, { log: async () => undefined }, {});
+  await assert.rejects(
+    () => service.createInvoice("artist-a", { number: "DEMO-001", recipientName: "Example Buyer", currency: "USD", subtotalMinor: 50000, taxMinor: 0 }, "owner@test", "operator-a"),
+    /already exists/i
+  );
+});
+
+test("invoices can be created without a linked deal", async () => {
+  let created = null;
+  const service = new operationsMod.OperationsService({
+    client: {
+      invoice: {
+        create: async ({ data }) => {
+          created = data;
+          return { id: "inv-1", ...data, totalMinor: data.subtotalMinor + data.taxMinor };
+        }
+      }
+    }
+  }, { log: async () => undefined }, {});
+  const row = await service.createInvoice("artist-a", {
+    number: "INV-100",
+    recipientName: "Example Buyer",
+    currency: "USD",
+    subtotalMinor: 10000,
+    taxMinor: 0,
+    dealOfferId: null
+  }, "owner@test", "operator-a");
+  assert.equal(created?.dealOfferId, null);
+  assert.equal(row.number, "INV-100");
+  assert.equal(row.totalMinor, 10000);
 });
 
 test("event logistics surfaces an executed linked resource as stale without preparing a duplicate", () => {

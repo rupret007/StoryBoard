@@ -637,15 +637,17 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm db:generate` | `prisma generate` (root config) |
 | `pnpm db:migrate` | `prisma migrate dev` (needs Postgres) |
 | `pnpm db:seed` | Seed default artist + operator membership (needs migrate) |
+| `pnpm catalog:import` | Dry-run (default) or `--apply` a local Vault/Show Night catalog |
 | `pnpm db:studio` | Prisma Studio |
 | `pnpm db:audit-relationships` | Read-only check for historical cross-artist record links |
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
 
 Release validation snapshot (2026-07-13) plus the 2026-08-23 quality-review
-unit/eval gate: root typecheck/lint, 11/11 shared tests, 260/260 API unit
-tests, both production builds, and 85/85 `manager_evals_v38` checks at 100%
+unit/eval gate: root typecheck/lint, 15/15 shared tests, 264/264 API unit
+tests, both production builds, and 86/86 `manager_evals_v38` checks at 100%
 safety. The 2026-07-13 package also recorded 5/5 database workflows across all
-40 migrations and 15/15 Chromium workflows. Prisma reports no schema
+40 migrations; this change adds a 41st migration for song/setlist `sourceKey`.
+15/15 Chromium workflows remain the last hosted browser snapshot. Prisma reports no schema
 drift, the relationship diagnostic reports zero integrity issues (and now reports
 non-fatal skips when optional tables are absent from older DB snapshots), and the
 rebuilt local container bundle passes health, readiness, Dev-login session,

@@ -115,6 +115,8 @@ export type ManagerFacts = {
   projects: { id: string; name: string; type?: string; status: string; dueAt: Date | null; updatedAt?: Date; readiness?: ProjectReadiness | null }[];
   deals: { id: string; title: string; status: string; expiresAt: Date | null; updatedAt?: Date }[];
   invoices: { id: string; number: string; status: string; currency: string; totalMinor: number; paidMinor: number; dueAt: Date | null; updatedAt?: Date }[];
+  songs?: { id: string; title: string; active?: boolean; musicalKey?: string | null; sourceKey?: string | null }[];
+  setlists?: { id: string; name: string; status: string; itemCount?: number }[];
   decisions: { id: string; workstream: ManagerWorkstream; title: string; context: string | null; options: unknown; choice: string | null; rationale: string | null; expectedOutcome: string | null; needsFraming?: boolean; evidence: unknown; status: string; reviewAt: Date | null; decidedAt: Date | null; reviewOutcome?: string | null; reviewNote?: string | null; reviewedAt?: Date | null }[];
   approvals: { id: string; title: string; status: string; actionType: string; executionAttemptedAt?: Date | null; updatedAt: Date; reconciliations?: { outcome: string; createdAt: Date }[] }[];
   bookingReplies: { id: string; subject: string | null; fromName: string | null; fromEmail: string; processingStatus: string; receivedAt: Date }[];
@@ -1065,6 +1067,10 @@ export function managerQuestionAsksAboutFollowThrough(question: string) {
   return /\b(follow[- ]?through|accepted recommendations?|accepted work|status of (?:the |that )?recommendation)\b/i.test(question);
 }
 
+export function managerQuestionAsksAboutCatalog(question: string) {
+  return /\b(setlists?|song library|song catalog|vault|app_api|what songs|our songs|import (?:the )?(?:catalog|songs)|show night)\b/i.test(question);
+}
+
 function deterministicManagerChatBase(
   facts: ManagerFacts,
   question: string,
@@ -1078,7 +1084,8 @@ function deterministicManagerChatBase(
   const externalRequest = questionAsksForExternalAction(question);
   const subject = subjectReference?.status === "resolved" ? subjectReference.subject : null;
   const moneyQuestion = ["deal", "invoice", "settlement"].includes(subject?.kind ?? "") || questionHas(question, /\b(money|invoice|paid|payment|deposit|deal|settlement|settle|profit|revenue|expense|cash)\b/);
-  const liveQuestion = subject?.kind === "event" || questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/);
+  const catalogQuestion = managerQuestionAsksAboutCatalog(question) && subject?.kind !== "event";
+  const liveQuestion = subject?.kind === "event" || (!catalogQuestion && questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/));
   const bookingQuestion = ["opportunity", "prospect"].includes(subject?.kind ?? "") || questionHas(question, /\b(booking|buyer|venue|festival|prospect|campaign|reply|outreach|pitch)\b/);
   const teamQuestion = questionHas(question, /\b(member|lineup|bandmate|who|available)\b/);
   const planQuestion = subject?.kind === "goal" || managerQuestionAsksAboutPlanHealth(question);
@@ -1439,6 +1446,26 @@ function deterministicManagerChatBase(
       answer: `The books currently show ${balanceText}. ${facts.invoices.length ? `${facts.invoices.length} open invoice record${facts.invoices.length === 1 ? " is" : "s are"} in view.` : "No open invoices are recorded."} ${draftSettlements.length ? `${draftSettlements.length} settlement${draftSettlements.length === 1 ? " still needs" : "s still need"} final review.` : "No draft settlement is waiting."}\n\n${recommendation ? `My next move would be: ${recommendation.nextAction}` : "If money is expected but missing here, record the deal or invoice before making a decision from these totals."}`,
       citations: unique([...facts.invoices.map((invoice) => invoice.id), ...draftSettlements.map((settlement) => settlement.id)]).slice(0, 10),
       recommendation: actionableRecommendation(recommendation)
+    };
+  }
+
+  if (catalogQuestion) {
+    const songs = facts.songs ?? [];
+    const setlists = facts.setlists ?? [];
+    const activeSongs = songs.filter((song) => song.active !== false);
+    if (!songs.length && !setlists.length) {
+      return {
+        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Import a local app_api.json or Show Night show.json with `pnpm catalog:import` (dry-run by default), or add songs in Band operations.",
+        citations: [],
+        recommendation: null
+      };
+    }
+    const songLines = activeSongs.slice(0, responsePolicy.itemLimit).map((song) => `• ${song.title}${song.musicalKey ? ` (${song.musicalKey})` : ""}`);
+    const setlistLines = setlists.slice(0, responsePolicy.itemLimit).map((setlist) => `• ${setlist.name} — ${setlist.status}${setlist.itemCount != null ? `; ${setlist.itemCount} item${setlist.itemCount === 1 ? "" : "s"}` : ""}`);
+    return {
+      answer: `${activeSongs.length} song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded.${songLines.length ? `\n\nSongs:\n${songLines.join("\n")}` : ""}${setlistLines.length ? `\n\nSetlists:\n${setlistLines.join("\n")}` : ""}\n\nThese are StoryBoard records only. Missing duration stays unknown until someone records it.`,
+      citations: unique([...activeSongs.map((song) => song.id), ...setlists.map((setlist) => setlist.id)]).slice(0, 10),
+      recommendation: null
     };
   }
 
