@@ -397,9 +397,10 @@ key, BPM, lead vocalist, optional `sourceKey` (Vault/Show Night import
 idempotency), ordered songs/breaks/notes, and event linkage.
 Local Vault import is the default way to populate songs (dry-run by default;
 `--apply` / `dryRun: false` writes; remote URLs are rejected). Planning uses
-Vault `setlist_ready` plus Jeff Story / Rad Dad (or a recorded Rad Dad play),
-maps `bpm_int` / `vault_ref`, and skips Travis booker rows. See
-[`catalog-import.md`](catalog-import.md).
+exact Rad Dad `import_scope` / `artist_project` rows and
+`setlist_ready_default_import`, maps clean `bpm` plus constructed notes, and
+skips Travis booker rows. Writer projects, hybrids, and `played_live` are
+not a live band. See [`catalog-import.md`](catalog-import.md).
 `setlist_summary_v1` is a non-persistent projection over the ordered items and
 their current Song rows. It reports song/break/note counts, known song time,
 missing-duration count, and `empty` / `incomplete` / `timed` status. It never

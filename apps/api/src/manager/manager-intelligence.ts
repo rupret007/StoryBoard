@@ -1087,6 +1087,11 @@ export function managerQuestionAsksAboutFourthBand(question: string) {
     && /\b(live|band|import|catalog|setlist|artist|create|add)\b/i.test(question);
 }
 
+export function managerQuestionAsksAboutWriterProjectAsLiveBand(question: string) {
+  return /\bjeff story\b/i.test(question)
+    && /\b(live|band|fourth|4th|catalog|import|artist|setlist)\b/i.test(question);
+}
+
 function deterministicManagerChatBase(
   facts: ManagerFacts,
   question: string,
@@ -1235,6 +1240,14 @@ function deterministicManagerChatBase(
   if (managerQuestionAsksAboutBookerPitch(question)) {
     return {
       answer: "Travis books. StoryBoard will not auto-pitch him or invent a buyer. Record a real prospect, then review a campaign in Approvals. Nothing posts from this conversation.",
+      citations: [],
+      recommendation: null
+    };
+  }
+
+  if (managerQuestionAsksAboutWriterProjectAsLiveBand(question)) {
+    return {
+      answer: "Jeff Story is a Vault writer project, not the live band. Default import is Rad Dad only. live_presence is not artist_project, and a hybrid or parked label is not a fourth live band. Import a local app_api.json; do not invent a live catalog from writer rows.",
       citations: [],
       recommendation: null
     };
@@ -1495,7 +1508,7 @@ function deterministicManagerChatBase(
     const activeSongs = songs.filter((song) => song.active !== false);
     if (!songs.length && !setlists.length) {
       return {
-        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. The song catalog lives in AI-Music-Vault; import a local app_api.json or master_catalog.json with `pnpm catalog:import` (dry-run by default; `--apply` writes). StoryBoard never fetches a remote catalog.",
+        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Vault is the sole catalog; default import is Rad Dad rows from a local app_api.json (`pnpm catalog:import`, dry-run by default; `--apply` writes). Writer projects and parked catalogs stay out unless an operator opts in. That empty table is not a second catalog. StoryBoard never fetches a remote catalog.",
         citations: [],
         recommendation: null
       };

@@ -94,7 +94,7 @@ function printPlan(plan, reconciliation, dryRun) {
   console.log(`policy ${plan.policyVersion}`);
   console.log(`planned songs ${plan.songs.length} · setlists ${plan.setlists.length}`);
   console.log(`vault seen ${plan.counts.vaultSongsSeen} · show-night seen ${plan.counts.showNightSongsSeen}`);
-  console.log(`parked skipped ${plan.counts.parkedSkipped} · guest sets skipped ${plan.counts.guestSetsSkipped}`);
+  console.log(`parked skipped ${plan.counts.parkedSkipped} · not live skipped ${plan.counts.notLiveSkipped} · guest sets skipped ${plan.counts.guestSetsSkipped}`);
   if (plan.warnings.length) console.log(`warnings: ${plan.warnings.join("; ")}`);
   for (const song of plan.songs.slice(0, 20)) console.log(`  song ${song.title} (${song.sourceKey})`);
   if (plan.songs.length > 20) console.log(`  … ${plan.songs.length - 20} more songs`);

@@ -317,6 +317,7 @@ export class OperationsService {
       skippedSongCount: reconciliation.skipSongs.length,
       skippedSetlistCount: reconciliation.skipSetlists.length,
       parkedSkipped: plan.counts.parkedSkipped,
+      notLiveSkipped: plan.counts.notLiveSkipped,
       guestSetsSkipped: plan.counts.guestSetsSkipped
     });
     return { dryRun: false, policyVersion: plan.policyVersion, plan, reconciliation, created: { songs: created.songs.length, setlists: created.setlists.length } };

@@ -1,13 +1,27 @@
 import { z } from "zod";
 
 export const CATALOG_IMPORT_POLICY_VERSION = "catalog_import_v1" as const;
-export const LIVE_CATALOG_PROJECTS = ["rad dad", "jeff story"] as const;
+/** Exact Vault `artist_project` match only. Hybrids are not a live band. */
+export const LIVE_CATALOG_PROJECTS = ["rad dad"] as const;
 export const PARKED_CATALOG_PROJECTS = ["stalemate", "trailer swift", "something dirty"] as const;
 export const BOOKER_CATALOG_PROJECTS = ["travis", "travis story"] as const;
+export const CATALOG_IMPORT_SCOPES = ["default_live", "parked_catalog", "not_live_band"] as const;
 export const VAULT_SAMPLE_CATALOG_RELATIVE_PATH = "packages/shared/test/fixtures/vault-app-api.sample.json";
 
 /** Travis is the human booker. StoryBoard never auto-pitches him. */
 export const CATALOG_BOOKER_POLICY = "travis_books" as const;
+
+/** Live Vault `storyboard.field_map` honesty (AI-Music-Vault, 2026-08-23). */
+export const VAULT_STORYBOARD_FIELD_MAP = {
+  title: "title",
+  musicalKey: "key",
+  bpm: "bpm",
+  sourceKey: `vault:${CATALOG_IMPORT_POLICY_VERSION}:{id}`,
+  notes: "constructed: source {id} · {project} · original|not original",
+  active: "always true on import — not is_original"
+} as const;
+
+export type CatalogImportScope = (typeof CATALOG_IMPORT_SCOPES)[number];
 
 const REMOTE_LOCATOR_KEYS = ["url", "href", "sourceUrl", "catalogUrl", "fetch"] as const;
 
@@ -98,8 +112,11 @@ const vaultSongSchema = z.object({
   key: optionalText,
   bpm: z.union([z.number(), z.string(), z.null()]).optional(),
   bpm_int: optionalNullableNumber,
+  bpm_raw: optionalText,
+  import_scope: z.string().trim().min(1).max(40).optional(),
   vault_id: z.string().trim().min(1).max(80).optional(),
   vault_ref: z.string().trim().min(1).max(120).optional(),
+  source_key: z.string().trim().min(1).max(120).optional(),
   duration_seconds: optionalNullableNumber,
   played_live: z.array(z.string()).max(50).optional()
 }).passthrough();
@@ -109,7 +126,9 @@ const vaultSetlistReadySchema = z.object({
   title: z.string().trim().min(1).max(240).optional(),
   key: optionalText,
   project: optionalText,
+  bpm: z.union([z.number(), z.string(), z.null()]).optional(),
   bpm_int: optionalNullableNumber,
+  import_scope: z.string().trim().min(1).max(40).optional(),
   vault_ref: z.string().trim().min(1).max(120).optional()
 }).passthrough();
 
@@ -120,6 +139,7 @@ const vaultAppApiSchema = z.object({
   primary_consumer: z.string().optional(),
   songs: z.array(vaultSongSchema).max(2000),
   setlist_ready: z.array(vaultSetlistReadySchema).max(2000).optional(),
+  setlist_ready_default_import: z.array(vaultSetlistReadySchema).max(2000).optional(),
   lanes: z.unknown().optional(),
   storyboard: z.unknown().optional()
 }).passthrough();
@@ -210,6 +230,7 @@ export type CatalogImportPlan = {
     showNightSongsSeen: number;
     liveSelected: number;
     parkedSkipped: number;
+    notLiveSkipped: number;
     guestSetsSkipped: number;
   };
 };
@@ -241,11 +262,6 @@ function projectTokens(value: string | undefined) {
   return new Set(normalizeProject(value).split(" ").filter(Boolean));
 }
 
-function hasPhrase(tokens: Set<string>, phrase: string) {
-  const parts = phrase.split(" ");
-  return parts.every((part) => tokens.has(part));
-}
-
 function slug(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "untitled";
 }
@@ -254,18 +270,21 @@ function cleanTitle(value: string) {
   return value.replace(/→/g, "").replace(/\s+/g, " ").trim();
 }
 
-/** Vault `bpm_int` first; otherwise parse a leading 2–3 digit tempo. Never guess. */
+function isCleanBpmInteger(value: number) {
+  return Number.isInteger(value) && value >= 20 && value <= 400;
+}
+
+/** Live Vault honesty: prefer clean `bpm`. Do not parse annotations such as `214 (cut)`. */
 function parseBpm(song: { bpm?: unknown; bpm_int?: unknown }): number | null {
-  if (typeof song.bpm_int === "number" && Number.isInteger(song.bpm_int) && song.bpm_int >= 20 && song.bpm_int <= 400) {
-    return song.bpm_int;
-  }
-  if (typeof song.bpm === "number" && Number.isInteger(song.bpm) && song.bpm >= 20 && song.bpm <= 400) return song.bpm;
+  if (typeof song.bpm === "number" && isCleanBpmInteger(song.bpm)) return song.bpm;
   if (typeof song.bpm === "string") {
-    const match = song.bpm.trim().match(/^(\d{2,3})\b/);
-    if (!match) return null;
-    const parsed = Number(match[1]);
-    if (Number.isInteger(parsed) && parsed >= 20 && parsed <= 400) return parsed;
+    const trimmed = song.bpm.trim();
+    if (/^\d{2,3}$/.test(trimmed)) {
+      const parsed = Number(trimmed);
+      if (isCleanBpmInteger(parsed)) return parsed;
+    }
   }
+  if (typeof song.bpm_int === "number" && isCleanBpmInteger(song.bpm_int)) return song.bpm_int;
   return null;
 }
 
@@ -280,18 +299,16 @@ function clipNotes(value: string) {
   return value.slice(0, 2000);
 }
 
-function isLiveProject(project: string | undefined) {
-  const normalized = normalizeProject(project);
-  if ((LIVE_CATALOG_PROJECTS as readonly string[]).includes(normalized)) return true;
-  const tokens = projectTokens(project);
-  return hasPhrase(tokens, "rad dad") || hasPhrase(tokens, "jeff story");
-}
-
-function isParkedProject(project: string | undefined) {
-  const normalized = normalizeProject(project);
-  if ((PARKED_CATALOG_PROJECTS as readonly string[]).includes(normalized)) return true;
-  const tokens = projectTokens(project);
-  return tokens.has("stalemate") || hasPhrase(tokens, "trailer swift") || hasPhrase(tokens, "something dirty");
+export function constructedVaultNotes(
+  songId: string,
+  project: string | null | undefined,
+  isOriginal: boolean | undefined
+) {
+  const parts = [`source ${songId}`];
+  if (project && String(project).trim()) parts.push(String(project).trim());
+  if (isOriginal === true) parts.push("original");
+  else if (isOriginal === false) parts.push("not original");
+  return clipNotes(parts.join(" · "));
 }
 
 function isBookerProject(project: string | undefined) {
@@ -300,8 +317,20 @@ function isBookerProject(project: string | undefined) {
   return projectTokens(project).has("travis");
 }
 
-function playedLiveByRadDad(playedLive: string[] | undefined) {
-  return (playedLive ?? []).some((row) => /rad\s*dad/i.test(row));
+export function catalogImportScope(project: string | undefined, declared?: unknown): CatalogImportScope | typeof CATALOG_BOOKER_POLICY {
+  if (isBookerProject(project)) return CATALOG_BOOKER_POLICY;
+  const declaredScope = asText(declared)?.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  if (declaredScope === "default_live" || declaredScope === "parked_catalog" || declaredScope === "not_live_band") {
+    return declaredScope;
+  }
+  const normalized = normalizeProject(project);
+  if ((LIVE_CATALOG_PROJECTS as readonly string[]).includes(normalized)) return "default_live";
+  if ((PARKED_CATALOG_PROJECTS as readonly string[]).includes(normalized)) return "parked_catalog";
+  return "not_live_band";
+}
+
+function isParkedProject(project: string | undefined, declared?: unknown) {
+  return catalogImportScope(project, declared) === "parked_catalog";
 }
 
 function skipFields(title: string, project: string | undefined, source: string): CatalogImportSkip {
@@ -315,30 +344,16 @@ function skipFields(title: string, project: string | undefined, source: string):
 
 function decideVaultSong(
   song: z.infer<typeof vaultSongSchema>,
-  options: { includeParked: boolean; includeAllProjects: boolean; hasReadyList: boolean; inReadySet: boolean }
+  options: { includeParked: boolean; includeAllProjects: boolean }
 ): { include: true } | { include: false; reason: string } {
-  if (isBookerProject(song.project)) return { include: false, reason: "travis_books" };
-  if (!options.includeAllProjects && song.is_original === false) return { include: false, reason: "cover_not_active" };
-
-  const live = isLiveProject(song.project) || playedLiveByRadDad(song.played_live);
-  const parked = isParkedProject(song.project);
-
+  const scope = catalogImportScope(song.project, song.import_scope);
+  if (scope === CATALOG_BOOKER_POLICY) return { include: false, reason: "travis_books" };
   if (options.includeAllProjects) return { include: true };
-
-  if (options.hasReadyList && options.inReadySet) {
-    if (parked && !live && !options.includeParked) return { include: false, reason: "parked_catalog" };
-    if (!live && !parked) return { include: false, reason: "not_live_band" };
-    return { include: true };
+  if (scope === "default_live") return { include: true };
+  if (scope === "parked_catalog") {
+    return options.includeParked ? { include: true } : { include: false, reason: "parked_catalog" };
   }
-
-  if (options.hasReadyList && !options.inReadySet) {
-    if (options.includeParked && parked) return { include: true };
-    return { include: false, reason: "not_setlist_ready" };
-  }
-
-  if (parked && !live && !options.includeParked) return { include: false, reason: "parked_catalog" };
-  if (!live && !parked) return { include: false, reason: "not_live_band" };
-  return { include: true };
+  return { include: false, reason: "not_live_band" };
 }
 
 function vaultSongDraft(song: z.infer<typeof vaultSongSchema>): CatalogSongDraft {
@@ -348,8 +363,8 @@ function vaultSongDraft(song: z.infer<typeof vaultSongSchema>): CatalogSongDraft
     title: cleanTitle(song.title),
     musicalKey: parseKey(song.key),
     bpm: parseBpm(song),
-    notes: clipNotes(song.vault_ref ?? `vault:${vaultId}`),
-    active: song.is_original !== false,
+    notes: constructedVaultNotes(vaultId, song.project ? String(song.project) : null, song.is_original),
+    active: true,
     project: song.project ? String(song.project) : null,
     origin: "vault"
   };
@@ -387,6 +402,7 @@ export function planCatalogImport(input: {
   let vaultSongsSeen = 0;
   let showNightSongsSeen = 0;
   let parkedSkipped = 0;
+  let notLiveSkipped = 0;
   let guestSetsSkipped = 0;
 
   if (catalogLocatorLooksRemote(input.vault) || catalogLocatorLooksRemote(input.showNight)) {
@@ -403,25 +419,30 @@ export function planCatalogImport(input: {
       }
       if (isRecord(parsed.data.storyboard) && isRecord(parsed.data.storyboard.field_map)) {
         const map = parsed.data.storyboard.field_map;
-        if (asText(map.bpm) && asText(map.bpm) !== "bpm_int") {
-          warnings.push("Vault storyboard.field_map.bpm is not bpm_int; StoryBoard still prefers bpm_int and will not invent tempo.");
+        if (asText(map.bpm) === "bpm_int") {
+          warnings.push("Vault storyboard.field_map.bpm is bpm_int; live Vault honesty maps bpm from songs[].bpm. StoryBoard prefers a clean bpm integer and will not invent tempo.");
+        }
+        if (asText(map.notes) === "vault_ref") {
+          warnings.push("Vault storyboard.field_map.notes is vault_ref; live Vault honesty constructs source {id} · {project} · original|not original.");
+        }
+        if (asText(map.active) === "is_original") {
+          warnings.push("Vault storyboard.field_map.active is is_original; live Vault honesty keeps imported rows active.");
         }
       }
-      const readyRows = parsed.data.setlist_ready ?? [];
-      const hasReadyList = readyRows.length > 0;
-      const readyIds = new Set(readyRows.map((row) => row.id));
+      const defaultReadyRows = parsed.data.setlist_ready_default_import;
+      const readyRows = includeAllProjects || includeParked
+        ? (parsed.data.setlist_ready ?? [])
+        : Array.isArray(defaultReadyRows)
+          ? defaultReadyRows
+          : (parsed.data.setlist_ready ?? []);
       const songsById = new Map(parsed.data.songs.map((song) => [song.id, song]));
 
       for (const song of parsed.data.songs) {
         vaultSongsSeen += 1;
-        const decision = decideVaultSong(song, {
-          includeParked,
-          includeAllProjects,
-          hasReadyList,
-          inReadySet: readyIds.has(song.id)
-        });
+        const decision = decideVaultSong(song, { includeParked, includeAllProjects });
         if (!decision.include) {
-          if (decision.reason === "parked_catalog" || isParkedProject(song.project)) parkedSkipped += 1;
+          if (decision.reason === "parked_catalog" || isParkedProject(song.project, song.import_scope)) parkedSkipped += 1;
+          if (decision.reason === "not_live_band") notLiveSkipped += 1;
           skipped.push({ ...skipFields(song.title, song.project, song.id), reason: decision.reason });
           continue;
         }
@@ -454,7 +475,7 @@ export function planCatalogImport(input: {
           sourceKey: `vault:${CATALOG_IMPORT_POLICY_VERSION}:set:setlist-ready`,
           name: "Vault setlist-ready",
           status: "draft",
-          notes: clipNotes("Playable Vault originals already selected for the live band. Not a booking pitch. Lanes are not a setlist."),
+          notes: clipNotes("Playable Vault originals already selected for the live band. Not a booking pitch. Lanes are not a setlist. Jeff owns running order."),
           items: readyItems
         });
       }
@@ -550,7 +571,7 @@ export function planCatalogImport(input: {
   }
 
   if (input.vault != null && !catalogLocatorLooksRemote(input.vault) && vaultSongsSeen > 0 && songs.length === 0) {
-    warnings.push("Vault songs were seen but none matched the live-band import. The table is empty because parked/booker rows were skipped, not because the catalog is missing.");
+    warnings.push("Vault songs were seen but none are labeled Rad Dad (default_live). live_presence / played_live is not artist_project. Writer projects and parked catalogs stay out unless you opt in. StoryBoard will not invent a live band or a second catalog.");
   }
 
   return {
@@ -564,6 +585,7 @@ export function planCatalogImport(input: {
       showNightSongsSeen,
       liveSelected: songs.length,
       parkedSkipped,
+      notLiveSkipped,
       guestSetsSkipped
     }
   };
@@ -631,7 +653,7 @@ export function describeSongCatalogStatus(input: {
     source,
     defaultImport: "pnpm catalog:import",
     message: empty
-      ? "No songs are recorded. Vault is the catalog; this empty table is not a second catalog. Dry-run a local app_api.json with pnpm catalog:import, then --apply to write."
+      ? "No songs are recorded. Vault is the catalog; default import is Rad Dad rows from a local app_api.json (`pnpm catalog:import`, then --apply). Writer projects and parked catalogs stay out unless you opt in. This empty table is not a second catalog."
       : `${songCount} song${songCount === 1 ? "" : "s"} recorded${vaultSongCount ? ` (${vaultSongCount} from Vault)` : ""}.`
   };
 }

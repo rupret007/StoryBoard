@@ -37,7 +37,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | 2026-08-23 Vault `app_api.json` quality gate on top of PR #3: Prisma generation; root typecheck/lint; 21/21 shared tests; 266/266 API unit tests; both production builds; 91/91 `manager_evals_v38` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; catalog import added song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
+| Tests | 2026-08-23 live Vault honesty mapping on top of PR #4: Prisma generation; root typecheck/lint; shared + API unit tests; both production builds; `manager_evals_v39` at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; catalog import added song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
 
 The final web role audit fails mutation affordances closed as well as relying on
 the API boundary: viewers can read Manager and Band operations records without
@@ -130,6 +130,8 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 1. **Apply a real local Vault catalog (operator machine):** Vault import is the
    documented default song path (`pnpm catalog:import`, dry-run then `--apply`).
+   Default planning is Rad Dad only; the current live feed has zero Rad Dad
+   labels, so emptiness is honest until Jeff labels a project or opts in.
    Jeff can apply a private `data/app_api.json` or `data/master_catalog.json`
    (and optionally Show Night `content/show.json`) on his machine. Do not
    commit those files, do not fetch them over the network, do not invent a
@@ -154,7 +156,7 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
    working bands; compare expected results with observed show/project/business
    facts. Add or adjust code-owned policies only from reviewed operator
    evidence, never from a synthetic score alone; do not infer causality from one
-   result or auto-activate a version. `manager_os_v33` / `manager_evals_v38` is
+   result or auto-activate a version. `manager_os_v33` / `manager_evals_v39` is
    the current code-registered contract.
 5. **Connected delivery:** Add binary Drive/Gmail document delivery only after
    real provider acceptance testing. Keep external work approval-gated; do not add
