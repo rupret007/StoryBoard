@@ -3508,7 +3508,7 @@ test("manager chat refuses direct outside action and offers only reviewable inte
   assert.ok(!result.recommendation || result.recommendation.proposedAction?.type === "create_task");
 });
 
-test("empty seed chat stays honest about missing setlists, songs, and booking targets", () => {
+test("empty seed chat stays honest about missing setlists, songs, and booking targets", async () => {
   const emptySeed = managerFacts({
     artist: { id: "artist-a", name: "My Artist" },
     profile: { id: "profile-a", intakeCompletedAt: null, decisionStyle: "guided", twelveMonthAmbition: null },
