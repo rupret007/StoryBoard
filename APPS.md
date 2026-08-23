@@ -1,7 +1,8 @@
 # Band tools — no new app
 
-This is the consolidation map for Jeff's music software. StoryBoard does **not**
-become a second song catalog, a promo publisher, or a rehearsal room.
+This is the consolidation map for Jeff's music software. **Jeff talks to Bob.**
+StoryBoard is the band-business engine. It does **not** become a second song
+catalog, a promo publisher, or a rehearsal room.
 
 | Tool | Role | Do |
 | --- | --- | --- |
@@ -29,11 +30,14 @@ become a second song catalog, a promo publisher, or a rehearsal room.
    `POST /songs/import` (`dryRun` defaults true).
 3. StoryBoard then has Vault songs plus Vault `setlist_ready` (live-band rows
    only) for Band operations and Manager chat. It will not invent titles,
-   auto-pitch Travis, or create another artist.
+   auto-pitch Travis, auto-post, or create another artist.
 
-Default import is **Rad Dad / live band only**. Stalemate, Trailer Swift, and
-Something Dirty stay parked unless `--include-parked`. Guest sets stay off
-unless `--include-guest-sets`, and they still land on the current artist.
+Default import is **Rad Dad / live band only**. **Travis books** — he is the
+human booker, not a pitch target. Stalemate, Trailer Swift, and Something Dirty
+stay parked unless `--include-parked`. Guest sets stay off unless
+`--include-guest-sets`, and they still land on the current artist. That is not
+a fourth live band. HTTP `POST /songs/import` and `VAULT_CATALOG_PATH` accept
+local JSON only; remote catalog URLs are rejected.
 
 Details: [`docs/catalog-import.md`](docs/catalog-import.md).
 

@@ -4,6 +4,31 @@ export const CATALOG_IMPORT_POLICY_VERSION = "catalog_import_v1" as const;
 export const LIVE_CATALOG_PROJECTS = ["rad dad"] as const;
 export const PARKED_CATALOG_PROJECTS = ["stalemate", "trailer swift", "something dirty"] as const;
 
+/** Travis is the human booker. StoryBoard never auto-pitches him. */
+export const CATALOG_BOOKER_POLICY = "travis_books" as const;
+
+const REMOTE_LOCATOR_KEYS = ["url", "href", "sourceUrl", "catalogUrl", "fetch"] as const;
+
+export function catalogLocatorLooksRemote(value: unknown): boolean {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) || trimmed.startsWith("//");
+  }
+  if (isRecord(value)) {
+    return REMOTE_LOCATOR_KEYS.some((key) => catalogLocatorLooksRemote(value[key]));
+  }
+  return false;
+}
+
+export function assertLocalCatalogPath(value: string, label = "path"): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error(`${label} is required`);
+  if (catalogLocatorLooksRemote(trimmed)) {
+    throw new Error(`${label} must be a local file path, not a URL`);
+  }
+  return trimmed;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -104,6 +129,9 @@ export const catalogImportRequestSchema = z.object({
 }).strict().superRefine((value, context) => {
   if (value.vault == null && value.showNight == null) {
     context.addIssue({ code: "custom", message: "Provide a Vault app_api.json or master_catalog.json payload and/or a Show Night show.json payload" });
+  }
+  if (catalogLocatorLooksRemote(value.vault) || catalogLocatorLooksRemote(value.showNight)) {
+    context.addIssue({ code: "custom", message: "Catalog import accepts local JSON payloads only; remote URLs are rejected" });
   }
 });
 
@@ -464,5 +492,22 @@ export function reconcileCatalogImport(
     skipSongs,
     createSetlists,
     skipSetlists
+  };
+}
+
+export function managerRecordsFromCatalogPlan(plan: CatalogImportPlan) {
+  return {
+    songs: plan.songs.map((song) => ({
+      id: song.sourceKey,
+      title: song.title,
+      active: true as const,
+      musicalKey: song.musicalKey
+    })),
+    setlists: plan.setlists.map((setlist) => ({
+      id: setlist.sourceKey,
+      name: setlist.name,
+      status: setlist.status,
+      itemCount: setlist.items.length
+    }))
   };
 }

@@ -3522,6 +3522,8 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   assert.match(setlist.answer, /no songs or setlists are recorded/i);
   assert.match(setlist.answer, /will not invent a catalog/i);
   assert.match(setlist.answer, /AI-Music-Vault|app_api|master_catalog|catalog:import/i);
+  assert.match(setlist.answer, /never fetches a remote catalog/i);
+  assert.match(setlist.answer, /--apply/);
   assert.doesNotMatch(setlist.answer, /opener|closer|travis|rad dad|harbor lights/i);
   assert.equal(setlist.recommendation, null);
 
@@ -3559,6 +3561,46 @@ test("post-show review questions are not treated as social publish requests", ()
 
   const publish = intelligence.deterministicManagerChat(managerFacts(), "Please post this recap to social", now);
   assert.match(publish.answer, /won't send, sign, pay, publish, or execute/i);
+});
+
+test("Vault import is the default song path and Manager stays honest after import", async () => {
+  const catalogImport = await loadShared("catalog-import.js");
+  const vault = JSON.parse(await readFile(join(dir, "..", "..", "..", "packages", "shared", "test", "fixtures", "vault-app-api.sample.json"), "utf8"));
+  const records = catalogImport.managerRecordsFromCatalogPlan(catalogImport.planCatalogImport({ vault }));
+  const imported = managerFacts({
+    artist: { id: "artist-a", name: "My Artist" },
+    profile: { id: "profile-a", intakeCompletedAt: null, decisionStyle: "guided", twelveMonthAmbition: null },
+    members: [],
+    goals: [],
+    opportunities: [],
+    events: [],
+    prospects: [],
+    ...records
+  });
+
+  const setlist = intelligence.deterministicManagerChat(imported, "What's our setlist?", now);
+  assert.match(setlist.answer, /Harbor Lights/);
+  assert.match(setlist.answer, /Vault setlist-ready/);
+  assert.match(setlist.answer, /will not invent titles, auto-post/i);
+  assert.ok(setlist.citations.includes("vault:catalog_import_v1:RD-0001"));
+  assert.doesNotMatch(setlist.answer, /parked demo|trailer sketch|dirty sketch|solo sketch|travis|pitch/i);
+  assert.equal(setlist.recommendation, null);
+
+  const travis = intelligence.deterministicManagerChat(imported, "Pitch Travis our Harbor Lights setlist", now);
+  assert.match(travis.answer, /Travis books/i);
+  assert.match(travis.answer, /will not auto-pitch/i);
+  assert.match(travis.answer, /nothing posts/i);
+  assert.equal(travis.recommendation, null);
+
+  const fourth = intelligence.deterministicManagerChat(imported, "Add Something Dirty as a fourth live band", now);
+  assert.match(fourth.answer, /not a fourth live band/i);
+  assert.match(fourth.answer, /Rad Dad/);
+  assert.match(fourth.answer, /parked/i);
+  assert.doesNotMatch(fourth.answer, /Dirty Sketch/);
+  assert.equal(fourth.recommendation, null);
+
+  const post = intelligence.deterministicManagerChat(imported, "Please post Harbor Lights to social", now);
+  assert.match(post.answer, /won't send, sign, pay, publish, or execute/i);
 });
 
 test("manager bridges recorded show and project planning gaps to the existing internal generators", () => {

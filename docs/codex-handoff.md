@@ -37,7 +37,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | 2026-08-23 catalog-import unit/eval gate: Prisma generation; root typecheck/lint; 17/17 shared tests; 264/264 API unit tests; both production builds; 86/86 `manager_evals_v38` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; this change adds song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
+| Tests | 2026-08-23 catalog-honesty unit/eval gate: Prisma generation; root typecheck/lint; 20/20 shared tests; 265/265 API unit tests; both production builds; 90/90 `manager_evals_v38` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; catalog import added song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
 
 The final web role audit fails mutation affordances closed as well as relying on
 the API boundary: viewers can read Manager and Band operations records without
@@ -128,11 +128,13 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Apply a real local Vault catalog (operator machine):** Jeff can dry-run
-   then apply a private `data/app_api.json` or `data/master_catalog.json` (and
-   optionally Show Night `content/show.json`) with `pnpm catalog:import`. Do not
-   commit those files, do not invent a fourth live band, and do not auto-pitch
-   Travis or any Rad Dad booker. StoryLiner and WebJam stay out of this repo.
+1. **Apply a real local Vault catalog (operator machine):** Vault import is the
+   documented default song path (`pnpm catalog:import`, dry-run then `--apply`).
+   Jeff can apply a private `data/app_api.json` or `data/master_catalog.json`
+   (and optionally Show Night `content/show.json`) on his machine. Do not
+   commit those files, do not fetch them over the network, do not invent a
+   fourth live band, and do not auto-pitch Travis (he books). StoryLiner and
+   WebJam stay out of this repo.
 2. **Database client warning:** Trace the concurrent-`client.query()`
    deprecation emitted by `pg@8.14.1` during integration/browser execution and
    remove it before considering `pg@9`; do not change transaction semantics to

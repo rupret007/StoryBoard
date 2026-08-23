@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "generated": "2026-08-23",
+  "catalog_version": "sample",
+  "note": "Sanitized StoryBoard fixture. Not the private AI-Music-Vault catalog.",
+  "songs": [
+    {
+      "id": "RD-0001",
+      "title": "Harbor Lights",
+      "project": "Rad Dad",
+      "is_original": true,
+      "key": "G",
+      "bpm": 118
+    },
+    {
+      "id": "ST-0001",
+      "title": "Parked Demo",
+      "project": "Stalemate",
+      "is_original": true,
+      "key": "Am",
+      "bpm": "96"
+    },
+    {
+      "id": "TS-0001",
+      "title": "Trailer Sketch",
+      "project": "Trailer Swift",
+      "is_original": true,
+      "key": "D"
+    },
+    {
+      "id": "SD-0001",
+      "title": "Dirty Sketch",
+      "project": "Something Dirty",
+      "is_original": true,
+      "key": "E"
+    },
+    {
+      "id": "JS-0001",
+      "title": "Solo Sketch",
+      "project": "Jeff Story",
+      "is_original": true,
+      "key": "C"
+    }
+  ],
+  "setlist_ready": [
+    {
+      "id": "RD-0001",
+      "title": "Harbor Lights",
+      "key": "G",
+      "project": "Rad Dad"
+    },
+    {
+      "id": "ST-0001",
+      "title": "Parked Demo",
+      "key": "Am",
+      "project": "Stalemate"
+    }
+  ]
+}

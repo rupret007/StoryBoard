@@ -1071,6 +1071,16 @@ export function managerQuestionAsksAboutCatalog(question: string) {
   return /\b(setlists?|song library|song catalog|vault|app_api|master_catalog|what songs|our songs|import (?:the )?(?:catalog|songs)|show night)\b/i.test(question);
 }
 
+export function managerQuestionAsksAboutBookerPitch(question: string) {
+  return /\btravis\b/i.test(question) && /\b(pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send)\b/i.test(question);
+}
+
+export function managerQuestionAsksAboutFourthBand(question: string) {
+  if (/\b(fourth (?:live )?band|another (?:live )?band|new (?:live )?band)\b/i.test(question)) return true;
+  return /\b(stalemate|trailer swift|something dirty)\b/i.test(question)
+    && /\b(live|band|import|catalog|setlist|artist|create|add)\b/i.test(question);
+}
+
 function deterministicManagerChatBase(
   facts: ManagerFacts,
   question: string,
@@ -1214,6 +1224,22 @@ function deterministicManagerChatBase(
       answer: `I can help prepare that, but I won't send, sign, pay, publish, or execute outside work from this conversation. Those actions need the exact payload reviewed in Approvals.\n\nThe useful next move is to prepare the internal work first${recommendation ? `: ${recommendation.nextAction}` : "."}`,
       citations: recommendation?.evidenceIds ?? [],
       recommendation: recommendation?.proposedAction ? recommendation : null
+    };
+  }
+
+  if (managerQuestionAsksAboutBookerPitch(question)) {
+    return {
+      answer: "Travis books. StoryBoard will not auto-pitch him or invent a buyer. Record a real prospect, then review a campaign in Approvals. Nothing posts from this conversation.",
+      citations: [],
+      recommendation: null
+    };
+  }
+
+  if (managerQuestionAsksAboutFourthBand(question)) {
+    return {
+      answer: "StoryBoard imports onto the current artist only. The live catalog is Rad Dad. Stalemate, Trailer Swift, and Something Dirty stay parked unless an operator opts in, and that is not a fourth live band. Import a local Vault file; do not invent another artist.",
+      citations: [],
+      recommendation: null
     };
   }
 
@@ -1455,7 +1481,7 @@ function deterministicManagerChatBase(
     const activeSongs = songs.filter((song) => song.active !== false);
     if (!songs.length && !setlists.length) {
       return {
-        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. The song catalog lives in AI-Music-Vault; import a local app_api.json or master_catalog.json (or Show Night show.json) with `pnpm catalog:import` (dry-run by default), or add songs in Band operations.",
+        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. The song catalog lives in AI-Music-Vault; import a local app_api.json or master_catalog.json with `pnpm catalog:import` (dry-run by default; `--apply` writes). StoryBoard never fetches a remote catalog.",
         citations: [],
         recommendation: null
       };
@@ -1463,7 +1489,7 @@ function deterministicManagerChatBase(
     const songLines = activeSongs.slice(0, responsePolicy.itemLimit).map((song) => `• ${song.title}${song.musicalKey ? ` (${song.musicalKey})` : ""}`);
     const setlistLines = setlists.slice(0, responsePolicy.itemLimit).map((setlist) => `• ${setlist.name} — ${setlist.status}${setlist.itemCount != null ? `; ${setlist.itemCount} item${setlist.itemCount === 1 ? "" : "s"}` : ""}`);
     return {
-      answer: `${activeSongs.length} song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded.${songLines.length ? `\n\nSongs:\n${songLines.join("\n")}` : ""}${setlistLines.length ? `\n\nSetlists:\n${setlistLines.join("\n")}` : ""}\n\nThese are StoryBoard records only. Missing duration stays unknown until someone records it.`,
+      answer: `${activeSongs.length} song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded.${songLines.length ? `\n\nSongs:\n${songLines.join("\n")}` : ""}${setlistLines.length ? `\n\nSetlists:\n${setlistLines.join("\n")}` : ""}\n\nThese are StoryBoard records only, usually from a local Vault import. Missing duration stays unknown until someone records it. StoryBoard will not invent titles, auto-post, or treat a parked catalog as another live band.`,
       citations: unique([...activeSongs.map((song) => song.id), ...setlists.map((setlist) => setlist.id)]).slice(0, 10),
       recommendation: null
     };

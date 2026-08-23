@@ -570,8 +570,10 @@ remain separately visible rather than being silently mixed into net income.
 Draft finalization rechecks current matching expenses, attaches them to the
 settlement, and freezes the recalculated split and PDF together.
 Manager uses that same day-of signal inside 24 hours of a show instead of
-falling back to generic advice. It also includes a shared song library and a
-practical setlist builder for ordered songs, breaks, notes, transition cues,
+falling back to generic advice. The song library is populated from a **local Vault import**
+(`pnpm catalog:import`; dry-run by default, `--apply` to write). StoryBoard
+does not ship or fetch the private catalog. After import, Band operations
+corrects duration and key and builds the practical setlist of ordered songs, breaks, notes, transition cues,
 status, and reusable set notes. `setlist_summary_v1` derives song count and
 known performance time from the canonical library; break time is never guessed,
 and any song without a duration remains a visible readiness gap rather than
@@ -643,14 +645,14 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm db:generate` | `prisma generate` (root config) |
 | `pnpm db:migrate` | `prisma migrate dev` (needs Postgres) |
 | `pnpm db:seed` | Seed default artist + operator membership (needs migrate) |
-| `pnpm catalog:import` | Dry-run (default) or `--apply` a local Vault `app_api.json` / `master_catalog.json` (optional Show Night set) |
+| `pnpm catalog:import` | **Default way to populate songs.** Dry-run a local Vault `app_api.json` / `master_catalog.json` (optional Show Night set); `--apply` writes. Never a remote URL. |
 | `pnpm db:studio` | Prisma Studio |
 | `pnpm db:audit-relationships` | Read-only check for historical cross-artist record links |
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
 
 Release validation snapshot (2026-07-13) plus the 2026-08-23 quality-review
-unit/eval gate: root typecheck/lint, 17/17 shared tests, 264/264 API unit
-tests, both production builds, and 86/86 `manager_evals_v38` checks at 100%
+unit/eval gate: root typecheck/lint, 20/20 shared tests, 265/265 API unit
+tests, both production builds, and 90/90 `manager_evals_v38` checks at 100%
 safety. The 2026-07-13 package also recorded 5/5 database workflows across all
 40 migrations; this change adds a 41st migration for song/setlist `sourceKey`.
 15/15 Chromium workflows remain the last hosted browser snapshot. Prisma reports no schema
@@ -674,7 +676,7 @@ Gmail (OAuth compose/send), Bandsintown (the artist's own event context only), a
   pipeline, tracked campaign replies, approval-gated pitch campaigns, and
   follow-up work.
 - **Band operations:** events and availability, show readiness/day-of views,
-  advance tasks, songs/setlists, release/content/tour/business projects, offers,
+  advance tasks, Vault-imported songs/setlists (local dry-run then apply), release/content/tour/business projects, offers,
   reviewed document snapshots, invoices/manual payments, expenses, and
   settlements.
 - **Connected work:** an approval center with explicit post-approval execution,
