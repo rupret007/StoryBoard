@@ -30,7 +30,7 @@ import { assessEventLogistics, eventLogisticsApprovalSourceKey, eventLogisticsFi
 import { projectManagerFollowThrough, projectManagerFollowThroughForProvider, summarizeManagerFollowThrough, type ManagerFollowThroughSource } from "./manager-follow-through";
 
 export const MANAGER_PROMPT_VERSION = "manager_os_v33";
-export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v43";
+export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v44";
 
 type ReviewedExample = { id: string; label: string; promptVersion: string; snapshot: unknown };
 type ReviewedResponseExample = { id: string; label: string; promptVersion: string; expectedBehavior: string | null; resolutionVersion: string | null; resolvedAt: Date | null; snapshot: unknown; inputFacts: unknown };
@@ -255,6 +255,35 @@ function goldenResults(candidateVersion: string): EvalResult[] {
   });
   const liveVaultEmptyAnswer = deterministicManagerChat(liveVaultEmptyFacts, "What's our setlist?", NOW);
   const writerProjectAnswer = deterministicManagerChat(liveVaultEmptyFacts, "Make Jeff Story a live band", NOW);
+  const emptySliceShowNightPlan = planCatalogImport({
+    vault: {
+      schema_version: 3,
+      songs: [
+        { id: "JS-0001", title: "Harbor Lights", project: "Jeff Story", import_scope: "not_live_band", is_original: true, key: "G", bpm: 118, played_live: ["Rad Dad (2026-05)"] },
+        { id: "ST-0001", title: "Parked Demo", project: "Stalemate", import_scope: "parked_catalog", is_original: true },
+        { id: "ST-0002", title: "Cover Example", project: "Stalemate", import_scope: "cover_not_active", is_original: false }
+      ],
+      setlist_ready: [
+        { id: "JS-0001", title: "Harbor Lights", project: "Jeff Story" },
+        { id: "ST-0001", title: "Parked Demo", project: "Stalemate" }
+      ],
+      setlist_ready_default_import: []
+    },
+    showNight: {
+      event: { name: "Rad Dad + Friends", venue: "Example Room", dateLong: "Saturday, September 19, 2026" },
+      radDadSet: [
+        { number: 1, song: "Harbor Lights →", transition: true, special: false },
+        { number: 2, song: "Cover Example", transition: false, special: false }
+      ]
+    }
+  });
+  const emptySliceShowNightAnswer = deterministicManagerChat(facts({
+    ...managerRecordsFromCatalogPlan(emptySliceShowNightPlan),
+    goals: [],
+    initiatives: [],
+    tasks: [],
+    opportunities: []
+  }), "What's our setlist?", NOW);
   const liveVaultPublishedPlan = planCatalogImport({
     vault: {
       schema_version: 3,
@@ -519,6 +548,7 @@ function goldenResults(candidateVersion: string): EvalResult[] {
     { name: "imported-catalog-does-not-auto-post", source: "golden", passed: /won't send, sign, pay, publish, or execute/i.test(importedPostAnswer.answer) && importedPostAnswer.recommendation === null, detail: "An imported song title does not authorize a social post from Manager chat." },
     { name: "caption-request-is-not-ops", source: "golden", passed: /storyliner is promo-only/i.test(captionPromoAnswer.answer) && /won't send, sign, pay, publish, or execute/i.test(captionPromoAnswer.answer) && captionPromoAnswer.recommendation === null, detail: "Caption and auto-post requests stay out of StoryBoard ops and do not publish." },
     { name: "published-empty-default-import-stays-empty", source: "golden", passed: liveVaultHonestyPlan.songs.length === 0 && liveVaultHonestyPlan.setlists.length === 0 && /no songs or setlists are recorded/i.test(liveVaultEmptyAnswer.answer) && /will not invent a catalog/i.test(liveVaultEmptyAnswer.answer) && /setlist_ready_default_import|default_live/i.test(liveVaultEmptyAnswer.answer) && !/harbor lights|sidewalk radio|parked demo/i.test(liveVaultEmptyAnswer.answer) && liveVaultEmptyAnswer.recommendation === null, detail: "When Vault publishes an empty setlist_ready_default_import, default import stays empty. Manager does not invent titles from played_live or writer/hybrid labels." },
+    { name: "shownight-does-not-expand-vault-catalog", source: "golden", passed: emptySliceShowNightPlan.songs.length === 0 && emptySliceShowNightPlan.setlists.length === 0 && /no songs or setlists are recorded/i.test(emptySliceShowNightAnswer.answer) && /will not invent a catalog/i.test(emptySliceShowNightAnswer.answer) && emptySliceShowNightAnswer.recommendation === null && !/harbor lights|cover example|parked demo/i.test(emptySliceShowNightAnswer.answer) && emptySliceShowNightPlan.skipped.some((row) => row.reason === "cover_not_active" && row.title === "Cover Example" && row.source === "show_night"), detail: "When a Vault catalog is present, Show Night binds a running order to planned Vault titles only. It does not mint covers or fill an empty published default-live slice." },
     { name: "live-vault-default-import-uses-published-slice", source: "golden", passed: liveVaultPublishedPlan.songs.map((song) => song.title).join(",") === "Harbor Lights,Sidewalk Radio,Everyday" && liveVaultPublishedPlan.setlists[0]?.name === "Vault default-live" && liveVaultPublishedPlan.setlists[0]?.items.length === 3 && /Harbor Lights/.test(liveVaultPublishedAnswer.answer) && /Sidewalk Radio/.test(liveVaultPublishedAnswer.answer) && /Everyday/.test(liveVaultPublishedAnswer.answer) && /Vault default-live/.test(liveVaultPublishedAnswer.answer) && /setlist_ready_default_import|default_live/i.test(liveVaultPublishedAnswer.answer) && /not a fourth live band/i.test(liveVaultPublishedAnswer.answer) && !/parked demo/i.test(liveVaultPublishedAnswer.answer) && liveVaultPublishedAnswer.recommendation === null, detail: "When Vault publishes a default-live slice, default import and Manager list those recorded rows only — including Jeff Story, hybrid Rad Dad plays, and live-ready Stalemate such as Everyday — and leave parked titles out." },
     { name: "published-default-live-stalemate-is-not-a-fourth-band", source: "golden", passed: /Everyday/.test(publishedStalemateAnswer.answer) && /current artist/i.test(publishedStalemateAnswer.answer) && /not a fourth live band/i.test(publishedStalemateAnswer.answer) && /setlist_ready_default_import|default_live/i.test(publishedStalemateAnswer.answer) && publishedStalemateAnswer.citations.includes("vault:catalog_import_v1:ST-0014") && publishedStalemateAnswer.recommendation === null && !/parked demo/i.test(publishedStalemateAnswer.answer), detail: "After Vault publishes Everyday as default_live, Manager treats that Stalemate-origin row as current-artist repertoire — not a fourth live band — and does not invent parked titles." },
     { name: "jeff-story-is-default-live-repertoire", source: "golden", passed: /jeff story/i.test(writerProjectAnswer.answer) && /default live|default-live|setlist_ready_default_import/i.test(writerProjectAnswer.answer) && /rad dad/i.test(writerProjectAnswer.answer) && /not a fourth live band/i.test(writerProjectAnswer.answer) && writerProjectAnswer.recommendation === null && !/harbor lights|sidewalk radio|writer project/i.test(writerProjectAnswer.answer), detail: "Jeff Story is already default live repertoire with Rad Dad. Manager will not invent titles, a second catalog, or a fourth live band." },

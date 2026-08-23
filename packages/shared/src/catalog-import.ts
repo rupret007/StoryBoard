@@ -519,6 +519,19 @@ export function planCatalogImport(input: {
   let parkedSkipped = 0;
   let notLiveSkipped = 0;
   let guestSetsSkipped = 0;
+  let vaultCatalogResolved = false;
+  const vaultSkipByTitle = new Map<string, string>();
+
+  function showNightSongSourceKey(title: string, draft: CatalogSongDraft): string | null {
+    if (vaultCatalogResolved) {
+      const planned = songs.find((song) => song.title.toLocaleLowerCase() === title.toLocaleLowerCase());
+      if (planned) return planned.sourceKey;
+      const reason = vaultSkipByTitle.get(title.toLocaleLowerCase()) ?? "show_night_not_in_vault";
+      skipped.push({ ...skipFields(title, draft.project ?? undefined, "show_night"), reason });
+      return null;
+    }
+    return upsertSong(songs, draft);
+  }
 
   if (catalogLocatorLooksRemote(input.vault) || catalogLocatorLooksRemote(input.showNight)) {
     warnings.push("Catalog locators must be local JSON objects, not URLs or file paths.");
@@ -529,6 +542,7 @@ export function planCatalogImport(input: {
     if (!parsed.success) {
       warnings.push("Vault payload is not a valid app_api.json or master_catalog.json catalog. No vault songs were planned.");
     } else {
+      vaultCatalogResolved = true;
       if (parsed.data.lanes != null) {
         warnings.push("Vault lanes are WIP slots, not a setlist. Jeff owns running order.");
       }
@@ -565,6 +579,7 @@ export function planCatalogImport(input: {
           inReadySet: readyIds.has(song.id)
         });
         if (!decision.include) {
+          vaultSkipByTitle.set(cleanTitle(song.title).toLocaleLowerCase(), decision.reason);
           if (decision.reason === "parked_catalog") parkedSkipped += 1;
           if (decision.reason === "not_live_band" || decision.reason === "not_setlist_ready" || decision.reason === "cover_not_active") {
             notLiveSkipped += 1;
@@ -623,7 +638,7 @@ export function planCatalogImport(input: {
       for (const row of official) {
         showNightSongsSeen += 1;
         const title = cleanTitle(row.song);
-        const sourceKey = upsertSong(songs, {
+        const sourceKey = showNightSongSourceKey(title, {
           sourceKey: `shownight:${CATALOG_IMPORT_POLICY_VERSION}:song:rad-dad:${slug(title)}`,
           title,
           musicalKey: null,
@@ -633,6 +648,7 @@ export function planCatalogImport(input: {
           project: "Rad Dad",
           origin: "show_night"
         });
+        if (!sourceKey) continue;
         officialItems.push({
           songSourceKey: sourceKey,
           itemType: "song",
@@ -662,7 +678,7 @@ export function planCatalogImport(input: {
         for (const row of guest.songs) {
           showNightSongsSeen += 1;
           const title = cleanTitle(row.song);
-          const sourceKey = upsertSong(songs, {
+          const sourceKey = showNightSongSourceKey(title, {
             sourceKey: `shownight:${CATALOG_IMPORT_POLICY_VERSION}:song:${guestSlug}:${slug(title)}`,
             title,
             musicalKey: null,
@@ -672,6 +688,7 @@ export function planCatalogImport(input: {
             project: guest.name,
             origin: "show_night"
           });
+          if (!sourceKey) continue;
           items.push({
             songSourceKey: sourceKey,
             itemType: "song",

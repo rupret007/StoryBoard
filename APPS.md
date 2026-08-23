@@ -45,7 +45,9 @@ Default import is Vault's published `setlist_ready_default_import` /
 slice stay on the current artist — not a fourth live band. A Stalemate
 row Vault already marked `default_live` (for example Everyday) stays here
 too; that is still not a fourth live band. An empty published slice stays
-empty. **Travis books** — he is the human booker, not a pitch target.
+empty, including when a Show Night running order is also supplied — Show
+Night binds planned Vault titles only and does not mint covers or unknown
+songs. **Travis books** — he is the human booker, not a pitch target.
 Stalemate, Trailer Swift, and Something Dirty catalogs stay parked unless
 `--include-parked`. Guest sets stay off unless
 `--include-guest-sets`, and they still land on the current artist.

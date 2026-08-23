@@ -402,7 +402,9 @@ Story + recorded Rad Dad plays gated by `setlist_ready`. It maps `bpm_int`,
 `notes` ← `vault_ref`, and `active` ← `is_original !== false`, and skips
 Travis booker rows. A Stalemate-origin row already in the published
 `default_live` slice stays on the current artist — not a fourth live band.
-Parked catalogs stay parked. `SEED_DEMO_OPS`, Show Night, and Band
+Parked catalogs stay parked. When a Vault payload is present, Show Night
+attaches a running-order setlist to planned Vault titles only and does not
+mint covers or unknown songs. `SEED_DEMO_OPS`, Show Night-only imports, and Band
 operations one-offs keep separate provenance; they are not a Vault import.
 See
 [`catalog-import.md`](catalog-import.md).
