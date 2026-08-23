@@ -1247,7 +1247,7 @@ function deterministicManagerChatBase(
 
   if (managerQuestionAsksAboutWriterProjectAsLiveBand(question)) {
     return {
-      answer: "Jeff Story is already part of Vault's default live repertoire with Rad Dad. StoryBoard consumes the published setlist_ready_default_import / default_live slice from a local app_api.json — it does not invent a catalog or a fourth live band. Parked catalogs stay parked unless an operator opts in. Import locally; nothing posts from this conversation.",
+      answer: "Jeff Story is already part of Vault's default live repertoire with Rad Dad. StoryBoard consumes the published setlist_ready_default_import / default_live slice from a local app_api.json — it does not invent a catalog. Parked catalogs stay parked and are not a fourth live band. Import locally; nothing posts from this conversation.",
       citations: [],
       recommendation: null
     };
