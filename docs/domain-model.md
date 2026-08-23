@@ -400,7 +400,9 @@ Local Vault import is the default way to populate songs (dry-run by default;
 `import_scope=default_live` slice when present, otherwise Rad Dad + Jeff
 Story + recorded Rad Dad plays gated by `setlist_ready`. It maps `bpm_int`,
 `notes` ← `vault_ref`, and `active` ← `is_original !== false`, and skips
-Travis booker rows. Parked catalogs stay parked. See
+Travis booker rows. A Stalemate-origin row already in the published
+`default_live` slice stays on the current artist — not a fourth live band.
+Parked catalogs stay parked. See
 [`catalog-import.md`](catalog-import.md).
 `setlist_summary_v1` is a non-persistent projection over the ordered items and
 their current Song rows. It reports song/break/note counts, known song time,

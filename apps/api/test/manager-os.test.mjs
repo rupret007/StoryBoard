@@ -3618,7 +3618,28 @@ test("Vault import is the default song path and Manager stays honest after impor
   assert.match(publishedSetlist.answer, /Harbor Lights/);
   assert.match(publishedSetlist.answer, /Sidewalk Radio/);
   assert.match(publishedSetlist.answer, /Everyday/);
+  assert.match(publishedSetlist.answer, /Vault default-live/);
+  assert.match(publishedSetlist.answer, /setlist_ready_default_import|default_live/i);
+  assert.match(publishedSetlist.answer, /not a fourth live band/i);
   assert.doesNotMatch(publishedSetlist.answer, /parked demo|trailer sketch|cover example/i);
+
+  const publishedStalemate = intelligence.deterministicManagerChat(managerFacts({
+    artist: { id: "artist-a", name: "My Artist" },
+    profile: { id: "profile-a", intakeCompletedAt: null, decisionStyle: "guided", twelveMonthAmbition: null },
+    members: [],
+    goals: [],
+    opportunities: [],
+    events: [],
+    prospects: [],
+    ...catalogImport.managerRecordsFromCatalogPlan(liveShape)
+  }), "Should Stalemate be a live band?", now);
+  assert.match(publishedStalemate.answer, /Everyday/);
+  assert.match(publishedStalemate.answer, /current artist/i);
+  assert.match(publishedStalemate.answer, /not a fourth live band/i);
+  assert.match(publishedStalemate.answer, /setlist_ready_default_import|default_live/i);
+  assert.ok(publishedStalemate.citations.includes("vault:catalog_import_v1:ST-0014"));
+  assert.doesNotMatch(publishedStalemate.answer, /parked demo/i);
+  assert.equal(publishedStalemate.recommendation, null);
 
   const records = catalogImport.managerRecordsFromCatalogPlan(catalogImport.planCatalogImport({
     vault: {
@@ -3643,7 +3664,7 @@ test("Vault import is the default song path and Manager stays honest after impor
 
   const setlist = intelligence.deterministicManagerChat(imported, "What's our setlist?", now);
   assert.match(setlist.answer, /Harbor Lights/);
-  assert.match(setlist.answer, /Vault setlist-ready/);
+  assert.match(setlist.answer, /Vault default-live/);
   assert.match(setlist.answer, /will not invent titles, auto-post/i);
   assert.ok(setlist.citations.includes("vault:catalog_import_v1:RD-0001"));
   assert.doesNotMatch(setlist.answer, /parked demo|trailer sketch|booking calendar|cover example|travis|pitch/i);
@@ -3660,6 +3681,8 @@ test("Vault import is the default song path and Manager stays honest after impor
   assert.match(fourth.answer, /Rad Dad/);
   assert.match(fourth.answer, /parked/i);
   assert.match(fourth.answer, /include-parked/i);
+  assert.match(fourth.answer, /Harbor Lights/);
+  assert.ok(fourth.citations.includes("vault:catalog_import_v1:RD-0001"));
   assert.doesNotMatch(fourth.answer, /Dirty Sketch/);
   assert.equal(fourth.recommendation, null);
 
@@ -4286,6 +4309,22 @@ test("catalog status reports an empty table as missing Vault import, not a secon
   assert.equal(status.source, "none");
   assert.equal(status.defaultImport, "pnpm catalog:import");
   assert.match(status.message, /not a second catalog/i);
+});
+
+test("catalog status after Vault import names the published default-live slice and refuses a fourth band", async () => {
+  const service = new operationsMod.OperationsService({
+    client: {
+      song: { findMany: async () => [{ sourceKey: "vault:catalog_import_v1:ST-0014" }] },
+      setlist: { findMany: async () => [{ sourceKey: "vault:catalog_import_v1:set:setlist-ready" }] }
+    }
+  }, { log: async () => undefined }, {});
+  const status = await service.catalogStatus("artist-a");
+  assert.equal(status.empty, false);
+  assert.equal(status.source, "vault");
+  assert.equal(status.songCount, 1);
+  assert.equal(status.vaultSongCount, 1);
+  assert.match(status.message, /setlist_ready_default_import|default_live/i);
+  assert.match(status.message, /not a fourth live band/i);
 });
 
 test("catalog import apply writes only reconciled live-band songs and audits counts", async () => {

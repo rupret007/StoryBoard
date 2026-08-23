@@ -13,6 +13,8 @@ export const CATALOG_IMPORT_SCOPES = [
   "cover_not_active"
 ] as const;
 export const VAULT_SAMPLE_CATALOG_RELATIVE_PATH = "packages/shared/test/fixtures/vault-app-api.sample.json";
+export const VAULT_DEFAULT_LIVE_SETLIST_NAME = "Vault default-live";
+export const VAULT_SETLIST_READY_SETLIST_NAME = "Vault setlist-ready";
 
 /** Travis is the human booker. StoryBoard never auto-pitches him. */
 export const CATALOG_BOOKER_POLICY = "travis_books" as const;
@@ -321,12 +323,28 @@ function isLiveProject(project: string | undefined) {
   return hasPhrase(tokens, "rad dad") || hasPhrase(tokens, "jeff story");
 }
 
-function isParkedProject(project: string | undefined, declared?: unknown) {
-  if (recognizedImportScope(declared) === "parked_catalog") return true;
+function projectNameLooksParked(project: string | undefined) {
   const normalized = normalizeProject(project);
   if ((PARKED_CATALOG_PROJECTS as readonly string[]).includes(normalized)) return true;
   const tokens = projectTokens(project);
   return tokens.has("stalemate") || hasPhrase(tokens, "trailer swift") || hasPhrase(tokens, "something dirty");
+}
+
+function isParkedProject(project: string | undefined, declared?: unknown) {
+  if (recognizedImportScope(declared) === "parked_catalog") return true;
+  return projectNameLooksParked(project);
+}
+
+export function vaultSetlistIdentity(usedPublishedDefault: boolean) {
+  return usedPublishedDefault
+    ? {
+        name: VAULT_DEFAULT_LIVE_SETLIST_NAME,
+        notes: clipNotes("Published Vault setlist_ready_default_import / default_live slice. Current artist only — not a fourth live band. Not a booking pitch. Lanes are not a setlist. Jeff owns running order.")
+      }
+    : {
+        name: VAULT_SETLIST_READY_SETLIST_NAME,
+        notes: clipNotes("Playable Vault originals already selected for the live band. Not a booking pitch. Lanes are not a setlist. Jeff owns running order.")
+      };
 }
 
 function isBookerProject(project: string | undefined) {
@@ -494,6 +512,7 @@ export function planCatalogImport(input: {
       const publishedDefaultIds = publishedDefaultRows
         ? new Set(publishedDefaultRows.map((row) => row.id))
         : null;
+      const usedPublishedDefault = publishedDefaultRows != null && !includeAllProjects && !includeParked;
       const readyRows = includeAllProjects || includeParked
         ? (parsed.data.setlist_ready ?? [])
         : publishedDefaultRows ?? parsed.data.setlist_ready ?? [];
@@ -546,13 +565,17 @@ export function planCatalogImport(input: {
         });
       }
       if (readyItems.length) {
+        const identity = vaultSetlistIdentity(usedPublishedDefault);
         setlists.push({
           sourceKey: `vault:${CATALOG_IMPORT_POLICY_VERSION}:set:setlist-ready`,
-          name: "Vault setlist-ready",
+          name: identity.name,
           status: "draft",
-          notes: clipNotes("Playable Vault originals already selected for the live band. Not a booking pitch. Lanes are not a setlist. Jeff owns running order."),
+          notes: identity.notes,
           items: readyItems
         });
+      }
+      if (usedPublishedDefault && songs.some((song) => projectNameLooksParked(song.project ?? undefined))) {
+        warnings.push("Published default-live includes songs whose Vault project is a parked catalog name. They stay on the current artist — not a fourth live band.");
       }
     }
   }
@@ -729,7 +752,9 @@ export function describeSongCatalogStatus(input: {
     defaultImport: "pnpm catalog:import",
     message: empty
       ? "No songs are recorded. Vault is the catalog; default import is the published setlist_ready_default_import / default_live slice from a local app_api.json (`pnpm catalog:import`, then --apply). This empty table is not a second catalog."
-      : `${songCount} song${songCount === 1 ? "" : "s"} recorded${vaultSongCount ? ` (${vaultSongCount} from Vault)` : ""}.`
+      : vaultSongCount
+        ? `${songCount} song${songCount === 1 ? "" : "s"} recorded (${vaultSongCount} from Vault). Default import is Vault's published setlist_ready_default_import / default_live slice on the current artist — not a fourth live band. Duration stays unknown until Band operations records it.`
+        : `${songCount} song${songCount === 1 ? "" : "s"} recorded.`
   };
 }
 
@@ -739,7 +764,8 @@ export function managerRecordsFromCatalogPlan(plan: CatalogImportPlan) {
       id: song.sourceKey,
       title: song.title,
       active: song.active,
-      musicalKey: song.musicalKey
+      musicalKey: song.musicalKey,
+      sourceKey: song.sourceKey
     })),
     setlists: plan.setlists.map((setlist) => ({
       id: setlist.sourceKey,

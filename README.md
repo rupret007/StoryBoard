@@ -256,7 +256,7 @@ to deterministic and provider-backed answers through
 action explicit, simplify tone, or ask one evidence-backed missing-premise
 question. Raw correction notes never become instructions, and adaptation cannot
 change facts, citations, recommendations, tools, permissions, or writes.
-Prompt/policy version `manager_os_v33` and its `manager_evals_v40` offline eval
+Prompt/policy version `manager_os_v33` and its `manager_evals_v41` offline eval
 suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only

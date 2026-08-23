@@ -157,7 +157,7 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
    working bands; compare expected results with observed show/project/business
    facts. Add or adjust code-owned policies only from reviewed operator
    evidence, never from a synthetic score alone; do not infer causality from one
-   result or auto-activate a version. `manager_os_v33` / `manager_evals_v40` is
+   result or auto-activate a version. `manager_os_v33` / `manager_evals_v41` is
    the current code-registered contract.
 5. **Connected delivery:** Add binary Drive/Gmail document delivery only after
    real provider acceptance testing. Keep external work approval-gated; do not add

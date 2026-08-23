@@ -682,7 +682,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v33` with offline dataset `manager_evals_v40` retains the
+version `manager_os_v33` with offline dataset `manager_evals_v41` retains the
 current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,

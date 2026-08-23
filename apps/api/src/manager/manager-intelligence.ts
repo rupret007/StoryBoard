@@ -1092,6 +1092,18 @@ export function managerQuestionAsksAboutWriterProjectAsLiveBand(question: string
     && /\b(live|band|fourth|4th|catalog|import|artist|setlist)\b/i.test(question);
 }
 
+function recordedVaultCatalog(facts: ManagerFacts) {
+  const songs = (facts.songs ?? []).filter((song) => song.active !== false && (song.sourceKey ?? song.id).startsWith("vault:"));
+  const titles = songs.slice(0, 5).map((song) => song.title);
+  return {
+    songs,
+    citations: songs.map((song) => song.id).slice(0, 10),
+    titleClause: titles.length
+      ? ` Recorded songs (${titles.join(", ")}) stay on the current artist — not a fourth live band.`
+      : ""
+  };
+}
+
 function deterministicManagerChatBase(
   facts: ManagerFacts,
   question: string,
@@ -1246,17 +1258,19 @@ function deterministicManagerChatBase(
   }
 
   if (managerQuestionAsksAboutWriterProjectAsLiveBand(question)) {
+    const recorded = recordedVaultCatalog(facts);
     return {
-      answer: "Jeff Story is already part of Vault's default live repertoire with Rad Dad. StoryBoard consumes the published setlist_ready_default_import / default_live slice from a local app_api.json — it does not invent a catalog. Parked catalogs stay parked and are not a fourth live band. Import locally; nothing posts from this conversation.",
-      citations: [],
+      answer: `Jeff Story is already part of Vault's default live repertoire with Rad Dad.${recorded.titleClause} StoryBoard consumes the published setlist_ready_default_import / default_live slice from a local app_api.json — it does not invent a catalog. Parked catalogs stay parked and are not a fourth live band. Import locally; nothing posts from this conversation.`,
+      citations: recorded.citations,
       recommendation: null
     };
   }
 
   if (managerQuestionAsksAboutFourthBand(question)) {
+    const recorded = recordedVaultCatalog(facts);
     return {
-      answer: "StoryBoard imports onto the current artist only. The live catalog is Vault's published default-live slice (Rad Dad + Jeff Story + recorded Rad Dad plays, gated by setlist_ready). Stalemate, Trailer Swift, and Something Dirty stay parked unless an operator opts in with --include-parked, and that is not a fourth live band. Import a local Vault file; do not invent another artist.",
-      citations: [],
+      answer: `StoryBoard imports onto the current artist only. The live catalog is Vault's published setlist_ready_default_import / default_live slice (Rad Dad + Jeff Story + recorded Rad Dad plays). A Stalemate, hybrid, or Jeff Story row already in that slice is current-artist repertoire — not a fourth live band.${recorded.titleClause} Stalemate, Trailer Swift, and Something Dirty catalogs stay parked unless an operator opts in with --include-parked. Import a local Vault file; do not invent another artist.`,
+      citations: recorded.citations,
       recommendation: null
     };
   }
@@ -1508,15 +1522,19 @@ function deterministicManagerChatBase(
     const activeSongs = songs.filter((song) => song.active !== false);
     if (!songs.length && !setlists.length) {
       return {
-        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Vault is the sole catalog; default import is the published setlist_ready_default_import / default_live slice (Rad Dad + Jeff Story + recorded Rad Dad plays, gated by setlist_ready) from a local app_api.json (`pnpm catalog:import`, dry-run by default; `--apply` writes). That empty table is not a second catalog. StoryBoard never fetches a remote catalog.",
+        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Vault is the sole catalog; default import is the published setlist_ready_default_import / default_live slice (Rad Dad + Jeff Story + recorded Rad Dad plays) from a local app_api.json (`pnpm catalog:import`, dry-run by default; `--apply` writes). That empty table is not a second catalog. StoryBoard never fetches a remote catalog.",
         citations: [],
         recommendation: null
       };
     }
+    const recorded = recordedVaultCatalog(facts);
     const songLines = activeSongs.slice(0, responsePolicy.itemLimit).map((song) => `• ${song.title}${song.musicalKey ? ` (${song.musicalKey})` : ""}`);
     const setlistLines = setlists.slice(0, responsePolicy.itemLimit).map((setlist) => `• ${setlist.name} — ${setlist.status}${setlist.itemCount != null ? `; ${setlist.itemCount} item${setlist.itemCount === 1 ? "" : "s"}` : ""}`);
+    const provenance = recorded.songs.length
+      ? "These are StoryBoard records from a local Vault import. Default live is Vault's published setlist_ready_default_import / default_live slice when present. They stay on the current artist. A Stalemate, hybrid, or Jeff Story row in that slice is current-artist repertoire — not a fourth live band. Duration stays unknown until Band operations records it. StoryBoard will not invent titles, auto-post, or auto-pitch Travis."
+      : "These are StoryBoard records only, usually from a local Vault import. Missing duration stays unknown until someone records it. StoryBoard will not invent titles, auto-post, or treat a parked catalog as another live band.";
     return {
-      answer: `${activeSongs.length} song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded.${songLines.length ? `\n\nSongs:\n${songLines.join("\n")}` : ""}${setlistLines.length ? `\n\nSetlists:\n${setlistLines.join("\n")}` : ""}\n\nThese are StoryBoard records only, usually from a local Vault import. Missing duration stays unknown until someone records it. StoryBoard will not invent titles, auto-post, or treat a parked catalog as another live band.`,
+      answer: `${activeSongs.length} song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded.${songLines.length ? `\n\nSongs:\n${songLines.join("\n")}` : ""}${setlistLines.length ? `\n\nSetlists:\n${setlistLines.join("\n")}` : ""}\n\n${provenance}`,
       citations: unique([...activeSongs.map((song) => song.id), ...setlists.map((setlist) => setlist.id)]).slice(0, 10),
       recommendation: null
     };
