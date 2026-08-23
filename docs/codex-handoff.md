@@ -24,7 +24,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Cross-functional Manager intake, goals, memory, briefs, chat, recommendations | Core shipped; executable idempotent 90-day starter plans, recoverable bounded conversation history with thread-safe switching, structured currentness-checked follow-ups and tenant-grounded named-record resolution, intent-aware fallback, strict evidence rejection, editable structured band/lineup context with transparent coverage questions, six-area operating-evidence calibration that prevents missing/stale records from sounding complete, dependency-aware ready-now versus waiting work sequencing, code-owned goal→initiative→task→prerequisite paths that prevent orphan work, explicit minimum/cap/exact target semantics without invented linear forecasts, linked member task ownership, voluntary append-only capacity check-ins, and bounded team-load/assignment review, global explainable pressure ranking before response limits, code-owned profile-over-memory source precedence and freshness/conflict assessment, evidence-reconciled goal measurements with explicit member sync, explicit review-before-save conversational memory, novice-safe code-owned business coaching with personalized learning prompts, evidence-ranked blocked/deferred/waiting follow-through, owner-opted timezone-aware daily/weekly briefs with deterministic-default delivery, exact-response helpful/correction feedback plus conservative immediate-turn natural verdicts, reviewed conversational profile capture, source-bound shared-task creation, existing-task follow-through, direct assignment, atomic project-plus-plan creation, timezone-safe event/initial-lineup creation, reviewed one-member event availability, and code-owned confirmed-gig Calendar/Drive approval preparation with no provider call on acceptance; refresh-safe thread summaries, side-effect-free per-operator answer review, owner response-eval triage, owner finished-recommendation outcome review, natural-response guardrails, evidence-backed 90-day post-show/outcome review, scheduled option→choice→expected-result→immutable-review decisions, reviewed recommendation and exact-answer learning/cooldowns, sensitivity-enforced provider context, correctable non-profile memory, append-only goal progress, evidence-calibrated plan health, and owner-run offline eval gate. `manager_follow_through_v1` now reconciles accepted work to authoritative Tasks, Decisions, Projects, Events, current role-visible memory, and Approvals; returns durable destinations when applicable; repairs stale conversation outcomes after reload; gives actionless advice a reviewed handled path; and quarantines failed, simulated, or uncertain provider execution. Note-backed Manager reconciliation can close only simulated or typed-but-orphaned receipts. A linked failed or uncertain Approval routes to append-only evidence in the Approval Center; no-effect evidence permits a separate newly reviewed request, while external-effect evidence keeps linked Manager work blocked for manual repair. Explicit memory capture is classified and redacted before provider routing or storage, role-sensitive conversation reads re-apply the current memory boundary, and Manager/Task/Decision lifecycle audits commit atomically with their state changes. |
 | Manager brief presentation | Done; cache-only preferred-cadence SSR plus deliberate daily/weekly switching; explicit member/owner Refresh generates; Today, This week, Decisions, Waiting, and Risks all render from the same structured run |
 | Manager response adaptation | Done; `manager_response_adaptation_v1` applies reviewed correction categories to deterministic and provider-backed presentation without consuming raw notes or expanding facts, actions, tools, or authority |
-| Events, availability, show advance, songs/setlists, projects | Done; structured operations workspace, actionable gig editor, phone day-of view with editable custom run-of-show checkpoints, practical ordered setlist/song editing, shared `setlist_summary_v1` timing truth, evidence-backed show-readiness scoring, and event-bound Calendar/Drive state with explicit approval preparation shipped |
+| Events, availability, show advance, songs/setlists, projects | Done; structured operations workspace, actionable gig editor, phone day-of view with editable custom run-of-show checkpoints, practical ordered setlist/song editing, shared `setlist_summary_v1` timing truth, evidence-backed show-readiness scoring, event-bound Calendar/Drive state with explicit approval preparation, and dry-run-default Vault/Show Night catalog import (`pnpm catalog:import` / `POST /songs/import`) onto the current artist only. Default seed still leaves the song table empty; `SEED_DEMO_OPS` is optional generic practice data, not a live catalog. |
 | Release/content/tour/business execution | Done; idempotent dated milestone templates, owners/status, metrics/assets/budget, derived readiness, focused workspace, and Manager integration shipped |
 | Offers, reviewed templates, PDF snapshots, invoices/manual payments, settlements | Internal workflow done; binary Drive/Gmail attachment and provider payment/signature adapters deferred |
 | One-command local container bundle | Done (Docker Compose v2; internal server fetches and host-visible auth links are separated and verified; allocate 2 GB) |
@@ -37,7 +37,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | 2026-08-23 quality-review unit/eval gate: Prisma generation; root typecheck/lint; 11/11 shared tests; 260/260 API unit tests; both production builds; 85/85 `manager_evals_v38` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
+| Tests | 2026-08-23 catalog-import unit/eval gate: Prisma generation; root typecheck/lint; 17/17 shared tests; 264/264 API unit tests; both production builds; 86/86 `manager_evals_v38` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; this change adds song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
 
 The final web role audit fails mutation affordances closed as well as relying on
 the API boundary: viewers can read Manager and Band operations records without
@@ -106,7 +106,7 @@ for manual repair; it is not a recovered provider success response.
 | Booking advisor | `apps/api/src/advisor/`, `apps/web/src/app/(app)/advisor/` |
 | Booking reply loop | `apps/api/src/booking/booking-replies.*`, `apps/web/src/app/(app)/booking-inbox/` |
 | Manager OS | `apps/api/src/manager/`, `apps/web/src/app/(app)/manager/`, `apps/api/test/fixtures/manager-evals-v1.json` |
-| Band operations | `apps/api/src/operations/` (including `event-logistics.ts`), `apps/web/src/app/(app)/operations/` |
+| Band operations | `apps/api/src/operations/` (including `event-logistics.ts`), `apps/web/src/app/(app)/operations/`, `packages/shared/src/catalog-import.ts`, `scripts/import-catalog.mjs`, [`catalog-import.md`](catalog-import.md), [`APPS.md`](../APPS.md) |
 | Approval lifecycle | `apps/api/src/approvals/approval-lifecycle.ts`, `apps/api/src/approvals/approval-reconciliation.ts`, `apps/api/src/approvals/approvals.service.ts`, `apps/web/src/app/(app)/approvals/`, `prisma/migrations/20260714030000_approval_reconciliation_receipts/` |
 | Web app API client | `apps/web/src/lib/api.ts` (cookies + `x-artist-id`) |
 
@@ -128,18 +128,23 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Database client warning:** Trace the concurrent-`client.query()`
+1. **Apply a real local Vault catalog (operator machine):** Jeff can dry-run
+   then apply a private `data/app_api.json` or `data/master_catalog.json` (and
+   optionally Show Night `content/show.json`) with `pnpm catalog:import`. Do not
+   commit those files, do not invent a fourth live band, and do not auto-pitch
+   Travis or any Rad Dad booker. StoryLiner and WebJam stay out of this repo.
+2. **Database client warning:** Trace the concurrent-`client.query()`
    deprecation emitted by `pg@8.14.1` during integration/browser execution and
    remove it before considering `pg@9`; do not change transaction semantics to
    silence the warning.
-2. **Product validation:** Run scheduled/on-demand Manager briefs, plan health,
+3. **Product validation:** Run scheduled/on-demand Manager briefs, plan health,
    conversation, show advance, reviewed event-logistics approvals, and manual
    deal/settlement workflows with real original and cover bands. Confirm the
    chosen local cadence is useful rather than noisy; verify Calendar/Drive results
    against a real connected Google account before production use, capture reviewed
    examples when recommendations are useful, wrong, or missing context, and do
    not tune from synthetic scores alone.
-3. **Learning validation:** Review real band context, responsibilities, workload
+4. **Learning validation:** Review real band context, responsibilities, workload
    and task-sequence questions, operating-evidence questions, novice coaching
    questions, knowledge-refresh questions, explicit conversational memory
    proposals, natural answer verdicts, reviewed context answers, reviewed
@@ -149,13 +154,13 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
    evidence, never from a synthetic score alone; do not infer causality from one
    result or auto-activate a version. `manager_os_v33` / `manager_evals_v38` is
    the current code-registered contract.
-4. **Connected delivery:** Add binary Drive/Gmail document delivery only after
+5. **Connected delivery:** Add binary Drive/Gmail document delivery only after
    real provider acceptance testing. Keep external work approval-gated; do not add
    scraping, general inbox access, or autonomous sends.
-5. **Runtime/tests:** Define queue-worker deployment, broader cursor
+6. **Runtime/tests:** Define queue-worker deployment, broader cursor
    pagination/query limits, and metrics before horizontal scale. Add mobile/offline
    resilience only after real day-of field testing.
-6. **Hosted CI health:** Before product work, confirm the current `main`
+7. **Hosted CI health:** Before product work, confirm the current `main`
    [Quality workflow](https://github.com/rupret007/StoryBoard/actions/workflows/quality.yml)
    is green. The current browser fixtures use the recorded IANA timezone and
    pass with `CI=true` and `TZ=UTC`; keep those invariants when adding event

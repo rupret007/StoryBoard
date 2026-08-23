@@ -9,4 +9,5 @@ export * from "./schemas/booking-acquisition";
 export * from "./schemas/manager";
 export * from "./schemas/operations";
 export * from "./setlist-summary";
+export * from "./catalog-import";
 export * from "./zoned-date-time";

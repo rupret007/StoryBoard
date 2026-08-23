@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put, Query, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
-import { dealCreateSchema, dealPatchSchema, eventCreateSchema, eventParticipantSchema, eventPatchSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, expenseCreateSchema, expensePatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, projectCreateSchema, projectPatchSchema, setlistCreateSchema, setlistPatchSchema, settlementCreateSchema, settlementPatchSchema, songCreateSchema, songPatchSchema } from "@storyboard/shared";
+import { catalogImportRequestSchema, dealCreateSchema, dealPatchSchema, eventCreateSchema, eventParticipantSchema, eventPatchSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, expenseCreateSchema, expensePatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, projectCreateSchema, projectPatchSchema, setlistCreateSchema, setlistPatchSchema, settlementCreateSchema, settlementPatchSchema, songCreateSchema, songPatchSchema } from "@storyboard/shared";
 import { CurrentOperator } from "../auth/current-operator.decorator";
 import { MembershipService } from "../auth/membership.service";
 import { RolePolicyService } from "../auth/role-policy.service";
@@ -41,6 +41,7 @@ export class SongsController extends ArtistController {
   constructor(operations: OperationsService, membership: MembershipService, roles: RolePolicyService) { super(operations, membership, roles); }
   @Get() async list(@CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { return this.operations.songs(await this.artistId(op.id, req, h)); }
   @Post() async create(@Body() body: unknown, @CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { const artistId = await this.mutable(op, req, h); return this.operations.createSong(artistId, this.parse(songCreateSchema, body), op.email, op.id); }
+  @Post("import") async importCatalog(@Body() body: unknown, @CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { const artistId = await this.mutable(op, req, h); return this.operations.importCatalog(artistId, this.parse(catalogImportRequestSchema, body), op.email, op.id); }
   @Patch(":id") async patch(@Param("id") id: string, @Body() body: unknown, @CurrentOperator() op: RequestOperator, @Req() req: FastifyRequest, @Headers("x-artist-id") h?: string) { const artistId = await this.mutable(op, req, h); return this.operations.patchSong(artistId, id, this.parse(songPatchSchema, body), op.email, op.id); }
 }
 

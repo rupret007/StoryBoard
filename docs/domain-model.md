@@ -393,7 +393,9 @@ blocks duplicate preparation, does not populate the event's provider link, and
 keeps linked Manager work blocked for manual repair.
 
 `Song` and `Setlist` provide a practical artist-owned library with duration,
-key, BPM, lead vocalist, ordered songs/breaks/notes, and event linkage.
+key, BPM, lead vocalist, optional `sourceKey` (Vault/Show Night import
+idempotency), ordered songs/breaks/notes, and event linkage.
+Local catalog import is dry-run by default; see [`catalog-import.md`](catalog-import.md).
 `setlist_summary_v1` is a non-persistent projection over the ordered items and
 their current Song rows. It reports song/break/note counts, known song time,
 missing-duration count, and `empty` / `incomplete` / `timed` status. It never

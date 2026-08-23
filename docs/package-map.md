@@ -136,7 +136,7 @@ Approval reconciliation write.
 
 ### `packages/shared`
 
-Cross-app domain contracts, validation schemas, and shared types (including **workflow notify prefs** and **Telegram notify** Zod schemas). **`pnpm test`** runs `build` + `node:test` on `test/*.mjs`.
+Cross-app domain contracts, validation schemas, and shared types (including **workflow notify prefs**, **Telegram notify** Zod schemas, and **`catalog-import.ts`** for Vault/Show Night song-library planning). **`pnpm test`** runs `build` + `node:test` on `test/*.mjs`.
 
 ### `packages/ui`
 
@@ -166,11 +166,12 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
   explicit disposable-database migration and reset; never fall back to the app DB
 - `scripts/run-e2e.mjs` — orchestrates the mock-provider browser environment
 - `scripts/run-manager-evals.mjs` — versioned offline Manager safety/usefulness gate
+- `scripts/import-catalog.mjs` — local Vault/Show Night catalog import (`pnpm catalog:import`; dry-run by default; never fetches a remote file)
 
 ## Tests
 
 - **`packages/shared/test/`** — Node test runner for shared schemas and derived
-  policies, including setlist timing and Telegram helpers
+  policies, including setlist timing, catalog import planning, and Telegram helpers
 - **`apps/api/test/`** — compiled API regressions (the API package **`test`** script runs **`nest build`** first, then `node --test`)
 - **`apps/api/test/approval-lifecycle.test.mjs`** and
   **`approval-lifecycle-callers.test.mjs`** — shared stage/partition policy and

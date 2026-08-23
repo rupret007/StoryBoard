@@ -24,6 +24,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "node prisma/seed.mjs",
+    "catalog:import": "node scripts/import-catalog.mjs",
     "db:studio": "prisma studio",
     "db:audit-relationships": "node scripts/audit-artist-references.mjs",
     "manager:eval": "pnpm --filter @storyboard/api build && node scripts/run-manager-evals.mjs",

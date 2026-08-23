@@ -1480,12 +1480,14 @@ model Song {
   notes           String?
   lyricsUrl       String?
   chartUrl        String?
+  sourceKey       String?
   active          Boolean       @default(true)
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   artist          Artist        @relation(fields: [artistId], references: [id], onDelete: Cascade)
   setlistItems    SetlistItem[]
 
+  @@unique([artistId, sourceKey])
   @@index([artistId, title])
 }
 
@@ -1495,6 +1497,7 @@ model Setlist {
   name        String
   status      SetlistStatus @default(draft)
   notes       String?
+  sourceKey   String?
   publicToken String?       @unique
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -1502,6 +1505,7 @@ model Setlist {
   items       SetlistItem[]
   events      BandEvent[]
 
+  @@unique([artistId, sourceKey])
   @@index([artistId, status])
 }
 
