@@ -3665,9 +3665,9 @@ test("Vault import is the default song path and Manager stays honest after impor
   const setlist = intelligence.deterministicManagerChat(imported, "What's our setlist?", now);
   assert.match(setlist.answer, /Harbor Lights/);
   assert.match(setlist.answer, /Vault default-live/);
-  assert.match(setlist.answer, /will not invent titles, auto-post/i);
+  assert.match(setlist.answer, /will not invent titles, auto-post, or auto-pitch Travis/i);
   assert.ok(setlist.citations.includes("vault:catalog_import_v1:RD-0001"));
-  assert.doesNotMatch(setlist.answer, /parked demo|trailer sketch|booking calendar|cover example|travis|pitch/i);
+  assert.doesNotMatch(setlist.answer, /parked demo|trailer sketch|booking calendar|cover example/i);
   assert.equal(setlist.recommendation, null);
 
   const travis = intelligence.deterministicManagerChat(imported, "Pitch Travis our Harbor Lights setlist", now);
