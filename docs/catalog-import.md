@@ -1,13 +1,18 @@
-# Catalog import (Vault `app_api.json` / Show Night)
+# Catalog import (Vault → StoryBoard)
 
-StoryBoard’s song table is empty after the default seed. That is intentional:
-the public repo does not ship a private catalog, and Manager chat will not
-invent one.
+StoryBoard is the band-business OS. [AI-Music-Vault](https://github.com/rupret007/AI-Music-Vault)
+is the sole song catalog. The public StoryBoard seed leaves the song table
+empty on purpose: this repo must not ship the private catalog, and Manager
+chat will not invent one.
 
-Use this import when the operator has a **local** Vault
-[`data/app_api.json`](https://github.com/rupret007/AI-Music-Vault) export
+Use this import when the operator has a **local** Vault file:
+
+- `data/app_api.json` — slim feed from Vault `scripts/export_app_api.py`
+- `data/master_catalog.json` — the Vault spine (`song_id`, `canonical_title`,
+  `artist_project`, `classification`)
+
 and/or a **local** Show Night [`content/show.json`](https://github.com/rupret007/rad-dad-show-night).
-The importer never fetches those files over the network.
+The importer never fetches those files over the network. See [`APPS.md`](../APPS.md).
 
 ## What it writes
 
@@ -29,6 +34,7 @@ From the repo root, after `pnpm install` (so `@storyboard/shared` is built):
 ```bash
 # Preview only — default
 pnpm catalog:import -- --source /path/to/app_api.json
+pnpm catalog:import -- --source /path/to/master_catalog.json
 pnpm catalog:import -- --source /path/to/app_api.json --show-night /path/to/show.json
 ```
 

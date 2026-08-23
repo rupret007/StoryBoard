@@ -3521,6 +3521,7 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   const setlist = intelligence.deterministicManagerChat(emptySeed, "What's our setlist?", now);
   assert.match(setlist.answer, /no songs or setlists are recorded/i);
   assert.match(setlist.answer, /will not invent a catalog/i);
+  assert.match(setlist.answer, /AI-Music-Vault|app_api|master_catalog|catalog:import/i);
   assert.doesNotMatch(setlist.answer, /opener|closer|travis|rad dad|harbor lights/i);
   assert.equal(setlist.recommendation, null);
 

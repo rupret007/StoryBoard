@@ -37,7 +37,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | 2026-08-23 catalog-import unit/eval gate: Prisma generation; root typecheck/lint; 15/15 shared tests; 264/264 API unit tests; both production builds; 86/86 `manager_evals_v38` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; this change adds song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
+| Tests | 2026-08-23 catalog-import unit/eval gate: Prisma generation; root typecheck/lint; 16/16 shared tests; 264/264 API unit tests; both production builds; 86/86 `manager_evals_v38` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; this change adds song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
 
 The final web role audit fails mutation affordances closed as well as relying on
 the API boundary: viewers can read Manager and Band operations records without
@@ -106,7 +106,7 @@ for manual repair; it is not a recovered provider success response.
 | Booking advisor | `apps/api/src/advisor/`, `apps/web/src/app/(app)/advisor/` |
 | Booking reply loop | `apps/api/src/booking/booking-replies.*`, `apps/web/src/app/(app)/booking-inbox/` |
 | Manager OS | `apps/api/src/manager/`, `apps/web/src/app/(app)/manager/`, `apps/api/test/fixtures/manager-evals-v1.json` |
-| Band operations | `apps/api/src/operations/` (including `event-logistics.ts`), `apps/web/src/app/(app)/operations/`, `packages/shared/src/catalog-import.ts`, `scripts/import-catalog.mjs`, [`catalog-import.md`](catalog-import.md) |
+| Band operations | `apps/api/src/operations/` (including `event-logistics.ts`), `apps/web/src/app/(app)/operations/`, `packages/shared/src/catalog-import.ts`, `scripts/import-catalog.mjs`, [`catalog-import.md`](catalog-import.md), [`APPS.md`](../APPS.md) |
 | Approval lifecycle | `apps/api/src/approvals/approval-lifecycle.ts`, `apps/api/src/approvals/approval-reconciliation.ts`, `apps/api/src/approvals/approvals.service.ts`, `apps/web/src/app/(app)/approvals/`, `prisma/migrations/20260714030000_approval_reconciliation_receipts/` |
 | Web app API client | `apps/web/src/lib/api.ts` (cookies + `x-artist-id`) |
 
@@ -128,10 +128,11 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Apply a real local catalog (operator machine):** Jeff can dry-run then
-   apply a private Vault `data/app_api.json` and/or Show Night `content/show.json`
-   with `pnpm catalog:import`. Do not commit those files, do not invent a fourth
-   live band, and do not auto-pitch Travis or any Rad Dad booker.
+1. **Apply a real local Vault catalog (operator machine):** Jeff can dry-run
+   then apply a private `data/app_api.json` or `data/master_catalog.json` (and
+   optionally Show Night `content/show.json`) with `pnpm catalog:import`. Do not
+   commit those files, do not invent a fourth live band, and do not auto-pitch
+   Travis or any Rad Dad booker. StoryLiner and WebJam stay out of this repo.
 2. **Database client warning:** Trace the concurrent-`client.query()`
    deprecation emitted by `pg@8.14.1` during integration/browser execution and
    remove it before considering `pg@9`; do not change transaction semantics to

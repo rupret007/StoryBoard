@@ -72,6 +72,24 @@ test("parked catalog and guest sets stay opt-in and stay on the current artist",
   assert.match(plan.setlists.find((setlist) => setlist.name.startsWith("Stalemate"))?.notes ?? "", /current artist only/i);
 });
 
+test("master_catalog.json field names normalize to the same live-band plan as app_api.json", () => {
+  const masterCatalog = {
+    version: "1.6",
+    songs: [
+      { song_id: "RD-0001", canonical_title: "Harbor Lights", artist_project: "Rad Dad", classification: "original", key: "G", bpm: "118" },
+      { song_id: "ST-0001", canonical_title: "Parked Demo", artist_project: "Stalemate", classification: "original", key: "Am" }
+    ]
+  };
+  const fromMaster = shared.planCatalogImport({ vault: masterCatalog });
+  const fromApi = shared.planCatalogImport({ vault: vaultFixture });
+  assert.deepEqual(fromMaster.songs.map((song) => song.title), fromApi.songs.map((song) => song.title));
+  assert.equal(fromMaster.songs[0]?.sourceKey, "vault:catalog_import_v1:RD-0001");
+  assert.equal(fromMaster.counts.parkedSkipped, 1);
+
+  const fromArray = shared.planCatalogImport({ vault: masterCatalog.songs });
+  assert.deepEqual(fromArray.songs.map((song) => song.title), ["Harbor Lights"]);
+});
+
 test("invalid or empty catalog payloads fail closed without inventing rows", () => {
   const empty = shared.planCatalogImport({});
   assert.equal(empty.songs.length, 0);

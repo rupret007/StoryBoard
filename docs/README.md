@@ -11,6 +11,7 @@ detail.
 | --- | --- |
 | Run StoryBoard locally | [`developer-runbook.md`](developer-runbook.md) |
 | Understand the current shipped state | [`codex-handoff.md`](codex-handoff.md) |
+| See how Vault, Bob, StoryBoard, StoryLiner, and WebJam split | [`../APPS.md`](../APPS.md) |
 | Understand system boundaries | [`architecture.md`](architecture.md) |
 | Understand records and relationships | [`domain-model.md`](domain-model.md) |
 | Find a package or code entry point | [`package-map.md`](package-map.md) |

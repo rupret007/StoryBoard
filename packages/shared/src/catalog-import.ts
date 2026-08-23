@@ -4,6 +4,45 @@ export const CATALOG_IMPORT_POLICY_VERSION = "catalog_import_v1" as const;
 export const LIVE_CATALOG_PROJECTS = ["rad dad"] as const;
 export const PARKED_CATALOG_PROJECTS = ["stalemate", "trailer swift", "something dirty"] as const;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asText(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function normalizeVaultSong(song: unknown): unknown {
+  if (!isRecord(song)) return song;
+  const id = asText(song.id) ?? asText(song.song_id);
+  const title = asText(song.title) ?? asText(song.canonical_title);
+  const project = asText(song.project) ?? asText(song.artist_project);
+  let isOriginal = song.is_original;
+  if (typeof isOriginal !== "boolean") {
+    const classification = asText(song.classification)?.toLowerCase();
+    if (classification === "original") isOriginal = true;
+    else if (classification === "cover") isOriginal = false;
+  }
+  return {
+    ...song,
+    ...(id ? { id } : {}),
+    ...(title ? { title } : {}),
+    ...(project ? { project } : {}),
+    ...(typeof isOriginal === "boolean" ? { is_original: isOriginal } : {})
+  };
+}
+
+/** Accept Vault `app_api.json` or `master_catalog.json` (or a raw song array). */
+export function normalizeVaultCatalog(input: unknown): unknown {
+  if (input == null) return input;
+  if (Array.isArray(input)) return { songs: input.map(normalizeVaultSong) };
+  if (!isRecord(input)) return input;
+  if (!Array.isArray(input.songs)) return input;
+  return { ...input, songs: input.songs.map(normalizeVaultSong) };
+}
+
 const optionalText = z.union([z.string(), z.number()]).transform((value) => String(value)).optional();
 
 const vaultSongSchema = z.object({
@@ -56,7 +95,7 @@ export const catalogImportRequestSchema = z.object({
   includeAllProjects: z.boolean().default(false)
 }).strict().superRefine((value, context) => {
   if (value.vault == null && value.showNight == null) {
-    context.addIssue({ code: "custom", message: "Provide a Vault app_api.json payload and/or a Show Night show.json payload" });
+    context.addIssue({ code: "custom", message: "Provide a Vault app_api.json or master_catalog.json payload and/or a Show Night show.json payload" });
   }
 });
 
@@ -193,9 +232,9 @@ export function planCatalogImport(input: {
   let guestSetsSkipped = 0;
 
   if (input.vault != null) {
-    const parsed = vaultAppApiSchema.safeParse(input.vault);
+    const parsed = vaultAppApiSchema.safeParse(normalizeVaultCatalog(input.vault));
     if (!parsed.success) {
-      warnings.push("Vault payload is not a valid app_api.json catalog. No vault songs were planned.");
+      warnings.push("Vault payload is not a valid app_api.json or master_catalog.json catalog. No vault songs were planned.");
     } else {
       for (const song of parsed.data.songs) {
         vaultSongsSeen += 1;

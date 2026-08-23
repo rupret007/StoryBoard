@@ -17,18 +17,20 @@ function cuidLike() {
 }
 
 function usage() {
-  return `Import a local Vault app_api.json and/or Show Night show.json into the current artist's song library.
+  return `Import a local Vault catalog into StoryBoard's song library.
 
+AI-Music-Vault is the song catalog. StoryBoard is the band-business OS.
 Dry-run is the default. This command never fetches a remote catalog and never
 creates booking pitches, contacts, or a second artist.
 
 Usage:
   pnpm catalog:import -- --source ./app_api.json
+  pnpm catalog:import -- --source ./master_catalog.json
   pnpm catalog:import -- --source ./app_api.json --show-night ./show.json
   pnpm catalog:import -- --source ./app_api.json --apply --artist default
 
 Options:
-  --source <path>          Local Vault data/app_api.json
+  --source <path>          Local Vault data/app_api.json or data/master_catalog.json
   --show-night <path>      Local Show Night content/show.json
   --artist <slug>          Artist slug (default: default)
   --include-parked         Also import Stalemate / Trailer Swift / Something Dirty

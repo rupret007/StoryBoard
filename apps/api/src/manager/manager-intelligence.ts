@@ -1068,7 +1068,7 @@ export function managerQuestionAsksAboutFollowThrough(question: string) {
 }
 
 export function managerQuestionAsksAboutCatalog(question: string) {
-  return /\b(setlists?|song library|song catalog|vault|app_api|what songs|our songs|import (?:the )?(?:catalog|songs)|show night)\b/i.test(question);
+  return /\b(setlists?|song library|song catalog|vault|app_api|master_catalog|what songs|our songs|import (?:the )?(?:catalog|songs)|show night)\b/i.test(question);
 }
 
 function deterministicManagerChatBase(
@@ -1455,7 +1455,7 @@ function deterministicManagerChatBase(
     const activeSongs = songs.filter((song) => song.active !== false);
     if (!songs.length && !setlists.length) {
       return {
-        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Import a local app_api.json or Show Night show.json with `pnpm catalog:import` (dry-run by default), or add songs in Band operations.",
+        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. The song catalog lives in AI-Music-Vault; import a local app_api.json or master_catalog.json (or Show Night show.json) with `pnpm catalog:import` (dry-run by default), or add songs in Band operations.",
         citations: [],
         recommendation: null
       };
