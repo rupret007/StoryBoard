@@ -3535,11 +3535,28 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
 
   const recorded = intelligence.deterministicManagerChat(managerFacts({
     songs: [{ id: "song-harbor", title: "Harbor Lights", active: true, musicalKey: "G" }],
-    setlists: [{ id: "setlist-demo", name: "Demo set", status: "draft", itemCount: 2 }]
+    setlists: [{ id: "setlist-manual", name: "Friday headline set", status: "draft", itemCount: 1 }]
   }), "What songs do we have?", now);
   assert.match(recorded.answer, /Harbor Lights/);
+  assert.match(recorded.answer, /not a Vault import/i);
   assert.ok(recorded.citations.includes("song-harbor"));
-  assert.doesNotMatch(recorded.answer, /travis|pitch/i);
+  assert.doesNotMatch(recorded.answer, /travis|pitch|usually from a local Vault/i);
+
+  const demo = intelligence.deterministicManagerChat(managerFacts({
+    songs: [
+      { id: "song-demo-opener", title: "Demo Opener", active: true, sourceKey: "seed:demo:opener" },
+      { id: "song-demo-closer", title: "Demo Closer", active: true, sourceKey: "seed:demo:closer" }
+    ],
+    setlists: [{ id: "setlist-demo", name: "Demo set", status: "draft", itemCount: 2, sourceKey: "seed:demo:setlist" }]
+  }), "What's our setlist?", now);
+  assert.match(demo.answer, /Demo Opener/);
+  assert.match(demo.answer, /Demo Closer/);
+  assert.match(demo.answer, /SEED_DEMO_OPS|practice/i);
+  assert.match(demo.answer, /not a live catalog/i);
+  assert.match(demo.answer, /not a Vault import/i);
+  assert.match(demo.answer, /will not invent titles, auto-post, or auto-pitch Travis/i);
+  assert.doesNotMatch(demo.answer, /usually from a local Vault|harbor lights|everyday|parked demo/i);
+  assert.equal(demo.recommendation, null);
 
   const pitch = intelligence.deterministicManagerChat(emptySeed, "Who should we pitch in Milwaukee?", now);
   assert.match(pitch.answer, /0 active opportunities/i);
@@ -4309,6 +4326,24 @@ test("catalog status reports an empty table as missing Vault import, not a secon
   assert.equal(status.source, "none");
   assert.equal(status.defaultImport, "pnpm catalog:import");
   assert.match(status.message, /not a second catalog/i);
+});
+
+test("catalog status after demo seed names practice data and refuses a Vault import claim", async () => {
+  const service = new operationsMod.OperationsService({
+    client: {
+      song: { findMany: async () => [{ sourceKey: "seed:demo:opener" }, { sourceKey: "seed:demo:closer" }] },
+      setlist: { findMany: async () => [{ sourceKey: "seed:demo:setlist" }] }
+    }
+  }, { log: async () => undefined }, {});
+  const status = await service.catalogStatus("artist-a");
+  assert.equal(status.empty, false);
+  assert.equal(status.source, "demo");
+  assert.equal(status.demoSongCount, 2);
+  assert.equal(status.vaultSongCount, 0);
+  assert.match(status.message, /SEED_DEMO_OPS|practice/i);
+  assert.match(status.message, /not a live catalog/i);
+  assert.match(status.message, /not a Vault import/i);
+  assert.doesNotMatch(status.message, /usually from a local Vault/i);
 });
 
 test("catalog status after Vault import names the published default-live slice and refuses a fourth band", async () => {

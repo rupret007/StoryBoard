@@ -103,16 +103,21 @@ are rejected.
 `SEED_DEMO_OPS=true pnpm db:seed` adds two generic demo songs, one draft
 setlist, and invoice `DEMO-001` for local UI practice. Prefer Vault import.
 That demo is not a live catalog and is not Rad Dad / Stalemate / Trailer Swift.
+Manager chat and `GET /songs/status` label those rows as practice data, not a
+Vault import.
 
 ## Manager chat
 
 `POST /manager/chat` questions about the setlist, song library, or catalog stay
 record-bound. An empty library says so and points at this import (dry-run,
-`--apply` to write, no remote fetch). After import it lists only recorded
-live-band rows and names the published default-live setlist. A Stalemate-origin
-row already in that slice stays current-artist repertoire — not a fourth live
-band. It will not invent titles, write captions, auto-post, or auto-pitch
-Travis. StoryLiner stays promo-only.
+`--apply` to write, no remote fetch). After a Vault import it lists only
+recorded live-band rows and names the published default-live setlist. A
+Stalemate-origin row already in that slice stays current-artist repertoire —
+not a fourth live band. `SEED_DEMO_OPS` practice rows, Show Night running-order
+imports, and Band operations one-offs keep their own provenance; they are
+never described as “usually from a local Vault import.” It will not invent
+titles, write captions, auto-post, or auto-pitch Travis. StoryLiner stays
+promo-only.
 
 Default Vault planning consumes the published
 `setlist_ready_default_import` / `import_scope=default_live` slice when
@@ -125,4 +130,6 @@ opted in. Travis rows stay skipped (`travis_books`). Covers stay out
 (`active` ← `is_original !== false`). `bpm` prefers `songs[].bpm_int`, then
 a clean `bpm` integer, then a leading 2–3 digit tempo; notes come from
 `vault_ref`. Duration and lead vocalist stay null. `GET /songs/status`
-reports an empty table as a missing Vault import, not as a second catalog.
+reports an empty table as a missing Vault import, not as a second catalog. After
+rows exist it names Vault, Show Night, `SEED_DEMO_OPS`, Band operations, or a
+mix — and never calls non-Vault songs a Vault import.

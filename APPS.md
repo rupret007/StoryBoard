@@ -50,7 +50,9 @@ Stalemate, Trailer Swift, and Something Dirty catalogs stay parked unless
 `--include-parked`. Guest sets stay off unless
 `--include-guest-sets`, and they still land on the current artist.
 HTTP `POST /songs/import` and `VAULT_CATALOG_PATH` accept local JSON only;
-remote catalog URLs are rejected.
+remote catalog URLs are rejected. `SEED_DEMO_OPS` practice rows, Show Night
+running-order imports, and Band operations one-offs keep their own
+provenance; Manager and `GET /songs/status` never call them a Vault import.
 
 Details: [`docs/catalog-import.md`](docs/catalog-import.md).
 

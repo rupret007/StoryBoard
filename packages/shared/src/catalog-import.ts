@@ -256,13 +256,30 @@ export type CatalogImportReconciliation = {
   skipSetlists: Array<CatalogImportSkip & { sourceKey: string }>;
 };
 
-export type SongCatalogStatus = {
+export const CATALOG_RECORD_SOURCES = [
+  "none",
+  "vault",
+  "show_night",
+  "demo",
+  "manual",
+  "mixed"
+] as const;
+
+export type CatalogRecordSource = (typeof CATALOG_RECORD_SOURCES)[number];
+
+export type CatalogRecordProvenance = {
+  source: CatalogRecordSource;
+  songCount: number;
+  vaultSongCount: number;
+  showNightSongCount: number;
+  demoSongCount: number;
+  manualSongCount: number;
+};
+
+export type SongCatalogStatus = CatalogRecordProvenance & {
   policyVersion: typeof CATALOG_IMPORT_POLICY_VERSION;
   empty: boolean;
-  songCount: number;
   setlistCount: number;
-  vaultSongCount: number;
-  source: "none" | "vault" | "manual" | "mixed";
   defaultImport: "pnpm catalog:import";
   message: string;
 };
@@ -733,28 +750,82 @@ export function reconcileCatalogImport(
   };
 }
 
+export function catalogSourceKind(sourceKey?: string | null): Exclude<CatalogRecordSource, "none" | "mixed"> {
+  const key = sourceKey ?? "";
+  if (key.startsWith("vault:")) return "vault";
+  if (key.startsWith("shownight:")) return "show_night";
+  if (key.startsWith("seed:demo:")) return "demo";
+  return "manual";
+}
+
+export function catalogRecordProvenance(songs: { sourceKey?: string | null }[]): CatalogRecordProvenance {
+  let vaultSongCount = 0;
+  let showNightSongCount = 0;
+  let demoSongCount = 0;
+  let manualSongCount = 0;
+  for (const song of songs) {
+    const kind = catalogSourceKind(song.sourceKey);
+    if (kind === "vault") vaultSongCount += 1;
+    else if (kind === "show_night") showNightSongCount += 1;
+    else if (kind === "demo") demoSongCount += 1;
+    else manualSongCount += 1;
+  }
+  const present = (
+    [
+      vaultSongCount ? "vault" : null,
+      showNightSongCount ? "show_night" : null,
+      demoSongCount ? "demo" : null,
+      manualSongCount ? "manual" : null
+    ] as const
+  ).filter((value): value is Exclude<CatalogRecordSource, "none" | "mixed"> => Boolean(value));
+  return {
+    source: songs.length === 0 ? "none" : present.length === 1 ? present[0]! : "mixed",
+    songCount: songs.length,
+    vaultSongCount,
+    showNightSongCount,
+    demoSongCount,
+    manualSongCount
+  };
+}
+
+function catalogStatusMessage(provenance: CatalogRecordProvenance): string {
+  if (provenance.source === "none") {
+    return "No songs are recorded. Vault is the catalog; default import is the published setlist_ready_default_import / default_live slice from a local app_api.json (`pnpm catalog:import`, then --apply). This empty table is not a second catalog.";
+  }
+  const countLabel = `${provenance.songCount} song${provenance.songCount === 1 ? "" : "s"} recorded`;
+  if (provenance.source === "vault") {
+    return `${countLabel} (${provenance.vaultSongCount} from Vault). Default import is Vault's published setlist_ready_default_import / default_live slice on the current artist — not a fourth live band. Duration stays unknown until Band operations records it.`;
+  }
+  if (provenance.source === "show_night") {
+    return `${countLabel} from Show Night on the current artist — not a fourth live band. Vault remains the catalog; Show Night is a running-order import, not a second catalog.`;
+  }
+  if (provenance.source === "demo") {
+    return `${countLabel} from SEED_DEMO_OPS practice data. This is not a live catalog and not a Vault import. Default import is still the published setlist_ready_default_import / default_live slice.`;
+  }
+  if (provenance.source === "manual") {
+    return `${countLabel} as Band operations corrections. This is not a Vault import and not a second catalog. Default import remains the published setlist_ready_default_import / default_live slice.`;
+  }
+  const parts = [
+    provenance.vaultSongCount ? `${provenance.vaultSongCount} from Vault` : null,
+    provenance.showNightSongCount ? `${provenance.showNightSongCount} from Show Night` : null,
+    provenance.demoSongCount ? `${provenance.demoSongCount} practice/demo` : null,
+    provenance.manualSongCount ? `${provenance.manualSongCount} Band operations` : null
+  ].filter((part): part is string => Boolean(part));
+  return `${countLabel} (${parts.join(", ")}). Vault rows follow the published setlist_ready_default_import / default_live slice on the current artist; Show Night, practice/demo, and one-off rows are not a live catalog or a fourth live band.`;
+}
+
 export function describeSongCatalogStatus(input: {
   songs: { sourceKey?: string | null }[];
   setlists: { sourceKey?: string | null }[];
 }): SongCatalogStatus {
-  const songCount = input.songs.length;
-  const setlistCount = input.setlists.length;
-  const vaultSongCount = input.songs.filter((song) => song.sourceKey?.startsWith("vault:")).length;
-  const empty = songCount === 0;
-  const source = empty ? "none" : vaultSongCount === 0 ? "manual" : vaultSongCount === songCount ? "vault" : "mixed";
+  const provenance = catalogRecordProvenance(input.songs);
   return {
     policyVersion: CATALOG_IMPORT_POLICY_VERSION,
-    empty,
-    songCount,
-    setlistCount,
-    vaultSongCount,
-    source,
+    empty: provenance.songCount === 0,
+    setlistCount: input.setlists.length,
     defaultImport: "pnpm catalog:import",
-    message: empty
-      ? "No songs are recorded. Vault is the catalog; default import is the published setlist_ready_default_import / default_live slice from a local app_api.json (`pnpm catalog:import`, then --apply). This empty table is not a second catalog."
-      : vaultSongCount
-        ? `${songCount} song${songCount === 1 ? "" : "s"} recorded (${vaultSongCount} from Vault). Default import is Vault's published setlist_ready_default_import / default_live slice on the current artist — not a fourth live band. Duration stays unknown until Band operations records it.`
-        : `${songCount} song${songCount === 1 ? "" : "s"} recorded.`
+    message: catalogStatusMessage(provenance),
+    ...provenance
   };
 }
 
@@ -771,7 +842,8 @@ export function managerRecordsFromCatalogPlan(plan: CatalogImportPlan) {
       id: setlist.sourceKey,
       name: setlist.name,
       status: setlist.status,
-      itemCount: setlist.items.length
+      itemCount: setlist.items.length,
+      sourceKey: setlist.sourceKey
     }))
   };
 }

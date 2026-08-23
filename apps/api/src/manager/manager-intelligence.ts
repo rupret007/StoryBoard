@@ -1,3 +1,4 @@
+import { describeSongCatalogStatus } from "@storyboard/shared";
 import type { ManagerGoalTargetDirection, ManagerWorkstream } from "../generated/prisma/enums";
 import { approvalLifecycleStage, type ApprovalLifecycleStage } from "../approvals/approval-lifecycle";
 import type { ShowReadiness } from "../operations/event-readiness";
@@ -116,7 +117,7 @@ export type ManagerFacts = {
   deals: { id: string; title: string; status: string; expiresAt: Date | null; updatedAt?: Date }[];
   invoices: { id: string; number: string; status: string; currency: string; totalMinor: number; paidMinor: number; dueAt: Date | null; updatedAt?: Date }[];
   songs?: { id: string; title: string; active?: boolean; musicalKey?: string | null; sourceKey?: string | null }[];
-  setlists?: { id: string; name: string; status: string; itemCount?: number }[];
+  setlists?: { id: string; name: string; status: string; itemCount?: number; sourceKey?: string | null }[];
   decisions: { id: string; workstream: ManagerWorkstream; title: string; context: string | null; options: unknown; choice: string | null; rationale: string | null; expectedOutcome: string | null; needsFraming?: boolean; evidence: unknown; status: string; reviewAt: Date | null; decidedAt: Date | null; reviewOutcome?: string | null; reviewNote?: string | null; reviewedAt?: Date | null }[];
   approvals: { id: string; title: string; status: string; actionType: string; executionAttemptedAt?: Date | null; updatedAt: Date; reconciliations?: { outcome: string; createdAt: Date }[] }[];
   bookingReplies: { id: string; subject: string | null; fromName: string | null; fromEmail: string; processingStatus: string; receivedAt: Date }[];
@@ -1530,9 +1531,14 @@ function deterministicManagerChatBase(
     const recorded = recordedVaultCatalog(facts);
     const songLines = activeSongs.slice(0, responsePolicy.itemLimit).map((song) => `• ${song.title}${song.musicalKey ? ` (${song.musicalKey})` : ""}`);
     const setlistLines = setlists.slice(0, responsePolicy.itemLimit).map((setlist) => `• ${setlist.name} — ${setlist.status}${setlist.itemCount != null ? `; ${setlist.itemCount} item${setlist.itemCount === 1 ? "" : "s"}` : ""}`);
-    const provenance = recorded.songs.length
-      ? "These are StoryBoard records from a local Vault import. Default live is Vault's published setlist_ready_default_import / default_live slice when present. They stay on the current artist. A Stalemate, hybrid, or Jeff Story row in that slice is current-artist repertoire — not a fourth live band. Duration stays unknown until Band operations records it. StoryBoard will not invent titles, auto-post, or auto-pitch Travis."
-      : "These are StoryBoard records only, usually from a local Vault import. Missing duration stays unknown until someone records it. StoryBoard will not invent titles, auto-post, or treat a parked catalog as another live band.";
+    const status = describeSongCatalogStatus({
+      songs: songs.map((song) => ({ sourceKey: song.sourceKey })),
+      setlists: setlists.map((setlist) => ({ sourceKey: setlist.sourceKey }))
+    });
+    const vaultSlice = recorded.songs.length
+      ? " A Stalemate, hybrid, or Jeff Story row in that slice is current-artist repertoire — not a fourth live band."
+      : "";
+    const provenance = `${status.message}${vaultSlice} StoryBoard will not invent titles, auto-post, or auto-pitch Travis.`;
     return {
       answer: `${activeSongs.length} song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded.${songLines.length ? `\n\nSongs:\n${songLines.join("\n")}` : ""}${setlistLines.length ? `\n\nSetlists:\n${setlistLines.join("\n")}` : ""}\n\n${provenance}`,
       citations: unique([...activeSongs.map((song) => song.id), ...setlists.map((setlist) => setlist.id)]).slice(0, 10),

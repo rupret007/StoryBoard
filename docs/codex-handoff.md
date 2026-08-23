@@ -37,7 +37,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Tests | 2026-08-23 published default-live honesty: Prisma generation; root typecheck/lint; 23/23 shared tests; 267/267 API unit tests; both production builds; 95/95 `manager_evals_v41` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; catalog import added song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
+| Tests | 2026-08-23 catalog provenance honesty: Prisma generation; root typecheck/lint; 24/24 shared tests; 268/268 API unit tests; both production builds; 96/96 `manager_evals_v42` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; catalog import added song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
 
 The final web role audit fails mutation affordances closed as well as relying on
 the API boundary: viewers can read Manager and Band operations records without
@@ -157,7 +157,7 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
    working bands; compare expected results with observed show/project/business
    facts. Add or adjust code-owned policies only from reviewed operator
    evidence, never from a synthetic score alone; do not infer causality from one
-   result or auto-activate a version. `manager_os_v33` / `manager_evals_v41` is
+   result or auto-activate a version. `manager_os_v33` / `manager_evals_v42` is
    the current code-registered contract.
 5. **Connected delivery:** Add binary Drive/Gmail document delivery only after
    real provider acceptance testing. Keep external work approval-gated; do not add
