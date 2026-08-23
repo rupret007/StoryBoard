@@ -396,7 +396,9 @@ keeps linked Manager work blocked for manual repair.
 key, BPM, lead vocalist, optional `sourceKey` (Vault/Show Night import
 idempotency), ordered songs/breaks/notes, and event linkage.
 Local Vault import is the default way to populate songs (dry-run by default;
-`--apply` / `dryRun: false` writes; remote URLs are rejected). See
+`--apply` / `dryRun: false` writes; remote URLs are rejected). Planning uses
+Vault `setlist_ready` plus Jeff Story / Rad Dad (or a recorded Rad Dad play),
+maps `bpm_int` / `vault_ref`, and skips Travis booker rows. See
 [`catalog-import.md`](catalog-import.md).
 `setlist_summary_v1` is a non-persistent projection over the ordered items and
 their current Song rows. It reports song/break/note counts, known song time,

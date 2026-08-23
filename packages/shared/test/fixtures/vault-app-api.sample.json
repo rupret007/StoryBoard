@@ -1,59 +1,156 @@
 {
   "schema_version": 1,
   "generated": "2026-08-23",
-  "catalog_version": "sample",
-  "note": "Sanitized StoryBoard fixture. Not the private AI-Music-Vault catalog.",
+  "catalog_version": "1.6",
+  "primary_consumer": "StoryBoard",
+  "counts": {
+    "entities": 6,
+    "originals": 5,
+    "scored": 0,
+    "ai_upload_ok": 0
+  },
+  "lanes": {
+    "flagship": "JS-0001",
+    "quick_win": "JS-0002",
+    "experimental": "JS-0003",
+    "on_deck": "JS-0004",
+    "opus": "JS-0107"
+  },
+  "storyboard": {
+    "consumer": "StoryBoard",
+    "import_from": "songs",
+    "setlist_seed": "setlist_ready",
+    "second_catalog": false,
+    "field_map": {
+      "title": "title",
+      "musicalKey": "key",
+      "bpm": "bpm_int",
+      "active": "is_original",
+      "notes": "vault_ref"
+    },
+    "leave_null": ["durationSeconds", "leadVocalist"],
+    "merge_key": "vault_id",
+    "setlist": {
+      "seed_from": "setlist_ready",
+      "item_type": "song",
+      "link_by": "vault_id",
+      "jeff_owns_order": true,
+      "do_not_invent": ["breaks", "running_order", "lead_vocalist", "duration"]
+    },
+    "ops": {
+      "lanes_are_not_a_setlist": true
+    }
+  },
   "songs": [
     {
-      "id": "RD-0001",
+      "id": "JS-0001",
+      "vault_id": "JS-0001",
+      "vault_ref": "vault:JS-0001",
       "title": "Harbor Lights",
-      "project": "Rad Dad",
+      "project": "Jeff Story",
       "is_original": true,
+      "writers": ["Example Writer"],
       "key": "G",
-      "bpm": 118
+      "bpm": "118",
+      "bpm_int": 118,
+      "duration_seconds": null,
+      "played_live": ["Rad Dad (2026-05)"]
+    },
+    {
+      "id": "JS-0002",
+      "vault_id": "JS-0002",
+      "vault_ref": "vault:JS-0002",
+      "title": "Sidewalk Radio",
+      "project": "Something Dirty / Stalemate / Rad Dad",
+      "is_original": true,
+      "writers": ["Example Writer"],
+      "key": "A",
+      "bpm": "",
+      "bpm_int": null,
+      "duration_seconds": null,
+      "played_live": ["Rad Dad (2026-05)"]
     },
     {
       "id": "ST-0001",
+      "vault_id": "ST-0001",
+      "vault_ref": "vault:ST-0001",
       "title": "Parked Demo",
       "project": "Stalemate",
       "is_original": true,
+      "writers": ["Example Writer"],
       "key": "Am",
-      "bpm": "96"
+      "bpm": "",
+      "bpm_int": null,
+      "duration_seconds": null,
+      "played_live": ["Stalemate (2024-04)"]
     },
     {
       "id": "TS-0001",
+      "vault_id": "TS-0001",
+      "vault_ref": "vault:TS-0001",
       "title": "Trailer Sketch",
       "project": "Trailer Swift",
       "is_original": true,
-      "key": "D"
+      "key": "D",
+      "bpm": "",
+      "bpm_int": null,
+      "duration_seconds": null,
+      "played_live": []
     },
     {
-      "id": "SD-0001",
-      "title": "Dirty Sketch",
-      "project": "Something Dirty",
+      "id": "TR-0001",
+      "vault_id": "TR-0001",
+      "vault_ref": "vault:TR-0001",
+      "title": "Booking Calendar Blues",
+      "project": "Travis Story",
       "is_original": true,
-      "key": "E"
+      "key": "C",
+      "bpm": "100",
+      "bpm_int": 100,
+      "duration_seconds": null,
+      "played_live": []
     },
     {
-      "id": "JS-0001",
-      "title": "Solo Sketch",
+      "id": "CV-0001",
+      "vault_id": "CV-0001",
+      "vault_ref": "vault:CV-0001",
+      "title": "Cover Example",
       "project": "Jeff Story",
-      "is_original": true,
-      "key": "C"
+      "is_original": false,
+      "key": "C",
+      "bpm": "214 (cut)",
+      "bpm_int": 214,
+      "duration_seconds": null,
+      "played_live": []
     }
   ],
   "setlist_ready": [
     {
-      "id": "RD-0001",
+      "id": "JS-0001",
       "title": "Harbor Lights",
       "key": "G",
-      "project": "Rad Dad"
+      "project": "Jeff Story",
+      "bpm_int": 118,
+      "vault_ref": "vault:JS-0001"
+    },
+    {
+      "id": "JS-0002",
+      "title": "Sidewalk Radio",
+      "key": "A",
+      "project": "Something Dirty / Stalemate / Rad Dad",
+      "bpm_int": null,
+      "vault_ref": "vault:JS-0002"
     },
     {
       "id": "ST-0001",
       "title": "Parked Demo",
       "key": "Am",
-      "project": "Stalemate"
+      "project": "Stalemate",
+      "bpm_int": null,
+      "vault_ref": "vault:ST-0001"
     }
-  ]
+  ],
+  "notes": {
+    "storyboard_import": "PRIMARY PATH: StoryBoard imports THIS file. Use songs[] (or setlist_ready for keyed originals). Do not invent a second catalog."
+  }
 }

@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
-import { eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, summarizeSetlist, catalogImportRequestSchema, planCatalogImport, reconcileCatalogImport } from "@storyboard/shared";
+import { eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, summarizeSetlist, catalogImportRequestSchema, planCatalogImport, reconcileCatalogImport, describeSongCatalogStatus } from "@storyboard/shared";
 import type { Prisma } from "../generated/prisma/client";
 import { ApprovalStatus, InvoiceStatus, SettlementStatus } from "../generated/prisma/enums";
 import { ApprovalsService } from "../approvals/approvals.service";
@@ -238,6 +238,13 @@ export class OperationsService {
   }
 
   songs(artistId: string) { return this.prisma.client.song.findMany({ where: { artistId }, orderBy: [{ active: "desc" }, { title: "asc" }] }); }
+  async catalogStatus(artistId: string) {
+    const [songs, setlists] = await Promise.all([
+      this.prisma.client.song.findMany({ where: { artistId }, select: { sourceKey: true } }),
+      this.prisma.client.setlist.findMany({ where: { artistId }, select: { sourceKey: true } })
+    ]);
+    return describeSongCatalogStatus({ songs, setlists });
+  }
   async createSong(artistId: string, input: SongCreate, actorLabel: string, actorOperatorId: string) { const row = await this.prisma.client.song.create({ data: { artistId, ...input } as Prisma.SongUncheckedCreateInput }); await this.auditWrite(artistId, "Song", row.id, "song.created", actorLabel, actorOperatorId, { title: row.title }); return row; }
   async patchSong(artistId: string, id: string, input: SongPatch, actorLabel: string, actorOperatorId: string) { const row = await this.prisma.client.song.findFirst({ where: { id, artistId } }); if (!row) throw new NotFoundException("Song not found"); const updated = await this.prisma.client.song.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "Song", id, "song.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) }); return updated; }
   async setlists(artistId: string) { const rows = await this.prisma.client.setlist.findMany({ where: { artistId }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } }, orderBy: { updatedAt: "desc" } }); return rows.map((row) => ({ ...row, summary: summarizeSetlist(row.items) })); }
@@ -267,7 +274,7 @@ export class OperationsService {
             bpm: song.bpm,
             notes: song.notes,
             sourceKey: song.sourceKey,
-            active: true
+            active: song.active
           }
         }));
       }
