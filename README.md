@@ -651,8 +651,8 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
 
 Release validation snapshot (2026-07-13) plus the 2026-08-23 quality-review
-unit/eval gate: root typecheck/lint, 20/20 shared tests, 265/265 API unit
-tests, both production builds, and 90/90 `manager_evals_v38` checks at 100%
+unit/eval gate: root typecheck/lint, 21/21 shared tests, 266/266 API unit
+tests, both production builds, and 91/91 `manager_evals_v38` checks at 100%
 safety. The 2026-07-13 package also recorded 5/5 database workflows across all
 40 migrations; this change adds a 41st migration for song/setlist `sourceKey`.
 15/15 Chromium workflows remain the last hosted browser snapshot. Prisma reports no schema
