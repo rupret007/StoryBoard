@@ -52,6 +52,7 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--help" || arg === "-h") return { help: true };
+    if (arg === "--") continue;
     if (arg === "--apply") options.apply = true;
     else if (arg === "--dry-run") options.apply = false;
     else if (arg === "--include-parked") options.includeParked = true;
