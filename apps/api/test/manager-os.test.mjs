@@ -3540,7 +3540,8 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   assert.match(recorded.answer, /Harbor Lights/);
   assert.match(recorded.answer, /not a Vault import/i);
   assert.ok(recorded.citations.includes("song-harbor"));
-  assert.doesNotMatch(recorded.answer, /travis|pitch|usually from a local Vault/i);
+  assert.doesNotMatch(recorded.answer, /travis|pitch/i);
+  assert.doesNotMatch(recorded.answer, /usually from a local Vault/i);
 
   const demo = intelligence.deterministicManagerChat(managerFacts({
     songs: [
@@ -3554,8 +3555,8 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   assert.match(demo.answer, /SEED_DEMO_OPS|practice/i);
   assert.match(demo.answer, /not a live catalog/i);
   assert.match(demo.answer, /not a Vault import/i);
-  assert.match(demo.answer, /will not invent titles, auto-post, or auto-pitch Travis/i);
-  assert.doesNotMatch(demo.answer, /usually from a local Vault|harbor lights|everyday|parked demo/i);
+  assert.match(demo.answer, /will not invent titles, auto-post/i);
+  assert.doesNotMatch(demo.answer, /usually from a local Vault|harbor lights|everyday|parked demo|auto-pitch travis/i);
   assert.equal(demo.recommendation, null);
 
   const pitch = intelligence.deterministicManagerChat(emptySeed, "Who should we pitch in Milwaukee?", now);

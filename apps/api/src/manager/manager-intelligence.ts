@@ -1532,13 +1532,16 @@ function deterministicManagerChatBase(
     const songLines = activeSongs.slice(0, responsePolicy.itemLimit).map((song) => `• ${song.title}${song.musicalKey ? ` (${song.musicalKey})` : ""}`);
     const setlistLines = setlists.slice(0, responsePolicy.itemLimit).map((setlist) => `• ${setlist.name} — ${setlist.status}${setlist.itemCount != null ? `; ${setlist.itemCount} item${setlist.itemCount === 1 ? "" : "s"}` : ""}`);
     const status = describeSongCatalogStatus({
-      songs: songs.map((song) => ({ sourceKey: song.sourceKey })),
-      setlists: setlists.map((setlist) => ({ sourceKey: setlist.sourceKey }))
+      songs: songs.map((song) => ({ sourceKey: song.sourceKey ?? null })),
+      setlists: setlists.map((setlist) => ({ sourceKey: setlist.sourceKey ?? null }))
     });
     const vaultSlice = recorded.songs.length
       ? " A Stalemate, hybrid, or Jeff Story row in that slice is current-artist repertoire — not a fourth live band."
       : "";
-    const provenance = `${status.message}${vaultSlice} StoryBoard will not invent titles, auto-post, or auto-pitch Travis.`;
+    const closer = recorded.songs.length
+      ? " StoryBoard will not invent titles, auto-post, or auto-pitch Travis."
+      : " StoryBoard will not invent titles, auto-post, or treat a parked catalog as another live band.";
+    const provenance = `${status.message}${vaultSlice}${closer}`;
     return {
       answer: `${activeSongs.length} song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded.${songLines.length ? `\n\nSongs:\n${songLines.join("\n")}` : ""}${setlistLines.length ? `\n\nSetlists:\n${setlistLines.join("\n")}` : ""}\n\n${provenance}`,
       citations: unique([...activeSongs.map((song) => song.id), ...setlists.map((setlist) => setlist.id)]).slice(0, 10),
