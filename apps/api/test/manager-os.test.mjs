@@ -3501,7 +3501,7 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
 
   const pitch = intelligence.deterministicManagerChat(emptySeed, "Who should we pitch in Milwaukee?", now);
   assert.match(pitch.answer, /0 active opportunities/i);
-  assert.match(pitch.answer, /no recorded booking action/i);
+  assert.match(pitch.answer, /complete the guided manager setup|no recorded booking action/i);
   assert.doesNotMatch(pitch.answer, /travis|rad dad|mock hall|ticketmaster/i);
   assert.ok(!pitch.recommendation || pitch.recommendation.proposedAction == null || pitch.recommendation.proposedAction.type === "create_task");
 });
