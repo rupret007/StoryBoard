@@ -179,6 +179,14 @@ test("real Vault app_api.json shape seeds setlist_ready live-band rows and honor
   });
   assert.equal(parsedBpm.songs[0]?.bpm, 214);
   assert.equal(parsedBpm.songs[0]?.notes, "vault:JS-0099");
+
+  const nullBpm = shared.planCatalogImport({
+    vault: { songs: [{ id: "JS-0100", title: "No Tempo Yet", project: "Jeff Story", is_original: true, key: "G", bpm: null, bpm_int: null, vault_ref: "vault:JS-0100" }] }
+  });
+  assert.equal(nullBpm.songs.length, 1);
+  assert.equal(nullBpm.songs[0]?.title, "No Tempo Yet");
+  assert.equal(nullBpm.songs[0]?.bpm, null);
+  assert.ok(!nullBpm.warnings.some((warning) => /not a valid app_api/i.test(warning)));
 });
 
 test("catalog:import CLI dry-runs the local sample and refuses remote URLs", () => {

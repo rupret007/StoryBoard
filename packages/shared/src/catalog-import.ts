@@ -96,7 +96,7 @@ const vaultSongSchema = z.object({
   is_original: z.boolean().optional(),
   writers: z.array(z.string()).max(20).optional(),
   key: optionalText,
-  bpm: z.union([z.number(), z.string()]).optional(),
+  bpm: z.union([z.number(), z.string(), z.null()]).optional(),
   bpm_int: optionalNullableNumber,
   vault_id: z.string().trim().min(1).max(80).optional(),
   vault_ref: z.string().trim().min(1).max(120).optional(),
