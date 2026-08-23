@@ -167,6 +167,20 @@ test("Manager records from a Vault plan stay live-band only", () => {
   assert.ok(!records.songs.some((song) => /parked|trailer|dirty|solo|travis/i.test(song.title)));
 });
 
+test("published default-live setlist is labeled as the slice and keeps parked-named projects on the current artist", () => {
+  const plan = shared.planCatalogImport({ vault: vaultFixture });
+  assert.equal(plan.setlists[0]?.name, shared.VAULT_DEFAULT_LIVE_SETLIST_NAME);
+  assert.match(plan.setlists[0]?.notes ?? "", /setlist_ready_default_import|default_live/i);
+  assert.match(plan.setlists[0]?.notes ?? "", /not a fourth live band/i);
+  assert.ok(plan.songs.some((song) => song.title === "Everyday" && song.project === "Stalemate"));
+  assert.ok(plan.warnings.some((warning) => /parked catalog name/i.test(warning) && /not a fourth live band/i.test(warning)));
+  assert.ok(!plan.songs.some((song) => song.title === "Parked Demo"));
+
+  const fallback = shared.planCatalogImport({ vault: radDadOnlyVault });
+  assert.equal(fallback.setlists[0]?.name, shared.VAULT_SETLIST_READY_SETLIST_NAME);
+  assert.ok(!fallback.warnings.some((warning) => /parked catalog name/i.test(warning)));
+});
+
 test("published empty setlist_ready_default_import stays empty without inventing a catalog", () => {
   const plan = shared.planCatalogImport({ vault: emptyPublishedVault });
   assert.deepEqual(plan.songs, []);
@@ -191,6 +205,7 @@ test("live Vault schema 3 sample uses the published default-live slice and field
   const plan = shared.planCatalogImport({ vault: vaultFixture });
   assert.deepEqual(plan.songs.map((song) => song.title), ["Harbor Lights", "Sidewalk Radio", "Everyday"]);
   assert.equal(plan.setlists.length, 1);
+  assert.equal(plan.setlists[0]?.name, "Vault default-live");
   assert.deepEqual(plan.setlists[0]?.items.map((item) => item.label), ["Harbor Lights", "Sidewalk Radio", "Everyday"]);
   assert.equal(plan.counts.vaultSongsSeen, 8);
   assert.equal(plan.counts.liveSelected, 3);
@@ -225,6 +240,16 @@ test("live Vault schema 3 sample uses the published default-live slice and field
   assert.match(emptyStatus.message, /not a second catalog/i);
   assert.match(emptyStatus.message, /setlist_ready_default_import|default_live/i);
 
+  const importedStatus = shared.describeSongCatalogStatus({
+    songs: plan.songs.map((song) => ({ sourceKey: song.sourceKey })),
+    setlists: plan.setlists.map((setlist) => ({ sourceKey: setlist.sourceKey }))
+  });
+  assert.equal(importedStatus.empty, false);
+  assert.equal(importedStatus.source, "vault");
+  assert.match(importedStatus.message, /3 songs recorded \(3 from Vault\)/i);
+  assert.match(importedStatus.message, /setlist_ready_default_import|default_live/i);
+  assert.match(importedStatus.message, /not a fourth live band/i);
+
   const annotatedBpm = shared.planCatalogImport({
     vault: { songs: [{ id: "RD-0099", title: "Cut Tempo", project: "Rad Dad", is_original: true, key: "E", bpm: "214 (cut)" }] }
   });
@@ -253,6 +278,8 @@ test("catalog:import CLI dry-runs the local sample and refuses remote URLs", () 
   assert.equal(dryRun.status, 0, dryRun.stderr);
   assert.match(dryRun.stdout, /Catalog import dry-run/);
   assert.match(dryRun.stdout, /planned songs 3/);
+  assert.match(dryRun.stdout, /setlist Vault default-live/);
+  assert.match(dryRun.stdout, /not a fourth live band/);
   assert.match(dryRun.stdout, /song Harbor Lights/);
   assert.match(dryRun.stdout, /song Sidewalk Radio/);
   assert.match(dryRun.stdout, /song Everyday/);

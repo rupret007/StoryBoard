@@ -34,9 +34,11 @@ re-enter the private catalog by hand.
 
 It does **not** create artists, venues, contacts, booking prospects, pitches,
 Travis/booker rows, invoices, or social posts. **Travis books**; StoryBoard
-does not auto-pitch him. Stalemate / Trailer Swift / Something Dirty stay
-parked unless you opt in. Guest sets stay off unless you opt in, and even then
-they land on the **current** artist (no fourth live band).
+does not auto-pitch him. A Stalemate or hybrid row already in Vault's
+published `default_live` slice (for example Everyday) stays on the **current**
+artist — that is not a fourth live band. Parked catalogs stay parked unless
+you opt in. Guest sets stay off unless you opt in, and even then they land on
+the current artist.
 
 ## Dry-run first
 
@@ -107,9 +109,10 @@ That demo is not a live catalog and is not Rad Dad / Stalemate / Trailer Swift.
 `POST /manager/chat` questions about the setlist, song library, or catalog stay
 record-bound. An empty library says so and points at this import (dry-run,
 `--apply` to write, no remote fetch). After import it lists only recorded
-live-band rows. It will not invent titles, write captions, auto-post,
-auto-pitch Travis, or treat a parked catalog as a fourth live band.
-StoryLiner stays promo-only.
+live-band rows and names the published default-live setlist. A Stalemate-origin
+row already in that slice stays current-artist repertoire — not a fourth live
+band. It will not invent titles, write captions, auto-post, or auto-pitch
+Travis. StoryLiner stays promo-only.
 
 Default Vault planning consumes the published
 `setlist_ready_default_import` / `import_scope=default_live` slice when

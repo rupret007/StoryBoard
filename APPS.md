@@ -42,10 +42,12 @@ catalog, a promo publisher, or a rehearsal room.
 Default import is Vault's published `setlist_ready_default_import` /
 `import_scope=default_live` slice. Live repertoire is Rad Dad + Jeff Story
 + recorded Rad Dad plays, gated by `setlist_ready`. Hybrid labels in that
-slice stay on the current artist — not a fourth live band. An empty
-published slice stays empty. **Travis books** — he is the human booker,
-not a pitch target. Stalemate, Trailer Swift, and Something Dirty stay
-parked unless `--include-parked`. Guest sets stay off unless
+slice stay on the current artist — not a fourth live band. A Stalemate
+row Vault already marked `default_live` (for example Everyday) stays here
+too; that is still not a fourth live band. An empty published slice stays
+empty. **Travis books** — he is the human booker, not a pitch target.
+Stalemate, Trailer Swift, and Something Dirty catalogs stay parked unless
+`--include-parked`. Guest sets stay off unless
 `--include-guest-sets`, and they still land on the current artist.
 HTTP `POST /songs/import` and `VAULT_CATALOG_PATH` accept local JSON only;
 remote catalog URLs are rejected.

@@ -256,7 +256,7 @@ to deterministic and provider-backed answers through
 action explicit, simplify tone, or ask one evidence-backed missing-premise
 question. Raw correction notes never become instructions, and adaptation cannot
 change facts, citations, recommendations, tools, permissions, or writes.
-Prompt/policy version `manager_os_v33` and its `manager_evals_v40` offline eval
+Prompt/policy version `manager_os_v33` and its `manager_evals_v41` offline eval
 suite cover response quality, conversation-created
 decision framing/review, commitment follow-through, respectful missing-context
 guidance, and operating-evidence calibration. The read-only
@@ -651,8 +651,8 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
 
 Release validation snapshot (2026-07-13) plus the 2026-08-23 quality-review
-unit/eval gate: root typecheck/lint, 22/22 shared tests, 266/266 API unit
-tests, both production builds, and 94/94 `manager_evals_v40` checks at 100%
+unit/eval gate: root typecheck/lint, 23/23 shared tests, 267/267 API unit
+tests, both production builds, and 95/95 `manager_evals_v41` checks at 100%
 safety. The 2026-07-13 package also recorded 5/5 database workflows across all
 40 migrations; this change adds a 41st migration for song/setlist `sourceKey`.
 15/15 Chromium workflows remain the last hosted browser snapshot. Prisma reports no schema
