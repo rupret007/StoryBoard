@@ -26,8 +26,9 @@ re-enter the private catalog by hand.
 
 - `Song` rows with optional `sourceKey` (`vault:catalog_import_v1:…` or
   `shownight:catalog_import_v1:…`)
-- Draft `Setlist` rows from Vault `setlist_ready` (live-band songs already
-  selected) and from an official Show Night running order
+- Draft `Setlist` rows from Vault `setlist_ready_default_import` (the
+  published default-live planner slice) or, when opted in, from
+  `setlist_ready`, plus an official Show Night running order
 - One audited `catalog.imported` event on HTTP apply (`POST /songs/import`
   with `dryRun: false`). The CLI `--apply` path writes songs/setlists only.
 
@@ -78,10 +79,10 @@ are skipped so a second apply does not overwrite Band operations edits.
 
 | Flag / body field | Default | Effect |
 | --- | --- | --- |
-| _(none)_ | live only | Vault `setlist_ready` plus Jeff Story / Rad Dad (or a recorded Rad Dad play) + official Show Night Rad Dad set |
-| `--include-parked` / `includeParked` | off | Also import Stalemate, Trailer Swift, Something Dirty onto the same artist |
+| _(none)_ | live only | Published `setlist_ready_default_import` / `import_scope=default_live` rows when present; otherwise Rad Dad + Jeff Story + recorded Rad Dad plays, gated by `setlist_ready`. Official Show Night Rad Dad set. Parked catalogs and covers stay out. |
+| `--include-parked` / `includeParked` | off | Also import exact Stalemate, Trailer Swift, Something Dirty rows onto the same artist |
 | `--include-guest-sets` / `includeGuestSets` | off | Import Show Night guest sets as draft setlists on the same artist |
-| `--include-all-projects` / `includeAllProjects` | off | Import every vault project onto the same artist |
+| `--include-all-projects` / `includeAllProjects` | off | Import every vault project except Travis onto the same artist |
 
 Flex/encore pools are skipped. Duration stays unknown unless a later Band
 operations edit records it.
@@ -110,8 +111,15 @@ live-band rows. It will not invent titles, write captions, auto-post,
 auto-pitch Travis, or treat a parked catalog as a fourth live band.
 StoryLiner stays promo-only.
 
-Default Vault planning uses `setlist_ready` plus the live writer/band
-projects (`Jeff Story`, `Rad Dad`, or a recorded Rad Dad play). Covers stay
-inactive. Parked projects stay parked. `bpm` comes from `bpm_int`; duration
-and lead vocalist stay null. `GET /songs/status` reports an empty table as
-missing import, not as an invented catalog.
+Default Vault planning consumes the published
+`setlist_ready_default_import` / `import_scope=default_live` slice when
+present. Live repertoire is Rad Dad + Jeff Story + recorded Rad Dad plays,
+gated by `setlist_ready`. A hybrid in that slice (or a Stalemate row Vault
+already marked `default_live`) stays on the current artist — not a fourth
+live band. An empty published `setlist_ready_default_import` stays empty;
+that is honesty, not a missing catalog. Parked projects stay parked unless
+opted in. Travis rows stay skipped (`travis_books`). Covers stay out
+(`active` ← `is_original !== false`). `bpm` prefers `songs[].bpm_int`, then
+a clean `bpm` integer, then a leading 2–3 digit tempo; notes come from
+`vault_ref`. Duration and lead vocalist stay null. `GET /songs/status`
+reports an empty table as a missing Vault import, not as a second catalog.

@@ -26,6 +26,20 @@ const radDadOnlyVault = {
   ]
 };
 
+const emptyPublishedVault = {
+  schema_version: 3,
+  songs: [
+    { id: "JS-0001", title: "Harbor Lights", project: "Jeff Story", import_scope: "not_live_band", is_original: true, key: "G", bpm: 118, played_live: ["Rad Dad (2026-05)"] },
+    { id: "JS-0002", title: "Sidewalk Radio", project: "Something Dirty / Stalemate / Rad Dad", import_scope: "not_live_band", is_original: true, played_live: ["Rad Dad (2026-05)"] },
+    { id: "ST-0001", title: "Parked Demo", project: "Stalemate", import_scope: "parked_catalog", is_original: true }
+  ],
+  setlist_ready: [
+    { id: "JS-0001", title: "Harbor Lights", project: "Jeff Story" },
+    { id: "ST-0001", title: "Parked Demo", project: "Stalemate" }
+  ],
+  setlist_ready_default_import: []
+};
+
 const showNightFixture = {
   event: { name: "Rad Dad + Friends", venue: "Example Room", dateLong: "Saturday, September 19, 2026" },
   radDadSet: [
@@ -47,7 +61,7 @@ test("catalog import defaults to the live band and dry-run reconcile creates not
   assert.deepEqual(plan.setlists[0]?.items.map((item) => item.label), ["Harbor Lights"]);
   assert.equal(plan.setlists[1]?.name, "Rad Dad — official set");
   assert.equal(plan.setlists[1]?.items[0]?.label, "Harbor Lights");
-  assert.equal(plan.counts.parkedSkipped, 3);
+  assert.equal(plan.counts.parkedSkipped, 1);
   assert.equal(plan.counts.guestSetsSkipped, 1);
   assert.ok(plan.skipped.some((row) => row.reason === "flex_pool_skipped"));
   assert.ok(plan.skipped.some((row) => row.reason === "setlist_ready_not_live" && row.title === "Parked Demo"));
@@ -153,39 +167,82 @@ test("Manager records from a Vault plan stay live-band only", () => {
   assert.ok(!records.songs.some((song) => /parked|trailer|dirty|solo|travis/i.test(song.title)));
 });
 
-test("real Vault app_api.json shape seeds setlist_ready live-band rows and honors the StoryBoard field map", () => {
+test("published empty setlist_ready_default_import stays empty without inventing a catalog", () => {
+  const plan = shared.planCatalogImport({ vault: emptyPublishedVault });
+  assert.deepEqual(plan.songs, []);
+  assert.deepEqual(plan.setlists, []);
+  assert.equal(plan.counts.vaultSongsSeen, 3);
+  assert.equal(plan.counts.liveSelected, 0);
+  assert.ok(plan.skipped.some((row) => row.reason === "not_live_band" && row.title === "Harbor Lights"));
+  assert.ok(plan.skipped.some((row) => row.reason === "parked_catalog" && row.title === "Parked Demo"));
+  assert.ok(plan.warnings.some((warning) => /published default-live slice/i.test(warning)));
+});
+
+test("live Vault schema 3 sample uses the published default-live slice and field map", () => {
+  assert.deepEqual(shared.LIVE_CATALOG_PROJECTS, ["rad dad", "jeff story"]);
+  assert.equal(shared.catalogImportScope("Jeff Story"), "default_live");
+  assert.equal(shared.catalogImportScope("Something Dirty / Stalemate / Rad Dad"), "default_live");
+  assert.equal(shared.catalogImportScope("Jeff Story", "not_live_band"), "not_live_band");
+  assert.equal(shared.catalogImportScope("Rad Dad"), "default_live");
+  assert.equal(shared.VAULT_STORYBOARD_FIELD_MAP.bpm, "bpm_int");
+  assert.equal(shared.VAULT_STORYBOARD_FIELD_MAP.notes, "vault_ref");
+  assert.equal(shared.VAULT_STORYBOARD_FIELD_MAP.active, "is_original !== false");
+
   const plan = shared.planCatalogImport({ vault: vaultFixture });
-  assert.deepEqual(plan.songs.map((song) => song.title).sort(), ["Harbor Lights", "Sidewalk Radio"]);
-  assert.equal(plan.songs.find((song) => song.title === "Harbor Lights")?.bpm, 118);
-  assert.equal(plan.songs.find((song) => song.title === "Harbor Lights")?.notes, "vault:JS-0001");
-  assert.equal(plan.songs.find((song) => song.title === "Harbor Lights")?.active, true);
-  assert.equal(plan.songs.find((song) => song.title === "Sidewalk Radio")?.bpm, null);
-  assert.equal(plan.setlists[0]?.name, "Vault setlist-ready");
-  assert.deepEqual(plan.setlists[0]?.items.map((item) => item.label), ["Harbor Lights", "Sidewalk Radio"]);
+  assert.deepEqual(plan.songs.map((song) => song.title), ["Harbor Lights", "Sidewalk Radio", "Everyday"]);
+  assert.equal(plan.setlists.length, 1);
+  assert.deepEqual(plan.setlists[0]?.items.map((item) => item.label), ["Harbor Lights", "Sidewalk Radio", "Everyday"]);
+  assert.equal(plan.counts.vaultSongsSeen, 8);
+  assert.equal(plan.counts.liveSelected, 3);
+  assert.equal(plan.counts.parkedSkipped, 2);
   assert.ok(plan.warnings.some((warning) => /lanes are WIP slots/i.test(warning)));
+  assert.ok(!plan.warnings.some((warning) => /none are labeled Rad Dad/i.test(warning)));
+  assert.ok(plan.skipped.some((row) => row.reason === "not_setlist_ready" && row.title === "It's Alright"));
   assert.ok(plan.skipped.some((row) => row.reason === "parked_catalog" && row.title === "Parked Demo"));
   assert.ok(plan.skipped.some((row) => row.reason === "travis_books" && row.title === "Booking Calendar Blues"));
   assert.ok(plan.skipped.some((row) => row.reason === "cover_not_active" && row.title === "Cover Example"));
-  assert.ok(!plan.songs.some((song) => /parked|trailer|booking calendar|cover example/i.test(song.title)));
-  assert.ok(plan.songs.every((song) => song.notes?.startsWith("vault:")));
+  assert.ok(!plan.songs.some((song) => /parked demo|trailer|booking calendar|cover example|it's alright/i.test(song.title)));
+
+  const harbor = plan.songs.find((song) => song.title === "Harbor Lights");
+  assert.equal(harbor?.bpm, 118);
+  assert.equal(harbor?.notes, "vault:JS-0001");
+  assert.equal(harbor?.active, true);
+  assert.equal(harbor?.project, "Jeff Story");
+  assert.equal(plan.songs.find((song) => song.title === "Sidewalk Radio")?.bpm, null);
+  assert.equal(plan.songs.find((song) => song.title === "Everyday")?.notes, "vault:ST-0014");
+
+  const optedIn = shared.planCatalogImport({ vault: vaultFixture, includeAllProjects: true });
+  assert.deepEqual(optedIn.songs.map((song) => song.title).sort(), ["Cover Example", "Everyday", "Harbor Lights", "It's Alright", "Parked Demo", "Sidewalk Radio", "Trailer Sketch"]);
+  assert.equal(optedIn.songs.find((song) => song.title === "Cover Example")?.active, false);
+  assert.equal(optedIn.songs.find((song) => song.title === "Cover Example")?.bpm, 214);
+  assert.ok(!optedIn.songs.some((song) => /booking calendar/i.test(song.title)));
+  assert.ok(optedIn.setlists[0]?.items.some((item) => item.label === "Harbor Lights"));
+  assert.ok(optedIn.setlists[0]?.items.some((item) => item.label === "Parked Demo"));
 
   const emptyStatus = shared.describeSongCatalogStatus({ songs: [], setlists: [] });
   assert.equal(emptyStatus.empty, true);
   assert.equal(emptyStatus.source, "none");
   assert.match(emptyStatus.message, /not a second catalog/i);
+  assert.match(emptyStatus.message, /setlist_ready_default_import|default_live/i);
 
-  const parsedBpm = shared.planCatalogImport({
-    vault: { songs: [{ id: "JS-0099", title: "Cut Tempo", project: "Jeff Story", is_original: true, key: "E", bpm: "214 (cut)", bpm_int: 214, vault_ref: "vault:JS-0099" }] }
+  const annotatedBpm = shared.planCatalogImport({
+    vault: { songs: [{ id: "RD-0099", title: "Cut Tempo", project: "Rad Dad", is_original: true, key: "E", bpm: "214 (cut)" }] }
   });
-  assert.equal(parsedBpm.songs[0]?.bpm, 214);
-  assert.equal(parsedBpm.songs[0]?.notes, "vault:JS-0099");
+  assert.equal(annotatedBpm.songs[0]?.bpm, 214);
+  assert.equal(annotatedBpm.songs[0]?.notes, "vault:RD-0099");
+
+  const compatBpm = shared.planCatalogImport({
+    vault: { songs: [{ id: "RD-0098", title: "Compat Tempo", project: "Rad Dad", is_original: true, key: "E", bpm: "214 (cut)", bpm_int: 214 }] }
+  });
+  assert.equal(compatBpm.songs[0]?.bpm, 214);
 
   const nullBpm = shared.planCatalogImport({
-    vault: { songs: [{ id: "JS-0100", title: "No Tempo Yet", project: "Jeff Story", is_original: true, key: "G", bpm: null, bpm_int: null, vault_ref: "vault:JS-0100" }] }
+    vault: { songs: [{ id: "RD-0100", title: "No Tempo Yet", project: "Rad Dad", is_original: true, key: "G", bpm: null, bpm_int: null }] }
   });
   assert.equal(nullBpm.songs.length, 1);
   assert.equal(nullBpm.songs[0]?.title, "No Tempo Yet");
   assert.equal(nullBpm.songs[0]?.bpm, null);
+  assert.equal(nullBpm.songs[0]?.active, true);
   assert.ok(!nullBpm.warnings.some((warning) => /not a valid app_api/i.test(warning)));
 });
 
@@ -195,14 +252,15 @@ test("catalog:import CLI dry-runs the local sample and refuses remote URLs", () 
   const dryRun = spawnSync(process.execPath, [script, "--source", sample], { encoding: "utf8", env: { ...process.env, DATABASE_URL: "" } });
   assert.equal(dryRun.status, 0, dryRun.stderr);
   assert.match(dryRun.stdout, /Catalog import dry-run/);
-  assert.match(dryRun.stdout, /Harbor Lights/);
-  assert.match(dryRun.stdout, /Sidewalk Radio/);
-  assert.match(dryRun.stdout, /Vault setlist-ready/);
-  assert.doesNotMatch(dryRun.stdout, /Parked Demo|Trailer Sketch|Booking Calendar Blues|Cover Example/i);
+  assert.match(dryRun.stdout, /planned songs 3/);
+  assert.match(dryRun.stdout, /song Harbor Lights/);
+  assert.match(dryRun.stdout, /song Sidewalk Radio/);
+  assert.match(dryRun.stdout, /song Everyday/);
+  assert.doesNotMatch(dryRun.stdout, /Parked Demo|Trailer Sketch|Booking Calendar Blues|Cover Example|It's Alright/);
 
   const defaultSample = spawnSync(process.execPath, [script], { encoding: "utf8", env: { ...process.env, DATABASE_URL: "" } });
   assert.equal(defaultSample.status, 0, defaultSample.stderr);
-  assert.match(defaultSample.stdout, /Harbor Lights/);
+  assert.match(defaultSample.stdout, /planned songs 3/);
 
   const remote = spawnSync(process.execPath, [script, "--source", "https://example.invalid/app_api.json"], { encoding: "utf8" });
   assert.notEqual(remote.status, 0);

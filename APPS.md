@@ -31,18 +31,24 @@ catalog, a promo publisher, or a rehearsal room.
    unset. Point `VAULT_CATALOG_PATH` at a local Vault export and set
    `VAULT_CATALOG_APPLY=true` to write. HTTP equivalent: `POST /songs/import`
    (`dryRun` defaults true). Remote catalog URLs are rejected.
-3. StoryBoard then has Vault songs plus Vault `setlist_ready` (live-band rows
-   only) for Band operations and Manager chat. It maps `title` / `key` /
-   `bpm_int` / `is_original` / `vault_ref` and leaves duration and lead
-   vocalist null. It will not invent titles, write captions, auto-post,
-   auto-pitch Travis, or create another artist.
+3. StoryBoard then has Vault songs plus Vault `setlist_ready_default_import`
+   (the published `default_live` planner slice) for Band operations and
+   Manager chat. It maps the live Vault honesty fields: `title` / `key` →
+   `musicalKey` / `bpm_int` / `notes` ← `vault_ref` / `active` ←
+   `is_original !== false`. Duration and lead vocalist stay null. It will
+   not invent titles, write captions, auto-post, auto-pitch Travis, or
+   create another artist.
 
-Default import is **setlist_ready plus Jeff Story / Rad Dad**. **Travis books**
-— he is the human booker, not a pitch target. Stalemate, Trailer Swift, and
-Something Dirty stay parked unless `--include-parked`. Guest sets stay off
-unless `--include-guest-sets`, and they still land on the current artist. That
-is not a fourth live band. HTTP `POST /songs/import` and `VAULT_CATALOG_PATH`
-accept local JSON only; remote catalog URLs are rejected.
+Default import is Vault's published `setlist_ready_default_import` /
+`import_scope=default_live` slice. Live repertoire is Rad Dad + Jeff Story
++ recorded Rad Dad plays, gated by `setlist_ready`. Hybrid labels in that
+slice stay on the current artist — not a fourth live band. An empty
+published slice stays empty. **Travis books** — he is the human booker,
+not a pitch target. Stalemate, Trailer Swift, and Something Dirty stay
+parked unless `--include-parked`. Guest sets stay off unless
+`--include-guest-sets`, and they still land on the current artist.
+HTTP `POST /songs/import` and `VAULT_CATALOG_PATH` accept local JSON only;
+remote catalog URLs are rejected.
 
 Details: [`docs/catalog-import.md`](docs/catalog-import.md).
 

@@ -3524,12 +3524,14 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   assert.match(setlist.answer, /AI-Music-Vault|app_api|master_catalog|catalog:import/i);
   assert.match(setlist.answer, /never fetches a remote catalog/i);
   assert.match(setlist.answer, /--apply/);
-  assert.doesNotMatch(setlist.answer, /opener|closer|travis|rad dad|harbor lights/i);
+  assert.match(setlist.answer, /rad dad/i);
+  assert.match(setlist.answer, /not a second catalog/i);
+  assert.doesNotMatch(setlist.answer, /opener|closer|travis|harbor lights/i);
   assert.equal(setlist.recommendation, null);
 
   const songs = intelligence.deterministicManagerChat(emptySeed, "What songs are in the vault?", now);
   assert.match(songs.answer, /no songs or setlists are recorded/i);
-  assert.doesNotMatch(songs.answer, /travis|rad dad|manic|basket case/i);
+  assert.doesNotMatch(songs.answer, /travis|manic|basket case|harbor lights/i);
 
   const recorded = intelligence.deterministicManagerChat(managerFacts({
     songs: [{ id: "song-harbor", title: "Harbor Lights", active: true, musicalKey: "G" }],
@@ -3567,7 +3569,67 @@ test("post-show review questions are not treated as social publish requests", ()
 test("Vault import is the default song path and Manager stays honest after import", async () => {
   const catalogImport = await loadShared("catalog-import.js");
   const vault = JSON.parse(await readFile(join(dir, "..", "..", "..", "packages", "shared", "test", "fixtures", "vault-app-api.sample.json"), "utf8"));
-  const records = catalogImport.managerRecordsFromCatalogPlan(catalogImport.planCatalogImport({ vault }));
+  const liveShape = catalogImport.planCatalogImport({ vault });
+  assert.deepEqual(liveShape.songs.map((song) => song.title), ["Harbor Lights", "Sidewalk Radio", "Everyday"]);
+  assert.equal(liveShape.setlists.length, 1);
+  assert.ok(!liveShape.songs.some((song) => /parked demo|trailer|booking calendar|cover example/i.test(song.title)));
+  const emptyPublished = catalogImport.planCatalogImport({
+    vault: {
+      schema_version: 3,
+      songs: [
+        { id: "JS-0001", title: "Harbor Lights", project: "Jeff Story", import_scope: "not_live_band", is_original: true },
+        { id: "ST-0001", title: "Parked Demo", project: "Stalemate", import_scope: "parked_catalog", is_original: true }
+      ],
+      setlist_ready_default_import: []
+    }
+  });
+  assert.equal(emptyPublished.songs.length, 0);
+  assert.equal(emptyPublished.setlists.length, 0);
+  const emptyLive = managerFacts({
+    artist: { id: "artist-a", name: "My Artist" },
+    profile: { id: "profile-a", intakeCompletedAt: null, decisionStyle: "guided", twelveMonthAmbition: null },
+    members: [],
+    goals: [],
+    opportunities: [],
+    events: [],
+    prospects: [],
+    ...catalogImport.managerRecordsFromCatalogPlan(emptyPublished)
+  });
+  const emptySetlist = intelligence.deterministicManagerChat(emptyLive, "What's our setlist?", now);
+  assert.match(emptySetlist.answer, /no songs or setlists are recorded/i);
+  assert.match(emptySetlist.answer, /not a second catalog/i);
+  assert.match(emptySetlist.answer, /setlist_ready_default_import|default_live/i);
+  assert.doesNotMatch(emptySetlist.answer, /harbor lights|sidewalk radio|parked demo/i);
+  const writer = intelligence.deterministicManagerChat(emptyLive, "Make Jeff Story a live band", now);
+  assert.match(writer.answer, /jeff story/i);
+  assert.match(writer.answer, /default live|default-live|setlist_ready_default_import/i);
+  assert.match(writer.answer, /not a fourth live band/i);
+  assert.doesNotMatch(writer.answer, /writer project|harbor lights|sidewalk radio/i);
+  const publishedSetlist = intelligence.deterministicManagerChat(managerFacts({
+    artist: { id: "artist-a", name: "My Artist" },
+    profile: { id: "profile-a", intakeCompletedAt: null, decisionStyle: "guided", twelveMonthAmbition: null },
+    members: [],
+    goals: [],
+    opportunities: [],
+    events: [],
+    prospects: [],
+    ...catalogImport.managerRecordsFromCatalogPlan(liveShape)
+  }), "What's our setlist?", now);
+  assert.match(publishedSetlist.answer, /Harbor Lights/);
+  assert.match(publishedSetlist.answer, /Sidewalk Radio/);
+  assert.match(publishedSetlist.answer, /Everyday/);
+  assert.doesNotMatch(publishedSetlist.answer, /parked demo|trailer sketch|cover example/i);
+
+  const records = catalogImport.managerRecordsFromCatalogPlan(catalogImport.planCatalogImport({
+    vault: {
+      songs: [
+        { id: "RD-0001", title: "Harbor Lights", project: "Rad Dad", is_original: true, key: "G", bpm: 118 },
+        { id: "ST-0001", title: "Parked Demo", project: "Stalemate", is_original: true }
+      ],
+      setlist_ready: [{ id: "RD-0001", title: "Harbor Lights", project: "Rad Dad" }],
+      setlist_ready_default_import: [{ id: "RD-0001", title: "Harbor Lights", project: "Rad Dad" }]
+    }
+  }));
   const imported = managerFacts({
     artist: { id: "artist-a", name: "My Artist" },
     profile: { id: "profile-a", intakeCompletedAt: null, decisionStyle: "guided", twelveMonthAmbition: null },
@@ -3583,7 +3645,7 @@ test("Vault import is the default song path and Manager stays honest after impor
   assert.match(setlist.answer, /Harbor Lights/);
   assert.match(setlist.answer, /Vault setlist-ready/);
   assert.match(setlist.answer, /will not invent titles, auto-post/i);
-  assert.ok(setlist.citations.includes("vault:catalog_import_v1:JS-0001"));
+  assert.ok(setlist.citations.includes("vault:catalog_import_v1:RD-0001"));
   assert.doesNotMatch(setlist.answer, /parked demo|trailer sketch|booking calendar|cover example|travis|pitch/i);
   assert.equal(setlist.recommendation, null);
 

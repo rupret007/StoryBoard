@@ -1087,6 +1087,11 @@ export function managerQuestionAsksAboutFourthBand(question: string) {
     && /\b(live|band|import|catalog|setlist|artist|create|add)\b/i.test(question);
 }
 
+export function managerQuestionAsksAboutWriterProjectAsLiveBand(question: string) {
+  return /\bjeff story\b/i.test(question)
+    && /\b(live|band|fourth|4th|catalog|import|artist|setlist)\b/i.test(question);
+}
+
 function deterministicManagerChatBase(
   facts: ManagerFacts,
   question: string,
@@ -1240,9 +1245,17 @@ function deterministicManagerChatBase(
     };
   }
 
+  if (managerQuestionAsksAboutWriterProjectAsLiveBand(question)) {
+    return {
+      answer: "Jeff Story is already part of Vault's default live repertoire with Rad Dad. StoryBoard consumes the published setlist_ready_default_import / default_live slice from a local app_api.json — it does not invent a catalog. Parked catalogs stay parked and are not a fourth live band. Import locally; nothing posts from this conversation.",
+      citations: [],
+      recommendation: null
+    };
+  }
+
   if (managerQuestionAsksAboutFourthBand(question)) {
     return {
-      answer: "StoryBoard imports onto the current artist only. The live catalog is Rad Dad. Stalemate, Trailer Swift, and Something Dirty stay parked unless an operator opts in with --include-parked, and that is not a fourth live band. Import a local Vault file; do not invent another artist.",
+      answer: "StoryBoard imports onto the current artist only. The live catalog is Vault's published default-live slice (Rad Dad + Jeff Story + recorded Rad Dad plays, gated by setlist_ready). Stalemate, Trailer Swift, and Something Dirty stay parked unless an operator opts in with --include-parked, and that is not a fourth live band. Import a local Vault file; do not invent another artist.",
       citations: [],
       recommendation: null
     };
@@ -1495,7 +1508,7 @@ function deterministicManagerChatBase(
     const activeSongs = songs.filter((song) => song.active !== false);
     if (!songs.length && !setlists.length) {
       return {
-        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. The song catalog lives in AI-Music-Vault; import a local app_api.json or master_catalog.json with `pnpm catalog:import` (dry-run by default; `--apply` writes). StoryBoard never fetches a remote catalog.",
+        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Vault is the sole catalog; default import is the published setlist_ready_default_import / default_live slice (Rad Dad + Jeff Story + recorded Rad Dad plays, gated by setlist_ready) from a local app_api.json (`pnpm catalog:import`, dry-run by default; `--apply` writes). That empty table is not a second catalog. StoryBoard never fetches a remote catalog.",
         citations: [],
         recommendation: null
       };
