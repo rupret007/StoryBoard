@@ -128,11 +128,13 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
 
 ## Suggested next work (not committed; pick with the user)
 
-1. **Apply a real local Vault catalog (operator machine):** Jeff can dry-run
-   then apply a private `data/app_api.json` or `data/master_catalog.json` (and
-   optionally Show Night `content/show.json`) with `pnpm catalog:import`. Do not
-   commit those files, do not invent a fourth live band, and do not auto-pitch
-   Travis or any Rad Dad booker. StoryLiner and WebJam stay out of this repo.
+1. **Apply a real local Vault catalog (operator machine):** Vault import is the
+   documented default song path (`pnpm catalog:import`, dry-run then `--apply`).
+   Jeff can apply a private `data/app_api.json` or `data/master_catalog.json`
+   (and optionally Show Night `content/show.json`) on his machine. Do not
+   commit those files, do not fetch them over the network, do not invent a
+   fourth live band, and do not auto-pitch Travis (he books). StoryLiner and
+   WebJam stay out of this repo.
 2. **Database client warning:** Trace the concurrent-`client.query()`
    deprecation emitted by `pg@8.14.1` during integration/browser execution and
    remove it before considering `pg@9`; do not change transaction semantics to

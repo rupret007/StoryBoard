@@ -20,7 +20,7 @@ detail.
 | Understand provider and adapter limits | [`integration-plan.md`](integration-plan.md) |
 | Understand operator sign-in, sessions, and roles | [`auth-operators.md`](auth-operators.md) |
 | Invite operators or onboard an artist | [`invitations.md`](invitations.md) |
-| Import a local Vault / Show Night catalog | [`catalog-import.md`](catalog-import.md) |
+| Populate songs (default: local Vault import) | [`catalog-import.md`](catalog-import.md) |
 | Operate notifications and background jobs | [`workflow-automation.md`](workflow-automation.md) |
 | Configure Telegram alerts and registration | [`telegram-alerts.md`](telegram-alerts.md) |
 

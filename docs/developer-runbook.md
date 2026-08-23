@@ -966,15 +966,16 @@ premises lower confidence, and proximity raises unresolved gaps to higher
 urgency. Manager briefs and chat consume this same result.
 
 The default seed leaves the song table empty unless `VAULT_CATALOG_PATH` points
-at a local Vault `app_api.json` or `master_catalog.json`. Vault is the catalog;
-StoryBoard imports it with `pnpm catalog:import` (dry-run by default),
-`VAULT_CATALOG_APPLY=true` on seed, or `POST /songs/import`. Details:
+at a local Vault `app_api.json` or `master_catalog.json`. Vault import is the
+default way to populate songs: `pnpm catalog:import` (dry-run by default),
+`VAULT_CATALOG_APPLY=true` on seed, or `POST /songs/import`. Paths and payloads
+must be local JSON; remote catalog URLs are rejected. Details:
 [`catalog-import.md`](catalog-import.md) and [`APPS.md`](../APPS.md).
 `SEED_DEMO_OPS=true` can add generic demo songs/invoice rows for local UI
-practice; prefer Vault import. It does not load a live catalog.
+practice; it is not the live catalog.
 
-Open **Music & setlists** in Band operations to maintain the canonical song
-library and running orders. Song duration uses `m:ss` in the UI and remains
+Open **Music & setlists** in Band operations to correct duration/key and build
+running orders after Vault import. Song duration uses `m:ss` in the UI and remains
 nullable. A setlist may contain up to 100 ordered songs, breaks, and notes;
 every break/note requires a label, and only song rows may reference a saved
 song. Reorder controls, transition cues, set notes, and draft/active/archive

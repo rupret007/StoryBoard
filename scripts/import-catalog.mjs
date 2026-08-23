@@ -76,9 +76,7 @@ function parseArgs(argv) {
 
 function assertLocalPath(value, label) {
   if (!value) return;
-  if (/^[a-z]+:\/\//i.test(value)) {
-    throw new Error(`${label} must be a local file path, not a URL`);
-  }
+  shared.assertLocalCatalogPath(value, label);
 }
 
 async function readJson(path) {

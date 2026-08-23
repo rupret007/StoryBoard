@@ -12,7 +12,13 @@ Use this import when the operator has a **local** Vault file:
   `artist_project`, `classification`)
 
 and/or a **local** Show Night [`content/show.json`](https://github.com/rupret007/rad-dad-show-night).
-The importer never fetches those files over the network. See [`APPS.md`](../APPS.md).
+The importer never fetches those files over the network. `--source`,
+`--show-night`, `VAULT_CATALOG_PATH`, and `POST /songs/import` reject remote
+URLs. See [`APPS.md`](../APPS.md).
+
+This import is the **default documented way** to populate StoryBoard songs.
+Band operations edits duration, key, and running order after import. Do not
+re-enter the private catalog by hand.
 
 ## What it writes
 
@@ -24,7 +30,8 @@ The importer never fetches those files over the network. See [`APPS.md`](../APPS
   with `dryRun: false`). The CLI `--apply` path writes songs/setlists only.
 
 It does **not** create artists, venues, contacts, booking prospects, pitches,
-Travis/booker rows, invoices, or social posts. Stalemate / Trailer Swift stay
+Travis/booker rows, invoices, or social posts. **Travis books**; StoryBoard
+does not auto-pitch him. Stalemate / Trailer Swift / Something Dirty stay
 parked unless you opt in. Guest sets stay off unless you opt in, and even then
 they land on the **current** artist (no fourth live band).
 
@@ -89,5 +96,7 @@ That demo is not a live catalog and is not Rad Dad / Stalemate / Trailer Swift.
 ## Manager chat
 
 `POST /manager/chat` questions about the setlist, song library, or catalog stay
-record-bound. An empty library says so and points at this import. It will not
-invent titles or auto-pitch a buyer.
+record-bound. An empty library says so and points at this import (dry-run,
+`--apply` to write, no remote fetch). After import it lists only recorded
+live-band rows. It will not invent titles, auto-pitch Travis, auto-post, or
+treat a parked catalog as a fourth live band.

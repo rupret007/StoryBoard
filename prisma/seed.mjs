@@ -96,7 +96,7 @@ async function main() {
 function importLocalVaultCatalog() {
   const source = process.env.VAULT_CATALOG_PATH?.trim();
   if (!source) return { skipped: true, reason: "VAULT_CATALOG_PATH unset" };
-  if (/^[a-z]+:\/\//i.test(source)) {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source) || source.startsWith("//")) {
     throw new Error("VAULT_CATALOG_PATH must be a local file path, not a URL");
   }
   const apply = /^(1|true|yes)$/i.test(process.env.VAULT_CATALOG_APPLY ?? "");
