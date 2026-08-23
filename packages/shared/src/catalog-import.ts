@@ -203,11 +203,21 @@ export function planCatalogImport(input: {
         if (!includeAllProjects && !isLiveProject(project)) {
           if (isParkedProject(project) && !includeParked) {
             parkedSkipped += 1;
-            skipped.push({ reason: "parked_catalog", title: song.title, project: song.project ? String(song.project) : undefined, source: song.id });
+            skipped.push({
+              reason: "parked_catalog",
+              title: song.title,
+              ...(song.project != null ? { project: String(song.project) } : {}),
+              source: song.id
+            });
             continue;
           }
           if (!isParkedProject(project)) {
-            skipped.push({ reason: "not_live_band", title: song.title, project: song.project ? String(song.project) : undefined, source: song.id });
+            skipped.push({
+              reason: "not_live_band",
+              title: song.title,
+              ...(song.project != null ? { project: String(song.project) } : {}),
+              source: song.id
+            });
             continue;
           }
         }
