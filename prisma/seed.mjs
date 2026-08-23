@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import pg from "pg";
 import { randomBytes } from "crypto";
 
@@ -80,10 +82,29 @@ async function main() {
       demo = await seedGenericDemoOps(client, artistId);
     }
 
-    console.log("Seed OK:", { artistId, operatorId, email: seedEmail, demoOps: demo });
+    const vaultImport = importLocalVaultCatalog();
+    if (vaultImport.skipped) {
+      console.log("Song table left empty. The catalog lives in AI-Music-Vault. Set VAULT_CATALOG_PATH or run pnpm catalog:import.");
+    }
+
+    console.log("Seed OK:", { artistId, operatorId, email: seedEmail, demoOps: demo, vaultImport });
   } finally {
     await client.end();
   }
+}
+
+function importLocalVaultCatalog() {
+  const source = process.env.VAULT_CATALOG_PATH?.trim();
+  if (!source) return { skipped: true, reason: "VAULT_CATALOG_PATH unset" };
+  if (/^[a-z]+:\/\//i.test(source)) {
+    throw new Error("VAULT_CATALOG_PATH must be a local file path, not a URL");
+  }
+  const apply = /^(1|true|yes)$/i.test(process.env.VAULT_CATALOG_APPLY ?? "");
+  const args = [resolve("scripts/import-catalog.mjs"), "--source", resolve(source)];
+  if (apply) args.push("--apply");
+  const result = spawnSync(process.execPath, args, { stdio: "inherit", env: process.env });
+  if (result.status !== 0) throw new Error("Vault catalog import failed");
+  return { skipped: false, applied: apply, source: resolve(source) };
 }
 
 async function seedGenericDemoOps(client, artistId) {

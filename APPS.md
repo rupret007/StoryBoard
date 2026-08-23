@@ -24,9 +24,12 @@ become a second song catalog, a promo publisher, or a rehearsal room.
    pnpm catalog:import -- --source /path/to/app_api.json --show-night /path/to/show.json --apply --artist default
    ```
 
-   HTTP equivalent: `POST /songs/import` (`dryRun` defaults true).
-3. StoryBoard then has songs/setlists for Band operations and Manager chat.
-   It still will not invent titles, auto-pitch Travis, or create another artist.
+   Seed can reuse the same file: `VAULT_CATALOG_PATH=/path/to/app_api.json`
+   (dry-run) and `VAULT_CATALOG_APPLY=true` to write. HTTP equivalent:
+   `POST /songs/import` (`dryRun` defaults true).
+3. StoryBoard then has Vault songs plus Vault `setlist_ready` (live-band rows
+   only) for Band operations and Manager chat. It will not invent titles,
+   auto-pitch Travis, or create another artist.
 
 Default import is **Rad Dad / live band only**. Stalemate, Trailer Swift, and
 Something Dirty stay parked unless `--include-parked`. Guest sets stay off

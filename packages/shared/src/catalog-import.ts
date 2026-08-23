@@ -55,11 +55,19 @@ const vaultSongSchema = z.object({
   bpm: z.union([z.number(), z.string()]).optional()
 }).passthrough();
 
+const vaultSetlistReadySchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  title: z.string().trim().min(1).max(240).optional(),
+  key: optionalText,
+  project: optionalText
+}).passthrough();
+
 const vaultAppApiSchema = z.object({
   schema_version: z.number().int().optional(),
   generated: z.string().optional(),
   catalog_version: z.string().optional(),
-  songs: z.array(vaultSongSchema).max(2000)
+  songs: z.array(vaultSongSchema).max(2000),
+  setlist_ready: z.array(vaultSetlistReadySchema).max(2000).optional()
 }).passthrough();
 
 const showNightSongSchema = z.object({
@@ -273,6 +281,39 @@ export function planCatalogImport(input: {
           active: true,
           project: song.project ? String(song.project) : null,
           origin: "vault"
+        });
+      }
+      const readyItems: CatalogSetlistItemDraft[] = [];
+      for (const row of parsed.data.setlist_ready ?? []) {
+        const bySource = songs.find((song) => song.sourceKey === `vault:${CATALOG_IMPORT_POLICY_VERSION}:${row.id}`);
+        const readyTitle = row.title ? cleanTitle(row.title) : "";
+        const byTitle = readyTitle
+          ? songs.find((song) => song.title.toLocaleLowerCase() === readyTitle.toLocaleLowerCase())
+          : undefined;
+        const planned = bySource ?? byTitle;
+        if (!planned) {
+          skipped.push({
+            reason: "setlist_ready_not_live",
+            title: row.title ?? row.id,
+            ...(row.project != null ? { project: String(row.project) } : {}),
+            source: row.id
+          });
+          continue;
+        }
+        readyItems.push({
+          songSourceKey: planned.sourceKey,
+          itemType: "song",
+          label: planned.title,
+          transitionNotes: null
+        });
+      }
+      if (readyItems.length) {
+        setlists.push({
+          sourceKey: `vault:${CATALOG_IMPORT_POLICY_VERSION}:set:setlist-ready`,
+          name: "Vault setlist-ready",
+          status: "draft",
+          notes: clipNotes("Playable Vault originals already selected for the live band. Not a booking pitch."),
+          items: readyItems
         });
       }
     }

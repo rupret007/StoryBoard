@@ -18,7 +18,8 @@ The importer never fetches those files over the network. See [`APPS.md`](../APPS
 
 - `Song` rows with optional `sourceKey` (`vault:catalog_import_v1:…` or
   `shownight:catalog_import_v1:…`)
-- Draft `Setlist` rows only from an official Show Night running order
+- Draft `Setlist` rows from Vault `setlist_ready` (live-band songs already
+  selected) and from an official Show Night running order
 - One audited `catalog.imported` event on HTTP apply (`POST /songs/import`
   with `dryRun: false`). The CLI `--apply` path writes songs/setlists only.
 
@@ -77,9 +78,13 @@ operations edit records it.
 `pnpm db:seed` still creates only the generic `My Artist` / `default` tenant
 plus the owner membership. The song table stays empty.
 
+`VAULT_CATALOG_PATH=/path/to/app_api.json pnpm db:seed` dry-runs that local
+Vault file during seed. `VAULT_CATALOG_APPLY=true` writes it. Unset keeps the
+song table empty.
+
 `SEED_DEMO_OPS=true pnpm db:seed` adds two generic demo songs, one draft
-setlist, and invoice `DEMO-001` for local UI practice. That is not a live
-catalog and is not Rad Dad / Stalemate / Trailer Swift.
+setlist, and invoice `DEMO-001` for local UI practice. Prefer Vault import.
+That demo is not a live catalog and is not Rad Dad / Stalemate / Trailer Swift.
 
 ## Manager chat
 

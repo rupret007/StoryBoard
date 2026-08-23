@@ -649,7 +649,7 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
 
 Release validation snapshot (2026-07-13) plus the 2026-08-23 quality-review
-unit/eval gate: root typecheck/lint, 16/16 shared tests, 264/264 API unit
+unit/eval gate: root typecheck/lint, 17/17 shared tests, 264/264 API unit
 tests, both production builds, and 86/86 `manager_evals_v38` checks at 100%
 safety. The 2026-07-13 package also recorded 5/5 database workflows across all
 40 migrations; this change adds a 41st migration for song/setlist `sourceKey`.

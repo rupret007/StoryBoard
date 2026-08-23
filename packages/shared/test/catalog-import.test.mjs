@@ -15,6 +15,10 @@ const vaultFixture = {
     { id: "ST-0001", title: "Parked Demo", project: "Stalemate", is_original: true, key: "Am", bpm: "96" },
     { id: "TS-0001", title: "Trailer Sketch", project: "Trailer Swift", is_original: true, key: "D" },
     { id: "JS-0001", title: "Solo Sketch", project: "Jeff Story", is_original: true, key: "C" }
+  ],
+  setlist_ready: [
+    { id: "RD-0001", title: "Harbor Lights", key: "G", project: "Rad Dad" },
+    { id: "ST-0001", title: "Parked Demo", key: "Am", project: "Stalemate" }
   ]
 };
 
@@ -34,18 +38,29 @@ test("catalog import defaults to the live band and dry-run reconcile creates not
   const plan = shared.planCatalogImport({ vault: vaultFixture, showNight: showNightFixture });
   assert.equal(plan.policyVersion, "catalog_import_v1");
   assert.deepEqual(plan.songs.map((song) => song.title).sort(), ["Cover Example", "Harbor Lights"]);
-  assert.equal(plan.setlists.length, 1);
-  assert.equal(plan.setlists[0]?.name, "Rad Dad — official set");
-  assert.equal(plan.setlists[0]?.items[0]?.label, "Harbor Lights");
+  assert.equal(plan.setlists.length, 2);
+  assert.equal(plan.setlists[0]?.name, "Vault setlist-ready");
+  assert.deepEqual(plan.setlists[0]?.items.map((item) => item.label), ["Harbor Lights"]);
+  assert.equal(plan.setlists[1]?.name, "Rad Dad — official set");
+  assert.equal(plan.setlists[1]?.items[0]?.label, "Harbor Lights");
   assert.equal(plan.counts.parkedSkipped, 2);
   assert.equal(plan.counts.guestSetsSkipped, 1);
   assert.ok(plan.skipped.some((row) => row.reason === "flex_pool_skipped"));
+  assert.ok(plan.skipped.some((row) => row.reason === "setlist_ready_not_live" && row.title === "Parked Demo"));
   assert.ok(!plan.songs.some((song) => /parked demo|trailer|solo|travis/i.test(song.title)));
 
   const reconciliation = shared.reconcileCatalogImport(plan, { songs: [], setlists: [] });
   assert.equal(reconciliation.createSongs.length, 2);
-  assert.equal(reconciliation.createSetlists.length, 1);
+  assert.equal(reconciliation.createSetlists.length, 2);
   assert.equal(reconciliation.skipSongs.length, 0);
+});
+
+test("Vault setlist_ready only includes already selected live-band songs", () => {
+  const plan = shared.planCatalogImport({ vault: vaultFixture });
+  const ready = plan.setlists.find((setlist) => setlist.sourceKey.endsWith(":set:setlist-ready"));
+  assert.ok(ready);
+  assert.deepEqual(ready.items.map((item) => item.label), ["Harbor Lights"]);
+  assert.ok(!ready.items.some((item) => /parked|trailer|solo|travis/i.test(item.label)));
 });
 
 test("catalog import does not invent songs and skips existing source keys or titles", () => {
