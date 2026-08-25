@@ -55,22 +55,23 @@ const showNightFixture = {
 test("catalog import defaults to the live band and dry-run reconcile creates nothing against an empty table", () => {
   const plan = shared.planCatalogImport({ vault: radDadOnlyVault, showNight: showNightFixture });
   assert.equal(plan.policyVersion, "catalog_import_v1");
-  assert.deepEqual(plan.songs.map((song) => song.title).sort(), ["Cover Example", "Harbor Lights"]);
+  assert.deepEqual(plan.songs.map((song) => song.title).sort(), ["Harbor Lights"]);
   assert.equal(plan.setlists.length, 2);
   assert.equal(plan.setlists[0]?.name, "Vault setlist-ready");
   assert.deepEqual(plan.setlists[0]?.items.map((item) => item.label), ["Harbor Lights"]);
   assert.equal(plan.setlists[1]?.name, "Rad Dad — official set");
-  assert.equal(plan.setlists[1]?.items[0]?.label, "Harbor Lights");
+  assert.deepEqual(plan.setlists[1]?.items.map((item) => item.label), ["Harbor Lights"]);
   assert.equal(plan.counts.parkedSkipped, 1);
   assert.equal(plan.counts.guestSetsSkipped, 1);
   assert.ok(plan.skipped.some((row) => row.reason === "flex_pool_skipped"));
   assert.ok(plan.skipped.some((row) => row.reason === "setlist_ready_not_live" && row.title === "Parked Demo"));
   assert.ok(plan.skipped.some((row) => (row.reason === "parked_catalog" || row.reason === "not_setlist_ready") && row.title === "Dirty Sketch"));
   assert.ok(plan.skipped.some((row) => row.reason === "not_setlist_ready" && row.title === "Solo Sketch"));
-  assert.ok(!plan.songs.some((song) => /parked demo|trailer|solo|dirty sketch|travis/i.test(song.title)));
+  assert.ok(plan.skipped.some((row) => row.reason === "show_night_not_in_vault" && row.title === "Cover Example"));
+  assert.ok(!plan.songs.some((song) => /cover example|parked demo|trailer|solo|dirty sketch|travis/i.test(song.title)));
 
   const reconciliation = shared.reconcileCatalogImport(plan, { songs: [], setlists: [] });
-  assert.equal(reconciliation.createSongs.length, 2);
+  assert.equal(reconciliation.createSongs.length, 1);
   assert.equal(reconciliation.createSetlists.length, 2);
   assert.equal(reconciliation.skipSongs.length, 0);
 });
@@ -190,6 +191,30 @@ test("published empty setlist_ready_default_import stays empty without inventing
   assert.ok(plan.skipped.some((row) => row.reason === "not_live_band" && row.title === "Harbor Lights"));
   assert.ok(plan.skipped.some((row) => row.reason === "parked_catalog" && row.title === "Parked Demo"));
   assert.ok(plan.warnings.some((warning) => /published default-live slice/i.test(warning)));
+});
+
+test("Show Night does not mint Vault-excluded or unknown titles when a Vault catalog is present", () => {
+  const withSample = shared.planCatalogImport({ vault: vaultFixture, showNight: showNightFixture });
+  assert.deepEqual(withSample.songs.map((song) => song.title), ["Harbor Lights", "Sidewalk Radio", "Everyday"]);
+  assert.equal(withSample.songs.every((song) => song.origin === "vault"), true);
+  assert.ok(!withSample.songs.some((song) => song.title === "Cover Example"));
+  assert.ok(withSample.skipped.some((row) => row.reason === "cover_not_active" && row.title === "Cover Example" && row.source === "show_night"));
+  const official = withSample.setlists.find((setlist) => setlist.sourceKey.endsWith(":set:rad-dad"));
+  assert.ok(official);
+  assert.deepEqual(official.items.map((item) => item.label), ["Harbor Lights"]);
+
+  const emptySlicePlusNight = shared.planCatalogImport({ vault: emptyPublishedVault, showNight: showNightFixture });
+  assert.deepEqual(emptySlicePlusNight.songs, []);
+  assert.deepEqual(emptySlicePlusNight.setlists, []);
+  assert.ok(emptySlicePlusNight.skipped.some((row) => row.reason === "not_live_band" && row.title === "Harbor Lights" && row.source === "show_night"));
+  assert.ok(emptySlicePlusNight.skipped.some((row) => row.reason === "show_night_not_in_vault" && row.title === "Cover Example"));
+  assert.ok(!emptySlicePlusNight.songs.some((song) => /harbor lights|cover example|parked demo/i.test(song.title)));
+
+  const showNightOnly = shared.planCatalogImport({ showNight: showNightFixture });
+  assert.deepEqual(showNightOnly.songs.map((song) => song.title).sort(), ["Cover Example", "Harbor Lights"]);
+  assert.equal(showNightOnly.songs.every((song) => song.origin === "show_night"), true);
+  assert.equal(showNightOnly.setlists[0]?.name, "Rad Dad — official set");
+  assert.deepEqual(showNightOnly.setlists[0]?.items.map((item) => item.label), ["Harbor Lights", "Cover Example"]);
 });
 
 test("live Vault schema 3 sample uses the published default-live slice and field map", () => {

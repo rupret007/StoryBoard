@@ -682,7 +682,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v33` with offline dataset `manager_evals_v43` retains the
+version `manager_os_v33` with offline dataset `manager_evals_v44` retains the
 current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
@@ -934,7 +934,9 @@ Operations routes:
   `PATCH /songs/:id`, `/setlists/:id`, and `/projects/:id`. `POST /songs/import`
   dry-runs (default) or applies a local Vault `app_api.json` /
   `master_catalog.json` and/or Show Night `show.json` onto the current artist only.
-  Default planning is Rad Dad rows only; writer, hybrid, and parked catalogs stay out unless opted in. Setlist reads include the derived
+  When a Vault payload is present, Show Night binds a running order to planned
+  Vault titles and does not mint covers or unknown songs. Default planning
+  consumes Vault's published default-live slice; parked catalogs stay out unless opted in. Setlist reads include the derived
   `setlist_summary_v1` timing summary; writes replace the submitted ordered
   item list atomically after validating every song belongs to the active artist.
 - `GET /projects/readiness`, `GET /projects/:id/readiness`, and
@@ -1267,10 +1269,10 @@ pnpm build
 pnpm manager:eval
 ```
 
-**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The current unit package passes 24/24 shared tests and 269/269 API unit tests. The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing and relational follow-through, reload-safe receipts and capability controls, owner/member provider-context gating, durable/exact/legacy full-context turn projection including provider fallback, owner-only recommendation mutation/history/learning isolation, feedback authorization rechecks, exact-source memory visibility, rejection of archived/private memory re-acceptance with active-normal-only refresh, full-input credential rejection, legacy audit-key projection, approval lifecycle classification/caller stitching, role capabilities, mixed provider-state quarantine and reconciliation, rejected/expired receipt behavior, one-shot execution safety, transaction-bound audit rollback, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The receipt package adds strict evidence, terminal-outcome, idempotency, tenant, unchanged-Approval, no-provider-call, event-logistics, campaign-replacement, and Manager-blocking regressions. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
+**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The current unit package passes 25/25 shared tests and 269/269 API unit tests. The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing and relational follow-through, reload-safe receipts and capability controls, owner/member provider-context gating, durable/exact/legacy full-context turn projection including provider fallback, owner-only recommendation mutation/history/learning isolation, feedback authorization rechecks, exact-source memory visibility, rejection of archived/private memory re-acceptance with active-normal-only refresh, full-input credential rejection, legacy audit-key projection, approval lifecycle classification/caller stitching, role capabilities, mixed provider-state quarantine and reconciliation, rejected/expired receipt behavior, one-shot execution safety, transaction-bound audit rollback, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The receipt package adds strict evidence, terminal-outcome, idempotency, tenant, unchanged-Approval, no-provider-call, event-logistics, campaign-replacement, and Manager-blocking regressions. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
 
 The complete root quality gate passes, including both production builds. The
-`manager_os_v33` / `manager_evals_v43` gate passes 97/97 checks at 100% safety.
+`manager_os_v33` / `manager_evals_v44` gate passes 98/98 checks at 100% safety.
 
 **Database integration tests:** Set `STORYBOARD_TEST_DATABASE_URL` to a disposable PostgreSQL database whose name contains `test`, then run:
 

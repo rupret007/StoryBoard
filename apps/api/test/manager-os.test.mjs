@@ -3508,7 +3508,7 @@ test("manager chat refuses direct outside action and offers only reviewable inte
   assert.ok(!result.recommendation || result.recommendation.proposedAction?.type === "create_task");
 });
 
-test("empty seed chat stays honest about missing setlists, songs, and booking targets", () => {
+test("empty seed chat stays honest about missing setlists, songs, and booking targets", async () => {
   const emptySeed = managerFacts({
     artist: { id: "artist-a", name: "My Artist" },
     profile: { id: "profile-a", intakeCompletedAt: null, decisionStyle: "guided", twelveMonthAmbition: null },
@@ -3577,6 +3577,34 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   assert.match(showNightOnVault.answer, /not a live catalog or a fourth live band/i);
   assert.doesNotMatch(showNightOnVault.answer, /usually from a local Vault|parked demo/i);
   assert.equal(showNightOnVault.recommendation, null);
+
+  const catalogImport = await loadShared("catalog-import.js");
+  const emptySliceShowNight = catalogImport.planCatalogImport({
+    vault: {
+      schema_version: 3,
+      songs: [
+        { id: "JS-0001", title: "Harbor Lights", project: "Jeff Story", import_scope: "not_live_band", is_original: true },
+        { id: "ST-0002", title: "Cover Example", project: "Stalemate", import_scope: "cover_not_active", is_original: false }
+      ],
+      setlist_ready_default_import: []
+    },
+    showNight: {
+      radDadSet: [
+        { number: 1, song: "Harbor Lights →", transition: true },
+        { number: 2, song: "Cover Example", transition: false }
+      ]
+    }
+  });
+  const emptySliceShowNightChat = intelligence.deterministicManagerChat(managerFacts({
+    ...catalogImport.managerRecordsFromCatalogPlan(emptySliceShowNight),
+    goals: [],
+    opportunities: []
+  }), "What's our setlist?", now);
+  assert.equal(emptySliceShowNight.songs.length, 0);
+  assert.equal(emptySliceShowNight.setlists.length, 0);
+  assert.match(emptySliceShowNightChat.answer, /no songs or setlists are recorded/i);
+  assert.doesNotMatch(emptySliceShowNightChat.answer, /harbor lights|cover example/i);
+  assert.equal(emptySliceShowNightChat.recommendation, null);
 
   const pitch = intelligence.deterministicManagerChat(emptySeed, "Who should we pitch in Milwaukee?", now);
   assert.match(pitch.answer, /0 active opportunities/i);
