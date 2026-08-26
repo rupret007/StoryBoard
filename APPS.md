@@ -29,8 +29,10 @@ catalog, a promo publisher, or a rehearsal room.
    `pnpm catalog:import` with no `--source` dry-runs the checked-in
    `app_api.json` shape. Seed does the same when `VAULT_CATALOG_PATH` is
    unset. Point `VAULT_CATALOG_PATH` at a local Vault export and set
-   `VAULT_CATALOG_APPLY=true` to write.    HTTP / Band operations equivalent: paste or choose the same local JSON in
-   **Music & setlists** (`POST /songs/import`, `dryRun` defaults true).
+   `VAULT_CATALOG_APPLY=true` to write. HTTP / Band operations equivalent:
+   paste or choose the same local JSON in **Music & setlists**
+   (`POST /songs/import`, `dryRun` defaults true). The Band operations
+   preview names planned titles and parked / cover / Travis skips.
    Remote catalog URLs are rejected.
 3. StoryBoard then has Vault songs plus Vault `setlist_ready_default_import`
    (the published `default_live` planner slice) for Band operations and

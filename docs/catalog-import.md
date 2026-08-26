@@ -64,7 +64,9 @@ pnpm catalog:import -- --source https://example.invalid/app_api.json   # must fa
 
 Band operations → **Music & setlists** also previews and applies the same
 local JSON through `POST /songs/import` (dry-run first). The form never
-fetches a URL.
+fetches a URL. Preview lists planned titles and names parked, cover, Travis,
+and guest-set skips before apply can write. Apply uses the reviewed payload,
+not a later edit in the textarea.
 
 HTTP equivalent (session + membership required; `dryRun` defaults true):
 
