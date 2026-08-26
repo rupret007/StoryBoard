@@ -7,11 +7,11 @@ private catalog, and Manager chat will not invent one. An empty song table
 is **not** a second catalog. Seed now dry-runs the checked-in
 `app_api.json` shape sample so that emptiness is never silent.
 
-Use this import when the operator has a **local** Vault file:
+Use this import when the operator has the **local** Vault StoryBoard feed:
 
 - `data/app_api.json` — slim feed from Vault `scripts/export_app_api.py`
-- `data/master_catalog.json` — the Vault spine (`song_id`, `canonical_title`,
-  `artist_project`, `classification`)
+- `data/master_catalog.json` is the Vault spine, not an import feed. StoryBoard
+  rejects it; regenerate `data/app_api.json` before importing.
 
 and/or a **local** Show Night [`content/show.json`](https://github.com/rupret007/rad-dad-show-night).
 The importer never fetches those files over the network. `--source`,
@@ -57,8 +57,8 @@ pnpm catalog:import
 
 # Preview a local Vault export — default
 pnpm catalog:import -- --source /path/to/app_api.json
-pnpm catalog:import -- --source /path/to/master_catalog.json
 pnpm catalog:import -- --source /path/to/app_api.json --show-night /path/to/show.json
+pnpm catalog:import -- --source /path/to/master_catalog.json              # must fail; export app_api.json first
 pnpm catalog:import -- --source https://example.invalid/app_api.json   # must fail
 ```
 

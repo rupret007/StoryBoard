@@ -932,8 +932,9 @@ Operations routes:
   run-of-show checkpoints; owner/member writes only
 - `GET` / `POST /songs`, `/setlists`, and `/projects`; item updates use
   `PATCH /songs/:id`, `/setlists/:id`, and `/projects/:id`. `POST /songs/import`
-  dry-runs (default) or applies a local Vault `app_api.json` /
-  `master_catalog.json` and/or Show Night `show.json` onto the current artist only.
+  dry-runs (default) or applies a local Vault `app_api.json` StoryBoard feed
+  and/or Show Night `show.json` onto the current artist only. The Vault
+  `master_catalog.json` spine is rejected as an import file.
   When a Vault payload is present, Show Night binds a running order to planned
   Vault titles and does not mint covers or unknown songs. Default planning
   consumes Vault's published default-live slice; parked catalogs stay out unless opted in.
@@ -972,8 +973,9 @@ urgency. Manager briefs and chat consume this same result.
 
 The default seed dry-runs the checked-in Vault `app_api.json` shape and leaves
 the song table empty unless `VAULT_CATALOG_APPLY=true`. Point
-`VAULT_CATALOG_PATH` at a local Vault `app_api.json` or `master_catalog.json`
-to plan that file instead. Vault is the catalog; StoryBoard imports it with
+`VAULT_CATALOG_PATH` at a local Vault `app_api.json` StoryBoard feed to plan
+that file instead. The `master_catalog.json` spine is not the feed. Vault is
+the catalog; StoryBoard imports it with
 `pnpm catalog:import` (dry-run by default), seed apply, or `POST /songs/import`.
 `GET /songs/status` reports an empty table as a missing import. Paths and
 payloads must be local JSON; remote catalog URLs are rejected. Details:

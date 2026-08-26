@@ -15,20 +15,20 @@ catalog, a promo publisher, or a rehearsal room.
 
 ## Consolidated path: Vault → StoryBoard
 
-1. In Vault, keep `data/master_catalog.json` as the spine. Optionally regenerate
-   the slim feed with `python3 scripts/export_app_api.py` → `data/app_api.json`.
+1. In Vault, keep `data/master_catalog.json` as the spine. Regenerate the slim
+   StoryBoard feed with `python3 scripts/export_app_api.py` → `data/app_api.json`.
+   StoryBoard rejects the spine as an import file.
 2. On a machine that already has those **local** files, dry-run then apply:
 
    ```bash
    pnpm catalog:import
    pnpm catalog:import -- --source /path/to/app_api.json
-   pnpm catalog:import -- --source /path/to/master_catalog.json
    pnpm catalog:import -- --source /path/to/app_api.json --show-night /path/to/show.json --apply --artist default
    ```
 
    `pnpm catalog:import` with no `--source` dry-runs the checked-in
    `app_api.json` shape. Seed does the same when `VAULT_CATALOG_PATH` is
-   unset. Point `VAULT_CATALOG_PATH` at a local Vault export and set
+   unset. Point `VAULT_CATALOG_PATH` at the local `data/app_api.json` feed and set
    `VAULT_CATALOG_APPLY=true` to write. HTTP / Band operations equivalent:
    paste or choose the same local JSON in **Music & setlists**
    (`POST /songs/import`, `dryRun` defaults true). The Band operations
@@ -54,8 +54,9 @@ songs. **Travis books** — he is the human booker, not a pitch target.
 Stalemate, Trailer Swift, and Something Dirty catalogs stay parked unless
 `--include-parked`. Guest sets stay off unless
 `--include-guest-sets`, and they still land on the current artist.
-HTTP `POST /songs/import` and `VAULT_CATALOG_PATH` accept local JSON only;
-remote catalog URLs are rejected. `SEED_DEMO_OPS` practice rows, Show Night
+HTTP `POST /songs/import` and `VAULT_CATALOG_PATH` accept the local
+`data/app_api.json` feed only; the Vault spine and remote catalog URLs are
+rejected. `SEED_DEMO_OPS` practice rows, Show Night
 running-order imports, and Band operations one-offs keep their own
 provenance; Manager and `GET /songs/status` never call them a Vault import,
 including when a Show Night running-order setlist sits on Vault-titled songs.
