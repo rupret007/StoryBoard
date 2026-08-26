@@ -362,12 +362,14 @@ export function describeCatalogImportPreview(input: {
   };
   created: { songs: number; setlists: number };
 }): CatalogImportPreviewView {
-  const createSongs = input.reconciliation.createSongs.length;
-  const createSetlists = input.reconciliation.createSetlists.length;
+  const songsToCreate = input.reconciliation.createSongs;
+  const setlistsToCreate = input.reconciliation.createSetlists;
+  const createSongs = songsToCreate.length;
+  const createSetlists = setlistsToCreate.length;
   const headline = input.dryRun
     ? `Dry-run: would create ${createSongs} song${createSongs === 1 ? "" : "s"} and ${createSetlists} setlist${createSetlists === 1 ? "" : "s"}. Existing titles and source keys stay skipped.`
     : `Applied: wrote ${input.created.songs} song${input.created.songs === 1 ? "" : "s"} and ${input.created.setlists} setlist${input.created.setlists === 1 ? "" : "s"}.`;
-  const songTitles = input.plan.songs.slice(0, CATALOG_IMPORT_PREVIEW_SONG_LIMIT).map((song) => song.title);
+  const songTitles = songsToCreate.slice(0, CATALOG_IMPORT_PREVIEW_SONG_LIMIT).map((song) => song.title);
   const travisCount = countSkipReason(input.plan.skipped, "travis_books");
   const coverCount = countSkipReason(input.plan.skipped, "cover_not_active");
   const showNightUnbound = countSkipReason(input.plan.skipped, "show_night_not_in_vault");
@@ -401,8 +403,8 @@ export function describeCatalogImportPreview(input: {
   return {
     headline,
     songTitles,
-    moreSongCount: Math.max(0, input.plan.songs.length - songTitles.length),
-    setlists: input.plan.setlists.map((setlist) => ({ name: setlist.name, itemCount: setlist.items.length })),
+    moreSongCount: Math.max(0, songsToCreate.length - songTitles.length),
+    setlists: setlistsToCreate.map((setlist) => ({ name: setlist.name, itemCount: setlist.items.length })),
     skipLines,
     existingSkipLine: existing.length
       ? `Already recorded, skipped: ${existing.slice(0, 5).join(", ")}${existing.length > 5 ? ` (+${existing.length - 5} more)` : ""}.`

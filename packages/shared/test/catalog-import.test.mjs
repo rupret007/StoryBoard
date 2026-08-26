@@ -346,11 +346,21 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
     plan: previewPlan,
     reconciliation: shared.reconcileCatalogImport(previewPlan, {
       songs: [{ id: "song-harbor", title: "Harbor Lights", sourceKey: "vault:catalog_import_v1:JS-0001" }],
-      setlists: []
+      setlists: [{
+        id: "setlist-existing",
+        name: previewPlan.setlists[0].name,
+        sourceKey: previewPlan.setlists[0].sourceKey
+      }]
     }),
     created: { songs: 0, setlists: 0 }
   });
+  assert.match(existingPreview.headline, /would create 2 songs and 0 setlists/);
   assert.match(existingPreview.existingSkipLine ?? "", /Harbor Lights/);
+  assert.match(existingPreview.existingSkipLine ?? "", /Vault default-live/);
+  assert.deepEqual(existingPreview.songTitles, ["Sidewalk Radio", "Everyday"]);
+  assert.equal(existingPreview.moreSongCount, 0);
+  assert.deepEqual(existingPreview.setlists, []);
+  assert.doesNotMatch(existingPreview.songTitles.join(" "), /Harbor Lights/);
 
   const emptySlicePreview = shared.describeCatalogImportPreview({
     dryRun: true,
