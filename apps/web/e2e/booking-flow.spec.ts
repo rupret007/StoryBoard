@@ -1211,3 +1211,38 @@ test("approved immediate-send campaigns remain executable and create follow-up w
   await page.goto("/tasks");
   await expect(page.getByRole("cell", { name: `Follow up with ${prospectName}`, exact: true })).toBeVisible();
 });
+
+test("day-of setlist keeps a mixed-duration subtotal explicit", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const knownSong = await artistApi<{ id: string }>(page, artistId, "/songs", "POST", {
+    title: `Day-of timed song ${suffix}`,
+    durationSeconds: 245,
+    active: true
+  });
+  const untimedSong = await artistApi<{ id: string }>(page, artistId, "/songs", "POST", {
+    title: `Day-of untimed song ${suffix}`,
+    durationSeconds: null,
+    active: true
+  });
+  const setlist = await artistApi<{ id: string }>(page, artistId, "/setlists", "POST", {
+    name: `Day-of mixed set ${suffix}`,
+    status: "draft",
+    items: [
+      { songId: knownSong.id, itemType: "song" },
+      { songId: untimedSong.id, itemType: "song" }
+    ]
+  });
+  const event = await artistApi<{ id: string }>(page, artistId, "/events", "POST", {
+    type: "gig",
+    status: "draft",
+    title: `Day-of duration check ${suffix}`,
+    setlistId: setlist.id,
+    currency: "USD"
+  });
+
+  await page.goto(`/operations/events/${event.id}`);
+  await expect(page.getByText("4:05 known + 1 song duration missing", { exact: true })).toBeVisible();
+  await expect(page.getByText("4 min", { exact: true })).toHaveCount(0);
+});
