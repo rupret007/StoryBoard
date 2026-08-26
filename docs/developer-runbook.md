@@ -936,7 +936,9 @@ Operations routes:
   `master_catalog.json` and/or Show Night `show.json` onto the current artist only.
   When a Vault payload is present, Show Night binds a running order to planned
   Vault titles and does not mint covers or unknown songs. Default planning
-  consumes Vault's published default-live slice; parked catalogs stay out unless opted in. Setlist reads include the derived
+  consumes Vault's published default-live slice; parked catalogs stay out unless opted in.
+  Band operations → Music & setlists can preview and apply the same local JSON.
+  Setlist reads include the derived
   `setlist_summary_v1` timing summary; writes replace the submitted ordered
   item list atomically after validating every song belongs to the active artist.
 - `GET /projects/readiness`, `GET /projects/:id/readiness`, and

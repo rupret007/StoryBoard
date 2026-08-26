@@ -126,7 +126,7 @@ export default async function OperationsPage() {
     <div className="space-y-8">
       <PageHeader
         title="Band operations"
-        description="Shows, rehearsals, music, projects, and deal readiness in one working layer."
+        description="Shows, rehearsals, Vault-imported music and setlists, projects, and deal readiness in one working layer."
       />
       <OperationsClient
         initialEvents={events}

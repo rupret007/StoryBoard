@@ -645,7 +645,7 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm db:generate` | `prisma generate` (root config) |
 | `pnpm db:migrate` | `prisma migrate dev` (needs Postgres) |
 | `pnpm db:seed` | Seed default artist + operator membership (needs migrate) |
-| `pnpm catalog:import` | **Default way to populate songs.** No `--source` dry-runs the checked-in `app_api.json` shape. A local Vault export imports the published `setlist_ready_default_import` / `default_live` slice; parked/cover/Travis rows stay out unless opted in. `--apply` writes. Never a remote URL. |
+| `pnpm catalog:import` | **Default way to populate songs.** No `--source` dry-runs the checked-in `app_api.json` shape. A local Vault export imports the published `setlist_ready_default_import` / `default_live` slice; parked/cover/Travis rows stay out unless opted in. `--apply` writes. Never a remote URL. Band operations → Music & setlists previews/applies the same local JSON via `POST /songs/import`. |
 | `pnpm db:studio` | Prisma Studio |
 | `pnpm db:audit-relationships` | Read-only check for historical cross-artist record links |
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
