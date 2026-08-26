@@ -62,6 +62,10 @@ pnpm catalog:import -- --source /path/to/app_api.json --show-night /path/to/show
 pnpm catalog:import -- --source https://example.invalid/app_api.json   # must fail
 ```
 
+Band operations → **Music & setlists** also previews and applies the same
+local JSON through `POST /songs/import` (dry-run first). The form never
+fetches a URL.
+
 HTTP equivalent (session + membership required; `dryRun` defaults true):
 
 ```http
@@ -116,7 +120,8 @@ Vault import.
 ## Manager chat
 
 `POST /manager/chat` questions about the setlist, song library, or catalog stay
-record-bound. An empty library says so and points at this import (dry-run,
+record-bound. An empty library says so and points at this import (Band
+operations → Music & setlists, or `pnpm catalog:import`; dry-run,
 `--apply` to write, no remote fetch). After a Vault import it lists only
 recorded live-band rows and names the published default-live setlist. A
 Stalemate-origin row already in that slice stays current-artist repertoire —

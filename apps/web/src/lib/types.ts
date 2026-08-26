@@ -451,6 +451,23 @@ export type EventDayOfResponse = { event: BandEvent; activeMembers: BandMember[]
 export type Song = { id: string; title: string; durationSeconds?: number | null; musicalKey?: string | null; bpm?: number | null; leadVocalist?: string | null; genre?: string | null; notes?: string | null; lyricsUrl?: string | null; chartUrl?: string | null; sourceKey?: string | null; active: boolean; updatedAt?: string };
 export type SetlistSummary = { policyVersion: "setlist_summary_v1"; itemCount: number; songCount: number; breakCount: number; noteCount: number; knownDurationSongCount: number; unknownDurationSongCount: number; totalSongDurationSeconds: number; timingStatus: "empty" | "incomplete" | "timed"; durationLabel: string };
 export type Setlist = { id: string; name: string; status: string; notes?: string | null; sourceKey?: string | null; updatedAt?: string; summary?: SetlistSummary; items: { id: string; songId?: string | null; itemType: "song" | "break" | "note"; label?: string | null; transitionNotes?: string | null; song?: Song | null }[] };
+export type CatalogImportResult = {
+  dryRun: boolean;
+  policyVersion: string;
+  plan: {
+    songs: { title: string; sourceKey: string }[];
+    setlists: { name: string; items: { label: string }[] }[];
+    skipped: { reason: string; title?: string }[];
+    warnings: string[];
+  };
+  reconciliation: {
+    createSongs: { title: string }[];
+    createSetlists: { name: string; items: { label: string }[] }[];
+    skipSongs: { reason: string; title?: string }[];
+    skipSetlists: { reason: string; title?: string }[];
+  };
+  created: { songs: number; setlists: number };
+};
 export type ProjectReadinessGap = { code: string; severity: "low" | "med" | "high"; detail: string; nextAction: string; evidenceIds: string[] };
 export type ProjectReadiness = { projectId: string; score: number; status: "on_track" | "at_risk" | "off_track" | "blocked" | "complete" | "closed" | "needs_plan"; confidence: number; headline: string; nextAction: string; nextMilestone?: { id: string; title: string; dueAt?: string | null; ownerLabel?: string | null } | null; completedMilestones: number; totalMilestones: number; overdueMilestones: number; blockedMilestones: number; spendMinor: number; budgetRemainingMinor?: number | null; gaps: ProjectReadinessGap[]; evidenceIds: string[]; observedAt: string };
 export type ArtistProject = { id: string; type: string; status: string; name: string; description?: string | null; startsAt?: string | null; dueAt?: string | null; budgetMinor?: number | null; currency: string; successMetrics?: string[]; assets?: { label: string; url: string }[]; tasks?: Task[]; events?: BandEvent[]; expenses?: Expense[]; readiness?: ProjectReadiness };

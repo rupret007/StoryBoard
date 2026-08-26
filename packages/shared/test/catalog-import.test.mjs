@@ -264,6 +264,8 @@ test("live Vault schema 3 sample uses the published default-live slice and field
   assert.equal(emptyStatus.source, "none");
   assert.match(emptyStatus.message, /not a second catalog/i);
   assert.match(emptyStatus.message, /setlist_ready_default_import|default_live/i);
+  assert.match(emptyStatus.message, /Band operations/i);
+  assert.match(emptyStatus.message, /Music & setlists/i);
 
   const importedStatus = shared.describeSongCatalogStatus({
     songs: plan.songs.map((song) => ({ sourceKey: song.sourceKey })),
@@ -301,6 +303,18 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.equal(shared.catalogSourceKind("shownight:catalog_import_v1:song:rad-dad:harbor-lights"), "show_night");
   assert.equal(shared.catalogSourceKind("seed:demo:opener"), "demo");
   assert.equal(shared.catalogSourceKind(null), "manual");
+  assert.equal(shared.catalogSourceLabel("vault:catalog_import_v1:JS-0001"), "Vault import");
+  assert.equal(shared.catalogSourceLabel("shownight:catalog_import_v1:set:rad-dad"), "Show Night");
+  assert.equal(shared.catalogSourceLabel("seed:demo:setlist"), "Practice data");
+  assert.equal(shared.catalogSourceLabel(null), "Band operations");
+  assert.match(shared.CATALOG_BAND_OPS_IMPORT_HINT, /Band operations/i);
+  assert.match(shared.CATALOG_BAND_OPS_IMPORT_HINT, /Music & setlists/i);
+
+  assert.deepEqual(shared.parseLocalCatalogJson('{"songs":[]}'), { songs: [] });
+  assert.equal(shared.parseLocalCatalogJson("  "), undefined);
+  assert.throws(() => shared.parseLocalCatalogJson("https://example.invalid/app_api.json", "Vault"), /local JSON, not a URL/i);
+  assert.throws(() => shared.parseLocalCatalogJson('{"url":"https://example.invalid/app_api.json"}', "Vault"), /local JSON, not a URL/i);
+  assert.throws(() => shared.parseLocalCatalogJson("{not-json", "Vault"), /valid JSON/i);
 
   const demoStatus = shared.describeSongCatalogStatus({
     songs: [{ sourceKey: "seed:demo:opener" }, { sourceKey: "seed:demo:closer" }],

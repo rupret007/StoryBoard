@@ -1,4 +1,4 @@
-import { describeSongCatalogStatus } from "@storyboard/shared";
+import { CATALOG_BAND_OPS_IMPORT_HINT, describeSongCatalogStatus } from "@storyboard/shared";
 import type { ManagerGoalTargetDirection, ManagerWorkstream } from "../generated/prisma/enums";
 import { approvalLifecycleStage, type ApprovalLifecycleStage } from "../approvals/approval-lifecycle";
 import type { ShowReadiness } from "../operations/event-readiness";
@@ -1523,7 +1523,7 @@ function deterministicManagerChatBase(
     const activeSongs = songs.filter((song) => song.active !== false);
     if (!songs.length && !setlists.length) {
       return {
-        answer: "No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Vault is the sole catalog; default import is the published setlist_ready_default_import / default_live slice (Rad Dad + Jeff Story + recorded Rad Dad plays) from a local app_api.json (`pnpm catalog:import`, dry-run by default; `--apply` writes). That empty table is not a second catalog. StoryBoard never fetches a remote catalog.",
+        answer: `No songs or setlists are recorded for this artist. StoryBoard will not invent a catalog. Vault is the sole catalog; default import is the published setlist_ready_default_import / default_live slice (Rad Dad + Jeff Story + recorded Rad Dad plays) from a local app_api.json (\`pnpm catalog:import\`, dry-run by default; \`--apply\` writes). ${CATALOG_BAND_OPS_IMPORT_HINT} That empty table is not a second catalog. StoryBoard never fetches a remote catalog.`,
         citations: [],
         recommendation: null
       };
@@ -1538,10 +1538,13 @@ function deterministicManagerChatBase(
     const vaultSlice = recorded.songs.length
       ? " A Stalemate, hybrid, or Jeff Story row in that slice is current-artist repertoire — not a fourth live band."
       : "";
+    const nextStep = setlists.length
+      ? " Attach a recorded setlist to a gig from Events."
+      : " Build or import a running order in Band operations.";
     const closer = recorded.songs.length
       ? " StoryBoard will not invent titles, auto-post, or auto-pitch Travis."
       : " StoryBoard will not invent titles, auto-post, or treat a parked catalog as another live band.";
-    const provenance = `${status.message}${vaultSlice}${closer}`;
+    const provenance = `${status.message}${vaultSlice}${nextStep}${closer}`;
     return {
       answer: `${activeSongs.length} song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded.${songLines.length ? `\n\nSongs:\n${songLines.join("\n")}` : ""}${setlistLines.length ? `\n\nSetlists:\n${setlistLines.join("\n")}` : ""}\n\n${provenance}`,
       citations: unique([...activeSongs.map((song) => song.id), ...setlists.map((setlist) => setlist.id)]).slice(0, 10),

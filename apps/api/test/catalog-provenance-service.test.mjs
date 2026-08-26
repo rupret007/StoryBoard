@@ -74,3 +74,71 @@ test("manual song updates preserve importer-owned catalog provenance", async () 
   assert.equal(writes.patched.title, "Corrected title");
   assert.equal(Object.hasOwn(writes.patched, "sourceKey"), false);
 });
+
+function setlistServiceFixture() {
+  const writes = { created: null, patched: null, auditFields: null };
+  const client = {
+    song: { count: async () => 0 },
+    setlist: {
+      findFirst: async () => ({ id: "setlist-a", artistId: "artist-a", sourceKey: "vault:catalog_import_v1:set:setlist-ready" }),
+      create: async ({ data }) => {
+        writes.created = data;
+        return { id: "setlist-a", ...data, items: data.items?.create ?? [] };
+      },
+      update: async ({ data }) => {
+        writes.patched = data;
+        return { id: "setlist-a", artistId: "artist-a", items: [], ...data };
+      }
+    },
+    setlistItem: {
+      deleteMany: async () => ({ count: 0 }),
+      createMany: async () => ({ count: 0 })
+    },
+    $transaction: async (fn) => fn(client)
+  };
+  const service = new OperationsService(
+    { client },
+    { log: async (entry) => { writes.auditFields = entry.metadata?.fields ?? null; } },
+    {}
+  );
+  return { service, writes };
+}
+
+test("manual setlist creation cannot mint catalog provenance through an internal caller", async () => {
+  const { service, writes } = setlistServiceFixture();
+
+  await service.createSetlist(
+    "artist-a",
+    {
+      name: "Manual running order",
+      status: "draft",
+      items: [],
+      sourceKey: "vault:catalog_import_v1:set:forged"
+    },
+    "owner",
+    "operator-a"
+  );
+
+  assert.equal(writes.created.name, "Manual running order");
+  assert.equal(writes.created.sourceKey, null);
+  assert.equal(Object.hasOwn(writes.created.items.create[0] ?? {}, "sourceKey"), false);
+});
+
+test("manual setlist updates preserve importer-owned catalog provenance", async () => {
+  const { service, writes } = setlistServiceFixture();
+
+  await service.patchSetlist(
+    "artist-a",
+    "setlist-a",
+    {
+      name: "Corrected running order",
+      sourceKey: "shownight:catalog_import_v1:set:forged"
+    },
+    "owner",
+    "operator-a"
+  );
+
+  assert.equal(writes.patched.name, "Corrected running order");
+  assert.equal(Object.hasOwn(writes.patched, "sourceKey"), false);
+  assert.deepEqual(writes.auditFields, ["name"]);
+});

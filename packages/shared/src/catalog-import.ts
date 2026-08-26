@@ -286,10 +286,43 @@ export function catalogWorkspaceUsesVaultFraming(status: Pick<CatalogRecordProve
 }
 
 export const CATALOG_NON_VAULT_LIBRARY_INTRO =
-  "These recorded rows are not a Vault import. Vault remains the catalog; default import is still the published setlist_ready_default_import / default_live slice (`pnpm catalog:import`). Add here only for a Band operations correction. Durations stay unknown until someone records them.";
+  "These recorded rows are not a Vault import. Vault remains the catalog; default import is still the published setlist_ready_default_import / default_live slice. Preview a local file in Band operations or use `pnpm catalog:import`. Add here only for a Band operations correction. Durations stay unknown until someone records them.";
 
 export const CATALOG_NON_VAULT_EMPTY_SETLIST_HINT =
-  "No setlist is recorded. Create one here from the songs on this artist. That is not a Vault import or a second catalog.";
+  "No setlist is recorded. Preview a local Vault or Show Night file in Band operations, or create one here from the songs on this artist. That is not a Vault import or a second catalog.";
+
+export const CATALOG_BAND_OPS_IMPORT_HINT =
+  "In the app, preview that same local JSON in Band operations → Music & setlists.";
+
+export const CATALOG_SOURCE_LABELS = {
+  vault: "Vault import",
+  show_night: "Show Night",
+  demo: "Practice data",
+  manual: "Band operations"
+} as const;
+
+export function catalogSourceLabel(sourceKey?: string | null) {
+  return CATALOG_SOURCE_LABELS[catalogSourceKind(sourceKey)];
+}
+
+/** Browser/CLI helper: accept pasted local JSON and refuse remote locators. */
+export function parseLocalCatalogJson(text: string, label = "catalog"): unknown {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  if (catalogLocatorLooksRemote(trimmed)) {
+    throw new Error(`${label} must be local JSON, not a URL`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error(`${label} must be valid JSON`);
+  }
+  if (catalogLocatorLooksRemote(parsed)) {
+    throw new Error(`${label} must be local JSON, not a URL`);
+  }
+  return parsed;
+}
 
 export type SongCatalogStatus = CatalogRecordProvenance & {
   policyVersion: typeof CATALOG_IMPORT_POLICY_VERSION;
@@ -848,7 +881,7 @@ export function catalogRecordProvenance(
 
 function catalogStatusMessage(provenance: CatalogRecordProvenance): string {
   if (provenance.source === "none") {
-    return "No songs are recorded. Vault is the catalog; default import is the published setlist_ready_default_import / default_live slice from a local app_api.json (`pnpm catalog:import`, then --apply). This empty table is not a second catalog.";
+    return "No songs are recorded. Vault is the catalog; default import is the published setlist_ready_default_import / default_live slice from a local app_api.json (`pnpm catalog:import`, then --apply). Preview the same local JSON in Band operations → Music & setlists. This empty table is not a second catalog.";
   }
   const countLabel = `${provenance.songCount} song${provenance.songCount === 1 ? "" : "s"} recorded`;
   if (provenance.source === "vault") {

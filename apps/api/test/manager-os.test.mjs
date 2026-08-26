@@ -3526,6 +3526,8 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   assert.match(setlist.answer, /--apply/);
   assert.match(setlist.answer, /rad dad/i);
   assert.match(setlist.answer, /not a second catalog/i);
+  assert.match(setlist.answer, /Band operations/i);
+  assert.match(setlist.answer, /Music & setlists/i);
   assert.doesNotMatch(setlist.answer, /opener|closer|travis|harbor lights/i);
   assert.equal(setlist.recommendation, null);
 
@@ -3539,6 +3541,7 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   }), "What songs do we have?", now);
   assert.match(recorded.answer, /Harbor Lights/);
   assert.match(recorded.answer, /not a Vault import/i);
+  assert.match(recorded.answer, /Attach a recorded setlist to a gig from Events/i);
   assert.ok(recorded.citations.includes("song-harbor"));
   assert.doesNotMatch(recorded.answer, /travis|pitch/i);
   assert.doesNotMatch(recorded.answer, /usually from a local Vault/i);

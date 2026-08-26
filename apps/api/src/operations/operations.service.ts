@@ -253,7 +253,31 @@ export class OperationsService {
   async patchSong(artistId: string, id: string, input: SongPatch, actorLabel: string, actorOperatorId: string) { const row = await this.prisma.client.song.findFirst({ where: { id, artistId } }); if (!row) throw new NotFoundException("Song not found"); const manualInput = withoutCatalogSourceKey(input); const updated = await this.prisma.client.song.update({ where: { id }, data: cleanDates(manualInput) }); await this.auditWrite(artistId, "Song", id, "song.updated", actorLabel, actorOperatorId, { fields: Object.keys(manualInput) }); return updated; }
   async setlists(artistId: string) { const rows = await this.prisma.client.setlist.findMany({ where: { artistId }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } }, orderBy: { updatedAt: "desc" } }); return rows.map((row) => ({ ...row, summary: summarizeSetlist(row.items) })); }
   private async validateSongs(artistId: string, items: SetlistCreate["items"]) { const ids = items.flatMap((item) => item.songId ? [item.songId] : []); if (!ids.length) return; const count = await this.prisma.client.song.count({ where: { artistId, id: { in: [...new Set(ids)] } } }); if (count !== new Set(ids).size) throw new NotFoundException("Song not found"); }
-  async createSetlist(artistId: string, input: SetlistCreate, actorLabel: string, actorOperatorId: string) { await this.validateSongs(artistId, input.items); const row = await this.prisma.client.setlist.create({ data: { artistId, name: input.name, status: input.status, notes: input.notes ?? null, sourceKey: null, items: { create: input.items.map((item, sortOrder) => ({ ...item, songId: item.songId ?? null, label: item.label ?? null, transitionNotes: item.transitionNotes ?? null, sortOrder })) } }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } } }); await this.auditWrite(artistId, "Setlist", row.id, "setlist.created", actorLabel, actorOperatorId, { itemCount: row.items.length }); return { ...row, summary: summarizeSetlist(row.items) }; }
+  async createSetlist(artistId: string, input: SetlistCreate, actorLabel: string, actorOperatorId: string) {
+    const manualInput = withoutCatalogSourceKey(input as Record<string, unknown>) as SetlistCreate;
+    await this.validateSongs(artistId, manualInput.items);
+    const row = await this.prisma.client.setlist.create({
+      data: {
+        artistId,
+        name: manualInput.name,
+        status: manualInput.status,
+        notes: manualInput.notes ?? null,
+        sourceKey: null,
+        items: {
+          create: manualInput.items.map((item, sortOrder) => ({
+            songId: item.songId ?? null,
+            itemType: item.itemType,
+            label: item.label ?? null,
+            transitionNotes: item.transitionNotes ?? null,
+            sortOrder
+          }))
+        }
+      },
+      include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } }
+    });
+    await this.auditWrite(artistId, "Setlist", row.id, "setlist.created", actorLabel, actorOperatorId, { itemCount: row.items.length });
+    return { ...row, summary: summarizeSetlist(row.items) };
+  }
   async importCatalog(artistId: string, input: CatalogImportInput, actorLabel: string, actorOperatorId: string) {
     const plan = planCatalogImport(input);
     if (plan.songs.length === 0 && plan.setlists.length === 0 && plan.counts.vaultSongsSeen === 0 && plan.counts.showNightSongsSeen === 0 && plan.warnings.length) {
@@ -326,7 +350,37 @@ export class OperationsService {
     });
     return { dryRun: false, policyVersion: plan.policyVersion, plan, reconciliation, created: { songs: created.songs.length, setlists: created.setlists.length } };
   }
-  async patchSetlist(artistId: string, id: string, input: SetlistPatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("setlist", artistId, id); if (input.items) await this.validateSongs(artistId, input.items); const row = await this.prisma.client.$transaction(async (tx) => { if (input.items) { await tx.setlistItem.deleteMany({ where: { setlistId: id } }); await tx.setlistItem.createMany({ data: input.items.map((item, sortOrder) => ({ setlistId: id, songId: item.songId ?? null, itemType: item.itemType, label: item.label ?? null, transitionNotes: item.transitionNotes ?? null, sortOrder })) }); } return tx.setlist.update({ where: { id }, data: { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.status !== undefined ? { status: input.status } : {}), ...(input.notes !== undefined ? { notes: input.notes } : {}) }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } } }); }); await this.auditWrite(artistId, "Setlist", id, "setlist.updated", actorLabel, actorOperatorId, { fields: Object.keys(input), itemCount: row.items.length }); return { ...row, summary: summarizeSetlist(row.items) }; }
+  async patchSetlist(artistId: string, id: string, input: SetlistPatch, actorLabel: string, actorOperatorId: string) {
+    const manualInput = withoutCatalogSourceKey(input as Record<string, unknown>) as SetlistPatch;
+    await this.assertArtistRecord("setlist", artistId, id);
+    if (manualInput.items) await this.validateSongs(artistId, manualInput.items);
+    const row = await this.prisma.client.$transaction(async (tx) => {
+      if (manualInput.items) {
+        await tx.setlistItem.deleteMany({ where: { setlistId: id } });
+        await tx.setlistItem.createMany({
+          data: manualInput.items.map((item, sortOrder) => ({
+            setlistId: id,
+            songId: item.songId ?? null,
+            itemType: item.itemType,
+            label: item.label ?? null,
+            transitionNotes: item.transitionNotes ?? null,
+            sortOrder
+          }))
+        });
+      }
+      return tx.setlist.update({
+        where: { id },
+        data: {
+          ...(manualInput.name !== undefined ? { name: manualInput.name } : {}),
+          ...(manualInput.status !== undefined ? { status: manualInput.status } : {}),
+          ...(manualInput.notes !== undefined ? { notes: manualInput.notes } : {})
+        },
+        include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } }
+      });
+    });
+    await this.auditWrite(artistId, "Setlist", id, "setlist.updated", actorLabel, actorOperatorId, { fields: Object.keys(manualInput), itemCount: row.items.length });
+    return { ...row, summary: summarizeSetlist(row.items) };
+  }
 
   async projects(artistId: string, now = new Date()) { const rows = await this.prisma.client.artistProject.findMany({ where: { artistId }, include: projectDetailInclude, orderBy: [{ status: "asc" }, { dueAt: "asc" }] }); return rows.map((project) => ({ ...project, readiness: deterministicProjectReadiness(project, now) })); }
   async project(artistId: string, id: string) { const row = await this.prisma.client.artistProject.findFirst({ where: { id, artistId }, include: projectDetailInclude }); if (!row) throw new NotFoundException("Project not found"); return row; }
