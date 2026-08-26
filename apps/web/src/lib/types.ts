@@ -459,6 +459,14 @@ export type CatalogImportResult = {
     setlists: { name: string; items: { label: string }[] }[];
     skipped: { reason: string; title?: string }[];
     warnings: string[];
+    counts: {
+      vaultSongsSeen: number;
+      showNightSongsSeen: number;
+      liveSelected: number;
+      parkedSkipped: number;
+      notLiveSkipped: number;
+      guestSetsSkipped: number;
+    };
   };
   reconciliation: {
     createSongs: { title: string }[];

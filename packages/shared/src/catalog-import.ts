@@ -324,6 +324,93 @@ export function parseLocalCatalogJson(text: string, label = "catalog"): unknown 
   return parsed;
 }
 
+export const CATALOG_IMPORT_PREVIEW_SONG_LIMIT = 20;
+
+export type CatalogImportPreviewView = {
+  headline: string;
+  songTitles: string[];
+  moreSongCount: number;
+  setlists: { name: string; itemCount: number }[];
+  skipLines: string[];
+  existingSkipLine: string | null;
+  warnings: string[];
+};
+
+function countSkipReason(skipped: CatalogImportSkip[], reason: string) {
+  return skipped.filter((row) => row.reason === reason).length;
+}
+
+function firstSkipTitle(skipped: CatalogImportSkip[], reason: string) {
+  return skipped.find((row) => row.reason === reason)?.title;
+}
+
+/** Band operations / CLI preview: name planned titles and honest skips, not just create counts. */
+export function describeCatalogImportPreview(input: {
+  dryRun: boolean;
+  plan: {
+    songs: { title: string }[];
+    setlists: { name: string; items: unknown[] }[];
+    skipped: CatalogImportSkip[];
+    warnings: string[];
+    counts: CatalogImportPlan["counts"];
+  };
+  reconciliation: {
+    createSongs: { title: string }[];
+    createSetlists: { name: string; items: unknown[] }[];
+    skipSongs: Array<{ reason: string; title?: string }>;
+    skipSetlists: Array<{ reason: string; title?: string }>;
+  };
+  created: { songs: number; setlists: number };
+}): CatalogImportPreviewView {
+  const createSongs = input.reconciliation.createSongs.length;
+  const createSetlists = input.reconciliation.createSetlists.length;
+  const headline = input.dryRun
+    ? `Dry-run: would create ${createSongs} song${createSongs === 1 ? "" : "s"} and ${createSetlists} setlist${createSetlists === 1 ? "" : "s"}. Existing titles and source keys stay skipped.`
+    : `Applied: wrote ${input.created.songs} song${input.created.songs === 1 ? "" : "s"} and ${input.created.setlists} setlist${input.created.setlists === 1 ? "" : "s"}.`;
+  const songTitles = input.plan.songs.slice(0, CATALOG_IMPORT_PREVIEW_SONG_LIMIT).map((song) => song.title);
+  const travisCount = countSkipReason(input.plan.skipped, "travis_books");
+  const coverCount = countSkipReason(input.plan.skipped, "cover_not_active");
+  const showNightUnbound = countSkipReason(input.plan.skipped, "show_night_not_in_vault");
+  const skipLines: string[] = [];
+  if (travisCount) {
+    const title = firstSkipTitle(input.plan.skipped, "travis_books");
+    skipLines.push(`Travis books — ${travisCount} booker row${travisCount === 1 ? "" : "s"} stayed out${title ? ` (${title})` : ""}.`);
+  }
+  if (input.plan.counts.parkedSkipped) {
+    skipLines.push(`${input.plan.counts.parkedSkipped} parked catalog row${input.plan.counts.parkedSkipped === 1 ? "" : "s"} stayed out — not a fourth live band.`);
+  }
+  if (input.plan.counts.notLiveSkipped) {
+    const coverTitle = firstSkipTitle(input.plan.skipped, "cover_not_active");
+    skipLines.push(coverCount
+      ? `${input.plan.counts.notLiveSkipped} not-live row${input.plan.counts.notLiveSkipped === 1 ? "" : "s"} stayed out, including ${coverCount} cover${coverCount === 1 ? "" : "s"}${coverTitle ? ` (${coverTitle})` : ""}.`
+      : `${input.plan.counts.notLiveSkipped} not-live row${input.plan.counts.notLiveSkipped === 1 ? "" : "s"} stayed out.`);
+  }
+  if (input.plan.counts.guestSetsSkipped) {
+    skipLines.push(`${input.plan.counts.guestSetsSkipped} guest set${input.plan.counts.guestSetsSkipped === 1 ? "" : "s"} stayed out.`);
+  }
+  if (showNightUnbound) {
+    skipLines.push(`${showNightUnbound} Show Night title${showNightUnbound === 1 ? "" : "s"} were not in the planned Vault slice.`);
+  }
+  if (countSkipReason(input.plan.skipped, "flex_pool_skipped")) {
+    skipLines.push("Flex/encore pools stayed out.");
+  }
+  const existing = [
+    ...input.reconciliation.skipSongs.map((row) => row.title ?? row.reason),
+    ...input.reconciliation.skipSetlists.map((row) => row.title ?? row.reason)
+  ];
+  return {
+    headline,
+    songTitles,
+    moreSongCount: Math.max(0, input.plan.songs.length - songTitles.length),
+    setlists: input.plan.setlists.map((setlist) => ({ name: setlist.name, itemCount: setlist.items.length })),
+    skipLines,
+    existingSkipLine: existing.length
+      ? `Already recorded, skipped: ${existing.slice(0, 5).join(", ")}${existing.length > 5 ? ` (+${existing.length - 5} more)` : ""}.`
+      : null,
+    warnings: input.plan.warnings
+  };
+}
+
 export type SongCatalogStatus = CatalogRecordProvenance & {
   policyVersion: typeof CATALOG_IMPORT_POLICY_VERSION;
   empty: boolean;

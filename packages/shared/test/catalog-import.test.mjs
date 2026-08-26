@@ -316,6 +316,53 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.throws(() => shared.parseLocalCatalogJson('{"url":"https://example.invalid/app_api.json"}', "Vault"), /local JSON, not a URL/i);
   assert.throws(() => shared.parseLocalCatalogJson("{not-json", "Vault"), /valid JSON/i);
 
+  const previewPlan = shared.planCatalogImport({ vault: vaultFixture });
+  const previewReconciliation = shared.reconcileCatalogImport(previewPlan, { songs: [], setlists: [] });
+  const dryPreview = shared.describeCatalogImportPreview({
+    dryRun: true,
+    plan: previewPlan,
+    reconciliation: previewReconciliation,
+    created: { songs: 0, setlists: 0 }
+  });
+  assert.match(dryPreview.headline, /Dry-run: would create 3 songs and 1 setlist/i);
+  assert.deepEqual(dryPreview.songTitles, ["Harbor Lights", "Sidewalk Radio", "Everyday"]);
+  assert.equal(dryPreview.moreSongCount, 0);
+  assert.equal(dryPreview.setlists[0]?.name, "Vault default-live");
+  assert.match(dryPreview.skipLines.join(" "), /Travis books/i);
+  assert.match(dryPreview.skipLines.join(" "), /Booking Calendar Blues/);
+  assert.match(dryPreview.skipLines.join(" "), /not a fourth live band/i);
+  assert.match(dryPreview.skipLines.join(" "), /Cover Example/);
+  assert.ok(!dryPreview.songTitles.some((title) => /parked demo|booking calendar|cover example/i.test(title)));
+  const appliedPreview = shared.describeCatalogImportPreview({
+    dryRun: false,
+    plan: previewPlan,
+    reconciliation: previewReconciliation,
+    created: { songs: 3, setlists: 1 }
+  });
+  assert.match(appliedPreview.headline, /Applied: wrote 3 songs and 1 setlist/i);
+  assert.doesNotMatch(appliedPreview.headline, /would create/i);
+  const existingPreview = shared.describeCatalogImportPreview({
+    dryRun: true,
+    plan: previewPlan,
+    reconciliation: shared.reconcileCatalogImport(previewPlan, {
+      songs: [{ id: "song-harbor", title: "Harbor Lights", sourceKey: "vault:catalog_import_v1:JS-0001" }],
+      setlists: []
+    }),
+    created: { songs: 0, setlists: 0 }
+  });
+  assert.match(existingPreview.existingSkipLine ?? "", /Harbor Lights/);
+
+  const emptySlicePreview = shared.describeCatalogImportPreview({
+    dryRun: true,
+    plan: shared.planCatalogImport({ vault: emptyPublishedVault }),
+    reconciliation: shared.reconcileCatalogImport(shared.planCatalogImport({ vault: emptyPublishedVault }), { songs: [], setlists: [] }),
+    created: { songs: 0, setlists: 0 }
+  });
+  assert.match(emptySlicePreview.headline, /would create 0 songs and 0 setlists/i);
+  assert.deepEqual(emptySlicePreview.songTitles, []);
+  assert.match(emptySlicePreview.skipLines.join(" "), /not a fourth live band|not-live/i);
+  assert.ok(!emptySlicePreview.songTitles.includes("Harbor Lights"));
+
   const demoStatus = shared.describeSongCatalogStatus({
     songs: [{ sourceKey: "seed:demo:opener" }, { sourceKey: "seed:demo:closer" }],
     setlists: [{ sourceKey: "seed:demo:setlist" }]
