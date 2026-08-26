@@ -33,6 +33,12 @@ re-enter the private catalog by hand.
 - One audited `catalog.imported` event on HTTP apply (`POST /songs/import`
   with `dryRun: false`). The CLI `--apply` path writes songs/setlists only.
 
+Catalog `sourceKey` values belong exclusively to these import paths. Manual
+song and setlist creation always records no catalog provenance, and manual
+edits preserve an existing import key instead of accepting a replacement from
+the request. This is enforced in the shared strict schemas and again in the
+operations service so an internal caller cannot impersonate a Vault import.
+
 It does **not** create artists, venues, contacts, booking prospects, pitches,
 Travis/booker rows, invoices, or social posts. **Travis books**; StoryBoard
 does not auto-pitch him. A Stalemate or hybrid row already in Vault's

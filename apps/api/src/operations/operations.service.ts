@@ -64,6 +64,10 @@ function cleanDates(input: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined).map(([key, value]) => [key, dateFields.has(key) && typeof value === "string" ? new Date(value) : value]));
 }
 
+function withoutCatalogSourceKey(input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(input).filter(([key]) => key !== "sourceKey"));
+}
+
 type EventTimeline = { startsAt: Date | null; endsAt: Date | null; loadInAt: Date | null; soundcheckAt: Date | null; doorsAt: Date | null; setAt: Date | null; curfewAt: Date | null };
 function eventDate(value: string | null | undefined, fallback: Date | null = null) { return value === undefined ? fallback : value === null ? null : new Date(value); }
 function validateEventTimeline(input: EventCreate | EventPatch, existing?: EventTimeline) {
@@ -245,8 +249,8 @@ export class OperationsService {
     ]);
     return describeSongCatalogStatus({ songs, setlists });
   }
-  async createSong(artistId: string, input: SongCreate, actorLabel: string, actorOperatorId: string) { const row = await this.prisma.client.song.create({ data: { artistId, ...input } as Prisma.SongUncheckedCreateInput }); await this.auditWrite(artistId, "Song", row.id, "song.created", actorLabel, actorOperatorId, { title: row.title }); return row; }
-  async patchSong(artistId: string, id: string, input: SongPatch, actorLabel: string, actorOperatorId: string) { const row = await this.prisma.client.song.findFirst({ where: { id, artistId } }); if (!row) throw new NotFoundException("Song not found"); const updated = await this.prisma.client.song.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "Song", id, "song.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) }); return updated; }
+  async createSong(artistId: string, input: SongCreate, actorLabel: string, actorOperatorId: string) { const manualInput = withoutCatalogSourceKey(input); const row = await this.prisma.client.song.create({ data: { artistId, ...manualInput, sourceKey: null } as Prisma.SongUncheckedCreateInput }); await this.auditWrite(artistId, "Song", row.id, "song.created", actorLabel, actorOperatorId, { title: row.title }); return row; }
+  async patchSong(artistId: string, id: string, input: SongPatch, actorLabel: string, actorOperatorId: string) { const row = await this.prisma.client.song.findFirst({ where: { id, artistId } }); if (!row) throw new NotFoundException("Song not found"); const manualInput = withoutCatalogSourceKey(input); const updated = await this.prisma.client.song.update({ where: { id }, data: cleanDates(manualInput) }); await this.auditWrite(artistId, "Song", id, "song.updated", actorLabel, actorOperatorId, { fields: Object.keys(manualInput) }); return updated; }
   async setlists(artistId: string) { const rows = await this.prisma.client.setlist.findMany({ where: { artistId }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } }, orderBy: { updatedAt: "desc" } }); return rows.map((row) => ({ ...row, summary: summarizeSetlist(row.items) })); }
   private async validateSongs(artistId: string, items: SetlistCreate["items"]) { const ids = items.flatMap((item) => item.songId ? [item.songId] : []); if (!ids.length) return; const count = await this.prisma.client.song.count({ where: { artistId, id: { in: [...new Set(ids)] } } }); if (count !== new Set(ids).size) throw new NotFoundException("Song not found"); }
   async createSetlist(artistId: string, input: SetlistCreate, actorLabel: string, actorOperatorId: string) { await this.validateSongs(artistId, input.items); const row = await this.prisma.client.setlist.create({ data: { artistId, name: input.name, status: input.status, notes: input.notes ?? null, sourceKey: null, items: { create: input.items.map((item, sortOrder) => ({ ...item, songId: item.songId ?? null, label: item.label ?? null, transitionNotes: item.transitionNotes ?? null, sortOrder })) } }, include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } } }); await this.auditWrite(artistId, "Setlist", row.id, "setlist.created", actorLabel, actorOperatorId, { itemCount: row.items.length }); return { ...row, summary: summarizeSetlist(row.items) }; }
