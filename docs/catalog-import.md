@@ -13,8 +13,10 @@ Use this import when the operator has the **local** Vault StoryBoard feed:
 - `data/master_catalog.json` is the Vault spine, not an import feed. StoryBoard
   rejects it; regenerate `data/app_api.json` before importing.
 
-and/or a **local** Show Night [`content/show.json`](https://github.com/rupret007/rad-dad-show-night).
-The importer never fetches those files over the network. `--source`,
+and/or a **local** Show Night [`content/show.json`](https://github.com/rupret007/rad-dad-show-night)
+or a local official-set dump (`songs[]` with `setSlug`, the GET `/api/show`
+shape). Public suggestion-board rows are not the official set. The importer
+never fetches those files or `/api/show` over the network. `--source`,
 `--show-night`, `VAULT_CATALOG_PATH`, and `POST /songs/import` reject remote
 URLs. See [`APPS.md`](../APPS.md).
 
@@ -64,7 +66,8 @@ pnpm catalog:import -- --source https://example.invalid/app_api.json   # must fa
 
 Band operations → **Music & setlists** also previews and applies the same
 local JSON through `POST /songs/import` (dry-run first). The form never
-fetches a URL. Preview lists planned titles and names parked, cover, Travis,
+fetches a URL. Show Night paste names a suggestion dump and does not POST it
+as the official set. Preview lists planned titles and names parked, cover, Travis,
 and guest-set skips before apply can write. Apply uses the reviewed payload,
 not a later edit in the textarea.
 
@@ -142,8 +145,10 @@ live band. An empty published `setlist_ready_default_import` stays empty;
 that is honesty, not a missing catalog. When a Vault payload is present,
 Show Night does not mint covers, parked rows, Travis rows, or unknown
 titles into the song table — it only attaches a running-order setlist to
-planned Vault songs. Show Night-only imports (no Vault file) still create
-`shownight:` songs on the current artist. Parked projects stay parked unless
+planned Vault songs. A local official-set dump (`songs[]` + `setSlug`) is
+the same bind: `rad-dad` is the official set, other slugs stay guest/parked
+unless opted in, and public suggestions never become that set. Show Night-only
+imports (no Vault file) still create `shownight:` songs on the current artist. Parked projects stay parked unless
 opted in. Travis rows stay skipped (`travis_books`). Covers stay out
 (`active` ← `is_original !== false`). `bpm` prefers `songs[].bpm_int`, then
 a clean `bpm` integer, then a leading 2–3 digit tempo; notes come from

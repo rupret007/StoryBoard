@@ -32,7 +32,7 @@ Usage:
 Options:
   --source <path>          Local Vault data/app_api.json StoryBoard feed
                            (default: the checked-in app_api.json shape sample)
-  --show-night <path>      Local Show Night content/show.json
+  --show-night <path>      Local Show Night show.json or official-set dump
   --artist <slug>          Artist slug (default: default)
   --include-parked         Also import Stalemate / Trailer Swift / Something Dirty
   --include-guest-sets     Import Show Night guest sets onto the same artist

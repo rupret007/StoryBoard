@@ -1,7 +1,7 @@
 "use client";
 
 import { SurfaceCard } from "@storyboard/ui";
-import { catalogImportOperatorMessage, describeCatalogImportPreview, parseLocalCatalogJson, parseLocalVaultFeedJson } from "@storyboard/shared";
+import { catalogImportOperatorMessage, describeCatalogImportPreview, parseLocalShowNightJson, parseLocalVaultFeedJson } from "@storyboard/shared";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -38,9 +38,9 @@ export function CatalogImportForm() {
 
   function parsePayload(): PreviewPayload {
     const vault = parseLocalVaultFeedJson(vaultText);
-    const showNight = parseLocalCatalogJson(showNightText, "Show Night");
+    const showNight = parseLocalShowNightJson(showNightText);
     if (vault == null && showNight == null) {
-      throw new Error("Provide a local Vault data/app_api.json feed and/or a Show Night show.json");
+      throw new Error("Provide a local Vault data/app_api.json feed and/or a Show Night show.json or official-set dump");
     }
     return {
       ...(vault !== undefined ? { vault } : {}),
@@ -77,7 +77,7 @@ export function CatalogImportForm() {
     <SurfaceCard>
       <h2 className="font-semibold">Import catalog</h2>
       <p className="mt-1 text-sm text-[var(--text-muted)]">
-        Vault is the catalog brain. Choose or paste its <strong>local data/app_api.json feed</strong>, not the master catalog spine — StoryBoard will not fetch a URL, auto-post, or invent a fourth live band. Travis books. Preview first; apply writes the reviewed songs and setlists onto this artist only. Parked catalogs and guest sets stay out unless you use the CLI flags.
+        Vault is the catalog brain. Choose or paste its <strong>local data/app_api.json feed</strong>, not the master catalog spine — StoryBoard will not fetch a URL, auto-post, or invent a fourth live band. Travis books. Show Night accepts a local <strong>show.json</strong> or official-set dump; public suggestions are not the official set and are not fetched. Preview first; apply writes the reviewed songs and setlists onto this artist only. Parked catalogs and guest sets stay out unless you use the CLI flags.
       </p>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <label>
@@ -100,7 +100,7 @@ export function CatalogImportForm() {
           />
         </label>
         <label>
-          <span className="sb-label">Show Night JSON (optional running order)</span>
+          <span className="sb-label">Show Night official set (show.json or official-set dump)</span>
           <input
             aria-label="Local Show Night file"
             className="sb-input mt-1.5"

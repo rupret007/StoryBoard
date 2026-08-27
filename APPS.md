@@ -31,9 +31,10 @@ catalog, a promo publisher, or a rehearsal room.
    unset. Point `VAULT_CATALOG_PATH` at the local `data/app_api.json` feed and set
    `VAULT_CATALOG_APPLY=true` to write. HTTP / Band operations equivalent:
    paste or choose the same local JSON in **Music & setlists**
-   (`POST /songs/import`, `dryRun` defaults true). The Band operations
-   preview names planned titles and parked / cover / Travis skips.
-   Remote catalog URLs are rejected.
+   (`POST /songs/import`, `dryRun` defaults true). Show Night accepts a local
+   `show.json` or official-set dump; public suggestions are not the official
+   set. The Band operations preview names planned titles and parked / cover /
+   Travis skips. Remote catalog URLs are rejected.
 3. StoryBoard then has Vault songs plus Vault `setlist_ready_default_import`
    (the published `default_live` planner slice) for Band operations and
    Manager chat. It maps the live Vault honesty fields: `title` / `key` →
@@ -48,9 +49,10 @@ Default import is Vault's published `setlist_ready_default_import` /
 slice stay on the current artist — not a fourth live band. A Stalemate
 row Vault already marked `default_live` (for example Everyday) stays here
 too; that is still not a fourth live band. An empty published slice stays
-empty, including when a Show Night running order is also supplied — Show
-Night binds planned Vault titles only and does not mint covers or unknown
-songs. **Travis books** — he is the human booker, not a pitch target.
+   empty, including when a Show Night running order is also supplied — Show
+   Night binds planned Vault titles only and does not mint covers or unknown
+   songs. A local official-set dump is the same bind; public suggestions are
+   not the official set. **Travis books** — he is the human booker, not a pitch target.
 Stalemate, Trailer Swift, and Something Dirty catalogs stay parked unless
 `--include-parked`. Guest sets stay off unless
 `--include-guest-sets`, and they still land on the current artist.
