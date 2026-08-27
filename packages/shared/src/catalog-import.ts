@@ -734,13 +734,13 @@ function showNightRowFromUnknown(song: unknown): ShowNightPlanRow | null {
   if (!isRecord(song)) return null;
   const title = officialSetSongTitle(song);
   if (!title) return null;
-  return {
-    song: title,
-    cue: asText(song.performanceNote) ?? asText(song.cue),
-    transition: song.transition === true,
-    special: song.special === true,
-    isOriginal: typeof song.isOriginal === "boolean" ? song.isOriginal : undefined
-  };
+  const row: ShowNightPlanRow = { song: title };
+  const cue = asText(song.performanceNote) ?? asText(song.cue);
+  if (cue) row.cue = cue;
+  if (song.transition === true) row.transition = true;
+  if (song.special === true) row.special = true;
+  if (typeof song.isOriginal === "boolean") row.isOriginal = song.isOriginal;
+  return row;
 }
 
 function officialSetPosition(value: unknown): number {
@@ -804,20 +804,16 @@ function readShowNightRunningOrder(input: unknown): { ok: true; order: ShowNight
     ok: true,
     order: {
       eventLabel: [parsed.data.event?.name, parsed.data.event?.venue, parsed.data.event?.dateLong].filter(Boolean).join(" · ") || "Show Night",
-      official: (parsed.data.radDadSet ?? []).map((row) => ({
-        song: row.song,
-        cue: row.cue,
-        transition: row.transition,
-        special: row.special
-      })),
+      official: (parsed.data.radDadSet ?? []).flatMap((row) => {
+        const mapped = showNightRowFromUnknown(row);
+        return mapped ? [mapped] : [];
+      }),
       guests: (parsed.data.guestSets ?? []).map((guest) => ({
         name: guest.name,
-        songs: guest.songs.map((row) => ({
-          song: row.song,
-          cue: row.cue,
-          transition: row.transition,
-          special: row.special
-        }))
+        songs: guest.songs.flatMap((row) => {
+          const mapped = showNightRowFromUnknown(row);
+          return mapped ? [mapped] : [];
+        })
       })),
       flexSongs: parsed.data.flexSongs ?? []
     }
