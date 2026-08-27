@@ -933,8 +933,9 @@ Operations routes:
 - `GET` / `POST /songs`, `/setlists`, and `/projects`; item updates use
   `PATCH /songs/:id`, `/setlists/:id`, and `/projects/:id`. `POST /songs/import`
   dry-runs (default) or applies a local Vault `app_api.json` StoryBoard feed
-  and/or Show Night `show.json` onto the current artist only. The Vault
-  `master_catalog.json` spine is rejected as an import file.
+  and/or Show Night `show.json` or a local official-set dump onto the current
+  artist only. The Vault `master_catalog.json` spine is rejected as an import
+  file. Public suggestions are not the official set.
   When a Vault payload is present, Show Night binds a running order to planned
   Vault titles and does not mint covers or unknown songs. Default planning
   consumes Vault's published default-live slice; parked catalogs stay out unless opted in.

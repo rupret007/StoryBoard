@@ -506,6 +506,81 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.match(shared.CATALOG_NON_VAULT_EMPTY_SETLIST_HINT, /not a Vault import/i);
 });
 
+const officialSetDump = {
+  show: { title: "Rad Dad + Friends", venue: "Example Room", date: "Saturday, September 19, 2026" },
+  sets: [
+    { slug: "stalemate", title: "Stalemate" },
+    { slug: "rad-dad", title: "Rad Dad" }
+  ],
+  songs: [
+    { setSlug: "stalemate", position: 1, title: "Parked Demo", isOriginal: true },
+    { setSlug: "rad-dad", position: 1, title: "Harbor Lights →", isOriginal: true, transition: true },
+    { setSlug: "rad-dad", position: 2, title: "Cover Example", isOriginal: false }
+  ],
+  updatedAt: "2026-08-27T00:00:00.000Z"
+};
+
+const suggestionDump = {
+  suggestions: [{ title: "Cover Example", artist: "Example Artist", notes: "please add this" }]
+};
+
+test("live Show Night official-set dump binds rad-dad and refuses suggestion rows", () => {
+  assert.equal(shared.showNightPayloadLooksLikeOfficialSetDump(officialSetDump), true);
+  assert.equal(shared.showNightPayloadLooksLikeOfficialSetDump(showNightFixture), false);
+  assert.equal(shared.showNightPayloadLooksLikeSuggestion(suggestionDump), true);
+  assert.equal(shared.showNightCatalogPayloadError(officialSetDump), null);
+  assert.equal(shared.showNightCatalogPayloadError(suggestionDump), shared.SHOW_NIGHT_OFFICIAL_SET_IMPORT_ERROR);
+  assert.equal(shared.showNightCatalogPayloadError({
+    version: "1.6",
+    songs: [{ song_id: "RD-0001", canonical_title: "Harbor Lights", artist_project: "Rad Dad", classification: "original" }]
+  }), shared.VAULT_SPINE_IMPORT_ERROR);
+
+  const leftover = shared.planCatalogImport({ showNight: officialSetDump });
+  assert.equal(leftover.setlists[0]?.name, "Rad Dad — official set");
+  assert.deepEqual(leftover.setlists[0]?.items.map((item) => item.label), ["Harbor Lights", "Cover Example"]);
+  assert.equal(leftover.songs.find((song) => song.title === "Harbor Lights")?.active, true);
+  assert.equal(leftover.songs.find((song) => song.title === "Cover Example")?.active, false);
+  assert.ok(leftover.skipped.some((row) => row.reason === "guest_set_skipped" && row.title === "Stalemate"));
+  assert.ok(!leftover.songs.some((song) => song.title === "Parked Demo"));
+  assert.ok(!leftover.setlists.some((setlist) => /stalemate/i.test(setlist.name) && !/guest/i.test(setlist.name)));
+
+  const withVault = shared.planCatalogImport({ vault: vaultFixture, showNight: officialSetDump });
+  const official = withVault.setlists.find((setlist) => setlist.sourceKey.endsWith(":set:rad-dad"));
+  assert.ok(official);
+  assert.deepEqual(official.items.map((item) => item.label), ["Harbor Lights"]);
+  assert.equal(withVault.songs.every((song) => song.origin === "vault"), true);
+  assert.ok(withVault.skipped.some((row) => row.reason === "cover_not_active" && row.title === "Cover Example" && row.source === "show_night"));
+  assert.ok(withVault.skipped.some((row) => row.reason === "guest_set_skipped" && row.title === "Stalemate"));
+  assert.ok(!withVault.songs.some((song) => /cover example|parked demo/i.test(song.title)));
+
+  const guests = shared.planCatalogImport({ showNight: officialSetDump, includeGuestSets: true });
+  assert.ok(guests.setlists.some((setlist) => setlist.name === "Stalemate — guest set"));
+  assert.match(guests.setlists.find((setlist) => setlist.name.startsWith("Stalemate"))?.notes ?? "", /not a new live band|current artist only/i);
+
+  const suggestionPlan = shared.planCatalogImport({ showNight: suggestionDump });
+  assert.deepEqual(suggestionPlan.songs, []);
+  assert.deepEqual(suggestionPlan.setlists, []);
+  assert.equal(suggestionPlan.counts.showNightSongsSeen, 0);
+  assert.ok(suggestionPlan.warnings.includes(shared.SHOW_NIGHT_OFFICIAL_SET_IMPORT_ERROR));
+
+  assert.throws(() => shared.parseLocalShowNightJson(JSON.stringify(suggestionDump)), (error) => (
+    error instanceof Error && error.message === shared.SHOW_NIGHT_OFFICIAL_SET_IMPORT_ERROR
+  ));
+  assert.deepEqual(shared.parseLocalShowNightJson(JSON.stringify(officialSetDump)), officialSetDump);
+  assert.deepEqual(shared.parseLocalShowNightJson(JSON.stringify(showNightFixture)), showNightFixture);
+  assert.equal(shared.parseLocalShowNightJson("  "), undefined);
+
+  const suggestionRequest = shared.catalogImportRequestSchema.safeParse({ showNight: suggestionDump });
+  assert.equal(suggestionRequest.success, false);
+  const flattenDump = JSON.stringify({
+    message: suggestionRequest.success ? null : suggestionRequest.error.flatten(),
+    error: "Bad Request",
+    statusCode: 400
+  });
+  assert.equal(shared.catalogImportOperatorMessage(new Error(flattenDump)), shared.SHOW_NIGHT_OFFICIAL_SET_IMPORT_ERROR);
+  assert.equal(shared.catalogImportRequestSchema.safeParse({ showNight: officialSetDump }).success, true);
+});
+
 test("catalog:import CLI dry-runs app_api and refuses the Vault spine and remote URLs", async () => {
   const script = join(dir, "../../../scripts/import-catalog.mjs");
   const sample = join(dir, "fixtures/vault-app-api.sample.json");
@@ -538,6 +613,19 @@ test("catalog:import CLI dry-runs app_api and refuses the Vault spine and remote
     const rejected = spawnSync(process.execPath, [script, "--source", spine], { encoding: "utf8", env: { ...process.env, DATABASE_URL: "" } });
     assert.notEqual(rejected.status, 0);
     assert.match(rejected.stderr, /master_catalog\.json is the Vault spine, not the StoryBoard import feed; export data\/app_api\.json/);
+    const official = join(temporary, "official-set.json");
+    await writeFile(official, JSON.stringify(officialSetDump));
+    const officialDryRun = spawnSync(process.execPath, [script, "--show-night", official], { encoding: "utf8", env: { ...process.env, DATABASE_URL: "" } });
+    assert.equal(officialDryRun.status, 0, officialDryRun.stderr);
+    assert.match(officialDryRun.stdout, /setlist Rad Dad — official set/);
+    assert.match(officialDryRun.stdout, /song Harbor Lights/);
+    assert.doesNotMatch(officialDryRun.stdout, /Parked Demo/);
+
+    const suggestions = join(temporary, "suggestions.json");
+    await writeFile(suggestions, JSON.stringify(suggestionDump));
+    const refusedSuggestions = spawnSync(process.execPath, [script, "--show-night", suggestions], { encoding: "utf8", env: { ...process.env, DATABASE_URL: "" } });
+    assert.notEqual(refusedSuggestions.status, 0);
+    assert.match(refusedSuggestions.stderr, /public suggestions are not the official set/i);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

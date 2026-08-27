@@ -19,6 +19,15 @@ export const VAULT_SPINE_IMPORT_ERROR =
   "master_catalog.json is the Vault spine, not the StoryBoard import feed; export data/app_api.json.";
 export const VAULT_FEED_IMPORT_ERROR =
   "Vault import requires the data/app_api.json StoryBoard feed.";
+export const SHOW_NIGHT_OFFICIAL_SET_IMPORT_ERROR =
+  "Show Night official set is a local show.json or official-set dump; public suggestions are not the official set.";
+export const SHOW_NIGHT_FEED_IMPORT_ERROR =
+  "Show Night import requires a local show.json or official-set dump, not a remote URL or suggestion board.";
+const SHOW_NIGHT_OFFICIAL_SET_SLUG = "rad-dad";
+const SHOW_NIGHT_GUEST_SET_TITLES: Record<string, string> = {
+  "jeff-story-friends": "Jeff Story & Friends",
+  stalemate: "Stalemate"
+};
 
 /** Travis is the human booker. StoryBoard never auto-pitches him. */
 export const CATALOG_BOOKER_POLICY = "travis_books" as const;
@@ -139,6 +148,44 @@ export function vaultCatalogPayloadError(input: unknown): string | null {
   return vaultAppApiSchema.safeParse(input).success ? null : VAULT_FEED_IMPORT_ERROR;
 }
 
+function officialSetSongTitle(song: unknown): string | undefined {
+  if (!isRecord(song)) return undefined;
+  return asText(song.title) ?? asText(song.song);
+}
+
+function officialSetSlug(song: unknown): string | undefined {
+  if (!isRecord(song)) return undefined;
+  return asText(song.setSlug);
+}
+
+function looksLikeOfficialSetSong(song: unknown): boolean {
+  return Boolean(officialSetSongTitle(song) && officialSetSlug(song));
+}
+
+/** Live Show Night GET /api/show dump: songs[] with setSlug, not radDadSet. */
+export function showNightPayloadLooksLikeOfficialSetDump(input: unknown): boolean {
+  if (!isRecord(input) || Array.isArray(input.radDadSet)) return false;
+  if (!Array.isArray(input.songs)) return false;
+  if (input.songs.some(looksLikeOfficialSetSong)) return true;
+  return input.songs.length === 0 && (isRecord(input.show) || Array.isArray(input.sets));
+}
+
+function looksLikeSuggestionEntry(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (officialSetSlug(value) || asText(value.song)) return false;
+  return Boolean(asText(value.title) && (asText(value.artist) || asText(value.submitter) || asText(value.notes)));
+}
+
+/** Public suggestion board / Google Form rows are not the official set. */
+export function showNightPayloadLooksLikeSuggestion(input: unknown): boolean {
+  if (Array.isArray(input)) return input.some(looksLikeSuggestionEntry);
+  if (!isRecord(input)) return false;
+  if (showNightPayloadLooksLikeOfficialSetDump(input) || Array.isArray(input.radDadSet)) return false;
+  if (Array.isArray(input.suggestions) || Array.isArray(input.entries)) return true;
+  if (asText(input.formAction) || asText(input.googleForm) || "entry.200" in input) return true;
+  return looksLikeSuggestionEntry(input);
+}
+
 const showNightSongSchema = z.object({
   number: z.number().optional(),
   song: z.string().trim().min(1).max(240),
@@ -163,6 +210,13 @@ const showNightSchema = z.object({
   flexSongs: z.array(z.string().trim().min(1).max(240)).max(50).optional()
 }).passthrough();
 
+export function showNightCatalogPayloadError(input: unknown): string | null {
+  if (showNightPayloadLooksLikeSuggestion(input)) return SHOW_NIGHT_OFFICIAL_SET_IMPORT_ERROR;
+  if (vaultPayloadLooksLikeSpine(input)) return VAULT_SPINE_IMPORT_ERROR;
+  if (showNightPayloadLooksLikeOfficialSetDump(input)) return null;
+  return showNightSchema.safeParse(input).success ? null : SHOW_NIGHT_FEED_IMPORT_ERROR;
+}
+
 export const catalogImportRequestSchema = z.object({
   vault: z.unknown().optional(),
   showNight: z.unknown().optional(),
@@ -181,6 +235,10 @@ export const catalogImportRequestSchema = z.object({
   if (value.vault != null && !remote) {
     const message = vaultCatalogPayloadError(value.vault);
     if (message) context.addIssue({ code: "custom", path: ["vault"], message });
+  }
+  if (value.showNight != null && !remote) {
+    const message = showNightCatalogPayloadError(value.showNight);
+    if (message) context.addIssue({ code: "custom", path: ["showNight"], message });
   }
 });
 
@@ -320,12 +378,23 @@ export function parseLocalVaultFeedJson(text: string): unknown {
   return parsed;
 }
 
-/** Prefer the named spine/feed sentence over a Nest flatten dump. */
+/** Band operations Show Night field: refuse suggestions / spine before POST. */
+export function parseLocalShowNightJson(text: string): unknown {
+  const parsed = parseLocalCatalogJson(text, "Show Night");
+  if (parsed === undefined) return undefined;
+  const message = showNightCatalogPayloadError(parsed);
+  if (message) throw new Error(message);
+  return parsed;
+}
+
+/** Prefer the named spine/feed/official-set sentence over a Nest flatten dump. */
 export function catalogImportOperatorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error ?? "").trim();
   if (!raw) return "Import failed";
   if (raw.includes(VAULT_SPINE_IMPORT_ERROR)) return VAULT_SPINE_IMPORT_ERROR;
   if (raw.includes(VAULT_FEED_IMPORT_ERROR)) return VAULT_FEED_IMPORT_ERROR;
+  if (raw.includes(SHOW_NIGHT_OFFICIAL_SET_IMPORT_ERROR)) return SHOW_NIGHT_OFFICIAL_SET_IMPORT_ERROR;
+  if (raw.includes(SHOW_NIGHT_FEED_IMPORT_ERROR)) return SHOW_NIGHT_FEED_IMPORT_ERROR;
   return extractCatalogImportHttpMessage(raw) ?? raw;
 }
 
@@ -339,6 +408,8 @@ function extractCatalogImportHttpMessage(raw: string): string | null {
     const fieldErrors = isRecord(message.fieldErrors) ? message.fieldErrors : null;
     const vaultError = fieldErrors && Array.isArray(fieldErrors.vault) ? fieldErrors.vault[0] : null;
     if (typeof vaultError === "string" && vaultError.trim()) return vaultError.trim();
+    const showNightError = fieldErrors && Array.isArray(fieldErrors.showNight) ? fieldErrors.showNight[0] : null;
+    if (typeof showNightError === "string" && showNightError.trim()) return showNightError.trim();
     const warning = Array.isArray(message.warnings) ? message.warnings[0] : null;
     if (typeof warning === "string" && warning.trim()) return warning.trim();
     if (typeof message.message === "string" && message.message.trim()) return message.message.trim();
@@ -644,6 +715,111 @@ function upsertSong(songs: CatalogSongDraft[], draft: CatalogSongDraft) {
   return draft.sourceKey;
 }
 
+type ShowNightPlanRow = {
+  song: string;
+  cue?: string;
+  transition?: boolean;
+  special?: boolean;
+  isOriginal?: boolean;
+};
+
+type ShowNightRunningOrder = {
+  eventLabel: string;
+  official: ShowNightPlanRow[];
+  guests: { name: string; songs: ShowNightPlanRow[] }[];
+  flexSongs: string[];
+};
+
+function showNightRowFromUnknown(song: unknown): ShowNightPlanRow | null {
+  if (!isRecord(song)) return null;
+  const title = officialSetSongTitle(song);
+  if (!title) return null;
+  const row: ShowNightPlanRow = { song: title };
+  const cue = asText(song.performanceNote) ?? asText(song.cue);
+  if (cue) row.cue = cue;
+  if (song.transition === true) row.transition = true;
+  if (song.special === true) row.special = true;
+  if (typeof song.isOriginal === "boolean") row.isOriginal = song.isOriginal;
+  return row;
+}
+
+function officialSetPosition(value: unknown): number {
+  if (!isRecord(value)) return Number.MAX_SAFE_INTEGER;
+  if (typeof value.position === "number" && Number.isFinite(value.position)) return value.position;
+  if (typeof value.number === "number" && Number.isFinite(value.number)) return value.number;
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function readShowNightRunningOrder(input: unknown): { ok: true; order: ShowNightRunningOrder } | { ok: false; message: string } {
+  const payloadError = showNightCatalogPayloadError(input);
+  if (payloadError) return { ok: false, message: payloadError };
+  if (showNightPayloadLooksLikeOfficialSetDump(input) && isRecord(input)) {
+    const songs = [...input.songs as unknown[]].sort((left, right) => officialSetPosition(left) - officialSetPosition(right));
+    const official = songs
+      .filter((song) => officialSetSlug(song) === SHOW_NIGHT_OFFICIAL_SET_SLUG)
+      .map(showNightRowFromUnknown)
+      .filter((row): row is ShowNightPlanRow => row != null);
+    const guestsBySlug = new Map<string, ShowNightPlanRow[]>();
+    for (const song of songs) {
+      const setSlug = officialSetSlug(song);
+      if (!setSlug || setSlug === SHOW_NIGHT_OFFICIAL_SET_SLUG) continue;
+      const row = showNightRowFromUnknown(song);
+      if (!row) continue;
+      const list = guestsBySlug.get(setSlug) ?? [];
+      list.push(row);
+      guestsBySlug.set(setSlug, list);
+    }
+    const setTitles = new Map<string, string>();
+    if (Array.isArray(input.sets)) {
+      for (const set of input.sets) {
+        const slugValue = isRecord(set) ? asText(set.slug) : undefined;
+        const title = isRecord(set) ? asText(set.title) : undefined;
+        if (slugValue && title) setTitles.set(slugValue, title);
+      }
+    }
+    const show = isRecord(input.show) ? input.show : null;
+    const eventLabel = [
+      asText(show?.title) ?? asText(show?.name),
+      asText(show?.venue),
+      asText(show?.date) ?? asText(show?.dateLong)
+    ].filter(Boolean).join(" · ") || "Show Night";
+    return {
+      ok: true,
+      order: {
+        eventLabel,
+        official,
+        guests: [...guestsBySlug.entries()].map(([setSlug, guestSongs]) => ({
+          name: setTitles.get(setSlug) ?? SHOW_NIGHT_GUEST_SET_TITLES[setSlug] ?? setSlug,
+          songs: guestSongs
+        })),
+        flexSongs: []
+      }
+    };
+  }
+  const parsed = showNightSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, message: "Show Night payload is not a valid show.json export. No show-night songs or setlists were planned." };
+  }
+  return {
+    ok: true,
+    order: {
+      eventLabel: [parsed.data.event?.name, parsed.data.event?.venue, parsed.data.event?.dateLong].filter(Boolean).join(" · ") || "Show Night",
+      official: (parsed.data.radDadSet ?? []).flatMap((row) => {
+        const mapped = showNightRowFromUnknown(row);
+        return mapped ? [mapped] : [];
+      }),
+      guests: (parsed.data.guestSets ?? []).map((guest) => ({
+        name: guest.name,
+        songs: guest.songs.flatMap((row) => {
+          const mapped = showNightRowFromUnknown(row);
+          return mapped ? [mapped] : [];
+        })
+      })),
+      flexSongs: parsed.data.flexSongs ?? []
+    }
+  };
+}
+
 export function planCatalogImport(input: {
   vault?: unknown;
   showNight?: unknown;
@@ -775,12 +951,17 @@ export function planCatalogImport(input: {
   }
 
   if (input.showNight != null && !vaultPayloadRejected && !catalogLocatorLooksRemote(input.showNight)) {
-    const parsed = showNightSchema.safeParse(input.showNight);
-    if (!parsed.success) {
-      warnings.push("Show Night payload is not a valid show.json export. No show-night songs or setlists were planned.");
+    const runningOrder = readShowNightRunningOrder(input.showNight);
+    if (!runningOrder.ok) {
+      warnings.push(
+        runningOrder.message === SHOW_NIGHT_OFFICIAL_SET_IMPORT_ERROR
+        || runningOrder.message === SHOW_NIGHT_FEED_IMPORT_ERROR
+        || runningOrder.message === VAULT_SPINE_IMPORT_ERROR
+          ? runningOrder.message
+          : "Show Night payload is not a valid show.json export. No show-night songs or setlists were planned."
+      );
     } else {
-      const eventLabel = [parsed.data.event?.name, parsed.data.event?.venue, parsed.data.event?.dateLong].filter(Boolean).join(" · ") || "Show Night";
-      const official = parsed.data.radDadSet ?? [];
+      const { eventLabel, official, guests, flexSongs } = runningOrder.order;
       const officialItems: CatalogSetlistItemDraft[] = [];
       for (const row of official) {
         showNightSongsSeen += 1;
@@ -791,7 +972,7 @@ export function planCatalogImport(input: {
           musicalKey: null,
           bpm: null,
           notes: clipNotes(`Show Night official set${row.special ? " · special" : ""}`),
-          active: true,
+          active: row.isOriginal !== false,
           project: "Rad Dad",
           origin: "show_night"
         });
@@ -813,7 +994,7 @@ export function planCatalogImport(input: {
         });
       }
 
-      for (const guest of parsed.data.guestSets ?? []) {
+      for (const guest of guests) {
         const guestProject = normalizeProject(guest.name);
         if (!includeGuestSets) {
           guestSetsSkipped += 1;
@@ -831,7 +1012,7 @@ export function planCatalogImport(input: {
             musicalKey: null,
             bpm: null,
             notes: clipNotes(`Show Night guest set · ${guest.name}`),
-            active: true,
+            active: row.isOriginal !== false,
             project: guest.name,
             origin: "show_night"
           });
@@ -854,8 +1035,8 @@ export function planCatalogImport(input: {
         }
       }
 
-      if ((parsed.data.flexSongs ?? []).length) {
-        skipped.push({ reason: "flex_pool_skipped", title: `${parsed.data.flexSongs!.length} flex songs` });
+      if (flexSongs.length) {
+        skipped.push({ reason: "flex_pool_skipped", title: `${flexSongs.length} flex songs` });
       }
     }
   }
