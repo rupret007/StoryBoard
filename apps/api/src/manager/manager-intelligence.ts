@@ -27,6 +27,7 @@ import type { ManagerConversationEventAction } from "./manager-event-capture";
 import type { ManagerConversationEventAvailabilityAction } from "./manager-event-availability";
 import { EVENT_LOGISTICS_POLICY_VERSION, type EventLogisticsAssessment, type PrepareEventLogisticsApprovalsAction } from "../operations/event-logistics";
 import { applyManagerResponseAdaptation, managerResponseAdaptationPolicy, type ManagerResponseAdaptationPolicy } from "./manager-response-quality";
+import { resolveManagerWriteClaim } from "./manager-write-claim";
 import type { ManagerFollowThrough } from "./manager-follow-through";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -1274,6 +1275,11 @@ function deterministicManagerChatBase(
       citations: recorded.citations,
       recommendation: null
     };
+  }
+
+  const writeClaim = resolveManagerWriteClaim(question);
+  if (writeClaim.status === "refused" && writeClaim.message) {
+    return { answer: writeClaim.message, citations: [], recommendation: null };
   }
 
   if (externalRequest) {

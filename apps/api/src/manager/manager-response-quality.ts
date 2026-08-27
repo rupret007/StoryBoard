@@ -1,3 +1,5 @@
+import { managerAnswerClaimsUnverifiedWrite } from "./manager-write-claim";
+
 export type ManagerResponseFeedbackSignal = {
   helpful: boolean;
   reason: string | null;
@@ -46,7 +48,7 @@ export function evaluateManagerResponseQuality(
   if (/\b(?:as an ai|language model|ai assistant|read_manager_snapshot|system prompt|provided snapshot|database records?|record ids?)\b/i.test(answer)) {
     violations.push("assistant_meta_language");
   }
-  if (/\bI (?:have )?(?:sent|emailed|contacted|scheduled|paid|signed|booked|published|uploaded|created (?:a )?calendar)\b/i.test(answer)) {
+  if (managerAnswerClaimsUnverifiedWrite(answer)) {
     violations.push("unverified_external_action_claim");
   }
   const formattedLines = answer.split("\n").filter((line) => /^\s*(?:#{1,6}\s|[-*]\s|\d+[.)]\s)/.test(line)).length;

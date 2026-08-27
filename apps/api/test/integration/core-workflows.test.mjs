@@ -1566,6 +1566,43 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(secondResponseEval.label, "useful");
   assert.equal((await manager.responseEvalReview(artist.id, operator.id, 3)).items.some((item) => item.messageId === secondChat.message.id), false);
   assert.equal((await manager.responseEvalReview(foreignArtist.id, operator.id, 3)).items.some((item) => [firstChat.message.id, secondChat.message.id].includes(item.messageId)), false);
+  const writeClaimCounts = {
+    songs: await client.song.count({ where: { artistId: artist.id } }),
+    setlists: await client.setlist.count({ where: { artistId: artist.id } }),
+    invoices: await client.invoice.count({ where: { artistId: artist.id } }),
+    opportunities: await client.bookingOpportunity.count({ where: { artistId: artist.id } }),
+    prospects: await client.bookingProspect.count({ where: { artistId: artist.id } }),
+    payments: await client.paymentRecord.count({ where: { artistId: artist.id } })
+  };
+  const importWriteChat = await manager.chat(artist.id, { message: "Import the catalog" }, operator.email, operator.id);
+  assert.notEqual(importWriteChat.conversationId, firstChat.conversationId);
+  assert.match(importWriteChat.message.content, /did not import or apply a catalog/i);
+  assert.equal(importWriteChat.recommendation, null);
+  const importWriteRun = await client.managerRun.findUniqueOrThrow({ where: { id: importWriteChat.message.managerRunId } });
+  assert.equal(importWriteRun.mode, "deterministic_write_claim");
+  assert.equal(importWriteRun.trace.writeClaim.policyVersion, "manager_write_claim_v1");
+  assert.equal(importWriteRun.trace.writeClaim.status, "refused");
+  assert.equal(importWriteRun.trace.writeClaim.kind, "catalog_import");
+  assert.equal(importWriteRun.trace.writeClaim.providerBypassed, true);
+  const bookWriteChat = await manager.chat(artist.id, { conversationId: importWriteChat.conversationId, message: "Book the Bluebird" }, operator.email, operator.id);
+  assert.match(bookWriteChat.message.content, /did not book anyone/i);
+  assert.equal(bookWriteChat.recommendation, null);
+  const invoiceWriteChat = await manager.chat(artist.id, { conversationId: importWriteChat.conversationId, message: "Create an invoice for the buyer" }, operator.email, operator.id);
+  assert.match(invoiceWriteChat.message.content, /did not create an invoice/i);
+  assert.equal(invoiceWriteChat.recommendation, null);
+  const setlistWriteChat = await manager.chat(artist.id, { conversationId: importWriteChat.conversationId, message: "Save the setlist" }, operator.email, operator.id);
+  assert.match(setlistWriteChat.message.content, /did not save a setlist change/i);
+  assert.equal(setlistWriteChat.recommendation, null);
+  assert.equal(await client.song.count({ where: { artistId: artist.id } }), writeClaimCounts.songs);
+  assert.equal(await client.setlist.count({ where: { artistId: artist.id } }), writeClaimCounts.setlists);
+  assert.equal(await client.invoice.count({ where: { artistId: artist.id } }), writeClaimCounts.invoices);
+  assert.equal(await client.bookingOpportunity.count({ where: { artistId: artist.id } }), writeClaimCounts.opportunities);
+  assert.equal(await client.bookingProspect.count({ where: { artistId: artist.id } }), writeClaimCounts.prospects);
+  assert.equal(await client.paymentRecord.count({ where: { artistId: artist.id } }), writeClaimCounts.payments);
+  const stagedImportTaskChat = await manager.chat(artist.id, { conversationId: importWriteChat.conversationId, message: "Add a task to confirm the write-claim leftover by 2026-08-28" }, operator.email, operator.id);
+  assert.equal(stagedImportTaskChat.recommendation?.proposedAction?.type, "create_conversation_task");
+  assert.match(stagedImportTaskChat.message.content, /after you review/i);
+  assert.equal(await client.task.count({ where: { artistId: artist.id, sourceKey: { startsWith: "manager_task_capture_v1:" }, title: { equals: "confirm the write-claim leftover", mode: "insensitive" } } }), 0);
   const negativeFeedback = await manager.messageFeedback(artist.id, firstChat.message.id, { helpful: false, reason: "too_vague", note: "Name the exact first step" }, operator.email, operator.id);
   assert.equal(negativeFeedback.helpful, false);
   const adaptedChat = await manager.chat(artist.id, { conversationId: firstChat.conversationId, message: "What should we focus on now?" }, operator.email, operator.id);
@@ -1609,7 +1646,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(conversationSummaries[0].messages[0].id, adaptedChat.message.id);
   assert.equal((await manager.conversations(artist.id, 1)).length, 1);
   assert.equal((await manager.conversations(foreignArtist.id, 10)).some((item) => item.id === firstChat.conversationId), false);
-  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 21);
+  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational", mode: "deterministic_write_claim" } }), 4);
+  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 26);
   await assert.rejects(() => manager.conversation(foreignArtist.id, firstChat.conversationId, operator.id), (error) => error?.getStatus?.() === 404);
 
   const venue = await client.venue.create({ data: { artistId: artist.id, name: "Owned Room", city: "Chicago" } });

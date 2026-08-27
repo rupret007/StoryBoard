@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const loadApi = async (path) => { const module = await import(pathToFileURL(join(dir, "..", "dist", path)).href); return module.default ?? module; };
 const loadShared = (path) => import(pathToFileURL(join(dir, "..", "..", "..", "packages", "shared", "dist", path)).href);
-const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, contextCapture, taskCapture, taskUpdate, taskAssignment, projectCapture, eventCapture, eventAvailability, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, naturalFeedback, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, followThrough, workflowProcessorMod] = await Promise.all([
+const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod, managerControllerMod, intelligence, responseQuality, outcomeReview, contextHealth, contextCapture, taskCapture, taskUpdate, taskAssignment, projectCapture, eventCapture, eventAvailability, knowledgeHealth, evidenceHealth, workSequence, goalPath, goalTarget, conversationContinuity, naturalFeedback, writeClaim, subjectReference, recommendationReview, responseReview, memoryCapture, goalMeasurement, coaching, commitmentHealth, teamLoad, managerSchedule, providerContext, tasksMod, evaluation, managerPlan, eventReadiness, eventDayOf, projectPlan, followThrough, workflowProcessorMod] = await Promise.all([
   loadApi("manager/manager-policy.js"),
   loadApi("operations/simple-pdf.js"),
   loadShared("schemas/manager.js"),
@@ -33,6 +33,7 @@ const [policy, pdf, managerSchemas, operationSchemas, operationsMod, managerMod,
   loadApi("manager/manager-goal-target.js"),
   loadApi("manager/manager-conversation-continuity.js"),
   loadApi("manager/manager-natural-feedback.js"),
+  loadApi("manager/manager-write-claim.js"),
   loadApi("manager/manager-subject-reference.js"),
   loadApi("manager/manager-recommendation-review.js"),
   loadApi("manager/manager-response-review.js"),
@@ -1727,6 +1728,103 @@ test("manager response quality rejects assistant tells, canned prose, and invent
   assert.ok(unsafe.violations.includes("unverified_external_action_claim"));
   const tooLong = responseQuality.evaluateManagerResponseQuality(Array.from({ length: 141 }, () => "word").join(" "), "concise");
   assert.ok(tooLong.violations.includes("too_long"));
+  for (const claim of [
+    "I imported the catalog onto this artist.",
+    "I invoiced the buyer for the deposit.",
+    "I booked Bluebird for Saturday.",
+    "I saved the setlist just now.",
+    "The catalog is now imported.",
+    "The invoice is now created."
+  ]) {
+    const result = responseQuality.evaluateManagerResponseQuality(claim, "guided");
+    assert.equal(result.passed, false, claim);
+    assert.ok(result.violations.includes("unverified_external_action_claim"), claim);
+  }
+});
+
+test("manager chat refuses booking invoice catalog and setlist writes without claiming they happened", () => {
+  const booking = writeClaim.resolveManagerWriteClaim("Book the Bluebird");
+  assert.equal(booking.status, "refused");
+  assert.equal(booking.kind, "booking");
+  assert.match(booking.message, /did not book anyone/i);
+  assert.match(booking.message, /Booking inbox or Approvals/i);
+  assert.doesNotMatch(booking.message, /\bI (?:have )?(?:booked|invoiced|imported|saved)\b/i);
+
+  const invoice = writeClaim.resolveManagerWriteClaim("Create an invoice for the buyer");
+  assert.equal(invoice.status, "refused");
+  assert.equal(invoice.kind, "invoice");
+  assert.match(invoice.message, /did not create an invoice/i);
+  assert.match(invoice.message, /Band operations/i);
+
+  const catalog = writeClaim.resolveManagerWriteClaim("Import the catalog");
+  assert.equal(catalog.status, "refused");
+  assert.equal(catalog.kind, "catalog_import");
+  assert.match(catalog.message, /did not import or apply a catalog/i);
+  assert.match(catalog.message, /catalog:import|--apply/i);
+
+  const setlist = writeClaim.resolveManagerWriteClaim("Save the setlist");
+  assert.equal(setlist.status, "refused");
+  assert.equal(setlist.kind, "setlist");
+  assert.match(setlist.message, /did not save a setlist change/i);
+  assert.match(setlist.message, /Music & setlists/i);
+
+  for (const question of ["What's our setlist?", "What is the balance on Invoice 1042?", "Should we book Milwaukee or Detroit?", "What is an invoice?"]) {
+    assert.equal(writeClaim.resolveManagerWriteClaim(question).status, "not_write", question);
+  }
+
+  const booked = intelligence.deterministicManagerChat(managerFacts(), "Book the Bluebird", now);
+  assert.match(booked.answer, /did not book anyone/i);
+  assert.equal(booked.recommendation, null);
+  assert.equal(responseQuality.evaluateManagerResponseQuality(booked.answer, "guided").passed, true);
+
+  const invoiced = intelligence.deterministicManagerChat(managerFacts(), "Invoice the buyer", now);
+  assert.match(invoiced.answer, /did not create an invoice/i);
+  assert.equal(invoiced.recommendation, null);
+
+  const imported = intelligence.deterministicManagerChat(managerFacts({
+    songs: [{ id: "song-harbor", title: "Harbor Lights", active: true, sourceKey: "vault:catalog_import_v1:RD-0001" }],
+    setlists: [{ id: "setlist-vault", name: "Vault default-live", status: "draft", itemCount: 1, sourceKey: "vault:catalog_import_v1:set:setlist-ready" }]
+  }), "Import the catalog", now);
+  assert.match(imported.answer, /did not import or apply a catalog/i);
+  assert.doesNotMatch(imported.answer, /Harbor Lights is now imported|I imported/i);
+  assert.equal(imported.recommendation, null);
+
+  const saved = intelligence.deterministicManagerChat(managerFacts({
+    songs: [{ id: "song-harbor", title: "Harbor Lights", active: true }],
+    setlists: [{ id: "setlist-manual", name: "Friday headline set", status: "draft", itemCount: 1 }]
+  }), "Add Harbor Lights to the setlist", now);
+  assert.match(saved.answer, /did not save a setlist change/i);
+  assert.equal(saved.recommendation, null);
+
+  const savedSetlist = intelligence.deterministicManagerChat(managerFacts({
+    songs: [{ id: "song-harbor", title: "Harbor Lights", active: true }],
+    setlists: [{ id: "setlist-manual", name: "Friday headline set", status: "draft", itemCount: 1 }]
+  }), "Save the setlist", now);
+  assert.match(savedSetlist.answer, /did not save a setlist change/i);
+  assert.equal(savedSetlist.recommendation, null);
+  assert.doesNotMatch(savedSetlist.answer, /band memory|remember_fact|I can keep that/i);
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Save the setlist").status, "not_requested");
+
+  const remember = intelligence.deterministicManagerChat(managerFacts(), "Remember that Morgan handles production advances", now);
+  assert.equal(remember.recommendation?.proposedAction?.type, "remember_fact");
+  assert.match(remember.answer, /after you review it/i);
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Remember that Morgan handles production advances").status, "ready");
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Save that Morgan handles production advances").status, "ready");
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Remember that I imported the catalog").status, "ready");
+
+  const decision = intelligence.deterministicManagerChat(managerFacts(), "Should we book Milwaukee or Detroit?", now);
+  assert.equal(decision.recommendation?.proposedAction?.type, "create_decision");
+  assert.doesNotMatch(decision.answer, /did not book anyone/i);
+
+  const helpful = naturalFeedback.managerNaturalFeedbackAcknowledgement(naturalFeedback.resolveManagerNaturalFeedback("That answer was helpful", [{ id: "answer-a", role: "assistant" }]));
+  assert.match(helpful, /marked that answer as helpful/i);
+  assert.equal(responseQuality.evaluateManagerResponseQuality(helpful, "guided").passed, true);
+  assert.equal(writeClaim.managerAnswerClaimsUnverifiedWrite(helpful), false);
+
+  const staged = taskCapture.resolveManagerTaskCapture({ message: "Add a task to confirm write-claim leftover by 2026-07-18", sourceMessageId: "message-write-claim", sourceMessageCreatedAt: now, timezone: null, openTasks: [] });
+  assert.equal(staged.status, "ready");
+  assert.match(staged.message, /after you review/i);
+  assert.equal(writeClaim.resolveManagerWriteClaim("Add a task to confirm write-claim leftover by 2026-07-18").status, "not_write");
 });
 
 test("explicit response feedback becomes bounded presentation guidance without changing authority", () => {

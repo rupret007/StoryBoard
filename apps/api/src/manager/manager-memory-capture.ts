@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolveManagerWriteClaim } from "./manager-write-claim";
 
 export type ManagerMemoryCaptureAssessment = {
   status: "ready";
@@ -44,6 +45,10 @@ function keyFromStatement(statement: string) {
 
 export function assessManagerMemoryCapture(question: string): ManagerMemoryCaptureAssessment {
   const trimmed = question.trim();
+  const explicitRemember = /^(?:please\s+)?(?:remember|note|keep in mind)\b/i.test(trimmed);
+  if (!explicitRemember && resolveManagerWriteClaim(trimmed).status === "refused") {
+    return { status: "not_requested", reason: "The operator asked for a booking, invoice, catalog, or setlist write, not conversational memory." };
+  }
   const match = explicitCapture.exec(trimmed);
   if (!match?.[1]) return explicitCaptureIntent.test(trimmed)
     ? { status: "invalid", reason: "Name the non-sensitive band fact you want StoryBoard to remember." }
