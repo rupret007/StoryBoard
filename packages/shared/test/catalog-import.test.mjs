@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const dir = dirname(fileURLToPath(import.meta.url));
@@ -109,7 +110,7 @@ test("parked catalog and guest sets stay opt-in and stay on the current artist",
   assert.match(plan.setlists.find((setlist) => setlist.name.startsWith("Stalemate"))?.notes ?? "", /current artist only/i);
 });
 
-test("master_catalog.json field names normalize to the same live-band plan as app_api.json", () => {
+test("master_catalog.json and raw song arrays are rejected while app_api.json stays valid", () => {
   const masterCatalog = {
     version: "1.6",
     songs: [
@@ -118,6 +119,31 @@ test("master_catalog.json field names normalize to the same live-band plan as ap
     ]
   };
   const fromMaster = shared.planCatalogImport({ vault: masterCatalog });
+  assert.deepEqual(fromMaster.songs, []);
+  assert.deepEqual(fromMaster.setlists, []);
+  assert.equal(fromMaster.counts.vaultSongsSeen, 0);
+  assert.ok(fromMaster.warnings.includes(shared.VAULT_SPINE_IMPORT_ERROR));
+
+  const masterRequest = shared.catalogImportRequestSchema.safeParse({ vault: masterCatalog });
+  assert.equal(masterRequest.success, false);
+  assert.match(masterRequest.error?.issues.map((issue) => issue.message).join(" ") ?? "", /master_catalog\.json is the Vault spine, not the StoryBoard import feed; export data\/app_api\.json/);
+
+  const fromArray = shared.planCatalogImport({ vault: masterCatalog.songs });
+  assert.deepEqual(fromArray.songs, []);
+  assert.ok(fromArray.warnings.includes(shared.VAULT_SPINE_IMPORT_ERROR));
+  assert.equal(shared.catalogImportRequestSchema.safeParse({ vault: masterCatalog.songs }).success, false);
+
+  const appApiRowsWithoutEnvelope = shared.planCatalogImport({ vault: [{ id: "RD-0001", title: "Harbor Lights" }] });
+  assert.deepEqual(appApiRowsWithoutEnvelope.songs, []);
+  assert.deepEqual(appApiRowsWithoutEnvelope.warnings, [shared.VAULT_FEED_IMPORT_ERROR]);
+  assert.equal(shared.catalogImportRequestSchema.safeParse({ vault: [{ id: "RD-0001", title: "Harbor Lights" }] }).success, false);
+
+  const withShowNight = shared.planCatalogImport({ vault: masterCatalog, showNight: showNightFixture });
+  assert.deepEqual(withShowNight.songs, []);
+  assert.deepEqual(withShowNight.setlists, []);
+  assert.equal(withShowNight.counts.showNightSongsSeen, 0);
+  assert.ok(withShowNight.warnings.includes(shared.VAULT_SPINE_IMPORT_ERROR));
+
   const fromApi = shared.planCatalogImport({
     vault: {
       songs: [
@@ -126,12 +152,10 @@ test("master_catalog.json field names normalize to the same live-band plan as ap
       ]
     }
   });
-  assert.deepEqual(fromMaster.songs.map((song) => song.title), fromApi.songs.map((song) => song.title));
-  assert.equal(fromMaster.songs[0]?.sourceKey, "vault:catalog_import_v1:RD-0001");
-  assert.equal(fromMaster.counts.parkedSkipped, 1);
-
-  const fromArray = shared.planCatalogImport({ vault: masterCatalog.songs });
-  assert.deepEqual(fromArray.songs.map((song) => song.title), ["Harbor Lights"]);
+  assert.deepEqual(fromApi.songs.map((song) => song.title), ["Harbor Lights"]);
+  assert.equal(fromApi.songs[0]?.sourceKey, "vault:catalog_import_v1:RD-0001");
+  assert.equal(fromApi.counts.parkedSkipped, 1);
+  assert.equal(shared.catalogImportRequestSchema.safeParse({ vault: vaultFixture }).success, true);
 });
 
 test("invalid or empty catalog payloads fail closed without inventing rows", () => {
@@ -142,7 +166,8 @@ test("invalid or empty catalog payloads fail closed without inventing rows", () 
   const invalid = shared.planCatalogImport({ vault: { generated: "today" }, showNight: { radDadSet: "nope" } });
   assert.equal(invalid.songs.length, 0);
   assert.equal(invalid.setlists.length, 0);
-  assert.ok(invalid.warnings.length >= 2);
+  assert.deepEqual(invalid.warnings, [shared.VAULT_FEED_IMPORT_ERROR]);
+  assert.equal(invalid.counts.showNightSongsSeen, 0);
 
   assert.equal(shared.catalogImportRequestSchema.safeParse({}).success, false);
   assert.equal(shared.catalogImportRequestSchema.parse({ vault: vaultFixture }).dryRun, true);
@@ -446,7 +471,7 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.match(shared.CATALOG_NON_VAULT_EMPTY_SETLIST_HINT, /not a Vault import/i);
 });
 
-test("catalog:import CLI dry-runs the local sample and refuses remote URLs", () => {
+test("catalog:import CLI dry-runs app_api and refuses the Vault spine and remote URLs", async () => {
   const script = join(dir, "../../../scripts/import-catalog.mjs");
   const sample = join(dir, "fixtures/vault-app-api.sample.json");
   const dryRun = spawnSync(process.execPath, [script, "--source", sample], { encoding: "utf8", env: { ...process.env, DATABASE_URL: "" } });
@@ -467,4 +492,18 @@ test("catalog:import CLI dry-runs the local sample and refuses remote URLs", () 
   const remote = spawnSync(process.execPath, [script, "--source", "https://example.invalid/app_api.json"], { encoding: "utf8" });
   assert.notEqual(remote.status, 0);
   assert.match(remote.stderr, /local file path, not a URL/);
+
+  const temporary = await mkdtemp(join(tmpdir(), "storyboard-vault-spine-"));
+  try {
+    const spine = join(temporary, "master_catalog.json");
+    await writeFile(spine, JSON.stringify({
+      version: "1.6",
+      songs: [{ song_id: "TEST-0001", canonical_title: "Synthetic Test", artist_project: "Rad Dad", classification: "original" }]
+    }));
+    const rejected = spawnSync(process.execPath, [script, "--source", spine], { encoding: "utf8", env: { ...process.env, DATABASE_URL: "" } });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /master_catalog\.json is the Vault spine, not the StoryBoard import feed; export data\/app_api\.json/);
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 });

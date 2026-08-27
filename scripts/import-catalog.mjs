@@ -26,12 +26,11 @@ creates booking pitches, contacts, or a second artist.
 Usage:
   pnpm catalog:import
   pnpm catalog:import -- --source ./app_api.json
-  pnpm catalog:import -- --source ./master_catalog.json
   pnpm catalog:import -- --source ./app_api.json --show-night ./show.json
   pnpm catalog:import -- --source ./app_api.json --apply --artist default
 
 Options:
-  --source <path>          Local Vault data/app_api.json or data/master_catalog.json
+  --source <path>          Local Vault data/app_api.json StoryBoard feed
                            (default: the checked-in app_api.json shape sample)
   --show-night <path>      Local Show Night content/show.json
   --artist <slug>          Artist slug (default: default)
@@ -188,13 +187,15 @@ async function main() {
     if (!options.source && !options.showNight) options.source = defaultSamplePath();
     const vault = options.source ? await readJson(resolve(options.source)) : undefined;
     const showNight = options.showNight ? await readJson(resolve(options.showNight)) : undefined;
-    const plan = shared.planCatalogImport({
-      vault,
-      showNight,
+    const request = shared.catalogImportRequestSchema.parse({
+      ...(vault !== undefined ? { vault } : {}),
+      ...(showNight !== undefined ? { showNight } : {}),
+      dryRun: !options.apply,
       includeParked: options.includeParked,
       includeGuestSets: options.includeGuestSets,
       includeAllProjects: options.includeAllProjects
     });
+    const plan = shared.planCatalogImport(request);
     let existing = { songs: [], setlists: [] };
     if (process.env.DATABASE_URL) {
       const client = new pg.Client({ connectionString: process.env.DATABASE_URL });

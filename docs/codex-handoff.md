@@ -133,8 +133,9 @@ With Postgres up: `pnpm db:migrate` after schema changes; always `pnpm db:genera
    Default planning consumes Vault's published
    `setlist_ready_default_import` / `default_live` slice (20 ids on live
    schema 3). An empty published slice stays empty.
-   Jeff can apply a private `data/app_api.json` or `data/master_catalog.json`
-   (and optionally Show Night `content/show.json`) on his machine. Do not
+   Jeff can apply a private `data/app_api.json` StoryBoard feed (and optionally
+   Show Night `content/show.json`) on his machine. `data/master_catalog.json`
+   is the Vault spine and is rejected as an import file. Do not
    commit those files, do not fetch them over the network, do not invent a
    fourth live band, and do not auto-pitch Travis (he books). StoryLiner and
    WebJam stay out of this repo.

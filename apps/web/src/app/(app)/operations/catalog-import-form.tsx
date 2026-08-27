@@ -40,7 +40,7 @@ export function CatalogImportForm() {
     const vault = parseLocalCatalogJson(vaultText, "Vault");
     const showNight = parseLocalCatalogJson(showNightText, "Show Night");
     if (vault == null && showNight == null) {
-      throw new Error("Provide a local Vault app_api.json / master_catalog.json and/or a Show Night show.json");
+      throw new Error("Provide a local Vault data/app_api.json feed and/or a Show Night show.json");
     }
     return {
       ...(vault !== undefined ? { vault } : {}),
@@ -77,11 +77,11 @@ export function CatalogImportForm() {
     <SurfaceCard>
       <h2 className="font-semibold">Import catalog</h2>
       <p className="mt-1 text-sm text-[var(--text-muted)]">
-        Vault is the catalog brain. Choose or paste a <strong>local</strong> JSON file — StoryBoard will not fetch a URL, auto-post, or invent a fourth live band. Travis books. Preview first; apply writes the reviewed songs and setlists onto this artist only. Parked catalogs and guest sets stay out unless you use the CLI flags.
+        Vault is the catalog brain. Choose or paste its <strong>local data/app_api.json feed</strong>, not the master catalog spine — StoryBoard will not fetch a URL, auto-post, or invent a fourth live band. Travis books. Preview first; apply writes the reviewed songs and setlists onto this artist only. Parked catalogs and guest sets stay out unless you use the CLI flags.
       </p>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <label>
-          <span className="sb-label">Vault JSON (app_api.json or master_catalog.json)</span>
+          <span className="sb-label">Vault StoryBoard feed (data/app_api.json)</span>
           <input
             aria-label="Local Vault catalog file"
             className="sb-input mt-1.5"

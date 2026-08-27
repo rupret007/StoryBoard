@@ -15,6 +15,10 @@ export const CATALOG_IMPORT_SCOPES = [
 export const VAULT_SAMPLE_CATALOG_RELATIVE_PATH = "packages/shared/test/fixtures/vault-app-api.sample.json";
 export const VAULT_DEFAULT_LIVE_SETLIST_NAME = "Vault default-live";
 export const VAULT_SETLIST_READY_SETLIST_NAME = "Vault setlist-ready";
+export const VAULT_SPINE_IMPORT_ERROR =
+  "master_catalog.json is the Vault spine, not the StoryBoard import feed; export data/app_api.json.";
+export const VAULT_FEED_IMPORT_ERROR =
+  "Vault import requires the data/app_api.json StoryBoard feed.";
 
 /** Travis is the human booker. StoryBoard never auto-pitches him. */
 export const CATALOG_BOOKER_POLICY = "travis_books" as const;
@@ -72,47 +76,6 @@ function asText(value: unknown): string | undefined {
   return undefined;
 }
 
-function asStringList(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const items = value.map(asText).filter((item): item is string => Boolean(item));
-  return items.length ? items : undefined;
-}
-
-function normalizeVaultSong(song: unknown): unknown {
-  if (!isRecord(song)) return song;
-  const id = asText(song.id) ?? asText(song.song_id) ?? asText(song.vault_id);
-  const title = asText(song.title) ?? asText(song.canonical_title);
-  const project = asText(song.project) ?? asText(song.artist_project);
-  const vaultId = asText(song.vault_id) ?? id;
-  const vaultRef = asText(song.vault_ref) ?? (vaultId ? `vault:${vaultId}` : undefined);
-  let isOriginal = song.is_original;
-  if (typeof isOriginal !== "boolean") {
-    const classification = asText(song.classification)?.toLowerCase();
-    if (classification === "original") isOriginal = true;
-    else if (classification === "cover") isOriginal = false;
-  }
-  const playedLive = asStringList(song.played_live);
-  return {
-    ...song,
-    ...(id ? { id } : {}),
-    ...(title ? { title } : {}),
-    ...(project ? { project } : {}),
-    ...(vaultId ? { vault_id: vaultId } : {}),
-    ...(vaultRef ? { vault_ref: vaultRef } : {}),
-    ...(typeof isOriginal === "boolean" ? { is_original: isOriginal } : {}),
-    ...(playedLive ? { played_live: playedLive } : {})
-  };
-}
-
-/** Accept Vault `app_api.json` or `master_catalog.json` (or a raw song array). */
-export function normalizeVaultCatalog(input: unknown): unknown {
-  if (input == null) return input;
-  if (Array.isArray(input)) return { songs: input.map(normalizeVaultSong) };
-  if (!isRecord(input)) return input;
-  if (!Array.isArray(input.songs)) return input;
-  return { ...input, songs: input.songs.map(normalizeVaultSong) };
-}
-
 const optionalText = z.union([z.string(), z.number()]).transform((value) => String(value)).optional();
 const optionalNullableNumber = z.union([z.number(), z.null()]).optional();
 
@@ -157,6 +120,25 @@ const vaultAppApiSchema = z.object({
   storyboard: z.unknown().optional()
 }).passthrough();
 
+function vaultPayloadLooksLikeSpine(input: unknown): boolean {
+  const songLooksLikeSpine = (song: unknown) => isRecord(song) && (
+    "song_id" in song
+    || "canonical_title" in song
+    || "artist_project" in song
+    || "classification" in song
+  );
+  if (Array.isArray(input)) return input.some(songLooksLikeSpine);
+  if (!isRecord(input)) return false;
+  if ("version" in input && !("schema_version" in input)) return true;
+  if (!Array.isArray(input.songs)) return false;
+  return input.songs.some(songLooksLikeSpine);
+}
+
+function vaultPayloadValidationError(input: unknown): string | null {
+  if (vaultPayloadLooksLikeSpine(input)) return VAULT_SPINE_IMPORT_ERROR;
+  return vaultAppApiSchema.safeParse(input).success ? null : VAULT_FEED_IMPORT_ERROR;
+}
+
 const showNightSongSchema = z.object({
   number: z.number().optional(),
   song: z.string().trim().min(1).max(240),
@@ -190,10 +172,15 @@ export const catalogImportRequestSchema = z.object({
   includeAllProjects: z.boolean().default(false)
 }).strict().superRefine((value, context) => {
   if (value.vault == null && value.showNight == null) {
-    context.addIssue({ code: "custom", message: "Provide a Vault app_api.json or master_catalog.json payload and/or a Show Night show.json payload" });
+    context.addIssue({ code: "custom", message: "Provide a Vault data/app_api.json payload and/or a Show Night show.json payload" });
   }
-  if (catalogLocatorLooksRemote(value.vault) || catalogLocatorLooksRemote(value.showNight)) {
+  const remote = catalogLocatorLooksRemote(value.vault) || catalogLocatorLooksRemote(value.showNight);
+  if (remote) {
     context.addIssue({ code: "custom", message: "Catalog import accepts local JSON payloads only; remote URLs are rejected" });
+  }
+  if (value.vault != null && !remote) {
+    const message = vaultPayloadValidationError(value.vault);
+    if (message) context.addIssue({ code: "custom", path: ["vault"], message });
   }
 });
 
@@ -640,6 +627,7 @@ export function planCatalogImport(input: {
   let notLiveSkipped = 0;
   let guestSetsSkipped = 0;
   let vaultCatalogResolved = false;
+  let vaultPayloadRejected = false;
   const vaultSkipByTitle = new Map<string, string>();
 
   function showNightSongSourceKey(title: string, draft: CatalogSongDraft): string | null {
@@ -658,9 +646,11 @@ export function planCatalogImport(input: {
   }
 
   if (input.vault != null && !catalogLocatorLooksRemote(input.vault)) {
-    const parsed = vaultAppApiSchema.safeParse(normalizeVaultCatalog(input.vault));
-    if (!parsed.success) {
-      warnings.push("Vault payload is not a valid app_api.json or master_catalog.json catalog. No vault songs were planned.");
+    const validationError = vaultPayloadValidationError(input.vault);
+    const parsed = vaultAppApiSchema.safeParse(input.vault);
+    if (validationError || !parsed.success) {
+      vaultPayloadRejected = true;
+      warnings.push(validationError ?? VAULT_FEED_IMPORT_ERROR);
     } else {
       vaultCatalogResolved = true;
       if (parsed.data.lanes != null) {
@@ -747,7 +737,7 @@ export function planCatalogImport(input: {
     }
   }
 
-  if (input.showNight != null && !catalogLocatorLooksRemote(input.showNight)) {
+  if (input.showNight != null && !vaultPayloadRejected && !catalogLocatorLooksRemote(input.showNight)) {
     const parsed = showNightSchema.safeParse(input.showNight);
     if (!parsed.success) {
       warnings.push("Show Night payload is not a valid show.json export. No show-night songs or setlists were planned.");
