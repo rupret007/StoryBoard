@@ -1,7 +1,7 @@
 "use client";
 
 import { SurfaceCard } from "@storyboard/ui";
-import { describeCatalogImportPreview, parseLocalCatalogJson } from "@storyboard/shared";
+import { catalogImportOperatorMessage, describeCatalogImportPreview, parseLocalCatalogJson, parseLocalVaultFeedJson } from "@storyboard/shared";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -37,7 +37,7 @@ export function CatalogImportForm() {
   }
 
   function parsePayload(): PreviewPayload {
-    const vault = parseLocalCatalogJson(vaultText, "Vault");
+    const vault = parseLocalVaultFeedJson(vaultText);
     const showNight = parseLocalCatalogJson(showNightText, "Show Night");
     if (vault == null && showNight == null) {
       throw new Error("Provide a local Vault data/app_api.json feed and/or a Show Night show.json");
@@ -67,7 +67,7 @@ export function CatalogImportForm() {
         router.refresh();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
+      setError(catalogImportOperatorMessage(err));
     } finally {
       setBusy(false);
     }
