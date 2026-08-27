@@ -1796,6 +1796,22 @@ test("manager chat refuses booking invoice catalog and setlist writes without cl
   assert.match(saved.answer, /did not save a setlist change/i);
   assert.equal(saved.recommendation, null);
 
+  const savedSetlist = intelligence.deterministicManagerChat(managerFacts({
+    songs: [{ id: "song-harbor", title: "Harbor Lights", active: true }],
+    setlists: [{ id: "setlist-manual", name: "Friday headline set", status: "draft", itemCount: 1 }]
+  }), "Save the setlist", now);
+  assert.match(savedSetlist.answer, /did not save a setlist change/i);
+  assert.equal(savedSetlist.recommendation, null);
+  assert.doesNotMatch(savedSetlist.answer, /band memory|remember_fact|I can keep that/i);
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Save the setlist").status, "not_requested");
+
+  const remember = intelligence.deterministicManagerChat(managerFacts(), "Remember that Morgan handles production advances", now);
+  assert.equal(remember.recommendation?.proposedAction?.type, "remember_fact");
+  assert.match(remember.answer, /after you review it/i);
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Remember that Morgan handles production advances").status, "ready");
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Save that Morgan handles production advances").status, "ready");
+  assert.equal(memoryCapture.assessManagerMemoryCapture("Remember that I imported the catalog").status, "ready");
+
   const decision = intelligence.deterministicManagerChat(managerFacts(), "Should we book Milwaukee or Detroit?", now);
   assert.equal(decision.recommendation?.proposedAction?.type, "create_decision");
   assert.doesNotMatch(decision.answer, /did not book anyone/i);
