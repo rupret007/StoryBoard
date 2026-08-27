@@ -341,6 +341,41 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.throws(() => shared.parseLocalCatalogJson('{"url":"https://example.invalid/app_api.json"}', "Vault"), /local JSON, not a URL/i);
   assert.throws(() => shared.parseLocalCatalogJson("{not-json", "Vault"), /valid JSON/i);
 
+  const leftoverSpine = {
+    version: "1.6",
+    songs: [
+      { song_id: "RD-0001", canonical_title: "Harbor Lights", artist_project: "Rad Dad", classification: "original" }
+    ]
+  };
+  assert.deepEqual(shared.parseLocalCatalogJson(JSON.stringify(leftoverSpine), "Vault"), leftoverSpine);
+  assert.equal(shared.vaultCatalogPayloadError(leftoverSpine), shared.VAULT_SPINE_IMPORT_ERROR);
+  assert.throws(() => shared.parseLocalVaultFeedJson(JSON.stringify(leftoverSpine)), (error) => (
+    error instanceof Error
+    && error.message === shared.VAULT_SPINE_IMPORT_ERROR
+    && !error.message.startsWith("{")
+  ));
+  assert.equal(shared.parseLocalVaultFeedJson("  "), undefined);
+  assert.deepEqual(shared.parseLocalVaultFeedJson(JSON.stringify(vaultFixture)), vaultFixture);
+  assert.throws(() => shared.parseLocalVaultFeedJson(JSON.stringify([{ id: "RD-0001", title: "Harbor Lights" }])), (error) => (
+    error instanceof Error && error.message === shared.VAULT_FEED_IMPORT_ERROR
+  ));
+
+  const leftoverRequest = shared.catalogImportRequestSchema.safeParse({ vault: leftoverSpine });
+  assert.equal(leftoverRequest.success, false);
+  const flattenDump = JSON.stringify({
+    message: leftoverRequest.success ? null : leftoverRequest.error.flatten(),
+    error: "Bad Request",
+    statusCode: 400
+  });
+  assert.match(flattenDump, /fieldErrors/);
+  assert.equal(shared.catalogImportOperatorMessage(new Error(flattenDump)), shared.VAULT_SPINE_IMPORT_ERROR);
+  assert.equal(shared.catalogImportOperatorMessage(new Error(shared.VAULT_SPINE_IMPORT_ERROR)), shared.VAULT_SPINE_IMPORT_ERROR);
+  assert.equal(shared.catalogImportOperatorMessage(new Error(JSON.stringify({
+    message: { message: "Catalog payload could not be read", warnings: [shared.VAULT_SPINE_IMPORT_ERROR] },
+    error: "Bad Request",
+    statusCode: 400
+  }))), shared.VAULT_SPINE_IMPORT_ERROR);
+
   const previewPlan = shared.planCatalogImport({ vault: vaultFixture });
   const previewReconciliation = shared.reconcileCatalogImport(previewPlan, { songs: [], setlists: [] });
   const dryPreview = shared.describeCatalogImportPreview({

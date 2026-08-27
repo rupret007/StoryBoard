@@ -134,7 +134,7 @@ function vaultPayloadLooksLikeSpine(input: unknown): boolean {
   return input.songs.some(songLooksLikeSpine);
 }
 
-function vaultPayloadValidationError(input: unknown): string | null {
+export function vaultCatalogPayloadError(input: unknown): string | null {
   if (vaultPayloadLooksLikeSpine(input)) return VAULT_SPINE_IMPORT_ERROR;
   return vaultAppApiSchema.safeParse(input).success ? null : VAULT_FEED_IMPORT_ERROR;
 }
@@ -179,7 +179,7 @@ export const catalogImportRequestSchema = z.object({
     context.addIssue({ code: "custom", message: "Catalog import accepts local JSON payloads only; remote URLs are rejected" });
   }
   if (value.vault != null && !remote) {
-    const message = vaultPayloadValidationError(value.vault);
+    const message = vaultCatalogPayloadError(value.vault);
     if (message) context.addIssue({ code: "custom", path: ["vault"], message });
   }
 });
@@ -309,6 +309,43 @@ export function parseLocalCatalogJson(text: string, label = "catalog"): unknown 
     throw new Error(`${label} must be local JSON, not a URL`);
   }
   return parsed;
+}
+
+/** Band operations Vault field: refuse the spine before POST /songs/import. */
+export function parseLocalVaultFeedJson(text: string): unknown {
+  const parsed = parseLocalCatalogJson(text, "Vault");
+  if (parsed === undefined) return undefined;
+  const message = vaultCatalogPayloadError(parsed);
+  if (message) throw new Error(message);
+  return parsed;
+}
+
+/** Prefer the named spine/feed sentence over a Nest flatten dump. */
+export function catalogImportOperatorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? "").trim();
+  if (!raw) return "Import failed";
+  if (raw.includes(VAULT_SPINE_IMPORT_ERROR)) return VAULT_SPINE_IMPORT_ERROR;
+  if (raw.includes(VAULT_FEED_IMPORT_ERROR)) return VAULT_FEED_IMPORT_ERROR;
+  return extractCatalogImportHttpMessage(raw) ?? raw;
+}
+
+function extractCatalogImportHttpMessage(raw: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return null;
+    const message = parsed.message;
+    if (typeof message === "string" && message.trim()) return message.trim();
+    if (!isRecord(message)) return null;
+    const fieldErrors = isRecord(message.fieldErrors) ? message.fieldErrors : null;
+    const vaultError = fieldErrors && Array.isArray(fieldErrors.vault) ? fieldErrors.vault[0] : null;
+    if (typeof vaultError === "string" && vaultError.trim()) return vaultError.trim();
+    const warning = Array.isArray(message.warnings) ? message.warnings[0] : null;
+    if (typeof warning === "string" && warning.trim()) return warning.trim();
+    if (typeof message.message === "string" && message.message.trim()) return message.message.trim();
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export const CATALOG_IMPORT_PREVIEW_SONG_LIMIT = 20;
@@ -646,7 +683,7 @@ export function planCatalogImport(input: {
   }
 
   if (input.vault != null && !catalogLocatorLooksRemote(input.vault)) {
-    const validationError = vaultPayloadValidationError(input.vault);
+    const validationError = vaultCatalogPayloadError(input.vault);
     const parsed = vaultAppApiSchema.safeParse(input.vault);
     if (validationError || !parsed.success) {
       vaultPayloadRejected = true;
