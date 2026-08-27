@@ -1548,6 +1548,42 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(naturalFeedbackChat.feedbackApplied?.feedback.note, "it named the next show.");
   assert.match(naturalFeedbackChat.message.content, /marked that answer as helpful/i);
   assert.equal(naturalFeedbackChat.recommendation, null);
+  const writeClaimCounts = {
+    songs: await client.song.count({ where: { artistId: artist.id } }),
+    setlists: await client.setlist.count({ where: { artistId: artist.id } }),
+    invoices: await client.invoice.count({ where: { artistId: artist.id } }),
+    opportunities: await client.bookingOpportunity.count({ where: { artistId: artist.id } }),
+    prospects: await client.bookingProspect.count({ where: { artistId: artist.id } }),
+    payments: await client.paymentRecord.count({ where: { artistId: artist.id } })
+  };
+  const importWriteChat = await manager.chat(artist.id, { conversationId: firstChat.conversationId, message: "Import the catalog" }, operator.email, operator.id);
+  assert.match(importWriteChat.message.content, /did not import or apply a catalog/i);
+  assert.equal(importWriteChat.recommendation, null);
+  const importWriteRun = await client.managerRun.findUniqueOrThrow({ where: { id: importWriteChat.message.managerRunId } });
+  assert.equal(importWriteRun.mode, "deterministic_write_claim");
+  assert.equal(importWriteRun.trace.writeClaim.policyVersion, "manager_write_claim_v1");
+  assert.equal(importWriteRun.trace.writeClaim.status, "refused");
+  assert.equal(importWriteRun.trace.writeClaim.kind, "catalog_import");
+  assert.equal(importWriteRun.trace.writeClaim.providerBypassed, true);
+  const bookWriteChat = await manager.chat(artist.id, { conversationId: firstChat.conversationId, message: "Book the Bluebird" }, operator.email, operator.id);
+  assert.match(bookWriteChat.message.content, /did not book anyone/i);
+  assert.equal(bookWriteChat.recommendation, null);
+  const invoiceWriteChat = await manager.chat(artist.id, { conversationId: firstChat.conversationId, message: "Create an invoice for the buyer" }, operator.email, operator.id);
+  assert.match(invoiceWriteChat.message.content, /did not create an invoice/i);
+  assert.equal(invoiceWriteChat.recommendation, null);
+  const setlistWriteChat = await manager.chat(artist.id, { conversationId: firstChat.conversationId, message: "Save the setlist" }, operator.email, operator.id);
+  assert.match(setlistWriteChat.message.content, /did not save a setlist change/i);
+  assert.equal(setlistWriteChat.recommendation, null);
+  assert.equal(await client.song.count({ where: { artistId: artist.id } }), writeClaimCounts.songs);
+  assert.equal(await client.setlist.count({ where: { artistId: artist.id } }), writeClaimCounts.setlists);
+  assert.equal(await client.invoice.count({ where: { artistId: artist.id } }), writeClaimCounts.invoices);
+  assert.equal(await client.bookingOpportunity.count({ where: { artistId: artist.id } }), writeClaimCounts.opportunities);
+  assert.equal(await client.bookingProspect.count({ where: { artistId: artist.id } }), writeClaimCounts.prospects);
+  assert.equal(await client.paymentRecord.count({ where: { artistId: artist.id } }), writeClaimCounts.payments);
+  const stagedImportTaskChat = await manager.chat(artist.id, { conversationId: firstChat.conversationId, message: "Add a task to confirm the write-claim leftover by 2026-08-28" }, operator.email, operator.id);
+  assert.equal(stagedImportTaskChat.recommendation?.proposedAction?.type, "create_conversation_task");
+  assert.match(stagedImportTaskChat.message.content, /after you review/i);
+  assert.equal(await client.task.count({ where: { artistId: artist.id, sourceKey: { startsWith: "manager_task_capture_v1:" }, title: { equals: "confirm the write-claim leftover", mode: "insensitive" } } }), 0);
   const naturalFeedbackRun = await client.managerRun.findUniqueOrThrow({ where: { id: naturalFeedbackChat.message.managerRunId } });
   assert.equal(naturalFeedbackRun.mode, "deterministic_feedback");
   assert.equal(naturalFeedbackRun.trace.naturalFeedback.policyVersion, "manager_natural_feedback_v1");
