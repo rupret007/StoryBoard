@@ -1646,7 +1646,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(conversationSummaries[0].messages[0].id, adaptedChat.message.id);
   assert.equal((await manager.conversations(artist.id, 1)).length, 1);
   assert.equal((await manager.conversations(foreignArtist.id, 10)).some((item) => item.id === firstChat.conversationId), false);
-  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 21);
+  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational", mode: "deterministic_write_claim" } }), 4);
+  assert.equal(await client.managerRun.count({ where: { artistId: artist.id, cadence: "conversational" } }), 26);
   await assert.rejects(() => manager.conversation(foreignArtist.id, firstChat.conversationId, operator.id), (error) => error?.getStatus?.() === 404);
 
   const venue = await client.venue.create({ data: { artistId: artist.id, name: "Owned Room", city: "Chicago" } });
