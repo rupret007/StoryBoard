@@ -62,6 +62,8 @@ rejected. `SEED_DEMO_OPS` practice rows, Show Night
 running-order imports, and Band operations one-offs keep their own
 provenance; Manager and `GET /songs/status` never call them a Vault import,
 including when a Show Night running-order setlist sits on Vault-titled songs.
+Music keeps the Vault-slice song-library intro when those song rows are
+Vault and only the official set is Show Night.
 
 Details: [`docs/catalog-import.md`](docs/catalog-import.md).
 

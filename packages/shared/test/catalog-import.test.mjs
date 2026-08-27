@@ -433,6 +433,7 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.match(demoStatus.message, /not a live catalog/i);
   assert.match(demoStatus.message, /not a Vault import/i);
   assert.doesNotMatch(demoStatus.message, /usually from a local Vault/i);
+  assert.equal(shared.catalogWorkspaceUsesVaultFraming(demoStatus), false);
 
   const showNightStatus = shared.describeSongCatalogStatus({
     songs: [{ sourceKey: "shownight:catalog_import_v1:song:rad-dad:harbor-lights" }],
@@ -442,6 +443,7 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.match(showNightStatus.message, /Show Night/i);
   assert.match(showNightStatus.message, /not a fourth live band/i);
   assert.match(showNightStatus.message, /not a second catalog/i);
+  assert.equal(shared.catalogWorkspaceUsesVaultFraming(showNightStatus), false);
 
   const manualStatus = shared.describeSongCatalogStatus({
     songs: [{ sourceKey: null }],
@@ -450,6 +452,7 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.equal(manualStatus.source, "manual");
   assert.match(manualStatus.message, /Band operations/i);
   assert.match(manualStatus.message, /not a Vault import/i);
+  assert.equal(shared.catalogWorkspaceUsesVaultFraming(manualStatus), false);
 
   const mixedStatus = shared.describeSongCatalogStatus({
     songs: [{ sourceKey: "vault:catalog_import_v1:JS-0001" }, { sourceKey: "seed:demo:opener" }],
@@ -461,6 +464,7 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.match(mixedStatus.message, /1 from Vault/i);
   assert.match(mixedStatus.message, /1 practice\/demo/i);
   assert.match(mixedStatus.message, /not a live catalog or a fourth live band/i);
+  assert.equal(shared.catalogWorkspaceUsesVaultFraming(mixedStatus), false);
 
   const vaultSongsManualSetlist = shared.describeSongCatalogStatus({
     songs: [{ sourceKey: "vault:catalog_import_v1:JS-0001" }],
@@ -494,7 +498,7 @@ test("catalog status names Vault, Show Night, demo, and manual rows without call
   assert.match(overlapStatus.message, /3 from Vault/i);
   assert.match(overlapStatus.message, /1 Show Night running-order setlist/i);
   assert.match(overlapStatus.message, /not a live catalog or a fourth live band/i);
-  assert.equal(shared.catalogWorkspaceUsesVaultFraming(overlapStatus), false);
+  assert.equal(shared.catalogWorkspaceUsesVaultFraming(overlapStatus), true);
   assert.match(shared.CATALOG_NON_VAULT_LIBRARY_INTRO, /not a Vault import/i);
   assert.doesNotMatch(shared.CATALOG_NON_VAULT_LIBRARY_INTRO, /Stalemate or hybrid row in that slice stays here/i);
 
@@ -552,6 +556,15 @@ test("live Show Night official-set dump binds rad-dad and refuses suggestion row
   assert.ok(withVault.skipped.some((row) => row.reason === "cover_not_active" && row.title === "Cover Example" && row.source === "show_night"));
   assert.ok(withVault.skipped.some((row) => row.reason === "guest_set_skipped" && row.title === "Stalemate"));
   assert.ok(!withVault.songs.some((song) => /cover example|parked demo/i.test(song.title)));
+  const leftoverStatus = shared.describeSongCatalogStatus({
+    songs: withVault.songs.map((song) => ({ sourceKey: song.sourceKey })),
+    setlists: withVault.setlists.map((setlist) => ({ sourceKey: setlist.sourceKey }))
+  });
+  assert.equal(leftoverStatus.source, "mixed");
+  assert.equal(leftoverStatus.vaultSongCount, 3);
+  assert.equal(leftoverStatus.showNightSongCount, 0);
+  assert.equal(leftoverStatus.showNightSetlistCount, 1);
+  assert.equal(shared.catalogWorkspaceUsesVaultFraming(leftoverStatus), true);
 
   const guests = shared.planCatalogImport({ showNight: officialSetDump, includeGuestSets: true });
   assert.ok(guests.setlists.some((setlist) => setlist.name === "Stalemate — guest set"));

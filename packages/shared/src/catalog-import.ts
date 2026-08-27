@@ -325,9 +325,21 @@ export type CatalogRecordProvenance = {
   manualSetlistCount: number;
 };
 
-/** Band operations Vault-slice intro is honest only for an empty table or a Vault-only library. */
-export function catalogWorkspaceUsesVaultFraming(status: Pick<CatalogRecordProvenance, "source">) {
-  return status.source === "none" || status.source === "vault";
+/**
+ * Band operations Vault-slice intro is honest for an empty table, a Vault-only
+ * library, or Vault song rows whose only extra catalog is a Show Night
+ * running-order setlist (Vault + official-set Rad Dad path). Demo, manual, and
+ * Show Night-minted song rows stay on the non-Vault intro.
+ */
+export function catalogWorkspaceUsesVaultFraming(status: Pick<
+  CatalogRecordProvenance,
+  "source" | "vaultSongCount" | "showNightSongCount" | "demoSongCount" | "manualSongCount"
+>) {
+  if (status.source === "none" || status.source === "vault") return true;
+  return status.vaultSongCount > 0
+    && status.showNightSongCount === 0
+    && status.demoSongCount === 0
+    && status.manualSongCount === 0;
 }
 
 export const CATALOG_NON_VAULT_LIBRARY_INTRO =
