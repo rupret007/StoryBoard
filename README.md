@@ -548,6 +548,13 @@ before write or audit. Each gig also has a phone-friendly **day-of view** with
 the next checkpoint, an editable custom run of show for travel calls, meals,
 support slots, changeovers, and other checkpoints, contact/map actions, lineup assignments,
 advance-task completion, setlist, production links, and recorded payment state.
+The dashboard puts the nearest active recorded gig, its exact assigned set,
+and the recorded booking pipeline before generic metrics. It distinguishes an
+empty record from an unavailable endpoint, preserves draft/hold/confirmed
+status, names Vault versus manual set provenance, and never substitutes a set
+or claims a live schedule that the artist has not recorded. On phones, the
+sticky Command surface starts as one compact approval-first launcher so it does
+not cover that operational read; opening it reveals the unchanged command form.
 Confirmed gigs with an exact start/end and timezone also show their Calendar
 and Drive connection state. **Prepare approvals** creates or reuses the
 reviewable requests; it never performs the external write. Approve and execute

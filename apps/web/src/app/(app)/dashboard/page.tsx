@@ -1,35 +1,110 @@
 import { Badge, MetricStat, PageHeader, SurfaceCard } from "@storyboard/ui";
+import {
+  catalogSourceLabel,
+  selectNextRecordedGig,
+  summarizeSetlist
+} from "@storyboard/shared";
 import { serverApiFetch } from "@/lib/api-server";
 import type {
+  BandEvent,
   DashboardInsights,
   DashboardStats,
+  Setlist,
+  ShowReadiness,
   Task,
   WeeklySummary
 } from "@/lib/types";
 import {
   ArrowRight,
+  CalendarDays,
   CircleAlert,
   ClipboardList,
+  ListMusic,
   ListTodo,
   Sparkles
 } from "lucide-react";
 import Link from "next/link";
+
+type BadgeVariant = "neutral" | "warning" | "success" | "danger";
+
+function eventStatusVariant(status: string): BadgeVariant {
+  return status === "confirmed"
+    ? "success"
+    : status === "hold"
+      ? "warning"
+      : "neutral";
+}
+
+function readinessVariant(status: ShowReadiness["status"]): BadgeVariant {
+  return status === "ready"
+    ? "success"
+    : status === "attention"
+      ? "warning"
+      : "danger";
+}
+
+function formatRecordedShowTime(show: BandEvent) {
+  if (!show.startsAt) return "Date not recorded";
+  const instant = new Date(show.startsAt);
+  if (!Number.isFinite(instant.getTime())) return "Recorded date is invalid";
+  const options: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short"
+  };
+  if (show.timezone) {
+    try {
+      return new Intl.DateTimeFormat("en-US", {
+        ...options,
+        timeZone: show.timezone
+      }).format(instant);
+    } catch {
+      return `${new Intl.DateTimeFormat("en-US", options).format(instant)} · recorded timezone is invalid`;
+    }
+  }
+  return `${new Intl.DateTimeFormat("en-US", options).format(instant)} · timezone not recorded`;
+}
 
 export default async function DashboardPage() {
   let stats: DashboardStats | null = null;
   let tasks: Task[] = [];
   let summary: WeeklySummary | null = null;
   let insights: DashboardInsights | null = null;
+  let events: BandEvent[] | null = null;
+  let readiness: ShowReadiness[] | null = null;
+  let setlists: Setlist[] | null = null;
   let error: string | null = null;
   try {
-    [stats, tasks, summary, insights] = await Promise.all([
-      serverApiFetch<DashboardStats>("/dashboard/stats", { cache: "no-store" }),
-      serverApiFetch<Task[]>("/tasks", { cache: "no-store" }),
-      serverApiFetch<WeeklySummary>("/weekly-summary", { cache: "no-store" }),
-      serverApiFetch<DashboardInsights>("/dashboard/insights", {
-        cache: "no-store"
-      }).catch(() => null)
+    const [coreRows, operationsRows] = await Promise.all([
+      Promise.all([
+        serverApiFetch<DashboardStats>("/dashboard/stats", {
+          cache: "no-store"
+        }),
+        serverApiFetch<Task[]>("/tasks", { cache: "no-store" }),
+        serverApiFetch<WeeklySummary>("/weekly-summary", {
+          cache: "no-store"
+        }),
+        serverApiFetch<DashboardInsights>("/dashboard/insights", {
+          cache: "no-store"
+        }).catch(() => null)
+      ]),
+      Promise.allSettled([
+        serverApiFetch<BandEvent[]>("/events", { cache: "no-store" }),
+        serverApiFetch<ShowReadiness[]>("/events/readiness?days=120", {
+          cache: "no-store"
+        }),
+        serverApiFetch<Setlist[]>("/setlists", { cache: "no-store" })
+      ])
     ]);
+    [stats, tasks, summary, insights] = coreRows;
+    const [eventRows, readinessRows, setlistRows] = operationsRows;
+    if (eventRows.status === "fulfilled") events = eventRows.value;
+    if (readinessRows.status === "fulfilled") readiness = readinessRows.value;
+    if (setlistRows.status === "fulfilled") setlists = setlistRows.value;
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not reach the API.";
   }
@@ -44,6 +119,27 @@ export default async function DashboardPage() {
             new Date(t.dueAt) < now
         )
       : [];
+  const nextShow = events ? selectNextRecordedGig(events, now) : null;
+  const nextShowReadiness =
+    nextShow && readiness
+      ? readiness.find((item) => item.eventId === nextShow.id) ?? null
+      : null;
+  const assignedSetlist = nextShow
+    ? nextShow.setlist ??
+      (nextShow.setlistId && setlists
+        ? setlists.find((setlist) => setlist.id === nextShow.setlistId) ?? null
+        : null)
+    : null;
+  const assignedSetSummary = assignedSetlist
+    ? assignedSetlist.summary ?? summarizeSetlist(assignedSetlist.items)
+    : null;
+  const assignedSetTitles = assignedSetlist
+    ? assignedSetlist.items.flatMap((item) => {
+        if (item.itemType !== "song") return [];
+        const title = item.song?.title?.trim() || item.label?.trim();
+        return title ? [title] : [];
+      })
+    : [];
 
   if (error) {
     return (
@@ -91,12 +187,18 @@ export default async function DashboardPage() {
     { label: "Needs reconciliation", value: approvalAttention.needsReconciliation, href: "/approvals#needs-reconciliation" }
   ];
   const isNewWorkspace = s.venues === 0 && s.contacts === 0 && s.bookingOpportunities === 0;
+  const bookingHref = isNewWorkspace ? "/prospects" : "/booking";
+  const bookingAction = isNewWorkspace
+    ? "Set up booking profile"
+    : s.activeOpportunities > 0
+      ? "Review active pipeline"
+      : "Open booking pipeline";
 
   return (
     <div className="space-y-10">
       <PageHeader
         title="Command center"
-        description="Your operational home base: CRM, pipeline health, follow-ups, and anything that needs a human decision before it ships."
+        description="Your operational home base: the next recorded show, its assigned set, and the booking work that moves the calendar forward."
         actions={
           <Link
             href="/summary"
@@ -107,6 +209,229 @@ export default async function DashboardPage() {
           </Link>
         }
       />
+
+      <section aria-labelledby="show-set-booking-heading">
+        <div className="mb-4 flex items-center gap-2">
+          <CalendarDays className="h-4 w-4 text-[var(--accent)]" />
+          <h2
+            id="show-set-booking-heading"
+            className="text-sm font-semibold text-[var(--text-primary)]"
+          >
+            Show, set, booking
+          </h2>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <SurfaceCard elevated className="flex min-h-72 flex-col">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                Next recorded show
+              </p>
+              {nextShow ? (
+                <Badge variant={eventStatusVariant(nextShow.status)}>
+                  {nextShow.status.replaceAll("_", " ")}
+                </Badge>
+              ) : null}
+            </div>
+            {events === null ? (
+              <>
+                <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">
+                  Show data unavailable
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                  StoryBoard could not verify the event list. It will not guess
+                  which show is next.
+                </p>
+              </>
+            ) : nextShow ? (
+              <>
+                <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">
+                  {nextShow.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                  {formatRecordedShowTime(nextShow)}
+                </p>
+                <p className="mt-1 text-sm text-[var(--text-muted)]">
+                  {nextShow.venue?.name ??
+                    nextShow.locationName ??
+                    "Location not recorded"}
+                </p>
+                {nextShowReadiness ? (
+                  <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={readinessVariant(nextShowReadiness.status)}>
+                        {nextShowReadiness.status.replaceAll("_", " ")}
+                      </Badge>
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">
+                        {nextShowReadiness.score}/100
+                      </span>
+                      <span className="text-xs text-[var(--text-muted)]">
+                        {nextShowReadiness.confidenceLabel} record confidence
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+                      {nextShowReadiness.headline}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-4 text-xs text-[var(--text-muted)]">
+                    {readiness === null
+                      ? "Readiness data unavailable."
+                      : "No readiness assessment is recorded in the 120-day window."}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">
+                  No upcoming show is recorded
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                  Add a real hold, draft, or confirmed gig when its date is
+                  known. StoryBoard will not invent a live band schedule.
+                </p>
+              </>
+            )}
+            <Link
+              href={nextShow ? `/operations/events/${nextShow.id}` : "/operations"}
+              className="sb-btn-secondary mt-auto w-fit"
+            >
+              {nextShow ? "Open show" : "Open band operations"}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </SurfaceCard>
+
+          <SurfaceCard elevated className="flex min-h-72 flex-col">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                Assigned set
+              </p>
+              <ListMusic className="h-4 w-4 text-[var(--accent)]" />
+            </div>
+            {!nextShow ? (
+              <>
+                <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">
+                  {events === null ? "Set assignment unavailable" : "Waiting for a show"}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                  {events === null
+                    ? "StoryBoard cannot verify a show or its set while event data is unavailable."
+                    : "Record the next show first; its exact assigned set will appear here."}
+                </p>
+              </>
+            ) : assignedSetlist && assignedSetSummary ? (
+              <>
+                <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">
+                  {assignedSetlist.name}
+                </h3>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge variant="accent">
+                    {catalogSourceLabel(assignedSetlist.sourceKey)}
+                  </Badge>
+                  <Badge>
+                    {assignedSetSummary.songCount} song
+                    {assignedSetSummary.songCount === 1 ? "" : "s"}
+                  </Badge>
+                </div>
+                <p className="mt-3 text-sm text-[var(--text-secondary)]">
+                  {assignedSetSummary.durationLabel}
+                </p>
+                {assignedSetTitles.length > 0 ? (
+                  <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">
+                    First up: {assignedSetTitles.slice(0, 3).join(" · ")}
+                    {assignedSetTitles.length > 3 ? " · …" : ""}
+                  </p>
+                ) : (
+                  <p className="mt-3 text-xs text-[var(--text-muted)]">
+                    No song titles are recorded in this set.
+                  </p>
+                )}
+              </>
+            ) : !nextShow.setlistId ? (
+              <>
+                <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">
+                  No setlist assigned
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                  {nextShow.title} has no recorded set. Assign an existing
+                  Vault-fed or manually maintained set in Band operations.
+                </p>
+              </>
+            ) : setlists === null ? (
+              <>
+                <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">
+                  Setlist data unavailable
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                  This show has a setlist ID, but StoryBoard could not verify
+                  the set contents.
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">
+                  Assigned set not found
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                  The show points to a setlist that was not returned. Review
+                  the assignment instead of substituting another set.
+                </p>
+              </>
+            )}
+            <Link href="/operations" className="sb-btn-secondary mt-auto w-fit">
+              Open band operations
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </SurfaceCard>
+
+          <SurfaceCard elevated className="flex min-h-72 flex-col">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                Booking
+              </p>
+              <Badge>Travis books</Badge>
+            </div>
+            <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">
+              {s.activeOpportunities} active pipeline
+            </h3>
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">
+              {s.bookingOpportunities} total {s.bookingOpportunities === 1
+                ? "opportunity"
+                : "opportunities"} recorded
+            </p>
+            {insights ? (
+              <div className="mt-4 flex items-center gap-2">
+                <Badge
+                  variant={
+                    insights.bookingHealth.label === "Healthy"
+                      ? "success"
+                      : insights.bookingHealth.label === "Attention"
+                        ? "warning"
+                        : "danger"
+                  }
+                >
+                  {insights.bookingHealth.label}
+                </Badge>
+                <span className="text-sm font-semibold text-[var(--text-primary)]">
+                  {insights.bookingHealth.score}/100 health
+                </span>
+              </div>
+            ) : (
+              <p className="mt-4 text-xs text-[var(--text-muted)]">
+                Booking health is unavailable; recorded pipeline counts remain
+                visible.
+              </p>
+            )}
+            <p className="mt-4 text-xs leading-relaxed text-[var(--text-muted)]">
+              Travis handles booking. StoryBoard tracks reviewed work and never
+              pitches, posts, or sends on its own.
+            </p>
+            <Link href={bookingHref} className="sb-btn-secondary mt-auto w-fit">
+              {bookingAction}
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </SurfaceCard>
+        </div>
+      </section>
 
       <section>
         <div className="mb-4 flex items-center gap-2">

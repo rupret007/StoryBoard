@@ -10,4 +10,5 @@ export * from "./schemas/manager";
 export * from "./schemas/operations";
 export * from "./setlist-summary";
 export * from "./catalog-import";
+export * from "./dashboard-show";
 export * from "./zoned-date-time";
