@@ -157,4 +157,6 @@ reports an empty table as a missing Vault import, not as a second catalog. After
 rows exist it names Vault, Show Night, `SEED_DEMO_OPS`, Band operations, or a
 mix — including a Show Night or demo setlist on Vault-titled songs — and never
 calls non-Vault songs or running orders a Vault import. Band operations keeps
-the Vault-slice intro only for an empty table or a Vault-only library.
+the Vault-slice intro for an empty table, a Vault-only library, or Vault song
+rows plus a Show Night official-set / running-order setlist. Demo, manual, and
+Show Night-minted song rows still use the non-Vault intro.
