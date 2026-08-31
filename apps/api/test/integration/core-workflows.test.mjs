@@ -1920,6 +1920,25 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(foreignInvoiceChat.message.citations.includes(invoice.id), false);
   assert.equal(replay.id, firstPayment.id);
   assert.equal((await client.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).paidMinor, 25000);
+  const concurrentInvoice = await operations.createInvoice(artist.id, { dealOfferId: deal.id, eventId: event.id, number: "TEST-002", recipientName: "Owned Room", currency: "USD", subtotalMinor: 100000, taxMinor: 0 }, operator.email, operator.id);
+  const competingPayments = await Promise.allSettled([
+    operations.recordPayment(artist.id, concurrentInvoice.id, { idempotencyKey: "test-competing-a", amountMinor: 60000, currency: "USD", method: "check", receivedAt: "2026-08-01T12:00:00.000Z" }, operator.email, operator.id),
+    operations.recordPayment(artist.id, concurrentInvoice.id, { idempotencyKey: "test-competing-b", amountMinor: 60000, currency: "USD", method: "check", receivedAt: "2026-08-01T12:00:00.000Z" }, operator.email, operator.id)
+  ]);
+  assert.equal(competingPayments.filter((payment) => payment.status === "fulfilled").length, 1);
+  assert.equal(competingPayments.filter((payment) => payment.status === "rejected").length, 1);
+  const competingRows = await client.paymentRecord.findMany({ where: { invoiceId: concurrentInvoice.id } });
+  assert.equal(competingRows.length, 1);
+  assert.equal(competingRows.reduce((sum, payment) => sum + payment.amountMinor, 0), 60000);
+  assert.equal((await client.invoice.findUniqueOrThrow({ where: { id: concurrentInvoice.id } })).paidMinor, 60000);
+  const replayInvoice = await operations.createInvoice(artist.id, { dealOfferId: deal.id, eventId: event.id, number: "TEST-003", recipientName: "Owned Room", currency: "USD", subtotalMinor: 100000, taxMinor: 0 }, operator.email, operator.id);
+  const concurrentReplay = await Promise.all([
+    operations.recordPayment(artist.id, replayInvoice.id, { idempotencyKey: "test-concurrent-replay", amountMinor: 40000, currency: "USD", method: "check", receivedAt: "2026-08-01T12:00:00.000Z" }, operator.email, operator.id),
+    operations.recordPayment(artist.id, replayInvoice.id, { idempotencyKey: "test-concurrent-replay", amountMinor: 40000, currency: "USD", method: "check", receivedAt: "2026-08-01T12:00:00.000Z" }, operator.email, operator.id)
+  ]);
+  assert.equal(concurrentReplay[0].id, concurrentReplay[1].id);
+  assert.equal(await client.paymentRecord.count({ where: { invoiceId: replayInvoice.id } }), 1);
+  assert.equal((await client.invoice.findUniqueOrThrow({ where: { id: replayInvoice.id } })).paidMinor, 40000);
   const fuelExpense = await client.expense.create({ data: { artistId: artist.id, eventId: event.id, category: "travel", description: "Van fuel", amountMinor: 10000, currency: "USD", incurredAt: new Date("2026-09-18T12:00:00.000Z") } });
   const settlement = await operations.createSettlement(artist.id, { eventId: event.id, currency: "USD", grossMinor: 100000, splits: [{ bandMemberId: member.id, basisPoints: 10000 }] }, operator.email, operator.id);
   assert.equal(settlement.netMinor, 90000);
