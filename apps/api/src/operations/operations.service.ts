@@ -415,7 +415,40 @@ export class OperationsService {
     }
   }
   async patchInvoice(artistId: string, id: string, input: InvoicePatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("invoice", artistId, id); await this.validateInvoiceRelations(artistId, input); const existing = await this.prisma.client.invoice.findUniqueOrThrow({ where: { id } }); const subtotal = input.subtotalMinor ?? existing.subtotalMinor; const tax = input.taxMinor ?? existing.taxMinor; if (subtotal + tax < existing.paidMinor) throw new BadRequestException("Invoice total cannot be less than recorded payments"); const row = await this.prisma.client.invoice.update({ where: { id }, data: { ...cleanDates(input), totalMinor: subtotal + tax } }); await this.auditWrite(artistId, "Invoice", id, "invoice.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) }); return row; }
-  async recordPayment(artistId: string, invoiceId: string, input: PaymentInput, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("invoice", artistId, invoiceId); const existing = await this.prisma.client.paymentRecord.findUnique({ where: { artistId_idempotencyKey: { artistId, idempotencyKey: input.idempotencyKey } } }); if (existing) { if (existing.invoiceId !== invoiceId || existing.amountMinor !== input.amountMinor) throw new BadRequestException("Idempotency key was already used for a different payment"); return existing; } const invoice = await this.prisma.client.invoice.findUniqueOrThrow({ where: { id: invoiceId } }); if (input.currency !== invoice.currency) throw new BadRequestException("Payment currency must match invoice currency"); if (invoice.paidMinor + input.amountMinor > invoice.totalMinor) throw new BadRequestException("Payment exceeds invoice balance"); const result = await this.prisma.client.$transaction(async (tx) => { const payment = await tx.paymentRecord.create({ data: { artistId, invoiceId, idempotencyKey: input.idempotencyKey, amountMinor: input.amountMinor, currency: input.currency, method: input.method, reference: input.reference ?? null, evidenceUrl: input.evidenceUrl ?? null, receivedAt: new Date(input.receivedAt) } }); const paidMinor = invoice.paidMinor + input.amountMinor; await tx.invoice.update({ where: { id: invoiceId }, data: { paidMinor, status: paidMinor === invoice.totalMinor ? InvoiceStatus.paid : InvoiceStatus.partially_paid } }); return payment; }); await this.auditWrite(artistId, "PaymentRecord", result.id, "invoice.payment_recorded", actorLabel, actorOperatorId, { invoiceId, amountMinor: input.amountMinor, idempotencyKey: input.idempotencyKey }); return result; }
+  async recordPayment(artistId: string, invoiceId: string, input: PaymentInput, actorLabel: string, actorOperatorId: string) {
+    let result: { payment: Awaited<ReturnType<Prisma.TransactionClient["paymentRecord"]["create"]>>; created: boolean } | null = null;
+    for (let attempt = 0; attempt < 3 && !result; attempt += 1) {
+      try {
+        result = await this.prisma.client.$transaction(async (tx) => {
+          const existing = await tx.paymentRecord.findUnique({ where: { artistId_idempotencyKey: { artistId, idempotencyKey: input.idempotencyKey } } });
+          if (existing) {
+            if (existing.invoiceId !== invoiceId || existing.amountMinor !== input.amountMinor) throw new BadRequestException("Idempotency key was already used for a different payment");
+            return { payment: existing, created: false };
+          }
+          const invoice = await tx.invoice.findFirst({ where: { id: invoiceId, artistId } });
+          if (!invoice) throw new NotFoundException("Invoice not found");
+          if (input.currency !== invoice.currency) throw new BadRequestException("Payment currency must match invoice currency");
+          const paidMinor = invoice.paidMinor + input.amountMinor;
+          if (paidMinor > invoice.totalMinor) throw new BadRequestException("Payment exceeds invoice balance");
+          const payment = await tx.paymentRecord.create({ data: { artistId, invoiceId, idempotencyKey: input.idempotencyKey, amountMinor: input.amountMinor, currency: input.currency, method: input.method, reference: input.reference ?? null, evidenceUrl: input.evidenceUrl ?? null, receivedAt: new Date(input.receivedAt) } });
+          const updated = await tx.invoice.updateMany({
+            where: { id: invoiceId, artistId, paidMinor: invoice.paidMinor, totalMinor: invoice.totalMinor, currency: invoice.currency },
+            data: { paidMinor, status: paidMinor === invoice.totalMinor ? InvoiceStatus.paid : InvoiceStatus.partially_paid }
+          });
+          if (updated.count !== 1) throw new ConflictException("Invoice changed while payment was being recorded");
+          return { payment, created: true };
+        }, { isolationLevel: "Serializable" });
+      } catch (error) {
+        const retryable = prismaErrorCode(error) === "P2002" || prismaErrorCode(error) === "P2034" || error instanceof ConflictException;
+        if (retryable && attempt < 2) continue;
+        if (retryable) throw new ConflictException("Invoice changed while payment was being recorded; try again");
+        throw error;
+      }
+    }
+    if (!result) throw new ConflictException("Invoice changed while payment was being recorded; try again");
+    if (result.created) await this.auditWrite(artistId, "PaymentRecord", result.payment.id, "invoice.payment_recorded", actorLabel, actorOperatorId, { invoiceId, amountMinor: input.amountMinor, idempotencyKey: input.idempotencyKey });
+    return result.payment;
+  }
 
   expenses(artistId: string) { return this.prisma.client.expense.findMany({ where: { artistId }, include: { event: true, project: true }, orderBy: { incurredAt: "desc" } }); }
   private async validateExpenseRelations(artistId: string, input: ExpenseCreate | ExpensePatch) { if (input.eventId) await this.assertArtistRecord("event", artistId, input.eventId); if (input.projectId) await this.assertArtistRecord("project", artistId, input.projectId); }

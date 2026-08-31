@@ -4229,15 +4229,50 @@ test("custom run-of-show items are tenant-bound, range-checked, editable, remova
 
 test("payment recording is idempotent and never double-applies the balance", async () => {
   let transactions = 0;
+  const isolationLevels = [];
   const existing = { id: "payment-a", artistId: "artist-a", invoiceId: "invoice-a", idempotencyKey: "same", amountMinor: 500 };
   const service = new operationsMod.OperationsService({ client: {
-    invoice: { findFirst: async () => ({ id: "invoice-a" }) },
-    paymentRecord: { findUnique: async () => existing },
-    $transaction: async () => { transactions += 1; }
+    $transaction: async (work, options) => {
+      transactions += 1;
+      isolationLevels.push(options?.isolationLevel);
+      return work({ paymentRecord: { findUnique: async () => existing } });
+    }
   } }, { log: async () => undefined }, {});
   const result = await service.recordPayment("artist-a", "invoice-a", { idempotencyKey: "same", amountMinor: 500, currency: "USD", method: "check", receivedAt: "2026-07-11T12:00:00.000Z" }, "owner@test", "operator-a");
   assert.equal(result.id, "payment-a");
-  assert.equal(transactions, 0);
+  assert.equal(transactions, 1);
+  assert.deepEqual(isolationLevels, ["Serializable"]);
+});
+
+test("payment recording retries a concurrent invoice write before applying one exact balance change", async () => {
+  let transactions = 0;
+  let creates = 0;
+  let updates = 0;
+  const audits = [];
+  const transactionClient = {
+    paymentRecord: {
+      findUnique: async () => null,
+      create: async ({ data }) => { creates += 1; return { id: "payment-new", ...data }; }
+    },
+    invoice: {
+      findFirst: async () => ({ id: "invoice-a", artistId: "artist-a", currency: "USD", paidMinor: 0, totalMinor: 1000 }),
+      updateMany: async ({ data }) => { updates += 1; assert.equal(data.paidMinor, 600); return { count: 1 }; }
+    }
+  };
+  const service = new operationsMod.OperationsService({ client: {
+    $transaction: async (work, options) => {
+      transactions += 1;
+      assert.equal(options?.isolationLevel, "Serializable");
+      if (transactions === 1) throw Object.assign(new Error("serialization failure"), { code: "P2034" });
+      return work(transactionClient);
+    }
+  } }, { log: async (entry) => audits.push(entry) }, {});
+  const result = await service.recordPayment("artist-a", "invoice-a", { idempotencyKey: "new", amountMinor: 600, currency: "USD", method: "check", receivedAt: "2026-07-11T12:00:00.000Z" }, "owner@test", "operator-a");
+  assert.equal(result.id, "payment-new");
+  assert.equal(transactions, 2);
+  assert.equal(creates, 1);
+  assert.equal(updates, 1);
+  assert.deepEqual(audits.map((entry) => entry.action), ["invoice.payment_recorded"]);
 });
 
 test("event logistics fingerprint and source keys bind only authoritative provider inputs", () => {
