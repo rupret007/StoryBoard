@@ -959,7 +959,14 @@ Operations routes:
 All relationships are re-checked in the service layer. Cross-artist IDs return
 a generic not-found result before write/audit. Payments require an artist-wide
 idempotency key, exact currency, positive integer minor units, and cannot
-overpay. Finalized settlements and document snapshots are immutable. Agreement
+overpay. Invoice PATCH uses the same serializable `paidMinor` compare-and-set:
+it cannot mark paid without `PaymentRecord` rows, cannot lower the total below
+recorded payments, and cannot change currency after a payment. Voided invoices
+are immutable (no payments, no later PATCH, no un-void). An invoice with
+recorded payments cannot be voided. One event has at most one settlement; a
+duplicate create fails closed. Finalized settlements freeze included expenses
+and the PDF snapshot; later event expense creates and patches fail closed.
+Agreement
 templates include a not-legal-advice disclaimer and must be activated by an
 owner. Current Gmail delivery prepares a reviewed draft referencing the
 StoryBoard PDF snapshot; attach the PDF manually until binary Drive/Gmail

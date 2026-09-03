@@ -100,6 +100,17 @@ function serviceFixture({
         if (!reply) throw new Error("not found");
         Object.assign(reply, data);
         return reply;
+      },
+      updateMany: async ({ where, data }) => {
+        const reply = state.replies.find(
+          (row) => row.id === where.id && row.artistId === where.artistId
+        );
+        if (!reply) return { count: 0 };
+        if (Object.hasOwn(where, "termsAppliedAt") && where.termsAppliedAt === null && reply.termsAppliedAt) {
+          return { count: 0 };
+        }
+        Object.assign(reply, data);
+        return { count: 1 };
       }
     },
     bookingCampaignRecipient: {
@@ -114,7 +125,16 @@ function serviceFixture({
       findFirst: async ({ where }) =>
         state.opportunities.find(
           (row) => row.id === where.id && row.artistId === where.artistId
-        ) ?? null
+        ) ?? null,
+      updateMany: async ({ where, data }) => {
+        const row = state.opportunities.find(
+          (item) => item.id === where.id && item.artistId === where.artistId
+        );
+        if (!row) return { count: 0 };
+        if (where.stage?.not && row.stage === where.stage.not) return { count: 0 };
+        Object.assign(row, data);
+        return { count: 1 };
+      }
     },
     bandEvent: {
       findUnique: async () => null
@@ -124,7 +144,7 @@ function serviceFixture({
         state.audits.push(data);
       }
     },
-    $transaction: async (fn) => fn(client)
+    $transaction: async (fn) => typeof fn === "function" ? fn(client) : Promise.all(fn)
   };
 
   const approvalStore = {
@@ -224,6 +244,60 @@ test("tracked-thread sync isolates provider failures", async () => {
   const result = await fixture.service.sync("artist-a");
   assert.equal(result.created, 0);
   assert.equal(result.failed, 1);
+});
+
+test("apply terms refuses closed opportunities and is idempotent after the first write", async () => {
+  const closed = serviceFixture({
+    existingOpportunity: { id: "opp-a", artistId: "artist-a", stage: "closed" }
+  });
+  closed.state.replies.push({
+    id: "reply-a",
+    artistId: "artist-a",
+    recipientId: "recipient-a",
+    opportunityId: "opp-a",
+    analyzedAt: new Date().toISOString(),
+    termsAppliedAt: null,
+    proposedFeeMinor: 100000,
+    proposedCurrency: "USD",
+    proposedDate: "2026-09-18T00:00:00.000Z",
+    materialConditions: "Deposit due 14 days out",
+    recipient: {
+      prospect: { id: "prospect-a", name: "A Buyer" },
+      campaign: { id: "campaign-a", name: "Show campaign" },
+      contact: { id: "contact-a", fullName: "A Buyer", email: "buyer@example.test" }
+    }
+  });
+  await assert.rejects(
+    () => closed.service.applyTerms("artist-a", "reply-a", "owner@test.invalid", "operator-a"),
+    /closed opportunity/i
+  );
+
+  const open = serviceFixture({
+    existingOpportunity: { id: "opp-a", artistId: "artist-a", stage: "offer", targetDate: null }
+  });
+  open.state.replies.push({
+    id: "reply-a",
+    artistId: "artist-a",
+    recipientId: "recipient-a",
+    opportunityId: "opp-a",
+    analyzedAt: new Date().toISOString(),
+    termsAppliedAt: null,
+    proposedFeeMinor: 100000,
+    proposedCurrency: "USD",
+    proposedDate: "2026-09-18T00:00:00.000Z",
+    materialConditions: "Deposit due 14 days out",
+    recipient: {
+      prospect: { id: "prospect-a", name: "A Buyer" },
+      campaign: { id: "campaign-a", name: "Show campaign" },
+      contact: { id: "contact-a", fullName: "A Buyer", email: "buyer@example.test" }
+    }
+  });
+  const first = await open.service.applyTerms("artist-a", "reply-a", "owner@test.invalid", "operator-a");
+  assert.ok(first.termsAppliedAt);
+  assert.equal(open.state.opportunities[0].proposedFeeMinor, 100000);
+  const second = await open.service.applyTerms("artist-a", "reply-a", "owner@test.invalid", "operator-a");
+  assert.equal(second.termsAppliedAt, first.termsAppliedAt);
+  assert.equal(open.state.opportunities[0].proposedFeeMinor, 100000);
 });
 
 test("prepare confirmation requires reply linked to an opportunity", async () => {

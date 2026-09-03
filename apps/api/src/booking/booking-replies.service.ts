@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
 import { z } from "zod";
@@ -19,6 +19,12 @@ import { PrismaService } from "../prisma/prisma.service";
 const ANALYSIS_PROMPT_VERSION = "booking-reply-v1";
 const ACTIVE_SINCE_MS = 180 * 86400000;
 const analysisSchema = z.object({ intent: z.nativeEnum(BookingReplyIntent), summary: z.string().min(1).max(2000), proposedDate: z.string().datetime({ offset: true }).nullable(), proposedFeeMinor: z.number().int().nonnegative().nullable(), proposedCurrency: z.string().trim().min(3).max(3).nullable(), proposedVenue: z.string().max(500).nullable(), materialConditions: z.string().max(5000).nullable(), questions: z.array(z.string().max(1000)).max(10), recommendedNextAction: z.string().min(1).max(2000), suggestedReplySubject: z.string().min(1).max(200), suggestedReplyBody: z.string().min(1).max(20000), confidence: z.number().min(0).max(1), evidence: z.array(z.string().max(500)).max(5) }).strict();
+
+function prismaErrorCode(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && typeof (error as { code: unknown }).code === "string"
+    ? (error as { code: string }).code
+    : null;
+}
 
 function bookingReplyConfirmSourceKey(replyId: string, opportunityId: string) {
   const payload = JSON.stringify({ replyId, opportunityId });
@@ -116,12 +122,48 @@ export class BookingRepliesService {
 
   async applyTerms(artistId: string, id: string, actorLabel: string, actorOperatorId: string) {
     const reply = await this.get(artistId, id);
+    if (reply.termsAppliedAt) return reply;
     if (!reply.opportunityId) throw new BadRequestException("Link an opportunity before applying negotiation terms");
     if (!reply.analyzedAt) throw new BadRequestException("Analyze this reply before applying terms");
-    const opportunity = await this.prisma.client.bookingOpportunity.findFirst({ where: { id: reply.opportunityId, artistId } });
-    if (!opportunity) throw new NotFoundException("Booking opportunity not found");
-    await this.prisma.client.$transaction([this.prisma.client.bookingOpportunity.update({ where: { id: opportunity.id }, data: { targetDate: reply.proposedDate ?? opportunity.targetDate, proposedFeeMinor: reply.proposedFeeMinor, proposedCurrency: reply.proposedCurrency, negotiationConditions: reply.materialConditions } }), this.prisma.client.bookingReply.update({ where: { id }, data: { termsAppliedAt: new Date(), processingStatus: BookingReplyProcessingStatus.reviewed } })]);
-    await this.audit.log({ artistId, aggregateType: "BookingReply", aggregateId: id, action: "booking_reply.terms_applied", actorLabel, actorOperatorId, metadata: { opportunityId: opportunity.id } });
+    let wrote: boolean | null = null;
+    for (let attempt = 0; attempt < 3 && wrote === null; attempt += 1) {
+      try {
+        wrote = await this.prisma.client.$transaction(async (tx) => {
+          const fresh = await tx.bookingReply.findFirst({ where: { id, artistId } });
+          if (!fresh) throw new NotFoundException("Booking reply not found");
+          if (fresh.termsAppliedAt) return false;
+          if (!fresh.opportunityId) throw new BadRequestException("Link an opportunity before applying negotiation terms");
+          const opportunity = await tx.bookingOpportunity.findFirst({ where: { id: fresh.opportunityId, artistId } });
+          if (!opportunity) throw new NotFoundException("Booking opportunity not found");
+          if (opportunity.stage === BookingStage.closed) throw new BadRequestException("Cannot apply terms to a closed opportunity");
+          const changedOpportunity = await tx.bookingOpportunity.updateMany({
+            where: { id: opportunity.id, artistId, stage: { not: BookingStage.closed } },
+            data: {
+              targetDate: fresh.proposedDate ?? opportunity.targetDate,
+              proposedFeeMinor: fresh.proposedFeeMinor,
+              proposedCurrency: fresh.proposedCurrency,
+              negotiationConditions: fresh.materialConditions
+            }
+          });
+          if (changedOpportunity.count !== 1) throw new ConflictException("Opportunity changed while terms were being applied");
+          const changedReply = await tx.bookingReply.updateMany({
+            where: { id, artistId, termsAppliedAt: null },
+            data: { termsAppliedAt: new Date(), processingStatus: BookingReplyProcessingStatus.reviewed }
+          });
+          if (changedReply.count !== 1) throw new ConflictException("Booking reply changed while terms were being applied");
+          return true;
+        }, { isolationLevel: "Serializable" });
+      } catch (error) {
+        const retryable = prismaErrorCode(error) === "P2034" || error instanceof ConflictException;
+        if (retryable && attempt < 2) continue;
+        if (retryable) throw new ConflictException("Opportunity changed while terms were being applied; try again");
+        throw error;
+      }
+    }
+    if (wrote === null) throw new ConflictException("Opportunity changed while terms were being applied; try again");
+    if (wrote) {
+      await this.audit.log({ artistId, aggregateType: "BookingReply", aggregateId: id, action: "booking_reply.terms_applied", actorLabel, actorOperatorId, metadata: { opportunityId: reply.opportunityId } });
+    }
     return this.get(artistId, id);
   }
 

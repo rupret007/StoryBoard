@@ -119,7 +119,8 @@ The NestJS orchestration backend. Current responsibilities:
   song/setlist editing with shared `setlist_summary_v1` timing truth,
   source-keyed Calendar/Drive approval planning in `event-logistics.ts`,
   projects, deal documents, invoices, expenses, and settlements in
-  `src/operations/`
+  `src/operations/` (invoice balances stay payment-derived; voided invoices and
+  finalized settlement expenses fail closed)
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
 - Global **`CsrfOriginGuard`** (OAuth + Telegram webhook paths excluded for POST)
 

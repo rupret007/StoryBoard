@@ -473,8 +473,12 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   Foreign `projectId` task links fail before write or audit.
 - Agreement templates require owner activation. Payment replay keys and
   immutable deal/document/settlement history take precedence over destructive
-  replacement. Settlement math filters expenses by exact settlement currency;
+  replacement. Invoice status after a payment is derived from `PaymentRecord`
+  rows; PATCH cannot fake paid, un-void, or void an invoice that already has
+  recorded payments. Settlement math filters expenses by exact settlement currency;
   unlike currencies are never added as though their minor units were equal.
+  Finalization attaches matching expenses inside a serializable transaction;
+  later event expense writes fail closed.
 
 ## Auditability Design
 
