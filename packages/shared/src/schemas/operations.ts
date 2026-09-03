@@ -46,7 +46,13 @@ const setlistItemSchema = z.object({ songId: z.string().trim().min(1).nullable()
 });
 const setlistFields = { name: z.string().trim().min(1).max(240), status: z.enum(["draft","active","archived"]), notes: z.string().trim().max(2000).nullable().optional(), items: z.array(setlistItemSchema).max(100) } as const;
 export const setlistCreateSchema = z.object({ ...setlistFields, status: setlistFields.status.default("draft"), items: setlistFields.items.default([]) }).strict();
-export const setlistPatchSchema = z.object(setlistFields).partial().strict();
+export const setlistPatchSchema = z.object(setlistFields).partial().extend({
+  expectedUpdatedAt: z.string().datetime({ offset: true })
+}).strict().superRefine((value, context) => {
+  if (Object.keys(value).every((key) => key === "expectedUpdatedAt")) {
+    context.addIssue({ code: "custom", message: "At least one setlist change is required" });
+  }
+});
 export const projectCreateSchema = z.object({ type: z.enum(["release","content_campaign","tour","business"]), status: z.enum(["draft","active","completed","paused","cancelled"]).default("draft"), goalId: nullableId, name: z.string().trim().min(1).max(240), description: z.string().trim().max(3000).nullable().optional(), startsAt: nullableDate, dueAt: nullableDate, budgetMinor: money, currency: z.string().trim().length(3).default("USD"), successMetrics: z.array(z.string().trim().min(1).max(300)).max(20).default([]), assets: z.array(z.object({ label: z.string().max(200), url: safeHttpUrl }).strict()).max(50).default([]) }).strict();
 export const projectPatchSchema = projectCreateSchema.partial().extend({
   status: z.enum(["draft","active","completed","paused","cancelled"]).optional(),

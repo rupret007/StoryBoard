@@ -422,35 +422,57 @@ export class OperationsService {
     return { dryRun: false, policyVersion: plan.policyVersion, plan, reconciliation, created: { songs: created.songs.length, setlists: created.setlists.length } };
   }
   async patchSetlist(artistId: string, id: string, input: SetlistPatch, actorLabel: string, actorOperatorId: string) {
-    const manualInput = withoutCatalogSourceKey(input as Record<string, unknown>) as SetlistPatch;
-    await this.assertArtistRecord("setlist", artistId, id);
+    const safeInput = withoutCatalogSourceKey(input as Record<string, unknown>) as SetlistPatch;
+    const { expectedUpdatedAt, ...manualInput } = safeInput;
     if (manualInput.items) await this.validateSongs(artistId, manualInput.items);
-    const row = await this.prisma.client.$transaction(async (tx) => {
-      if (manualInput.items) {
-        await tx.setlistItem.deleteMany({ where: { setlistId: id } });
-        await tx.setlistItem.createMany({
-          data: manualInput.items.map((item, sortOrder) => ({
-            setlistId: id,
-            songId: item.songId ?? null,
-            itemType: item.itemType,
-            label: item.label ?? null,
-            transitionNotes: item.transitionNotes ?? null,
-            sortOrder
-          }))
+    const expectedVersion = new Date(expectedUpdatedAt);
+    if (Number.isNaN(expectedVersion.getTime())) throw new BadRequestException("A valid setlist version is required");
+    try {
+      const row = await this.prisma.client.$transaction(async (tx) => {
+        const current = await tx.setlist.findFirst({ where: { id, artistId }, select: { updatedAt: true } });
+        if (!current) throw new NotFoundException("Setlist not found");
+        if (current.updatedAt.getTime() !== expectedVersion.getTime()) {
+          throw new ConflictException("Setlist changed since you opened it. Refresh to load the current running order, then reapply your edits.");
+        }
+        if (manualInput.items) {
+          await tx.setlistItem.deleteMany({ where: { setlistId: id } });
+          await tx.setlistItem.createMany({
+            data: manualInput.items.map((item, sortOrder) => ({
+              setlistId: id,
+              songId: item.songId ?? null,
+              itemType: item.itemType,
+              label: item.label ?? null,
+              transitionNotes: item.transitionNotes ?? null,
+              sortOrder
+            }))
+          });
+        }
+        const updated = await tx.setlist.updateMany({
+          where: { id, artistId, updatedAt: current.updatedAt },
+          data: {
+            ...(manualInput.name !== undefined ? { name: manualInput.name } : {}),
+            ...(manualInput.status !== undefined ? { status: manualInput.status } : {}),
+            ...(manualInput.notes !== undefined ? { notes: manualInput.notes } : {}),
+            updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1))
+          }
         });
+        if (updated.count !== 1) {
+          throw new ConflictException("Setlist changed since you opened it. Refresh to load the current running order, then reapply your edits.");
+        }
+        const saved = await tx.setlist.findUniqueOrThrow({
+          where: { id },
+          include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } }
+        });
+        await this.audit.log({ artistId, aggregateType: "Setlist", aggregateId: id, action: "setlist.updated", actorLabel, actorOperatorId, metadata: { fields: Object.keys(manualInput), itemCount: saved.items.length } }, tx);
+        return saved;
+      }, { isolationLevel: "Serializable" });
+      return { ...row, summary: summarizeSetlist(row.items) };
+    } catch (error) {
+      if (prismaErrorCode(error) === "P2034") {
+        throw new ConflictException("Setlist changed while it was being saved. Refresh to load the current running order, then reapply your edits.");
       }
-      return tx.setlist.update({
-        where: { id },
-        data: {
-          ...(manualInput.name !== undefined ? { name: manualInput.name } : {}),
-          ...(manualInput.status !== undefined ? { status: manualInput.status } : {}),
-          ...(manualInput.notes !== undefined ? { notes: manualInput.notes } : {})
-        },
-        include: { items: { include: { song: true }, orderBy: { sortOrder: "asc" } } }
-      });
-    });
-    await this.auditWrite(artistId, "Setlist", id, "setlist.updated", actorLabel, actorOperatorId, { fields: Object.keys(manualInput), itemCount: row.items.length });
-    return { ...row, summary: summarizeSetlist(row.items) };
+      throw error;
+    }
   }
 
   async projects(artistId: string, now = new Date()) { const rows = await this.prisma.client.artistProject.findMany({ where: { artistId }, include: projectDetailInclude, orderBy: [{ status: "asc" }, { dueAt: "asc" }] }); return rows.map((project) => ({ ...project, readiness: deterministicProjectReadiness(project, now) })); }
