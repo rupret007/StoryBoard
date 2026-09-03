@@ -1006,14 +1006,15 @@ practice; prefer Vault import. It does not load a live catalog.
 operations, booking pipeline, and Booking inbox surfaces. Event cards repeat
 `ShowReadiness.nextAction` and deep-link setlist attach, duration gaps, and
 unpaid deposits to the matching tab. `ops_show_control_v1` sits above the
-Band operations tab strip: it selects the live, next, or overdue recorded gig
+Band operations tab strip: it selects the live, overdue, or next recorded gig
 (without inventing live from a missing end), names the exact assigned set or
 an honest unassigned/unavailable/missing state, and shows Travis's open
 booking posture. The single next action is navigate-only; viewers and members
 use the same deep-link. A booking-read failure does not lock event or setlist
 edits. After the recorded show window, the same control opens the existing
-day-of after-show wrap-up before stale pre-show readiness gaps; it still does
-not invent results or close the gig. Day-of then runs `ops_live_run_v1`: the assigned set is advanced only
+day-of after-show wrap-up before stale pre-show or future-show readiness gaps;
+it still does not invent results or close the gig. Day-of then runs
+`ops_live_run_v1`: the assigned set is advanced only
 from an explicit recorded cursor, after-show facts stay closed until the
 recorded start, and wrap-up never auto-completes the gig. Invoice rows refuse payment on voided
 invoices, keep a stable payment idempotency key for a retry, and require an

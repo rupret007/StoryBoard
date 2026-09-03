@@ -192,7 +192,7 @@ export function showControlActionLabel(code: string): string {
 }
 
 /**
- * Pick the live, next, or overdue recorded gig for Band operations.
+ * Pick the live, overdue, or next recorded gig for Band operations.
  *
  * Live requires a recorded end that still covers now. A started gig with no
  * end is overdue, not assumed live. Rehearsals, completed/cancelled rows,
@@ -215,7 +215,9 @@ export function selectLiveOrNextOpsGig<T extends OpsShowControlEvent>(
     return [{ event, phase, start }];
   });
 
-  const rank = { live: 0, upcoming: 1, overdue: 2 };
+  // A live show is always first. An unfinished past show is next so its
+  // after-show facts cannot be buried behind future readiness work.
+  const rank = { live: 0, overdue: 1, upcoming: 2 };
   scored.sort((left, right) => {
     if (left.phase !== right.phase) return rank[left.phase] - rank[right.phase];
     if (left.phase === "upcoming" && left.start !== right.start) return left.start - right.start;

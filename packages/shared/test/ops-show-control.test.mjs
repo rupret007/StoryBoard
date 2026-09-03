@@ -247,14 +247,22 @@ test("upcoming readiness next action deep-links the existing workspace without a
   assert.equal(upcoming.nextAction?.href, "/operations?tab=events&event=next-a&focus=setlist");
 });
 
-test("overdue open gigs route to after-show wrap-up before stale readiness work", () => {
+test("overdue open gigs outrank upcoming readiness and route to after-show wrap-up", () => {
   const overdue = project({
-    events: [gig({
-      id: "late-a",
-      title: "Last Friday",
-      startsAt: "2026-08-28T01:00:00.000Z",
-      endsAt: "2026-08-28T04:00:00.000Z"
-    })],
+    events: [
+      gig({
+        id: "next-a",
+        title: "Next Friday",
+        startsAt: "2026-09-10T01:00:00.000Z",
+        endsAt: "2026-09-10T04:00:00.000Z"
+      }),
+      gig({
+        id: "late-a",
+        title: "Last Friday",
+        startsAt: "2026-08-28T01:00:00.000Z",
+        endsAt: "2026-08-28T04:00:00.000Z"
+      })
+    ],
     readiness: [{
       eventId: "late-a",
       status: "not_ready",
@@ -266,6 +274,7 @@ test("overdue open gigs route to after-show wrap-up before stale readiness work"
   });
 
   assert.equal(overdue.show.phase, "overdue");
+  assert.equal(overdue.show.eventId, "late-a");
   assert.equal(overdue.nextAction?.code, "review_overdue_gig");
   assert.equal(overdue.nextAction?.href, "/operations/events/late-a");
   assert.equal(overdue.nextAction?.label, "Open after-show wrap-up");
