@@ -670,10 +670,12 @@ test("manager-created gigs become practical day-of workspaces", async ({ page })
   await page.goto("/operations");
   const localTime = (date: Date) => dateTimeLocalInZone(date, "America/Chicago");
   const localEventStart = localTime(eventStart);
-  await expect(page.getByText(eventTitle, { exact: true })).toBeVisible();
-  await expect(page.getByText(/not show-ready yet/i)).toBeVisible();
-  await expect(page.getByText(/confidence/i).first()).toBeVisible();
-  await page.getByRole("button", { name: "Generate advance checklist" }).click();
+  const eventCard = page.locator("article").filter({ hasText: eventTitle });
+  await expect(page.getByTestId("ops-show-control")).toContainText(eventTitle);
+  await expect(eventCard.getByText(eventTitle, { exact: true })).toBeVisible();
+  await expect(eventCard.getByText(/not show-ready yet/i)).toBeVisible();
+  await expect(eventCard.getByText(/confidence/i).first()).toBeVisible();
+  await eventCard.getByRole("button", { name: "Generate advance checklist" }).click();
   await expect(page.getByRole("button", { name: "Generate advance checklist" })).toHaveCount(0);
   await page.getByText("Manage readiness details", { exact: true }).click();
   await page.getByLabel(`Availability for Alex at E2E rehearsal ${suffix}`).selectOption("available");
