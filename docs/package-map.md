@@ -32,7 +32,7 @@ The Next.js operator interface. Current responsibilities:
 - Manager OS intake, briefs, conversation, goals/initiatives/decisions, team
   context, reviewed actions, durable accepted-work follow-through, and
   evaluation controls
-- Band operations for events/day-of work, songs/setlists, projects, deals,
+- Band operations for events/day-of live-run work, songs/setlists, projects, deals,
   invoices, expenses, and settlements
 - Weekly summary, **Notifications** (prefs, escalation, **Telegram** link + manual chat id)
 - Team / invites (owners), onboarding, activity feed
@@ -119,6 +119,7 @@ The NestJS orchestration backend. Current responsibilities:
   song/setlist editing with shared `setlist_summary_v1` timing truth,
   `ops_next_action_v1` next-step links on existing workspaces,
   `ops_show_control_v1` Band operations show-control posture,
+  `ops_live_run_v1` day-of live-run projection and recorded set cursor,
   source-keyed Calendar/Drive approval planning in `event-logistics.ts`,
   projects, deal documents, invoices, expenses, and settlements in
   `src/operations/` (invoice balances stay payment-derived; voided invoices and
@@ -140,7 +141,7 @@ Approval reconciliation write.
 
 ### `packages/shared`
 
-Cross-app domain contracts, validation schemas, and shared types (including **workflow notify prefs**, **Telegram notify** Zod schemas, **`catalog-import.ts`** for Vault/Show Night song-library planning, **`ops-next-action.ts`** (`ops_next_action_v1`), **`ops-show-control.ts`** (`ops_show_control_v1`), and **`operator-api-error.ts`**). **`pnpm test`** runs `build` + `node:test` on `test/*.mjs`.
+Cross-app domain contracts, validation schemas, and shared types (including **workflow notify prefs**, **Telegram notify** Zod schemas, **`catalog-import.ts`** for Vault/Show Night song-library planning, **`ops-next-action.ts`** (`ops_next_action_v1`), **`ops-show-control.ts`** (`ops_show_control_v1`), **`ops-live-run.ts`** (`ops_live_run_v1`), **`operator-href.ts`** (credential-free http(s) operator links), and **`operator-api-error.ts`**). **`pnpm test`** runs `build` + `node:test` on `test/*.mjs`.
 
 ### `packages/ui`
 

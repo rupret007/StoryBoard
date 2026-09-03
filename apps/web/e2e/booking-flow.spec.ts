@@ -1228,6 +1228,80 @@ test("approved immediate-send campaigns remain executable and create follow-up w
   await expect(page.getByRole("cell", { name: `Follow up with ${prospectName}`, exact: true })).toBeVisible();
 });
 
+test("day-of live run advances the assigned set without inventing a song", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const openerTitle = `Live opener ${suffix}`;
+  const closerTitle = `Live closer ${suffix}`;
+  const eventTitle = `Live run gig ${suffix}`;
+  const opener = await artistApi<{ id: string }>(page, artistId, "/songs", "POST", {
+    title: openerTitle,
+    durationSeconds: 180,
+    musicalKey: "G",
+    leadVocalist: "Morgan",
+    active: true
+  });
+  const closer = await artistApi<{ id: string }>(page, artistId, "/songs", "POST", {
+    title: closerTitle,
+    durationSeconds: 240,
+    musicalKey: "A",
+    leadVocalist: "Alex",
+    active: true
+  });
+  const setlist = await artistApi<{ id: string }>(page, artistId, "/setlists", "POST", {
+    name: `Live run set ${suffix}`,
+    status: "active",
+    items: [
+      { songId: opener.id, itemType: "song" },
+      { songId: closer.id, itemType: "song" }
+    ]
+  });
+  await artistApi<{ id: string }>(page, artistId, "/events", "POST", {
+    type: "gig",
+    status: "confirmed",
+    title: eventTitle,
+    startsAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+    endsAt: new Date(Date.now() + 90 * 60_000).toISOString(),
+    timezone: "America/Chicago",
+    locationName: "E2E Working Room",
+    setlistId: setlist.id,
+    currency: "USD"
+  });
+
+  await page.goto("/operations");
+  const eventCard = operationsEventCard(page, eventTitle);
+  await expect(eventCard.locator(":scope > div.flex.items-start p.font-medium")).toHaveText(eventTitle);
+  await expect(page.getByTestId("ops-show-control")).toContainText(eventTitle);
+  await eventCard.getByRole("link", { name: "Open day-of view" }).click();
+
+  const liveRun = page.getByTestId("ops-live-run");
+  await expect(liveRun.getByTestId("ops-live-run-title")).toHaveText(eventTitle);
+  await expect(liveRun).toContainText(/live now/i);
+
+  const liveSet = page.getByTestId("ops-live-set");
+  await expect(liveSet.locator("li[data-state='current']")).toHaveCount(0);
+  await liveSet.getByRole("button", { name: `Start ${openerTitle}` }).click();
+  await expect(liveSet.locator("li[data-state='current']")).toContainText(openerTitle);
+  await liveSet.getByRole("button", { name: `Advance to ${closerTitle}` }).click();
+  await expect(liveSet.locator("li[data-state='current']")).toContainText(closerTitle);
+  await expect(liveSet.locator("li[data-state='played']")).toContainText(openerTitle);
+
+  const wrap = page.getByTestId("ops-live-wrap");
+  await expect(wrap).toContainText(/will not invent a result/i);
+  await wrap.getByLabel("Attendance").fill("142");
+  await wrap.getByLabel(/Gross revenue/).fill("350");
+  await wrap.getByLabel(/What happened/).fill("House was late; last song held.");
+  await wrap.getByLabel(/relationship outcome/).fill("Asked back for October.");
+  await wrap.getByRole("button", { name: "Save after-show facts" }).click();
+  await expect(wrap.getByLabel("Attendance")).toHaveValue("142");
+  await page.reload();
+  await expect(page.getByTestId("ops-live-run").getByTestId("ops-live-run-title")).toHaveText(eventTitle);
+  await expect(page.getByTestId("ops-live-set").locator("li[data-state='current']")).toContainText(closerTitle);
+  await expect(page.getByTestId("ops-live-wrap").getByLabel("Attendance")).toHaveValue("142");
+  await expect(page.getByTestId("ops-live-wrap").getByLabel(/Gross revenue/)).toHaveValue("350.00");
+});
+
 test("day-of setlist keeps a mixed-duration subtotal explicit", async ({ page }) => {
   const suffix = Date.now().toString(36);
   await signInForBrowserTest(page);

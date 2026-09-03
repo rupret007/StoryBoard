@@ -25,7 +25,7 @@ export default async function EventDayOfPage({ params }: { params: Promise<{ id:
     /* Keep the event readable while all changes fail closed. */
   }
   return <div className="space-y-6">
-    <PageHeader title={data.event.title} description="The live show plan: what matters now, what happens next, and what still needs attention." />
+    <PageHeader title={data.event.title} description="Run the assigned set from a recorded cursor, keep the show-day checkpoints honest, and record after-show facts without inventing a result." />
     <DayOfClient initialData={data} accessState={accessState} />
   </div>;
 }

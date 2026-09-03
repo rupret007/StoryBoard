@@ -4007,6 +4007,12 @@ test("operations validation rejects unknown fields, invalid money, and bad settl
   assert.equal(operationSchemas.eventScheduleItemCreateSchema.safeParse({ title: "Backwards", startsAt: "2026-07-19T00:00:00.000Z", endsAt: "2026-07-18T23:00:00.000Z" }).success, false);
   assert.equal(operationSchemas.eventScheduleItemCreateSchema.safeParse({ title: "Unknown field", startsAt: "2026-07-18T23:00:00.000Z", surprise: true }).success, false);
   assert.equal(operationSchemas.eventScheduleItemPatchSchema.safeParse({}).success, false);
+  assert.equal(operationSchemas.eventCreateSchema.safeParse({ type: "gig", title: "Show", stagePlotUrl: "javascript:alert(1)" }).success, false);
+  assert.equal(operationSchemas.eventCreateSchema.safeParse({ type: "gig", title: "Show", stagePlotUrl: "https://user:secret@evil.test/plot" }).success, false);
+  assert.equal(operationSchemas.eventCreateSchema.safeParse({ type: "gig", title: "Show", stagePlotUrl: "https://docs.example.test/plot.pdf" }).success, true);
+  assert.equal(operationSchemas.eventLiveSetPositionSchema.safeParse({ setlistItemId: "item-a" }).success, true);
+  assert.equal(operationSchemas.eventLiveSetPositionSchema.safeParse({ setlistItemId: null }).success, true);
+  assert.equal(operationSchemas.eventLiveSetPositionSchema.safeParse({ setlistItemId: "item-a", surprise: true }).success, false);
 });
 
 test("settlement math includes only expenses in the settlement currency", async () => {
@@ -4162,6 +4168,19 @@ test("day-of intelligence identifies the next checkpoint, work pressure, and rec
   assert.match(closed.nextAction, /cancellation outcome/i);
 });
 
+test("day-of does not invent a live window when the recorded end is missing", () => {
+  const event = {
+    id: "event-open", status: "confirmed", startsAt: new Date("2026-07-12T11:00:00.000Z"), endsAt: null,
+    loadInAt: new Date("2026-07-12T10:00:00.000Z"), soundcheckAt: null, doorsAt: null, setAt: null, curfewAt: null,
+    guaranteeMinor: null, depositMinor: 0, currency: "USD",
+    participants: [], tasks: [], schedule: [], deals: [], invoices: []
+  };
+  const readiness = { eventId: event.id, title: "Show", startsAt: event.startsAt.toISOString(), daysUntil: 0, score: 40, status: "attention", confidence: 0.5, confidenceLabel: "medium", observedAt: now.toISOString(), headline: "Open.", nextAction: null, categories: [], gaps: [], evidenceIds: [event.id] };
+  const view = eventDayOf.deterministicEventDayOf(event, readiness, [], now);
+  assert.equal(view.mode, "post_show");
+  assert.match(view.headline, /will not assume it is live without an end/i);
+});
+
 test("manager prioritizes the concrete day-of sequence for a show within 24 hours", () => {
   const dayOf = { eventId: "event-a", mode: "pre_show", observedAt: now.toISOString(), headline: "Next checkpoint: Load-in in 120 minutes.", nextAction: "Confirm load-in readiness before the next checkpoint.", nextCheckpoint: null, timeline: [], openTaskCount: 1, overdueTaskCount: 0, unavailableCount: 0, unresolvedAvailabilityCount: 0, expectedFeeMinor: 1000, expectedDepositMinor: 0, recordedPaidMinor: 0, openInvoiceBalanceMinor: 0, depositRemainingMinor: 0, currency: "USD", evidenceIds: ["event-a", "task-a"] };
   const readiness = { eventId: "event-a", title: "Tonight", startsAt: "2026-07-12T22:00:00.000Z", daysUntil: 0, score: 85, status: "attention", confidence: 0.9, confidenceLabel: "high", observedAt: now.toISOString(), headline: "Tonight has one remaining gap.", nextAction: "Review the event.", categories: [], gaps: [], evidenceIds: ["event-a"] };
@@ -4296,6 +4315,64 @@ test("custom run-of-show items are tenant-bound, range-checked, editable, remova
   assert.equal(deletes, 1);
   assert.deepEqual(audits.map((entry) => entry.action), ["event.schedule_item_created", "event.schedule_item_updated", "event.schedule_item_removed"]);
   assert.equal(audits.some((entry) => Object.hasOwn(entry.metadata, "notes")), false);
+});
+
+test("live set position stays on the assigned set, is tenant-bound, and does not write on no-op", async () => {
+  let updates = 0;
+  const audits = [];
+  let event = {
+    id: "event-a",
+    artistId: "artist-a",
+    setlistId: "set-a",
+    liveSetlistItemId: null,
+    type: "gig",
+    status: "confirmed",
+    title: "Tonight",
+    startsAt: new Date("2026-09-03T17:00:00.000Z"),
+    endsAt: new Date("2026-09-03T20:00:00.000Z"),
+    timezone: "America/Chicago",
+    locationName: "Bluebird",
+    setlist: { id: "set-a", name: "Friday set", sourceKey: null, items: [{ id: "item-1" }, { id: "item-2" }] },
+    participants: [],
+    tasks: [],
+    schedule: [],
+    deals: [],
+    invoices: [],
+    expenses: [],
+    approvals: []
+  };
+  const client = {
+    bandEvent: {
+      findFirst: async ({ where }) => {
+        if (where.id === "event-a" && where.artistId === "artist-a") {
+          if (where.OR || where.type) return event;
+          return event;
+        }
+        return null;
+      },
+      update: async ({ data }) => {
+        updates += 1;
+        event = { ...event, ...data };
+        return event;
+      }
+    },
+    bandMember: { findMany: async () => [] }
+  };
+  const service = new operationsMod.OperationsService({ client }, { log: async (entry) => audits.push(entry) }, {});
+  const started = await service.setLiveSetPosition("artist-a", "event-a", { setlistItemId: "item-1" }, "owner@test", "operator-a");
+  assert.equal(started.liveRun.set.currentItemId, "item-1");
+  assert.equal(started.liveRun.policyVersion, "ops_live_run_v1");
+  assert.equal(updates, 1);
+  const replay = await service.setLiveSetPosition("artist-a", "event-a", { setlistItemId: "item-1" }, "owner@test", "operator-a");
+  assert.equal(replay.liveRun.set.currentItemId, "item-1");
+  assert.equal(updates, 1);
+  await assert.rejects(() => service.setLiveSetPosition("artist-a", "event-a", { setlistItemId: "item-foreign" }, "owner@test", "operator-a"), (error) => error?.getStatus?.() === 404);
+  await assert.rejects(() => service.setLiveSetPosition("artist-b", "event-a", { setlistItemId: "item-1" }, "owner@test", "operator-b"), (error) => error?.getStatus?.() === 404);
+  event.setlistId = null;
+  event.setlist = null;
+  await assert.rejects(() => service.setLiveSetPosition("artist-a", "event-a", { setlistItemId: "item-1" }, "owner@test", "operator-a"), /will not substitute a set/i);
+  assert.equal(updates, 1);
+  assert.deepEqual(audits.map((entry) => entry.action), ["event.live_set_positioned"]);
 });
 
 test("payment recording is idempotent and never double-applies the balance", async () => {

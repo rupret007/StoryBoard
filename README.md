@@ -545,9 +545,14 @@ setlist, ordered show-day timing, guarantee/deposit, production notes, and
 technical-document links. Partial edits are checked against the complete saved
 schedule, so an impossible load-in/soundcheck/doors/set/curfew order is rejected
 before write or audit. Each gig also has a phone-friendly **day-of view** with
-the next checkpoint, an editable custom run of show for travel calls, meals,
-support slots, changeovers, and other checkpoints, contact/map actions, lineup assignments,
-advance-task completion, setlist, production links, and recorded payment state.
+`ops_live_run_v1` (phase-aligned live/upcoming/still-open header, assigned
+running order with key/duration/vocal, Start/Advance from a recorded cursor,
+and after-show wrap-up after the recorded start), the next checkpoint, an
+editable custom run of show for travel calls, meals, support slots,
+changeovers, and other checkpoints in the event IANA timezone, contact/map
+actions, lineup assignments, advance-task completion, setlist, https-only
+production links, and recorded payment state. Time never invents the current
+song, and a started gig with no end is still open rather than assumed live.
 Existing Band operations, booking, and inbox cards use `ops_next_action_v1` so
 the next recorded action is named and linked (attach set, fix durations, record
 a payment, create a draft settlement, review inbox terms). Band operations
@@ -651,7 +656,7 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm lint` | ESLint (API + web) |
 | `pnpm test` | Unit tests (`@storyboard/shared` + compiled API tests); does not require a database |
 | `pnpm test:integration` | Migrates and tests a dedicated DB named by `STORYBOARD_TEST_DATABASE_URL` (must contain `test`) |
-| `pnpm test:e2e` | Resets an explicit `STORYBOARD_TEST_DATABASE_URL`, builds production artifacts, and runs 15 focused Chromium workflows |
+| `pnpm test:e2e` | Resets an explicit `STORYBOARD_TEST_DATABASE_URL`, builds production artifacts, and runs 17 focused Chromium workflows |
 | `pnpm manager:eval` | Build the API and run the current offline Manager safety/usefulness gate |
 | `pnpm infra:up` / `infra:down` | Docker Postgres + Redis |
 | `pnpm container:up` / `container:down` | Build/start or stop the complete local container bundle |

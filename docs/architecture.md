@@ -49,7 +49,11 @@ Existing Events, Music, Deals, booking, and inbox cards use
 matching workspace. Band operations also projects `ops_show_control_v1` above
 the tab strip so the live/next/overdue recorded gig, assigned set, and open
 booking work are visible before the editors. The control action is navigate
-only; it never writes, pitches, or invents a show. Apply-terms
+only; it never writes, pitches, or invents a show. Day-of then projects
+`ops_live_run_v1` from the same live/next/overdue selection plus an explicit
+`BandEvent.liveSetlistItemId` cursor: current/next song are never inferred
+from the clock, another set is never substituted, and a missing end does not
+create a live window. Apply-terms
 (`booking_terms_apply_v1`) merges reviewed analysis onto the opportunity and
 will not erase a recorded fee, currency, condition, or date when analysis left
 that field null or blank. Travis books; StoryBoard does not auto-pitch.
@@ -454,8 +458,11 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   directly; there is no second itinerary or Manager-authored schedule.
 - The day-of view is recomputed from authoritative event data and the shared
   readiness policy. It carries evidence IDs and has no separate editable score.
-  Manager consumes it only inside the 24-hour show window, keeping longer-range
-  planning distinct from live operational guidance.
+  Mode uses a recorded end (`curfewAt` or `endsAt`); a started gig without one
+  is post-show rather than in-progress. `ops_live_run_v1` adds the assigned
+  running order and wrap-up availability from the same recorded facts.
+  Manager consumes the day-of signal only inside the 24-hour show window,
+  keeping longer-range planning distinct from live operational guidance.
 - Manager outcome review is another deterministic, non-persistent projection.
   It reads only bounded tenant records, derives confidence from premise
   coverage, separates currencies, and preserves unknown net until a settlement

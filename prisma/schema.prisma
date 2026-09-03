@@ -1385,6 +1385,7 @@ model BandEvent {
   contactId              String?
   projectId              String?
   setlistId              String?
+  liveSetlistItemId      String?
   type                   BandEventType
   status                 BandEventStatus         @default(draft)
   title                  String
@@ -1427,6 +1428,7 @@ model BandEvent {
   contact                Contact?                @relation(fields: [contactId], references: [id], onDelete: SetNull)
   project                ArtistProject?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
   setlist                Setlist?                @relation(fields: [setlistId], references: [id], onDelete: SetNull)
+  liveSetlistItem        SetlistItem?            @relation("BandEventLiveSetlistItem", fields: [liveSetlistItemId], references: [id], onDelete: SetNull)
   participants           EventParticipant[]
   schedule               EventScheduleItem[]
   tasks                  Task[]
@@ -1438,6 +1440,7 @@ model BandEvent {
   approvals              ApprovalRequest[]
 
   @@index([artistId, status, startsAt])
+  @@index([liveSetlistItemId])
 }
 
 model EventParticipant {
@@ -1517,8 +1520,9 @@ model SetlistItem {
   label           String?
   sortOrder       Int
   transitionNotes String?
-  setlist         Setlist @relation(fields: [setlistId], references: [id], onDelete: Cascade)
-  song            Song?   @relation(fields: [songId], references: [id], onDelete: SetNull)
+  setlist         Setlist     @relation(fields: [setlistId], references: [id], onDelete: Cascade)
+  song            Song?       @relation(fields: [songId], references: [id], onDelete: SetNull)
+  liveEvents      BandEvent[] @relation("BandEventLiveSetlistItem")
 
   @@unique([setlistId, sortOrder])
 }

@@ -884,10 +884,12 @@ that its name contains `test`, then seeds it. Browser coverage therefore
 exercises first-time intake on every run instead of inheriting old test data.
 The runner forces its production build environment internally, so an unrelated
 shell-level `NODE_ENV` cannot invalidate Next.js prerendering.
-The 15 focused browser cases establish their own domain prerequisites and cover
+The 17 focused browser cases establish their own domain prerequisites and cover
 booking (including approved immediate-send execution and follow-up creation),
-Manager, operations, finance, tasks, and approval-gated event logistics without
-depending on a previous case's records. The approval lifecycle journey also
+Manager, operations, finance, tasks, approval-gated event logistics, and the
+day-of live-run cursor without depending on a previous case's records.
+Gig-title asserts on Band operations stay scoped to the event card so
+show-control and live-run cannot trip Playwright strict mode. The approval lifecycle journey also
 invalidates prepared logistics by changing the event, verifies that execution
 fails closed, and confirms the quarantined result stays visible and
 non-retryable across Dashboard, Approvals, and Operations. That same existing
@@ -926,10 +928,19 @@ Operations routes:
   tenant-scoped, read-only readiness signals with category scores, confidence,
   evidence IDs, and prioritized gaps; `days` accepts 1–365
 - `GET /events/:id/day-of` — the tenant-scoped event, active lineup, shared
-  readiness result, and deterministic current/next show-day view
+  readiness result, deterministic current/next show-day view, and
+  `ops_live_run_v1` live-run projection. Day-of no longer invents a four-hour
+  live window when `endsAt` and `curfewAt` are missing; started-with-no-end is
+  post-show / overdue, not live. Operator document URLs accept only
+  credential-free `http:` / `https:`.
+- `POST /events/:id/live-set-position` — owner/member write of the recorded
+  live-set cursor on the assigned set only. Null clears it. A missing set
+  fails closed (`will not substitute a set`). A foreign item is 404. Same
+  cursor is a no-op. Returns the full day-of payload.
 - `POST /events/:id/schedule`, `PATCH /events/:id/schedule/:itemId`, and
   `DELETE /events/:id/schedule/:itemId` — strict, tenant-scoped custom
-  run-of-show checkpoints; owner/member writes only
+  run-of-show checkpoints; owner/member writes only. Day-of checkpoint
+  editors interpret `datetime-local` values in the event IANA timezone.
 - `GET` / `POST /songs`, `/setlists`, and `/projects`; item updates use
   `PATCH /songs/:id`, `/setlists/:id`, and `/projects/:id`. `POST /songs/import`
   dry-runs (default) or applies a local Vault `app_api.json` StoryBoard feed
@@ -1000,7 +1011,9 @@ Band operations tab strip: it selects the live, next, or overdue recorded gig
 an honest unassigned/unavailable/missing state, and shows Travis's open
 booking posture. The single next action is navigate-only; viewers and members
 use the same deep-link. A booking-read failure does not lock event or setlist
-edits. Invoice rows refuse payment on voided
+edits. Day-of then runs `ops_live_run_v1`: the assigned set is advanced only
+from an explicit recorded cursor, after-show facts stay closed until the
+recorded start, and wrap-up never auto-completes the gig. Invoice rows refuse payment on voided
 invoices, keep a stable payment idempotency key for a retry, and require an
 optional show link so deposit readiness can see the invoice. Settlement create
 is labeled as a draft write. Booking cards name Travis's next recorded step
