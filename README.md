@@ -560,7 +560,11 @@ opens with `ops_show_control_v1`: the live or next recorded gig, its exact
 assigned set, Travis's booking posture, and one navigate-only next action sit
 above the Events / Music / Projects / Deals editors. Unavailable records stay
 distinct from empty ones; a started gig with no end is overdue, not assumed
-live; StoryBoard will not substitute a set, auto-pitch, or invent a schedule.
+live. Once the recorded show window has passed, show control routes straight to
+the existing after-show wrap-up before any stale pre-show readiness gap, so the
+band can record attendance, revenue, lessons, and the buyer or venue outcome
+without hunting. StoryBoard will not substitute a set, auto-pitch, invent a
+schedule or result, or close a gig automatically.
 Travis still books; StoryBoard does not auto-pitch. Invoice create can link a
 show. Apply-terms will not erase a recorded fee when analysis left that field
 null.

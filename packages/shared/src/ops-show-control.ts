@@ -157,7 +157,7 @@ export function showControlActionLabel(code: string): string {
     case "open_day_of":
       return "Open live day-of";
     case "review_overdue_gig":
-      return "Review the overdue show";
+      return "Open after-show wrap-up";
     case "setlist_missing":
       return "Open setlist assignment";
     case "setlist_duration_incomplete":
@@ -458,18 +458,17 @@ function projectNextAction(
     );
   }
 
-  if (selected && readiness?.gaps.length) {
-    const readinessAction = eventReadinessNextAction(selected.event.id, readiness.gaps);
-    if (readinessAction) return withActionLabel(readinessAction);
-  }
-
   if (selected?.phase === "overdue") {
     return navigateAction(
       "review_overdue_gig",
-      `${selected.event.title} is still open after its recorded start. Review or complete it; StoryBoard will not close a gig automatically.`,
-      opsWorkspaceHref({ tab: "events", eventId: selected.event.id, focus: "details" }),
-      { tab: "events", focus: "details" }
+      `${selected.event.title} is still open after its recorded show window. Open after-show wrap-up to record attendance, money, lessons, and the relationship outcome; StoryBoard will not invent a result and will not close the gig automatically.`,
+      `/operations/events/${selected.event.id}`
     );
+  }
+
+  if (selected && readiness?.gaps.length) {
+    const readinessAction = eventReadinessNextAction(selected.event.id, readiness.gaps);
+    if (readinessAction) return withActionLabel(readinessAction);
   }
 
   const settlement = settlementWorkspaceNextAction({

@@ -1302,6 +1302,33 @@ test("day-of live run advances the assigned set without inventing a song", async
   await expect(page.getByTestId("ops-live-wrap").getByLabel(/Gross revenue/)).toHaveValue("350.00");
 });
 
+test("an overdue show leads to after-show wrap-up before stale readiness work", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const eventTitle = `Overdue wrap-up ${suffix}`;
+  await artistApi(page, artistId, "/events", "POST", {
+    type: "gig",
+    status: "confirmed",
+    title: eventTitle,
+    startsAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
+    endsAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+    timezone: "America/Chicago",
+    locationName: "E2E Working Room",
+    setlistId: null,
+    currency: "USD"
+  });
+
+  await page.goto("/operations");
+  const control = page.getByTestId("ops-show-control");
+  await expect(control).toContainText(eventTitle);
+  await expect(control.getByTestId("ops-show-control-wrap-up")).toContainText("After-show wrap-up is ready");
+  await expect(control.getByTestId("ops-show-control-next")).toContainText(/attendance, money, lessons/i);
+  await control.getByRole("link", { name: "Open after-show wrap-up" }).click();
+  await expect(page.getByTestId("ops-live-run-title")).toHaveText(eventTitle);
+  await expect(page.getByTestId("ops-live-wrap")).toBeVisible();
+});
+
 test("day-of setlist keeps a mixed-duration subtotal explicit", async ({ page }) => {
   const suffix = Date.now().toString(36);
   await signInForBrowserTest(page);
