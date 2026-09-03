@@ -157,7 +157,7 @@ export function showControlActionLabel(code: string): string {
     case "open_day_of":
       return "Open live day-of";
     case "review_overdue_gig":
-      return "Review the overdue show";
+      return "Open after-show wrap-up";
     case "setlist_missing":
       return "Open setlist assignment";
     case "setlist_duration_incomplete":
@@ -192,7 +192,7 @@ export function showControlActionLabel(code: string): string {
 }
 
 /**
- * Pick the live, next, or overdue recorded gig for Band operations.
+ * Pick the live, overdue, or next recorded gig for Band operations.
  *
  * Live requires a recorded end that still covers now. A started gig with no
  * end is overdue, not assumed live. Rehearsals, completed/cancelled rows,
@@ -215,7 +215,9 @@ export function selectLiveOrNextOpsGig<T extends OpsShowControlEvent>(
     return [{ event, phase, start }];
   });
 
-  const rank = { live: 0, upcoming: 1, overdue: 2 };
+  // A live show is always first. An unfinished past show is next so its
+  // after-show facts cannot be buried behind future readiness work.
+  const rank = { live: 0, overdue: 1, upcoming: 2 };
   scored.sort((left, right) => {
     if (left.phase !== right.phase) return rank[left.phase] - rank[right.phase];
     if (left.phase === "upcoming" && left.start !== right.start) return left.start - right.start;
@@ -458,18 +460,17 @@ function projectNextAction(
     );
   }
 
-  if (selected && readiness?.gaps.length) {
-    const readinessAction = eventReadinessNextAction(selected.event.id, readiness.gaps);
-    if (readinessAction) return withActionLabel(readinessAction);
-  }
-
   if (selected?.phase === "overdue") {
     return navigateAction(
       "review_overdue_gig",
-      `${selected.event.title} is still open after its recorded start. Review or complete it; StoryBoard will not close a gig automatically.`,
-      opsWorkspaceHref({ tab: "events", eventId: selected.event.id, focus: "details" }),
-      { tab: "events", focus: "details" }
+      `${selected.event.title} is still open after its recorded show window. Open after-show wrap-up to record attendance, money, lessons, and the relationship outcome; StoryBoard will not invent a result and will not close the gig automatically.`,
+      `/operations/events/${selected.event.id}`
     );
+  }
+
+  if (selected && readiness?.gaps.length) {
+    const readinessAction = eventReadinessNextAction(selected.event.id, readiness.gaps);
+    if (readinessAction) return withActionLabel(readinessAction);
   }
 
   const settlement = settlementWorkspaceNextAction({

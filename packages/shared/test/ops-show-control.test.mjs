@@ -247,20 +247,42 @@ test("upcoming readiness next action deep-links the existing workspace without a
   assert.equal(upcoming.nextAction?.href, "/operations?tab=events&event=next-a&focus=setlist");
 });
 
-test("overdue open gigs stay human-closed and do not auto-complete", () => {
+test("overdue open gigs outrank upcoming readiness and route to after-show wrap-up", () => {
   const overdue = project({
-    events: [gig({
-      id: "late-a",
-      title: "Last Friday",
-      startsAt: "2026-08-28T01:00:00.000Z",
-      endsAt: "2026-08-28T04:00:00.000Z"
-    })]
+    events: [
+      gig({
+        id: "next-a",
+        title: "Next Friday",
+        startsAt: "2026-09-10T01:00:00.000Z",
+        endsAt: "2026-09-10T04:00:00.000Z"
+      }),
+      gig({
+        id: "late-a",
+        title: "Last Friday",
+        startsAt: "2026-08-28T01:00:00.000Z",
+        endsAt: "2026-08-28T04:00:00.000Z"
+      })
+    ],
+    readiness: [{
+      eventId: "late-a",
+      status: "not_ready",
+      score: 40,
+      confidenceLabel: "medium",
+      headline: "Set was never attached",
+      gaps: [{ code: "setlist_missing", nextAction: "Attach a practical setlist." }]
+    }]
   });
 
   assert.equal(overdue.show.phase, "overdue");
+  assert.equal(overdue.show.eventId, "late-a");
   assert.equal(overdue.nextAction?.code, "review_overdue_gig");
-  assert.match(overdue.nextAction?.nextAction ?? "", /will not close a gig automatically/i);
+  assert.equal(overdue.nextAction?.href, "/operations/events/late-a");
+  assert.equal(overdue.nextAction?.label, "Open after-show wrap-up");
+  assert.match(overdue.nextAction?.nextAction ?? "", /attendance, money, lessons, and the relationship outcome/i);
+  assert.match(overdue.nextAction?.nextAction ?? "", /will not close the gig automatically/i);
   assert.equal(overdue.nextAction?.kind, "navigate");
+  assert.equal(overdue.nextAction?.tab, undefined);
+  assert.equal(overdue.nextAction?.focus, undefined);
 });
 
 test("settlement leftover is offered only after show readiness, still as a draft path", () => {

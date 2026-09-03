@@ -166,7 +166,14 @@ export function OperationsShowControl({
                 {formatRecordedShowTime(control.show.startsAt, control.show.timezone)}
               </p>
               <p className="mt-1 text-sm text-[var(--text-muted)]">{control.show.location ?? "Location not recorded"}</p>
-              {control.show.readinessAvailability === "ok" ? (
+              {control.show.phase === "overdue" ? (
+                <div data-testid="ops-show-control-wrap-up" className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                  <p className="text-sm font-semibold text-amber-100">After-show wrap-up is ready</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-100/80">
+                    Record attendance, gross revenue, lessons, and the buyer or venue relationship outcome. Pre-show gaps stay visible in the record, but they no longer hide this follow-through.
+                  </p>
+                </div>
+              ) : control.show.readinessAvailability === "ok" ? (
                 <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant={readinessVariant(control.show.readinessStatus)}>
