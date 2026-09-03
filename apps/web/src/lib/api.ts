@@ -1,3 +1,5 @@
+import { operatorApiErrorMessage } from "@storyboard/shared";
+
 function firstConfiguredUrl(...values: Array<string | undefined>): string | null {
   for (const value of values) {
     const configured = value?.trim();
@@ -88,7 +90,10 @@ export async function apiFetch<T>(
   const res = await fetch(url, fetchInit);
   if (!res.ok) {
     const text = await res.text();
-    throw new ApiHttpError(res.status, text || `${res.status} ${res.statusText}`);
+    throw new ApiHttpError(
+      res.status,
+      operatorApiErrorMessage(text, `${res.status} ${res.statusText}`)
+    );
   }
   return res.json() as Promise<T>;
 }

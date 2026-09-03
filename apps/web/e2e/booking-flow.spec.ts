@@ -817,6 +817,7 @@ test("show finance records produce grounded outcome answers", async ({ page }) =
   await page.getByPlaceholder("Payment").last().fill("100");
   await page.getByRole("button", { name: "Record", exact: true }).last().click();
   await expect(page.getByText("Balance USD 400.00")).toBeVisible();
+  await expect(page.getByTestId("deals-next-action")).toContainText("Record a payment for the remaining balance.");
 
   const expenseForm = page.getByLabel("Expense event or project").locator("..");
   await page.getByLabel("Expense event or project").selectOption({ label: eventTitle });
@@ -826,7 +827,7 @@ test("show finance records produce grounded outcome answers", async ({ page }) =
   await expect(page.getByText(/^Fuel/).first()).toBeVisible();
   await page.getByLabel("Settlement event").selectOption({ label: eventTitle });
   await page.getByPlaceholder("Gross USD").fill("500");
-  await page.getByRole("button", { name: "Calculate" }).click();
+  await page.getByRole("button", { name: "Create draft settlement" }).click();
   await page.getByRole("button", { name: "Finalize PDF" }).last().click();
   await expect(page.getByText("finalized", { exact: true }).last()).toBeVisible();
 

@@ -1,3 +1,4 @@
+import { parseOpsWorkspaceFocus, parseOpsWorkspaceTab } from "@storyboard/shared";
 import { PageHeader } from "@storyboard/ui";
 import { serverApiFetch } from "@/lib/api-server";
 import type {
@@ -19,7 +20,12 @@ import { OperationsClient } from "./operations-client";
 
 type OperationsAccessState = "manage" | "read_only" | "unavailable";
 
-export default async function OperationsPage() {
+export default async function OperationsPage({
+  searchParams
+}: {
+  searchParams: Promise<{ tab?: string; event?: string; focus?: string }>;
+}) {
+  const params = await searchParams;
   let events: BandEvent[] = [];
   let readiness: ShowReadiness[] = [];
   let songs: Song[] = [];
@@ -126,9 +132,12 @@ export default async function OperationsPage() {
     <div className="space-y-8">
       <PageHeader
         title="Band operations"
-        description="Shows, rehearsals, Vault-imported music and setlists, projects, and deal readiness in one working layer."
+        description="Shows, rehearsals, Vault-imported music and setlists, projects, and deal readiness in one working layer. Each card names the next recorded action."
       />
       <OperationsClient
+        initialTab={parseOpsWorkspaceTab(params.tab)}
+        focusEventId={params.event?.trim() || null}
+        focusField={parseOpsWorkspaceFocus(params.focus)}
         initialEvents={events}
         initialReadiness={readiness}
         initialSongs={songs}

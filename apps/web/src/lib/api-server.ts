@@ -1,3 +1,4 @@
+import { operatorApiErrorMessage } from "@storyboard/shared";
 import { cookies } from "next/headers";
 import {
   apiBaseUrl,
@@ -61,7 +62,7 @@ export async function serverApiFetch<T>(
     const text = await res.text();
     throw new ApiHttpError(
       res.status,
-      text || `${res.status} ${res.statusText}`
+      operatorApiErrorMessage(text, `${res.status} ${res.statusText}`)
     );
   }
   return res.json() as Promise<T>;

@@ -89,6 +89,9 @@ export type BookingOpportunity = {
   stage: string;
   venueId?: string | null;
   targetDate?: string | null;
+  proposedFeeMinor?: number | null;
+  proposedCurrency?: string | null;
+  negotiationConditions?: string | null;
   marketNotes?: string | null;
   venue?: Venue | null;
 };
@@ -481,7 +484,7 @@ export type ProjectReadiness = { projectId: string; score: number; status: "on_t
 export type ArtistProject = { id: string; type: string; status: string; name: string; description?: string | null; startsAt?: string | null; dueAt?: string | null; budgetMinor?: number | null; currency: string; successMetrics?: string[]; assets?: { label: string; url: string }[]; tasks?: Task[]; events?: BandEvent[]; expenses?: Expense[]; readiness?: ProjectReadiness };
 export type ProjectReadinessResponse = { project: ArtistProject; readiness: ProjectReadiness };
 export type DealOffer = { id: string; title: string; status: string; offerAmountMinor?: number | null; currency: string; buyerName?: string | null; buyerEmail?: string | null; agreements: { id: string; version: number; status: string }[]; invoices: Invoice[] };
-export type Invoice = { id: string; number: string; status: string; recipientName: string; currency: string; totalMinor: number; paidMinor: number; dueAt?: string | null };
+export type Invoice = { id: string; number: string; status: string; recipientName: string; currency: string; totalMinor: number; paidMinor: number; dueAt?: string | null; eventId?: string | null; event?: { id: string; title: string } | null };
 export type Settlement = { id: string; status: string; currency: string; grossMinor: number; expenseMinor: number; netMinor: number; event: BandEvent };
 export type Expense = { id: string; eventId?: string | null; projectId?: string | null; category: string; description: string; amountMinor: number; currency: string; incurredAt: string; event?: BandEvent | null; project?: ArtistProject | null };
 export type DocumentTemplate = { id: string; kind: string; name: string; version: number; active: boolean; legalDisclaimer: string };

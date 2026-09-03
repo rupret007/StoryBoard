@@ -548,6 +548,11 @@ before write or audit. Each gig also has a phone-friendly **day-of view** with
 the next checkpoint, an editable custom run of show for travel calls, meals,
 support slots, changeovers, and other checkpoints, contact/map actions, lineup assignments,
 advance-task completion, setlist, production links, and recorded payment state.
+Existing Band operations, booking, and inbox cards use `ops_next_action_v1` so
+the next recorded action is named and linked (attach set, fix durations, record
+a payment, create a draft settlement, review inbox terms). Travis still books;
+StoryBoard does not auto-pitch. Invoice create can link a show. Apply-terms
+will not erase a recorded fee when analysis left that field null.
 Confirmed gigs with an exact start/end and timezone also show their Calendar
 and Drive connection state. **Prepare approvals** creates or reuses the
 reviewable requests; it never performs the external write. Approve and execute

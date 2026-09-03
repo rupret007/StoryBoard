@@ -1,5 +1,6 @@
 "use client";
 
+import { bookingReplyNextAction } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { CalendarClock, CheckCircle2, MailSearch, RefreshCw, Sparkles } from "lucide-react";
 import { useState } from "react";
@@ -64,10 +65,12 @@ export function BookingInboxClient({
       });
       await reload();
       let message = "Reply updated.";
-      if (path === "prepare-approval") {
+      if (path === "apply-terms") {
+        message = "Reviewed terms were saved on the linked opportunity. Null analysis fields did not erase recorded fees. Next: confirm this booking when Travis is ready.";
+      } else if (path === "prepare-approval") {
         message = "Reply draft is waiting in Approvals.";
       } else if (path === "prepare-confirmation") {
-        message = "Booking confirmation is waiting in Approvals.";
+        message = "Booking confirmation is waiting in Approvals. StoryBoard will not pitch or send from here.";
       }
       setNotice(message);
     } catch (error) {
@@ -193,6 +196,7 @@ function ReplyCard({
 
   const hasOpportunity = Boolean(reply.recipient.opportunity?.id);
   const hasTerms = Boolean(reply.termsAppliedAt);
+  const next = bookingReplyNextAction(reply);
 
   return (
     <SurfaceCard>
@@ -238,29 +242,36 @@ function ReplyCard({
               : ""}
             {reply.proposedDate ? ` · ${new Date(reply.proposedDate).toLocaleDateString()}` : ""}
           </p>
-          {hasOpportunity && !reply.termsAppliedAt ? (
-            <button
-              type="button"
-              className="sb-btn-secondary mt-3"
-              disabled={busy !== null}
-              onClick={() => void onAction(reply.id, "apply-terms")}
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              Apply reviewed terms
-            </button>
-          ) : null}
-          {hasOpportunity && hasTerms ? (
-            <button
-              type="button"
-              className="sb-btn-secondary mt-3"
-              disabled={busy !== null}
-              onClick={() => void onAction(reply.id, "prepare-confirmation")}
-            >
-              <CalendarClock className="h-4 w-4" />
-              Confirm booking from this reply
-            </button>
-          ) : null}
         </div>
+      ) : null}
+
+      <p className="mt-3 text-sm font-medium text-[var(--text-primary)]" data-testid={`booking-reply-next-${reply.id}`}>
+        Next: {next.nextAction}
+      </p>
+      {hasOpportunity && reply.analyzedAt && !reply.termsAppliedAt ? (
+        <button
+          type="button"
+          className="sb-btn-secondary mt-3"
+          disabled={busy !== null}
+          onClick={() => void onAction(reply.id, "apply-terms")}
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          Apply reviewed terms
+        </button>
+      ) : null}
+      {hasOpportunity && hasTerms ? (
+        <>
+          <button
+            type="button"
+            className="sb-btn-secondary mt-3"
+            disabled={busy !== null}
+            onClick={() => void onAction(reply.id, "prepare-confirmation")}
+          >
+            <CalendarClock className="h-4 w-4" />
+            Confirm booking from this reply
+          </button>
+          <a className="sb-btn-secondary mt-3 w-fit" href="/booking">Open booking pipeline</a>
+        </>
       ) : null}
 
       <div className="mt-4 grid gap-2">

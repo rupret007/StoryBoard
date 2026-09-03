@@ -35,7 +35,7 @@ export default async function BookingPage() {
     <div className="space-y-8">
       <PageHeader
         title="Booking pipeline"
-        description="Stage opportunities from target to close — structured like a modern CRM board."
+        description="Stage opportunities from target to close. Travis books; each card names the next recorded action. StoryBoard will not pitch."
       />
       <BookingClient
         initialOpportunities={opportunities}

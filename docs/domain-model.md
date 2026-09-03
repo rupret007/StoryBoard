@@ -457,7 +457,12 @@ Contacts include promoters, talent buyers, venue managers, and collaborators.
 ### BookingOpportunity
 
 Represents a potential or active show opportunity. Tracks stage, target date,
-market notes, and source system references.
+market notes, recorded proposed fee/currency/conditions, and source system
+references. Applying reviewed reply terms (`booking_terms_apply_v1`) writes
+only present analysis fields and keeps previously recorded money or conditions
+when analysis left a field null. Closed opportunities refuse the write.
+Confirming a stage still creates a gig; Travis books, and StoryBoard does not
+auto-pitch.
 
 ### ArtistBookingProfile
 

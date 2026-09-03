@@ -1,5 +1,6 @@
 "use client";
 
+import { bookingStageNextAction } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -40,6 +41,7 @@ export function BookingClient({
   const [title, setTitle] = useState("");
   const [venueId, setVenueId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   const byStage = useMemo(() => {
     const m = {} as Record<(typeof STAGES)[number], BookingOpportunity[]>;
@@ -60,6 +62,7 @@ export function BookingClient({
   async function createOpp(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
+    setError("");
     try {
       await apiFetch("/booking-opportunities", {
         method: "POST",
@@ -71,6 +74,8 @@ export function BookingClient({
       setTitle("");
       setVenueId("");
       router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the opportunity");
     } finally {
       setBusy(false);
     }
@@ -78,6 +83,11 @@ export function BookingClient({
 
   return (
     <div className="space-y-8">
+      {error ? (
+        <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+          {error}
+        </div>
+      ) : null}
       <SurfaceCard>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -85,8 +95,8 @@ export function BookingClient({
               New opportunity
             </h2>
             <p className="text-xs text-[var(--text-muted)]">
-              Adds a card to your pipeline — drag-free for now, stages update in
-              place.
+              Travis books. StoryBoard tracks the pipeline and will not pitch,
+              post, or send on its own.
             </p>
           </div>
         </div>
@@ -167,6 +177,7 @@ export function BookingClient({
                         ? { risk: opportunityRisks[o.id]! }
                         : {})}
                       onStageChange={() => router.refresh()}
+                      onError={setError}
                     />
                   ))}
                 </div>
@@ -182,14 +193,17 @@ export function BookingClient({
 function OppCard({
   opportunity: o,
   risk,
-  onStageChange
+  onStageChange,
+  onError
 }: {
   opportunity: BookingOpportunity;
   risk?: "low" | "med" | "high";
   onStageChange: () => void;
+  onError: (message: string) => void;
 }) {
   const [stage, setStage] = useState(o.stage);
   const [busy, setBusy] = useState(false);
+  const next = bookingStageNextAction(o.stage);
 
   useEffect(() => {
     setStage(o.stage);
@@ -200,12 +214,16 @@ function OppCard({
       return;
     }
     setBusy(true);
+    onError("");
     try {
       await apiFetch(`/booking-opportunities/${o.id}/stage`, {
         method: "PATCH",
         json: { stage }
       });
       onStageChange();
+    } catch (err) {
+      setStage(o.stage);
+      onError(err instanceof Error ? err.message : "Could not update the booking stage");
     } finally {
       setBusy(false);
     }
@@ -226,6 +244,14 @@ function OppCard({
       <p className="mt-1 text-xs text-[var(--text-muted)]">
         {o.venue ? `${o.venue.name} · ${o.venue.city}` : "No venue"}
       </p>
+      {o.proposedFeeMinor != null ? (
+        <p className="mt-1 text-xs text-[var(--text-secondary)]">
+          Recorded terms {o.proposedCurrency ?? "USD"} {(o.proposedFeeMinor / 100).toFixed(2)}
+        </p>
+      ) : null}
+      <p className="mt-2 text-xs text-[var(--text-secondary)]" data-testid={`booking-next-action-${o.id}`}>
+        Next: {next.nextAction}
+      </p>
       <div className="mt-3 flex flex-col gap-2">
         <select
           className="sb-select text-xs"
@@ -238,6 +264,15 @@ function OppCard({
             </option>
           ))}
         </select>
+        {stage === "confirmed" && o.stage !== "confirmed" ? (
+          <p className="text-xs text-amber-200">
+            Confirming creates a gig event. Travis still books; StoryBoard will
+            not pitch.
+          </p>
+        ) : null}
+        <a className="text-xs font-medium text-[var(--accent)]" href={next.href}>
+          Open next workspace
+        </a>
         <button
           type="button"
           disabled={busy || stage === o.stage}
