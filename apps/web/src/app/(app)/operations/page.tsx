@@ -5,6 +5,7 @@ import type {
   ArtistProject,
   BandEvent,
   BandMember,
+  BookingOpportunity,
   Contact,
   DealOffer,
   DocumentTemplate,
@@ -39,6 +40,11 @@ export default async function OperationsPage({
   let members: BandMember[] = [];
   let contacts: Contact[] = [];
   let venues: Venue[] = [];
+  let bookings: BookingOpportunity[] = [];
+  let eventsAvailable = false;
+  let readinessAvailable = false;
+  let setlistsAvailable = false;
+  let bookingsAvailable = false;
   let accessState: OperationsAccessState = "unavailable";
   let isOwner = false;
 
@@ -56,6 +62,7 @@ export default async function OperationsPage({
     memberRows,
     contactRows,
     venueRows,
+    bookingRows,
     meResult
   ] = await Promise.allSettled([
     serverApiFetch<BandEvent[]>("/events", { cache: "no-store" }),
@@ -71,16 +78,26 @@ export default async function OperationsPage({
     serverApiFetch<BandMember[]>("/manager/members", { cache: "no-store" }),
     serverApiFetch<Contact[]>("/contacts", { cache: "no-store" }),
     serverApiFetch<Venue[]>("/venues", { cache: "no-store" }),
+    serverApiFetch<BookingOpportunity[]>("/booking-opportunities", { cache: "no-store" }),
     serverApiFetch<{
       currentArtistId: string | null;
       memberships: { artistId: string; role: string }[];
     }>("/auth/me", { cache: "no-store" })
   ]);
 
-  if (eventRows.status === "fulfilled") events = eventRows.value;
-  if (readinessRows.status === "fulfilled") readiness = readinessRows.value;
+  if (eventRows.status === "fulfilled") {
+    events = eventRows.value;
+    eventsAvailable = true;
+  }
+  if (readinessRows.status === "fulfilled") {
+    readiness = readinessRows.value;
+    readinessAvailable = true;
+  }
   if (songRows.status === "fulfilled") songs = songRows.value;
-  if (setlistRows.status === "fulfilled") setlists = setlistRows.value;
+  if (setlistRows.status === "fulfilled") {
+    setlists = setlistRows.value;
+    setlistsAvailable = true;
+  }
   if (projectRows.status === "fulfilled") projects = projectRows.value;
   if (dealRows.status === "fulfilled") deals = dealRows.value;
   if (invoiceRows.status === "fulfilled") invoices = invoiceRows.value;
@@ -90,6 +107,10 @@ export default async function OperationsPage({
   if (memberRows.status === "fulfilled") members = memberRows.value;
   if (contactRows.status === "fulfilled") contacts = contactRows.value;
   if (venueRows.status === "fulfilled") venues = venueRows.value;
+  if (bookingRows.status === "fulfilled") {
+    bookings = bookingRows.value;
+    bookingsAvailable = true;
+  }
 
   if (meResult.status === "fulfilled") {
     const me = meResult.value;
@@ -132,16 +153,21 @@ export default async function OperationsPage({
     <div className="space-y-8">
       <PageHeader
         title="Band operations"
-        description="Shows, rehearsals, Vault-imported music and setlists, projects, and deal readiness in one working layer. Each card names the next recorded action."
+        description="Show control names the live or next recorded gig, its assigned set, booking posture, and one safe next action before the editors. Travis still books. StoryBoard does not auto-pitch."
       />
       <OperationsClient
         initialTab={parseOpsWorkspaceTab(params.tab)}
         focusEventId={params.event?.trim() || null}
         focusField={parseOpsWorkspaceFocus(params.focus)}
+        eventsAvailable={eventsAvailable}
+        readinessAvailable={readinessAvailable}
+        setlistsAvailable={setlistsAvailable}
+        bookingsAvailable={bookingsAvailable}
         initialEvents={events}
         initialReadiness={readiness}
         initialSongs={songs}
         initialSetlists={setlists}
+        initialBookings={bookings}
         initialProjects={projects}
         initialDeals={deals}
         initialInvoices={invoices}

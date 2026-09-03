@@ -933,12 +933,17 @@ test("confirmed event logistics move through approvals before provider execution
 
   await ensureManagerFoundation(page);
   await page.goto("/operations");
+  await expect(page.getByTestId("ops-show-control")).toBeVisible();
+  await expect(page.getByTestId("ops-show-control")).toContainText(/Travis books/i);
+  await expect(page.getByTestId("ops-show-control")).toContainText(/will not pitch/i);
   await page.getByLabel("Title", { exact: true }).fill(eventTitle);
   await page.getByLabel("Starts", { exact: true }).fill(localTime(eventStart));
   await page.getByRole("button", { name: "Add event" }).click();
 
   let eventCard = page.locator("article").filter({ hasText: eventTitle });
   await expect(eventCard).toBeVisible();
+  await expect(page.getByTestId("ops-show-control")).toContainText(eventTitle);
+  await expect(page.getByTestId("ops-show-control-next")).toBeVisible();
   await eventCard.getByText("Manage readiness details", { exact: true }).click();
   await eventCard.getByLabel(`Status for ${eventTitle}`).selectOption("confirmed");
   await eventCard.getByLabel(`Event end for ${eventTitle}`).fill(localTime(eventEnd));

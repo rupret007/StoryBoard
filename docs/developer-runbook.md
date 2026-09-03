@@ -994,7 +994,13 @@ practice; prefer Vault import. It does not load a live catalog.
 `ops_next_action_v1` is the shared next-step projection for existing Band
 operations, booking pipeline, and Booking inbox surfaces. Event cards repeat
 `ShowReadiness.nextAction` and deep-link setlist attach, duration gaps, and
-unpaid deposits to the matching tab. Invoice rows refuse payment on voided
+unpaid deposits to the matching tab. `ops_show_control_v1` sits above the
+Band operations tab strip: it selects the live, next, or overdue recorded gig
+(without inventing live from a missing end), names the exact assigned set or
+an honest unassigned/unavailable/missing state, and shows Travis's open
+booking posture. The single next action is navigate-only; viewers and members
+use the same deep-link. A booking-read failure does not lock event or setlist
+edits. Invoice rows refuse payment on voided
 invoices, keep a stable payment idempotency key for a retry, and require an
 optional show link so deposit readiness can see the invoice. Settlement create
 is labeled as a draft write. Booking cards name Travis's next recorded step
