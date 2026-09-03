@@ -1898,6 +1898,21 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(dayOf.event.contactId, dayOfContact.id);
   assert.equal(Object.hasOwn(dayOf.event, "approvals"), false);
   assert.equal(dayOf.event.logisticsAssessment.eventId, event.id);
+  assert.equal(dayOf.liveRun.policyVersion, "ops_live_run_v1");
+  assert.equal(dayOf.liveRun.phase, "upcoming");
+  assert.equal(dayOf.liveRun.set.availability, "ok");
+  assert.equal(dayOf.liveRun.set.currentItemId, null);
+  const firstSetItem = setlist.items[0];
+  assert.ok(firstSetItem?.id);
+  const positioned = await operations.setLiveSetPosition(artist.id, event.id, { setlistItemId: firstSetItem.id }, operator.email, operator.id);
+  assert.equal(positioned.liveRun.set.currentItemId, firstSetItem.id);
+  assert.equal(positioned.liveRun.set.currentTitle, "Ready Song");
+  await assert.rejects(() => operations.setLiveSetPosition(foreignArtist.id, event.id, { setlistItemId: firstSetItem.id }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  const foreignSetlist = await operations.createSetlist(foreignArtist.id, { name: "Foreign set", status: "draft", items: [{ songId: foreignSong.id, itemType: "song" }] }, operator.email, operator.id);
+  await assert.rejects(() => operations.setLiveSetPosition(artist.id, event.id, { setlistItemId: foreignSetlist.items[0].id }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  assert.equal((await client.bandEvent.findUniqueOrThrow({ where: { id: event.id } })).liveSetlistItemId, firstSetItem.id);
+  const cleared = await operations.setLiveSetPosition(artist.id, event.id, { setlistItemId: null }, operator.email, operator.id);
+  assert.equal(cleared.liveRun.set.currentItemId, null);
   await assert.rejects(() => operations.eventDayOf(foreignArtist.id, event.id), (error) => error?.getStatus?.() === 404);
   assert.deepEqual(await operations.removeEventScheduleItem(artist.id, event.id, mealCheckpoint.id, operator.email, operator.id), { id: mealCheckpoint.id, deleted: true });
   assert.equal((await operations.eventDayOf(artist.id, event.id, new Date("2026-09-18T16:00:00.000Z"))).dayOf.nextCheckpoint.label, "Load-in");
@@ -2081,7 +2096,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(goalPathRun.trace.goalPath.policyVersion, "manager_goal_path_v1");
   assert.equal(goalPathRun.trace.goalPath.providerBypassed, true);
   const actions = await client.auditEvent.findMany({ where: { artistId: artist.id }, select: { action: true } });
-  for (const expected of ["manager.intake_completed", "manager.profile_updated", "manager.profile_context_updated", "manager.plan_ensured", "manager.settings_updated", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "task.created_from_manager_chat", "task.updated_from_manager_chat", "task.assigned_from_manager_chat", "project.created_from_manager_chat", "event.created_from_manager_chat", "event.availability_recorded_from_manager_chat", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.schedule_item_created", "event.schedule_item_updated", "event.schedule_item_removed", "event.availability_recorded", "event.advance_generated", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
+  for (const expected of ["manager.intake_completed", "manager.profile_updated", "manager.profile_context_updated", "manager.plan_ensured", "manager.settings_updated", "manager.goal_progress_recorded", "manager.recommendation_accepted", "manager.eval_example_promoted", "manager.evaluation_run", "manager.chat_completed", "manager.response_feedback_recorded", "task.created_from_manager_chat", "task.updated_from_manager_chat", "task.assigned_from_manager_chat", "project.created_from_manager_chat", "event.created_from_manager_chat", "event.availability_recorded_from_manager_chat", "project.plan_generated", "event.confirmed_from_opportunity", "event.updated", "event.schedule_item_created", "event.schedule_item_updated", "event.schedule_item_removed", "event.availability_recorded", "event.advance_generated", "event.live_set_positioned", "event.live_set_cleared", "invoice.payment_recorded", "settlement.finalized"]) assert.ok(actions.some((row) => row.action === expected), expected);
 });
 
 test("database integration: manager follow-through reconciles durable work without crossing artists", async () => {

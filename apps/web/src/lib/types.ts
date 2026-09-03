@@ -449,8 +449,32 @@ export type EventLogisticsAssessment = {
 };
 export type EventDayOfTimelineItem = { id: string; label: string; at: string; endsAt?: string | null; location?: string | null; notes?: string | null; state: "passed" | "next" | "later"; minutesUntil: number };
 export type EventDayOfView = { eventId: string; mode: "date_missing" | "pre_show" | "in_progress" | "post_show" | "closed"; observedAt: string; headline: string; nextAction: string; nextCheckpoint?: EventDayOfTimelineItem | null; timeline: EventDayOfTimelineItem[]; openTaskCount: number; overdueTaskCount: number; unavailableCount: number; unresolvedAvailabilityCount: number; expectedFeeMinor?: number | null; expectedDepositMinor: number; recordedPaidMinor: number; openInvoiceBalanceMinor: number; depositRemainingMinor: number; currency: string; evidenceIds: string[] };
-export type BandEvent = { id: string; type: string; status: string; title: string; startsAt?: string | null; endsAt?: string | null; timezone?: string | null; venueId?: string | null; venue?: Venue | null; contactId?: string | null; contact?: Contact | null; setlistId?: string | null; setlist?: Setlist | null; locationName?: string | null; address?: string | null; loadInAt?: string | null; soundcheckAt?: string | null; doorsAt?: string | null; setAt?: string | null; curfewAt?: string | null; travelNotes?: string | null; hospitalityNotes?: string | null; productionNotes?: string | null; parkingNotes?: string | null; guestListNotes?: string | null; stagePlotUrl?: string | null; inputListUrl?: string | null; techRiderUrl?: string | null; hospitalityRiderUrl?: string | null; driveFolderUrl?: string | null; calendarEventId?: string | null; logisticsAssessment?: EventLogisticsAssessment; guaranteeMinor?: number | null; depositMinor?: number | null; attendance?: number | null; grossRevenueMinor?: number | null; postShowNotes?: string | null; relationshipOutcome?: string | null; currency: string; participants: { id: string; response: string; assignment?: string | null; notes?: string | null; bandMember: BandMember }[]; schedule?: { id: string; title: string; startsAt: string; endsAt?: string | null; location?: string | null; notes?: string | null; sortOrder: number }[]; tasks?: Task[]; deals?: DealOffer[]; invoices?: Invoice[]; settlement?: Settlement | null };
-export type EventDayOfResponse = { event: BandEvent; activeMembers: BandMember[]; readiness: ShowReadiness; dayOf: EventDayOfView };
+export type OpsLiveRunItem = { id: string; itemType: "song" | "break" | "note"; title: string; musicalKey: string | null; leadVocalist: string | null; durationSeconds: number | null; durationLabel: string | null; transitionNotes: string | null; state: "unstarted" | "played" | "current" | "later" };
+export type OpsLiveRun = {
+  policyVersion: "ops_live_run_v1";
+  phase: "live" | "upcoming" | "overdue" | "closed" | "none";
+  eventId: string;
+  title: string;
+  location: string | null;
+  timezone: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  set: {
+    availability: "ok" | "unassigned" | "missing_record" | "empty";
+    setlistId: string | null;
+    name: string | null;
+    sourceKey: string | null;
+    currentItemId: string | null;
+    nextItemId: string | null;
+    currentTitle: string | null;
+    nextTitle: string | null;
+    summary: SetlistSummary | null;
+    items: OpsLiveRunItem[];
+  };
+  wrapUp: { available: boolean; reason: string };
+};
+export type BandEvent = { id: string; type: string; status: string; title: string; startsAt?: string | null; endsAt?: string | null; timezone?: string | null; venueId?: string | null; venue?: Venue | null; contactId?: string | null; contact?: Contact | null; setlistId?: string | null; liveSetlistItemId?: string | null; setlist?: Setlist | null; locationName?: string | null; address?: string | null; loadInAt?: string | null; soundcheckAt?: string | null; doorsAt?: string | null; setAt?: string | null; curfewAt?: string | null; travelNotes?: string | null; hospitalityNotes?: string | null; productionNotes?: string | null; parkingNotes?: string | null; guestListNotes?: string | null; stagePlotUrl?: string | null; inputListUrl?: string | null; techRiderUrl?: string | null; hospitalityRiderUrl?: string | null; driveFolderUrl?: string | null; calendarEventId?: string | null; logisticsAssessment?: EventLogisticsAssessment; guaranteeMinor?: number | null; depositMinor?: number | null; attendance?: number | null; grossRevenueMinor?: number | null; postShowNotes?: string | null; relationshipOutcome?: string | null; currency: string; participants: { id: string; response: string; assignment?: string | null; notes?: string | null; bandMember: BandMember }[]; schedule?: { id: string; title: string; startsAt: string; endsAt?: string | null; location?: string | null; notes?: string | null; sortOrder: number }[]; tasks?: Task[]; deals?: DealOffer[]; invoices?: Invoice[]; settlement?: Settlement | null };
+export type EventDayOfResponse = { event: BandEvent; activeMembers: BandMember[]; readiness: ShowReadiness; dayOf: EventDayOfView; liveRun: OpsLiveRun };
 export type Song = { id: string; title: string; durationSeconds?: number | null; musicalKey?: string | null; bpm?: number | null; leadVocalist?: string | null; genre?: string | null; notes?: string | null; lyricsUrl?: string | null; chartUrl?: string | null; sourceKey?: string | null; active: boolean; updatedAt?: string };
 export type SetlistSummary = { policyVersion: "setlist_summary_v1"; itemCount: number; songCount: number; breakCount: number; noteCount: number; knownDurationSongCount: number; unknownDurationSongCount: number; totalSongDurationSeconds: number; timingStatus: "empty" | "incomplete" | "timed"; durationLabel: string };
 export type Setlist = { id: string; name: string; status: string; notes?: string | null; sourceKey?: string | null; updatedAt?: string; summary?: SetlistSummary; items: { id: string; songId?: string | null; itemType: "song" | "break" | "note"; label?: string | null; transitionNotes?: string | null; song?: Song | null }[] };

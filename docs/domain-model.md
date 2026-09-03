@@ -365,7 +365,12 @@ rows join the canonical event timestamps in one ordered day-of projection.
 readiness result with the ordered timeline, active-member responses, event
 tasks, accepted terms, and unique invoices to identify the current/next
 checkpoint, work pressure, and recorded payment state. It never infers that an
-unrecorded payment, agreement, contact, or schedule fact exists.
+unrecorded payment, agreement, contact, or schedule fact exists, and it does
+not invent a live window when both `endsAt` and `curfewAt` are missing.
+`BandEvent.liveSetlistItemId` is an optional recorded cursor onto the assigned
+`SetlistItem`. Clearing the assigned set clears the cursor. `ops_live_run_v1`
+projects that cursor into current/next/played states without substituting a
+set or guessing the current song from time.
 
 `EventLogisticsAssessment` is the non-persistent `event_logistics_v1` view over
 one `BandEvent` and its event-bound approval history. A gig is eligible only

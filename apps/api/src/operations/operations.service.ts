@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
-import { eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, summarizeSetlist, catalogImportRequestSchema, planCatalogImport, reconcileCatalogImport, describeSongCatalogStatus } from "@storyboard/shared";
+import { eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, eventLiveSetPositionSchema, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, summarizeSetlist, catalogImportRequestSchema, planCatalogImport, reconcileCatalogImport, describeSongCatalogStatus, projectOpsLiveRun } from "@storyboard/shared";
 import type { Prisma } from "../generated/prisma/client";
 import { ApprovalStatus, InvoiceStatus, SettlementStatus } from "../generated/prisma/enums";
 import { ApprovalsService } from "../approvals/approvals.service";
@@ -15,6 +15,7 @@ import { EVENT_LOGISTICS_POLICY_VERSION, assessEventLogistics, planEventLogistic
 
 type EventCreate = z.infer<typeof eventCreateSchema>;
 type EventPatch = z.infer<typeof eventPatchSchema>;
+type EventLiveSetPosition = z.infer<typeof eventLiveSetPositionSchema>;
 type ParticipantInput = z.infer<typeof eventParticipantSchema>;
 type EventScheduleItemCreate = z.infer<typeof eventScheduleItemCreateSchema>;
 type EventScheduleItemPatch = z.infer<typeof eventScheduleItemPatchSchema>;
@@ -184,7 +185,12 @@ export class OperationsService {
       event: eventView.type === "gig" ? { ...eventView, logisticsAssessment: assessEventLogistics(eventView, approvals) } : eventView,
       activeMembers: members,
       readiness,
-      dayOf: deterministicEventDayOf(event, readiness, members, now)
+      dayOf: deterministicEventDayOf(event, readiness, members, now),
+      liveRun: projectOpsLiveRun({
+        event,
+        setlist: event.setlist,
+        now
+      })
     };
   }
   async eventReadinessList(artistId: string, days = 90, now = new Date()) {
@@ -196,7 +202,42 @@ export class OperationsService {
     return events.map((event) => deterministicShowReadiness(event, members, now));
   }
   async createEvent(artistId: string, input: EventCreate, actorLabel: string, actorOperatorId: string) { await this.validateEventRelations(artistId, input); validateEventTimeline(input); const row = await this.prisma.client.bandEvent.create({ data: { artistId, ...cleanDates(input) } as Prisma.BandEventUncheckedCreateInput }); await this.auditWrite(artistId, "BandEvent", row.id, "event.created", actorLabel, actorOperatorId, { type: row.type, status: row.status }); return this.event(artistId, row.id); }
-  async patchEvent(artistId: string, id: string, input: EventPatch, actorLabel: string, actorOperatorId: string) { const existing = await this.prisma.client.bandEvent.findFirst({ where: { id, artistId }, select: { startsAt: true, endsAt: true, loadInAt: true, soundcheckAt: true, doorsAt: true, setAt: true, curfewAt: true } }); if (!existing) throw new NotFoundException("Record not found"); await this.validateEventRelations(artistId, input); validateEventTimeline(input, existing); const row = await this.prisma.client.bandEvent.update({ where: { id }, data: cleanDates(input) }); await this.auditWrite(artistId, "BandEvent", id, "event.updated", actorLabel, actorOperatorId, { fields: Object.keys(input), status: row.status }); return this.event(artistId, id); }
+  async patchEvent(artistId: string, id: string, input: EventPatch, actorLabel: string, actorOperatorId: string) {
+    const existing = await this.prisma.client.bandEvent.findFirst({
+      where: { id, artistId },
+      select: { startsAt: true, endsAt: true, loadInAt: true, soundcheckAt: true, doorsAt: true, setAt: true, curfewAt: true, setlistId: true }
+    });
+    if (!existing) throw new NotFoundException("Record not found");
+    await this.validateEventRelations(artistId, input);
+    validateEventTimeline(input, existing);
+    const data = cleanDates(input);
+    if (input.setlistId !== undefined && input.setlistId !== existing.setlistId) data.liveSetlistItemId = null;
+    const row = await this.prisma.client.bandEvent.update({ where: { id }, data });
+    await this.auditWrite(artistId, "BandEvent", id, "event.updated", actorLabel, actorOperatorId, { fields: Object.keys(input), status: row.status });
+    return this.event(artistId, id);
+  }
+  async setLiveSetPosition(artistId: string, eventId: string, input: EventLiveSetPosition, actorLabel: string, actorOperatorId: string) {
+    const event = await this.prisma.client.bandEvent.findFirst({
+      where: { id: eventId, artistId },
+      select: { id: true, setlistId: true, liveSetlistItemId: true, setlist: { select: { id: true, items: { select: { id: true } } } } }
+    });
+    if (!event) throw new NotFoundException("Event not found");
+    if (!event.setlistId) throw new BadRequestException("Assign a setlist before marking a live song. StoryBoard will not substitute a set.");
+    if (input.setlistItemId == null) {
+      if (event.liveSetlistItemId) {
+        await this.prisma.client.bandEvent.update({ where: { id: eventId }, data: { liveSetlistItemId: null } });
+        await this.auditWrite(artistId, "BandEvent", eventId, "event.live_set_cleared", actorLabel, actorOperatorId, { setlistId: event.setlistId });
+      }
+      return this.eventDayOf(artistId, eventId);
+    }
+    const belongs = event.setlist?.id === event.setlistId && event.setlist.items.some((item) => item.id === input.setlistItemId);
+    if (!belongs) throw new NotFoundException("Setlist item not found");
+    if (event.liveSetlistItemId !== input.setlistItemId) {
+      await this.prisma.client.bandEvent.update({ where: { id: eventId }, data: { liveSetlistItemId: input.setlistItemId } });
+      await this.auditWrite(artistId, "BandEvent", eventId, "event.live_set_positioned", actorLabel, actorOperatorId, { setlistId: event.setlistId, setlistItemId: input.setlistItemId });
+    }
+    return this.eventDayOf(artistId, eventId);
+  }
   async createEventScheduleItem(artistId: string, eventId: string, input: EventScheduleItemCreate, actorLabel: string, actorOperatorId: string) {
     await this.assertArtistRecord("event", artistId, eventId);
     const startsAt = new Date(input.startsAt);

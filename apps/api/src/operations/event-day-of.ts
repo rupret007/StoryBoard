@@ -1,7 +1,5 @@
 import type { ShowReadiness } from "./event-readiness";
 
-const HOUR_MS = 60 * 60 * 1000;
-
 export type DayOfTimelineItem = {
   id: string;
   label: string;
@@ -70,14 +68,14 @@ export function deterministicEventDayOf(event: EventDayOfInput, readiness: ShowR
     ...fixedTimeline(event),
     ...event.schedule.map((item) => ({ id: item.id, label: item.title, at: item.startsAt, endsAt: item.endsAt, location: item.location, notes: item.notes }))
   ].sort((a, b) => a.at.getTime() - b.at.getTime());
-  const inferredEnd = event.curfewAt ?? event.endsAt ?? (event.startsAt ? new Date(event.startsAt.getTime() + 4 * HOUR_MS) : null);
+  const recordedEnd = event.curfewAt ?? event.endsAt ?? null;
   const mode: EventDayOfView["mode"] = ["completed", "cancelled"].includes(event.status)
     ? "closed"
     : !event.startsAt
       ? "date_missing"
       : now < (rawTimeline[0]?.at ?? event.startsAt)
         ? "pre_show"
-        : inferredEnd && now <= inferredEnd
+        : recordedEnd && now <= recordedEnd
           ? "in_progress"
           : "post_show";
   const nextIndex = rawTimeline.findIndex((item) => item.at >= now);
@@ -118,7 +116,9 @@ export function deterministicEventDayOf(event: EventDayOfInput, readiness: ShowR
       ? `Next checkpoint: ${nextCheckpoint.label} in ${nextCheckpoint.minutesUntil} minute${Math.abs(nextCheckpoint.minutesUntil) === 1 ? "" : "s"}.`
       : mode === "in_progress"
         ? "The recorded checkpoints have passed; stay on the event until curfew."
-        : "The recorded show-day sequence is complete; finish the post-show work.";
+        : !recordedEnd && event.startsAt && now >= event.startsAt
+          ? "This gig is still open after its recorded start. Review or complete it; StoryBoard will not assume it is live without an end."
+          : "The recorded show-day sequence is complete; finish the post-show work.";
   return {
     eventId: event.id,
     mode,

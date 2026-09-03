@@ -545,9 +545,14 @@ setlist, ordered show-day timing, guarantee/deposit, production notes, and
 technical-document links. Partial edits are checked against the complete saved
 schedule, so an impossible load-in/soundcheck/doors/set/curfew order is rejected
 before write or audit. Each gig also has a phone-friendly **day-of view** with
-the next checkpoint, an editable custom run of show for travel calls, meals,
-support slots, changeovers, and other checkpoints, contact/map actions, lineup assignments,
-advance-task completion, setlist, production links, and recorded payment state.
+`ops_live_run_v1` (phase-aligned live/upcoming/still-open header, assigned
+running order with key/duration/vocal, Start/Advance from a recorded cursor,
+and after-show wrap-up after the recorded start), the next checkpoint, an
+editable custom run of show for travel calls, meals, support slots,
+changeovers, and other checkpoints in the event IANA timezone, contact/map
+actions, lineup assignments, advance-task completion, setlist, https-only
+production links, and recorded payment state. Time never invents the current
+song, and a started gig with no end is still open rather than assumed live.
 Existing Band operations, booking, and inbox cards use `ops_next_action_v1` so
 the next recorded action is named and linked (attach set, fix durations, record
 a payment, create a draft settlement, review inbox terms). Band operations
