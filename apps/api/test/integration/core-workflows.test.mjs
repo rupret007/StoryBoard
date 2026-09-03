@@ -1837,13 +1837,14 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const untimedSong = await operations.createSong(artist.id, { title: "Untimed Closer", durationSeconds: null, active: true }, operator.email, operator.id);
   const initialSetlist = await operations.createSetlist(artist.id, { name: "Friday set", status: "draft", items: [{ songId: song.id, itemType: "song" }] }, operator.email, operator.id);
   assert.equal(initialSetlist.summary.timingStatus, "timed");
-  const setlist = await operations.patchSetlist(artist.id, initialSetlist.id, { status: "active", notes: "Keep the changeover tight", items: [{ songId: song.id, itemType: "song", transitionNotes: "Count the next song in" }, { itemType: "break", label: "Set break" }, { songId: untimedSong.id, itemType: "song" }] }, operator.email, operator.id);
+  const setlist = await operations.patchSetlist(artist.id, initialSetlist.id, { expectedUpdatedAt: initialSetlist.updatedAt.toISOString(), status: "active", notes: "Keep the changeover tight", items: [{ songId: song.id, itemType: "song", transitionNotes: "Count the next song in" }, { itemType: "break", label: "Set break" }, { songId: untimedSong.id, itemType: "song" }] }, operator.email, operator.id);
   assert.equal(setlist.summary.timingStatus, "incomplete");
   assert.equal(setlist.summary.totalSongDurationSeconds, 240);
   assert.equal(setlist.summary.unknownDurationSongCount, 1);
   const foreignSong = await operations.createSong(foreignArtist.id, { title: "Foreign Song", durationSeconds: 180, active: true }, operator.email, operator.id);
   const setlistAuditCount = await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: setlist.id, action: "setlist.updated" } });
-  await assert.rejects(() => operations.patchSetlist(artist.id, setlist.id, { items: [{ songId: foreignSong.id, itemType: "song" }] }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
+  await assert.rejects(() => operations.patchSetlist(artist.id, setlist.id, { expectedUpdatedAt: initialSetlist.updatedAt.toISOString(), notes: "Stale overwrite" }, operator.email, operator.id), (error) => error?.getStatus?.() === 409);
+  await assert.rejects(() => operations.patchSetlist(artist.id, setlist.id, { expectedUpdatedAt: setlist.updatedAt.toISOString(), items: [{ songId: foreignSong.id, itemType: "song" }] }, operator.email, operator.id), (error) => error?.getStatus?.() === 404);
   assert.equal(await client.setlistItem.count({ where: { setlistId: setlist.id } }), 3);
   assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, aggregateId: setlist.id, action: "setlist.updated" } }), setlistAuditCount);
   await operations.patchSong(artist.id, untimedSong.id, { durationSeconds: 210 }, operator.email, operator.id);

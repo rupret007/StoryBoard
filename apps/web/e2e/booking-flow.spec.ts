@@ -213,6 +213,7 @@ test("band can build, time, annotate, and reorder a practical setlist", async ({
   const secondSong = `E2E closer ${suffix}`;
   const setName = `E2E running order ${suffix}`;
   await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
   await page.goto("/operations");
   await page.getByRole("tab", { name: "Music & setlists" }).click();
 
@@ -253,6 +254,21 @@ test("band can build, time, annotate, and reorder a practical setlist", async ({
   await expect(builder.locator("summary").getByText(/7:35 song time/)).toBeVisible();
   if ((await builder.getAttribute("open")) === null) await builder.locator("summary").click();
   await expect(builder.getByLabel(`Transition after position 1 in ${setName}`)).toHaveValue("Hold for count-in, then segue");
+
+  const setlists = await artistApi<Array<{ id: string; name: string; notes: string | null; updatedAt: string }>>(page, artistId, "/setlists");
+  const current = setlists.find((setlist) => setlist.name === setName);
+  expect(current, "The saved running order must be available through the API").toBeTruthy();
+  await artistApi(page, artistId, `/setlists/${current!.id}`, "PATCH", {
+    expectedUpdatedAt: current!.updatedAt,
+    notes: "Updated by another band member"
+  });
+  await builder.getByLabel(`Notes for setlist ${setName}`).fill("My stale local notes");
+  const rejected = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes(`/setlists/${current!.id}`) && response.status() === 409);
+  await builder.getByRole("button", { name: "Save running order" }).click();
+  await rejected;
+  await expect(page.getByRole("alert").filter({ hasText: /changed since you opened it/i })).toBeVisible();
+  const preserved = (await artistApi<Array<{ id: string; notes: string | null }>>(page, artistId, "/setlists")).find((setlist) => setlist.id === current!.id);
+  expect(preserved?.notes).toBe("Updated by another band member");
 });
 
 test("novice manager intake produces grounded work and band operations records", async ({ page }) => {

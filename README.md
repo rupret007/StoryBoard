@@ -595,7 +595,10 @@ falling back to generic advice. The song library is populated from a **local Vau
 (`pnpm catalog:import`; dry-run by default, `--apply` to write). StoryBoard
 does not ship or fetch the private catalog. After import, Band operations
 corrects duration and key and builds the practical setlist of ordered songs, breaks, notes, transition cues,
-status, and reusable set notes. `setlist_summary_v1` derives song count and
+status, and reusable set notes. Every edit is bound to the exact setlist version
+the band member opened. If somebody else saves first, StoryBoard refuses the
+stale overwrite, keeps the newer running order intact, and asks the editor to
+refresh before reapplying their changes. `setlist_summary_v1` derives song count and
 known performance time from the canonical library; break time is never guessed,
 and any song without a duration remains a visible readiness gap rather than
 turning the known subtotal into a false set length. Song title, duration, key,

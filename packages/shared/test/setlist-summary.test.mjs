@@ -42,9 +42,12 @@ test("setlist summary formats a complete long set without inventing break time",
 });
 
 test("setlist schemas require coherent song, break, and note items", () => {
+  const expectedUpdatedAt = "2026-09-03T18:00:00.000Z";
   assert.equal(shared.setlistCreateSchema.safeParse({ name: "Good set", items: [{ itemType: "song", songId: "song-a" }, { itemType: "break", label: "Set break" }, { itemType: "note", label: "Thank the room" }] }).success, true);
   assert.equal(shared.setlistCreateSchema.safeParse({ name: "Missing song", items: [{ itemType: "song" }] }).success, false);
   assert.equal(shared.setlistCreateSchema.safeParse({ name: "Missing break label", items: [{ itemType: "break" }] }).success, false);
-  assert.equal(shared.setlistPatchSchema.safeParse({ items: [{ itemType: "note", songId: "song-a", label: "Invalid" }] }).success, false);
-  assert.equal(shared.setlistPatchSchema.safeParse({ items: [{ itemType: "song", label: "Uncatalogued cover" }] }).success, true);
+  assert.equal(shared.setlistPatchSchema.safeParse({ expectedUpdatedAt, items: [{ itemType: "note", songId: "song-a", label: "Invalid" }] }).success, false);
+  assert.equal(shared.setlistPatchSchema.safeParse({ expectedUpdatedAt, items: [{ itemType: "song", label: "Uncatalogued cover" }] }).success, true);
+  assert.equal(shared.setlistPatchSchema.safeParse({ items: [{ itemType: "song", label: "Missing version" }] }).success, false);
+  assert.equal(shared.setlistPatchSchema.safeParse({ expectedUpdatedAt }).success, false);
 });

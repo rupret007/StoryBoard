@@ -954,6 +954,11 @@ Operations routes:
   Setlist reads include the derived
   `setlist_summary_v1` timing summary; writes replace the submitted ordered
   item list atomically after validating every song belongs to the active artist.
+  `PATCH /setlists/:id` requires the read receipt in `expectedUpdatedAt`. The
+  service compares that value inside a serializable transaction, advances the
+  version with the setlist and item write, and records the audit event in the
+  same transaction. A stale receipt returns `409` without replacing items or
+  writing audit; clients must refresh and let the person reapply the edit.
 - `GET /projects/readiness`, `GET /projects/:id/readiness`, and
   `POST /projects/:id/generate-plan` — explainable active-project health plus
   idempotent type-specific milestone generation
@@ -1031,7 +1036,10 @@ status are persisted through `PATCH /setlists/:id`. The displayed duration is
 song time only. Breaks are excluded because their duration is not modeled, and
 missing song durations remain explicit. Show readiness awards full setlist
 timing credit only when at least one song is present and every song duration is
-known.
+known. The editor sends the setlist's last-seen `updatedAt` with every save and
+disables saving if that receipt is unavailable. If another band member saved
+first, the visible conflict asks for a refresh and the newer server copy is not
+overwritten.
 
 In Band operations, expand **Manage readiness details** on an event to record
 each active member's availability, attach an artist-owned venue/contact/setlist,

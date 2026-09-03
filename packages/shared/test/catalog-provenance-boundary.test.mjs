@@ -39,6 +39,7 @@ test("manual setlist writes cannot mint catalog provenance", () => {
   );
   assert.equal(
     operations.setlistPatchSchema.safeParse({
+      expectedUpdatedAt: "2026-09-03T18:00:00.000Z",
       sourceKey: "shownight:catalog_import_v1:set:forged"
     }).success,
     false
