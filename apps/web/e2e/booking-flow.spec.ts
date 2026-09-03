@@ -1257,7 +1257,7 @@ test("day-of live run advances the assigned set without inventing a song", async
       { songId: closer.id, itemType: "song" }
     ]
   });
-  await artistApi<{ id: string }>(page, artistId, "/events", "POST", {
+  const liveEvent = await artistApi<{ id: string }>(page, artistId, "/events", "POST", {
     type: "gig",
     status: "confirmed",
     title: eventTitle,
@@ -1300,6 +1300,9 @@ test("day-of live run advances the assigned set without inventing a song", async
   await expect(page.getByTestId("ops-live-set").locator("li[data-state='current']")).toContainText(closerTitle);
   await expect(page.getByTestId("ops-live-wrap").getByLabel("Attendance")).toHaveValue("142");
   await expect(page.getByTestId("ops-live-wrap").getByLabel(/Gross revenue/)).toHaveValue("350.00");
+  // Keep the serial browser fixture honest for the next test: this show's
+  // recorded live window must not outrank an intentionally overdue show.
+  await artistApi(page, artistId, `/events/${liveEvent.id}`, "PATCH", { status: "completed" });
 });
 
 test("an overdue show leads to after-show wrap-up before stale readiness work", async ({ page }) => {
