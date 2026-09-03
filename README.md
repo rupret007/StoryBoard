@@ -586,14 +586,16 @@ progress, blockers, metrics, assets, budget, spend, and linked events; and feed
 the same explainable readiness signal into Manager conversation and briefs. The
 operations layer also includes versioned deal memos, owner-activated agreement
 templates, immutable
-PDF snapshots, idempotent manual payments, and finalized settlements. Financial
+PDF snapshots, idempotent manual payments that stay payment-derived under
+concurrent invoice edits, immutable voided invoices, and finalized settlements
+that freeze matching event expenses. Financial
 values are integer minor units with US/USD defaults. Agreement templates are
 starting points only and explicitly not legal advice. Gmail/calendar/Drive
 side effects still require Approvals. Current deal delivery creates a reviewed
 Gmail draft that references the immutable snapshot; the human must attach the
 PDF. Binary Drive upload and Gmail attachment remain a later adapter package.
 
-**Booking reply loop:** When `GMAIL_REPLY_SYNC_ENABLED=true` and an owner reconnects Google with `gmail.readonly`, the Booking inbox checks only Gmail threads created by StoryBoard campaigns. It stores bounded message metadata/snippets, not full bodies or attachments. AI analysis is a separate per-artist opt-in; selected bodies are fetched transiently and discarded after structured terms are derived. Applying terms and creating a threaded Gmail reply draft both require explicit actions, and drafts still pass through Approvals. Keep reply sync disabled until Google restricted-scope requirements are satisfied.
+**Booking reply loop:** When `GMAIL_REPLY_SYNC_ENABLED=true` and an owner reconnects Google with `gmail.readonly`, the Booking inbox checks only Gmail threads created by StoryBoard campaigns. It stores bounded message metadata/snippets, not full bodies or attachments. AI analysis is a separate per-artist opt-in; selected bodies are fetched transiently and discarded after structured terms are derived. Applying terms and creating a threaded Gmail reply draft both require explicit actions, and drafts still pass through Approvals. Applying terms refuses a closed opportunity, writes once, and is idempotent on replay. Keep reply sync disabled until Google restricted-scope requirements are satisfied.
 Owners can additionally execute a validated booking-confirmation flow from a reply:
 `POST /booking-replies/:id/prepare-confirmation` validates reviewed terms and
 prepares a `booking_reply_confirm` approval; execution confirms the linked

@@ -1910,6 +1910,12 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.match(invoiceChat.message.content, /remaining balance is USD 750\.00/);
   assert.deepEqual(invoiceChat.message.citations, [invoice.id]);
   assert.equal(invoiceChat.recommendation, null);
+  const payInvoiceChat = await manager.chat(artist.id, { conversationId: invoiceChat.conversationId, message: "Pay the invoice" }, operator.email, operator.id);
+  assert.match(payInvoiceChat.message.content, /did not create an invoice, record a payment, or settle a show/i);
+  assert.match(payInvoiceChat.message.content, /Band operations/i);
+  assert.equal(payInvoiceChat.message.content.includes("Approvals"), false);
+  assert.equal(payInvoiceChat.recommendation, null);
+  assert.equal((await client.invoice.findUniqueOrThrow({ where: { id: invoice.id } })).paidMinor, 25000);
   const invoiceChatRun = await client.managerRun.findUniqueOrThrow({ where: { id: invoiceChat.message.managerRunId } });
   assert.equal(invoiceChatRun.trace.subjectReference.policyVersion, "manager_subject_reference_v1");
   assert.equal(invoiceChatRun.trace.subjectReference.status, "resolved");
@@ -1956,9 +1962,29 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   );
   assert.equal(paymentVersusPatch.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal(paymentVersusPatch.filter((result) => result.status === "rejected").length, 1);
+  const voidInvoice = await operations.createInvoice(artist.id, { dealOfferId: deal.id, eventId: event.id, number: "TEST-005", recipientName: "Owned Room", currency: "USD", subtotalMinor: 80000, taxMinor: 0 }, operator.email, operator.id);
+  await operations.patchInvoice(artist.id, voidInvoice.id, { status: "voided" }, operator.email, operator.id);
+  await assert.rejects(
+    () => operations.recordPayment(artist.id, voidInvoice.id, { idempotencyKey: "test-voided-pay", amountMinor: 10000, currency: "USD", method: "check", receivedAt: "2026-08-01T12:00:00.000Z" }, operator.email, operator.id),
+    /voided invoice/i
+  );
+  assert.equal((await client.invoice.findUniqueOrThrow({ where: { id: voidInvoice.id } })).status, "voided");
+  assert.equal(await client.paymentRecord.count({ where: { invoiceId: voidInvoice.id } }), 0);
+  await assert.rejects(
+    () => operations.patchInvoice(artist.id, voidInvoice.id, { notes: "still collect this" }, operator.email, operator.id),
+    /voided invoices are immutable/i
+  );
+  await assert.rejects(
+    () => operations.patchInvoice(artist.id, invoice.id, { status: "voided" }, operator.email, operator.id),
+    /cannot void an invoice with recorded payments/i
+  );
   const fuelExpense = await client.expense.create({ data: { artistId: artist.id, eventId: event.id, category: "travel", description: "Van fuel", amountMinor: 10000, currency: "USD", incurredAt: new Date("2026-09-18T12:00:00.000Z") } });
   const settlement = await operations.createSettlement(artist.id, { eventId: event.id, currency: "USD", grossMinor: 100000, splits: [{ bandMemberId: member.id, basisPoints: 10000 }] }, operator.email, operator.id);
   assert.equal(settlement.netMinor, 90000);
+  await assert.rejects(
+    () => operations.createSettlement(artist.id, { eventId: event.id, currency: "USD", grossMinor: 100000, splits: [{ bandMemberId: member.id, basisPoints: 10000 }] }, operator.email, operator.id),
+    /already exists for this event/i
+  );
   assert.equal((await client.expense.findUniqueOrThrow({ where: { id: fuelExpense.id } })).settlementId, null);
   const coachingChat = await manager.chat(artist.id, { message: "How does a show settlement work?" }, operator.email, operator.id);
   assert.match(coachingChat.message.content, /post-show money check/i);
@@ -1973,12 +1999,25 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const foreignCoaching = await manager.chat(foreignArtist.id, { message: "How does a show settlement work?" }, operator.email, operator.id);
   assert.equal(foreignCoaching.message.citations.includes(settlement.id), false);
   const lateExpense = await client.expense.create({ data: { artistId: artist.id, eventId: event.id, category: "production", description: "Late parking receipt", amountMinor: 5000, currency: "usd", incurredAt: new Date("2026-09-18T23:00:00.000Z") } });
-  const finalized = await operations.finalizeSettlement(artist.id, settlement.id, operator.email, operator.id);
-  assert.equal(finalized.status, "finalized");
+  const concurrentFinalize = await Promise.all([
+    operations.finalizeSettlement(artist.id, settlement.id, operator.email, operator.id),
+    operations.finalizeSettlement(artist.id, settlement.id, operator.email, operator.id)
+  ]);
+  const finalized = concurrentFinalize[0];
+  assert.equal(concurrentFinalize[0].status, "finalized");
+  assert.equal(concurrentFinalize[1].status, "finalized");
   assert.equal(finalized.expenseMinor, 15000);
   assert.equal(finalized.netMinor, 85000);
   assert.equal((await client.expense.findUniqueOrThrow({ where: { id: lateExpense.id } })).settlementId, settlement.id);
-  assert.equal(finalized.snapshots.length, 1);
+  assert.equal(await client.documentSnapshot.count({ where: { settlementId: settlement.id } }), 1);
+  await assert.rejects(
+    () => operations.patchExpense(artist.id, fuelExpense.id, { amountMinor: 12000 }, operator.email, operator.id),
+    /included in a settlement are immutable/i
+  );
+  await assert.rejects(
+    () => operations.createExpense(artist.id, { eventId: event.id, category: "travel", description: "Post-settle fuel", amountMinor: 2500, currency: "USD", incurredAt: "2026-09-19T12:00:00.000Z" }, operator.email, operator.id),
+    /finalized settlement are immutable/i
+  );
   await operations.patchEvent(artist.id, event.id, { status: "completed", attendance: 140, grossRevenueMinor: 100000, postShowNotes: "Strong room response; tighten changeover next time", relationshipOutcome: "Buyer invited a return pitch" }, operator.email, operator.id);
   const outcomeReview = await manager.outcomeReview(artist.id, 90, new Date("2026-10-01T12:00:00.000Z"));
   assert.equal(outcomeReview.activity.completedShows, 1);

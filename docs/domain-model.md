@@ -426,12 +426,20 @@ milestone, and evidence rather than asserting an unsupported project outcome.
 `DealOffer` and immutable versioned `DealMemo` snapshots lead into an
 `Agreement` based on an owner-activated `DocumentTemplate`. Generated
 `DocumentSnapshot` PDFs are content-addressed with SHA-256. `Invoice` balances
-derive from idempotent `PaymentRecord` rows. `Settlement` derives gross,
-same-currency expenses, net, and basis-point `MemberSplit` amounts, then becomes
-immutable on finalization. Other-currency costs remain separate rather than
-being combined as equal minor units. At finalization, included expenses receive
-the settlement link transactionally and the draft is recalculated before freezing
-its splits and PDF snapshot. All money uses integer minor units and an explicit
+derive from idempotent `PaymentRecord` rows. PATCH cannot mark an invoice paid
+or partially paid except from those rows; it serializes against the current
+`paidMinor`, refuses a total below recorded payments, and refuses a currency
+change after a payment. Voided invoices are immutable: they refuse new
+payments, field patches, and un-voiding, and an invoice with recorded payments
+cannot be voided. `Settlement`
+derives gross, same-currency expenses, net, and basis-point `MemberSplit`
+amounts, then becomes immutable on finalization. One event has at most one
+settlement; a duplicate create fails closed. Other-currency costs remain
+separate rather than being combined as equal minor units. At finalization,
+included expenses are re-aggregated inside a serializable transaction, receive
+the settlement link, and freeze splits plus a PDF snapshot. Concurrent
+finalizes are idempotent. After that freeze, event expenses cannot be created
+or edited. All money uses integer minor units and an explicit
 currency.
 
 ### Venue
