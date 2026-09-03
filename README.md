@@ -656,7 +656,7 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm lint` | ESLint (API + web) |
 | `pnpm test` | Unit tests (`@storyboard/shared` + compiled API tests); does not require a database |
 | `pnpm test:integration` | Migrates and tests a dedicated DB named by `STORYBOARD_TEST_DATABASE_URL` (must contain `test`) |
-| `pnpm test:e2e` | Resets an explicit `STORYBOARD_TEST_DATABASE_URL`, builds production artifacts, and runs 15 focused Chromium workflows |
+| `pnpm test:e2e` | Resets an explicit `STORYBOARD_TEST_DATABASE_URL`, builds production artifacts, and runs 17 focused Chromium workflows |
 | `pnpm manager:eval` | Build the API and run the current offline Manager safety/usefulness gate |
 | `pnpm infra:up` / `infra:down` | Docker Postgres + Redis |
 | `pnpm container:up` / `container:down` | Build/start or stop the complete local container bundle |

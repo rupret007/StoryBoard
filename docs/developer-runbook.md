@@ -884,10 +884,12 @@ that its name contains `test`, then seeds it. Browser coverage therefore
 exercises first-time intake on every run instead of inheriting old test data.
 The runner forces its production build environment internally, so an unrelated
 shell-level `NODE_ENV` cannot invalidate Next.js prerendering.
-The 15 focused browser cases establish their own domain prerequisites and cover
+The 17 focused browser cases establish their own domain prerequisites and cover
 booking (including approved immediate-send execution and follow-up creation),
-Manager, operations, finance, tasks, and approval-gated event logistics without
-depending on a previous case's records. The approval lifecycle journey also
+Manager, operations, finance, tasks, approval-gated event logistics, and the
+day-of live-run cursor without depending on a previous case's records.
+Gig-title asserts on Band operations stay scoped to the event card so
+show-control and live-run cannot trip Playwright strict mode. The approval lifecycle journey also
 invalidates prepared logistics by changing the event, verifies that execution
 fails closed, and confirms the quarantined result stays visible and
 non-retryable across Dashboard, Approvals, and Operations. That same existing
