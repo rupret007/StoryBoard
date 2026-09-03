@@ -4275,6 +4275,91 @@ test("payment recording retries a concurrent invoice write before applying one e
   assert.deepEqual(audits.map((entry) => entry.action), ["invoice.payment_recorded"]);
 });
 
+test("invoice patches cannot mark paid without recorded payments", async () => {
+  const existing = { id: "invoice-a", artistId: "artist-a", currency: "USD", paidMinor: 0, totalMinor: 1000, subtotalMinor: 1000, taxMinor: 0, status: "issued" };
+  const service = new operationsMod.OperationsService({ client: {
+    $transaction: async (work, options) => {
+      assert.equal(options?.isolationLevel, "Serializable");
+      return work({ invoice: { findFirst: async () => existing } });
+    }
+  } }, { log: async () => undefined }, {});
+  await assert.rejects(
+    () => service.patchInvoice("artist-a", "invoice-a", { status: "paid" }, "owner@test", "operator-a"),
+    /payment status comes from recorded payments/i
+  );
+});
+
+test("invoice patches retry a concurrent payment before keeping paidMinor at or below the new total", async () => {
+  let transactions = 0;
+  let updates = 0;
+  const audits = [];
+  const existing = { id: "invoice-a", artistId: "artist-a", currency: "USD", paidMinor: 0, totalMinor: 1000, subtotalMinor: 1000, taxMinor: 0, status: "issued" };
+  const service = new operationsMod.OperationsService({ client: {
+    $transaction: async (work, options) => {
+      transactions += 1;
+      assert.equal(options?.isolationLevel, "Serializable");
+      if (transactions === 1) throw Object.assign(new Error("serialization failure"), { code: "P2034" });
+      return work({
+        invoice: {
+          findFirst: async () => existing,
+          updateMany: async ({ where, data }) => {
+            updates += 1;
+            assert.equal(where.paidMinor, 0);
+            assert.equal(where.totalMinor, 1000);
+            assert.equal(data.totalMinor, 800);
+            assert.equal(data.status, "issued");
+            return { count: 1 };
+          },
+          findUniqueOrThrow: async () => ({ ...existing, totalMinor: 800, subtotalMinor: 800 })
+        }
+      });
+    }
+  } }, { log: async (entry) => audits.push(entry) }, {});
+  const result = await service.patchInvoice("artist-a", "invoice-a", { subtotalMinor: 800, taxMinor: 0 }, "owner@test", "operator-a");
+  assert.equal(result.totalMinor, 800);
+  assert.equal(transactions, 2);
+  assert.equal(updates, 1);
+  assert.deepEqual(audits.map((entry) => entry.action), ["invoice.updated"]);
+});
+
+test("invoice patches fail closed when recorded payments already cover more than the requested total", async () => {
+  const existing = { id: "invoice-a", artistId: "artist-a", currency: "USD", paidMinor: 600, totalMinor: 1000, subtotalMinor: 1000, taxMinor: 0, status: "partially_paid" };
+  const service = new operationsMod.OperationsService({ client: {
+    $transaction: async (work, options) => {
+      assert.equal(options?.isolationLevel, "Serializable");
+      return work({ invoice: { findFirst: async () => existing } });
+    }
+  } }, { log: async () => undefined }, {});
+  await assert.rejects(
+    () => service.patchInvoice("artist-a", "invoice-a", { subtotalMinor: 500, taxMinor: 0 }, "owner@test", "operator-a"),
+    /cannot be less than recorded payments/i
+  );
+});
+
+test("raising an invoice total after recorded payment leaves the invoice partially paid", async () => {
+  const existing = { id: "invoice-a", artistId: "artist-a", currency: "USD", paidMinor: 1000, totalMinor: 1000, subtotalMinor: 1000, taxMinor: 0, status: "paid" };
+  let patched = null;
+  const service = new operationsMod.OperationsService({ client: {
+    $transaction: async (work, options) => {
+      assert.equal(options?.isolationLevel, "Serializable");
+      return work({
+        invoice: {
+          findFirst: async () => existing,
+          updateMany: async ({ data }) => {
+            patched = data;
+            return { count: 1 };
+          },
+          findUniqueOrThrow: async () => ({ ...existing, ...patched })
+        }
+      });
+    }
+  } }, { log: async () => undefined }, {});
+  const result = await service.patchInvoice("artist-a", "invoice-a", { subtotalMinor: 1500, taxMinor: 0 }, "owner@test", "operator-a");
+  assert.equal(patched.totalMinor, 1500);
+  assert.equal(patched.status, "partially_paid");
+  assert.equal(result.status, "partially_paid");
+});
+
 test("event logistics fingerprint and source keys bind only authoritative provider inputs", () => {
   const event = { id: "event:a", type: "gig", title: "Bluebird show", status: "confirmed", startsAt: new Date("2026-09-18T20:00:00.000Z"), endsAt: new Date("2026-09-18T23:00:00.000Z"), timezone: "America/Chicago", calendarEventId: null, driveFolderUrl: null };
   const fingerprint = eventLogistics.eventLogisticsFingerprint(event);

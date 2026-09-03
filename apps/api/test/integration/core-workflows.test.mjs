@@ -1939,6 +1939,23 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal(concurrentReplay[0].id, concurrentReplay[1].id);
   assert.equal(await client.paymentRecord.count({ where: { invoiceId: replayInvoice.id } }), 1);
   assert.equal((await client.invoice.findUniqueOrThrow({ where: { id: replayInvoice.id } })).paidMinor, 40000);
+  await assert.rejects(
+    () => operations.patchInvoice(artist.id, replayInvoice.id, { status: "paid" }, operator.email, operator.id),
+    /payment status comes from recorded payments/i
+  );
+  const raceInvoice = await operations.createInvoice(artist.id, { dealOfferId: deal.id, eventId: event.id, number: "TEST-004", recipientName: "Owned Room", currency: "USD", subtotalMinor: 100000, taxMinor: 0 }, operator.email, operator.id);
+  const paymentVersusPatch = await Promise.allSettled([
+    operations.recordPayment(artist.id, raceInvoice.id, { idempotencyKey: "test-patch-race-pay", amountMinor: 60000, currency: "USD", method: "check", receivedAt: "2026-08-01T12:00:00.000Z" }, operator.email, operator.id),
+    operations.patchInvoice(artist.id, raceInvoice.id, { subtotalMinor: 50000, taxMinor: 0 }, operator.email, operator.id)
+  ]);
+  const raced = await client.invoice.findUniqueOrThrow({ where: { id: raceInvoice.id } });
+  assert.ok(raced.paidMinor <= raced.totalMinor);
+  assert.ok(
+    (raced.paidMinor === 60000 && raced.totalMinor === 100000)
+    || (raced.paidMinor === 0 && raced.totalMinor === 50000)
+  );
+  assert.equal(paymentVersusPatch.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(paymentVersusPatch.filter((result) => result.status === "rejected").length, 1);
   const fuelExpense = await client.expense.create({ data: { artistId: artist.id, eventId: event.id, category: "travel", description: "Van fuel", amountMinor: 10000, currency: "USD", incurredAt: new Date("2026-09-18T12:00:00.000Z") } });
   const settlement = await operations.createSettlement(artist.id, { eventId: event.id, currency: "USD", grossMinor: 100000, splits: [{ bandMemberId: member.id, basisPoints: 10000 }] }, operator.email, operator.id);
   assert.equal(settlement.netMinor, 90000);

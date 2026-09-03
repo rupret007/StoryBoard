@@ -43,6 +43,25 @@ function prismaErrorCode(error: unknown) {
   return isRecord(error) && typeof error.code === "string" ? error.code : null;
 }
 
+function invoiceStatusFromRecordedPayments(
+  paidMinor: number,
+  totalMinor: number,
+  requested: InvoiceStatus | undefined,
+  current: InvoiceStatus
+) {
+  if (requested === InvoiceStatus.voided) return InvoiceStatus.voided;
+  if (paidMinor > 0 && paidMinor === totalMinor) {
+    if (requested && requested !== InvoiceStatus.paid) throw new BadRequestException("Invoice payment status comes from recorded payments");
+    return InvoiceStatus.paid;
+  }
+  if (paidMinor > 0) {
+    if (requested && requested !== InvoiceStatus.partially_paid) throw new BadRequestException("Invoice payment status comes from recorded payments");
+    return InvoiceStatus.partially_paid;
+  }
+  if (requested === InvoiceStatus.paid || requested === InvoiceStatus.partially_paid) throw new BadRequestException("Invoice payment status comes from recorded payments");
+  return requested ?? current;
+}
+
 const dateFields = new Set(["startsAt","endsAt","loadInAt","soundcheckAt","doorsAt","setAt","curfewAt","depositDueAt","balanceDueAt","dueAt","performanceDate","expiresAt"]);
 const eventDetailInclude = (artistId: string) => ({
   venue: true,
@@ -414,7 +433,41 @@ export class OperationsService {
       throw error;
     }
   }
-  async patchInvoice(artistId: string, id: string, input: InvoicePatch, actorLabel: string, actorOperatorId: string) { await this.assertArtistRecord("invoice", artistId, id); await this.validateInvoiceRelations(artistId, input); const existing = await this.prisma.client.invoice.findUniqueOrThrow({ where: { id } }); const subtotal = input.subtotalMinor ?? existing.subtotalMinor; const tax = input.taxMinor ?? existing.taxMinor; if (subtotal + tax < existing.paidMinor) throw new BadRequestException("Invoice total cannot be less than recorded payments"); const row = await this.prisma.client.invoice.update({ where: { id }, data: { ...cleanDates(input), totalMinor: subtotal + tax } }); await this.auditWrite(artistId, "Invoice", id, "invoice.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) }); return row; }
+  async patchInvoice(artistId: string, id: string, input: InvoicePatch, actorLabel: string, actorOperatorId: string) {
+    await this.validateInvoiceRelations(artistId, input);
+    let row: Awaited<ReturnType<Prisma.TransactionClient["invoice"]["findUniqueOrThrow"]>> | null = null;
+    for (let attempt = 0; attempt < 3 && !row; attempt += 1) {
+      try {
+        row = await this.prisma.client.$transaction(async (tx) => {
+          const existing = await tx.invoice.findFirst({ where: { id, artistId } });
+          if (!existing) throw new NotFoundException("Invoice not found");
+          if (input.currency && input.currency !== existing.currency && existing.paidMinor > 0) {
+            throw new BadRequestException("Payment currency is already recorded on this invoice");
+          }
+          const subtotal = input.subtotalMinor ?? existing.subtotalMinor;
+          const tax = input.taxMinor ?? existing.taxMinor;
+          const totalMinor = subtotal + tax;
+          if (totalMinor < existing.paidMinor) throw new BadRequestException("Invoice total cannot be less than recorded payments");
+          const status = invoiceStatusFromRecordedPayments(existing.paidMinor, totalMinor, input.status, existing.status);
+          const updated = await tx.invoice.updateMany({
+            where: { id, artistId, paidMinor: existing.paidMinor, totalMinor: existing.totalMinor, currency: existing.currency, status: existing.status },
+            data: { ...cleanDates(input), totalMinor, status }
+          });
+          if (updated.count !== 1) throw new ConflictException("Invoice changed while it was being updated");
+          return tx.invoice.findUniqueOrThrow({ where: { id } });
+        }, { isolationLevel: "Serializable" });
+      } catch (error) {
+        if (prismaErrorCode(error) === "P2002") throw new ConflictException("Invoice number already exists for this artist");
+        const retryable = prismaErrorCode(error) === "P2034" || error instanceof ConflictException;
+        if (retryable && attempt < 2) continue;
+        if (retryable) throw new ConflictException("Invoice changed while it was being updated; try again");
+        throw error;
+      }
+    }
+    if (!row) throw new ConflictException("Invoice changed while it was being updated; try again");
+    await this.auditWrite(artistId, "Invoice", id, "invoice.updated", actorLabel, actorOperatorId, { fields: Object.keys(input) });
+    return row;
+  }
   async recordPayment(artistId: string, invoiceId: string, input: PaymentInput, actorLabel: string, actorOperatorId: string) {
     let result: { payment: Awaited<ReturnType<Prisma.TransactionClient["paymentRecord"]["create"]>>; created: boolean } | null = null;
     for (let attempt = 0; attempt < 3 && !result; attempt += 1) {
