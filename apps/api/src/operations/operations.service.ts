@@ -69,6 +69,38 @@ function invoiceStatusFromRecordedPayments(
   return requested ?? current;
 }
 
+type SettlementSplitBasis = { bandMemberId: string; basisPoints: number };
+
+export function allocateSettlementSplitAmounts<T extends SettlementSplitBasis>(
+  netMinor: number,
+  splits: readonly T[]
+): Array<T & { amountMinor: number }> {
+  if (splits.length === 0) return [];
+  if (splits.reduce((sum, split) => sum + split.basisPoints, 0) !== 10000) {
+    throw new BadRequestException("Member splits must total 100%");
+  }
+
+  const allocations = splits.map((split, index) => {
+    const numerator = netMinor * split.basisPoints;
+    const amountMinor = Math.floor(numerator / 10000);
+    return {
+      split,
+      index,
+      amountMinor,
+      remainder: numerator - amountMinor * 10000
+    };
+  });
+  const unallocatedMinor = netMinor - allocations.reduce((sum, allocation) => sum + allocation.amountMinor, 0);
+  const ranked = [...allocations].sort((left, right) => {
+    if (left.remainder !== right.remainder) return right.remainder - left.remainder;
+    if (left.split.bandMemberId < right.split.bandMemberId) return -1;
+    if (left.split.bandMemberId > right.split.bandMemberId) return 1;
+    return left.index - right.index;
+  });
+  for (let index = 0; index < unallocatedMinor; index += 1) ranked[index]!.amountMinor += 1;
+  return allocations.map(({ split, amountMinor }) => ({ ...split, amountMinor }));
+}
+
 function isSerializationConflict(error: unknown) {
   return prismaErrorCode(error) === "P2034" || error instanceof ConflictException;
 }
@@ -589,7 +621,7 @@ export class OperationsService {
           const expenseMinor = expenses._sum.amountMinor ?? 0;
           const netMinor = input.grossMinor - expenseMinor;
           if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue");
-          return tx.settlement.create({ data: { artistId, eventId: input.eventId, currency, grossMinor: input.grossMinor, expenseMinor, netMinor, notes: input.notes ?? null, splits: { create: input.splits.map((split) => ({ ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) })) } }, include: { splits: true } });
+          return tx.settlement.create({ data: { artistId, eventId: input.eventId, currency, grossMinor: input.grossMinor, expenseMinor, netMinor, notes: input.notes ?? null, splits: { create: allocateSettlementSplitAmounts(netMinor, input.splits) } }, include: { splits: true } });
         }, { isolationLevel: "Serializable" });
       } catch (error) {
         if (prismaErrorCode(error) === "P2002") throw new ConflictException("A settlement already exists for this event");
@@ -620,9 +652,10 @@ export class OperationsService {
           const netMinor = grossMinor - expenseMinor;
           if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue");
           const specs = input.splits ?? existing.splits.map((split) => ({ bandMemberId: split.bandMemberId, basisPoints: split.basisPoints }));
+          const splitAmounts = allocateSettlementSplitAmounts(netMinor, specs);
           if (input.splits) await tx.memberSplit.deleteMany({ where: { settlementId: id } });
-          if (input.splits) await tx.memberSplit.createMany({ data: specs.map((split) => ({ settlementId: id, ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) })) });
-          else for (const split of specs) await tx.memberSplit.update({ where: { settlementId_bandMemberId: { settlementId: id, bandMemberId: split.bandMemberId } }, data: { amountMinor: Math.floor(netMinor * split.basisPoints / 10000) } });
+          if (input.splits) await tx.memberSplit.createMany({ data: splitAmounts.map((split) => ({ settlementId: id, ...split })) });
+          else for (const split of splitAmounts) await tx.memberSplit.update({ where: { settlementId_bandMemberId: { settlementId: id, bandMemberId: split.bandMemberId } }, data: { amountMinor: split.amountMinor } });
           const updated = await tx.settlement.updateMany({
             where: { id, artistId, status: { not: SettlementStatus.finalized } },
             data: { grossMinor, expenseMinor, netMinor, ...(input.notes !== undefined ? { notes: input.notes } : {}) }
@@ -656,7 +689,7 @@ export class OperationsService {
           const expenseMinor = expenses._sum.amountMinor ?? 0;
           const netMinor = settlement.grossMinor - expenseMinor;
           if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue");
-          const splitAmounts = settlement.splits.map((split) => ({ ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) }));
+          const splitAmounts = allocateSettlementSplitAmounts(netMinor, settlement.splits);
           const title = `${settlement.event.title} settlement`;
           const body = [`Gross: ${settlement.currency} ${(settlement.grossMinor/100).toFixed(2)}`, `Expenses: ${settlement.currency} ${(expenseMinor/100).toFixed(2)}`, `Net: ${settlement.currency} ${(netMinor/100).toFixed(2)}`, "", ...splitAmounts.map((split) => `${split.bandMember.name}: ${settlement.currency} ${(split.amountMinor/100).toFixed(2)}`)].join("\n");
           const { bytes, sha256 } = renderTextPdf(title, body);

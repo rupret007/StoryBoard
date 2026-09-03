@@ -4011,21 +4011,40 @@ test("operations validation rejects unknown fields, invalid money, and bad settl
 
 test("settlement math includes only expenses in the settlement currency", async () => {
   let aggregateWhere = null;
+  let splitCreate = null;
   const tx = {
     expense: { aggregate: async ({ where }) => { aggregateWhere = where; return { _sum: { amountMinor: 2500 } }; } },
-    settlement: { create: async ({ data }) => ({ id: "settlement-a", ...data, splits: [] }) }
+    settlement: { create: async ({ data }) => { splitCreate = data.splits.create; return { id: "settlement-a", ...data, splits: splitCreate }; } }
   };
   const service = new operationsMod.OperationsService({ client: {
     bandEvent: { findFirst: async () => ({ id: "event-a" }) },
+    bandMember: { findFirst: async ({ where }) => ({ id: where.id }) },
     $transaction: async (work, options) => {
       assert.equal(options?.isolationLevel, "Serializable");
       return work(tx);
     }
   } }, { log: async () => undefined }, {});
-  const row = await service.createSettlement("artist-a", { eventId: "event-a", currency: "USD", grossMinor: 10000, splits: [] }, "member@test", "operator-a");
+  const row = await service.createSettlement("artist-a", { eventId: "event-a", currency: "USD", grossMinor: 2600, splits: [{ bandMemberId: "member-a", basisPoints: 3333 }, { bandMemberId: "member-b", basisPoints: 3333 }, { bandMemberId: "member-c", basisPoints: 3334 }] }, "member@test", "operator-a");
   assert.deepEqual(aggregateWhere, { artistId: "artist-a", eventId: "event-a", currency: { equals: "USD", mode: "insensitive" } });
   assert.equal(row.expenseMinor, 2500);
-  assert.equal(row.netMinor, 7500);
+  assert.equal(row.netMinor, 100);
+  assert.deepEqual(splitCreate.map(({ bandMemberId, amountMinor }) => [bandMemberId, amountMinor]), [["member-a", 33], ["member-b", 33], ["member-c", 34]]);
+  assert.equal(splitCreate.reduce((sum, split) => sum + split.amountMinor, 0), row.netMinor);
+});
+
+test("settlement split rounding is exact and deterministic", () => {
+  const splits = [{ bandMemberId: "member-b", basisPoints: 5000 }, { bandMemberId: "member-a", basisPoints: 5000 }];
+  const oneCent = operationsMod.allocateSettlementSplitAmounts(1, splits);
+  assert.deepEqual(oneCent.map(({ bandMemberId, amountMinor }) => [bandMemberId, amountMinor]), [["member-b", 0], ["member-a", 1]]);
+  assert.equal(oneCent.reduce((sum, split) => sum + split.amountMinor, 0), 1);
+
+  const reordered = operationsMod.allocateSettlementSplitAmounts(1, [...splits].reverse());
+  assert.deepEqual(Object.fromEntries(reordered.map(({ bandMemberId, amountMinor }) => [bandMemberId, amountMinor])), { "member-a": 1, "member-b": 0 });
+  assert.deepEqual(operationsMod.allocateSettlementSplitAmounts(99, []), []);
+  assert.throws(
+    () => operationsMod.allocateSettlementSplitAmounts(100, [{ bandMemberId: "member-a", basisPoints: 9999 }]),
+    /must total 100%/i
+  );
 });
 
 test("duplicate settlements for one event fail closed", async () => {

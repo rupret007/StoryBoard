@@ -588,7 +588,9 @@ operations layer also includes versioned deal memos, owner-activated agreement
 templates, immutable
 PDF snapshots, idempotent manual payments that stay payment-derived under
 concurrent invoice edits, immutable voided invoices, and finalized settlements
-that freeze matching event expenses. Financial
+that freeze matching event expenses. Member shares use deterministic
+largest-remainder cents, so a valid basis-point split totals exactly to the
+recorded net amount in storage and the final PDF. Financial
 values are integer minor units with US/USD defaults. Agreement templates are
 starting points only and explicitly not legal advice. Gmail/calendar/Drive
 side effects still require Approvals. Current deal delivery creates a reviewed
@@ -652,9 +654,9 @@ Details, troubleshooting, and checks: `docs/developer-runbook.md` and `docs/envi
 | `pnpm db:audit-relationships` | Read-only check for historical cross-artist record links |
 | `pnpm preflight` | Docker + Postgres + Redis smoke (needs infra + `.env`) |
 
-Release validation snapshot (2026-07-13) plus the 2026-08-23 quality-review
-unit/eval gate: root typecheck/lint, 25/25 shared tests, 269/269 API unit
-tests, both production builds, and 98/98 `manager_evals_v44` checks at 100%
+Release validation snapshot (2026-07-13) plus the current 2026-09-03
+unit/eval gate: root typecheck/lint, 28/28 shared tests, 270/270 API unit
+tests, both production builds, and 99/99 `manager_evals_v44` checks at 100%
 safety. The 2026-07-13 package also recorded 5/5 database workflows across all
 40 migrations; this change adds a 41st migration for song/setlist `sourceKey`.
 15/15 Chromium workflows remain the last hosted browser snapshot. Prisma reports no schema

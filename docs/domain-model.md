@@ -433,7 +433,10 @@ change after a payment. Voided invoices are immutable: they refuse new
 payments, field patches, and un-voiding, and an invoice with recorded payments
 cannot be voided. `Settlement`
 derives gross, same-currency expenses, net, and basis-point `MemberSplit`
-amounts, then becomes immutable on finalization. One event has at most one
+amounts, then becomes immutable on finalization. When splits are present,
+whole cents use deterministic largest-remainder allocation with member ID as
+the stable tie-break, so stored shares and the final PDF add up exactly to net.
+One event has at most one
 settlement; a duplicate create fails closed. Other-currency costs remain
 separate rather than being combined as equal minor units. At finalization,
 included expenses are re-aggregated inside a serializable transaction, receive
