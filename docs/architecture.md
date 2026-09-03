@@ -46,10 +46,13 @@ itself is read-only and non-persistent.
 
 Existing Events, Music, Deals, booking, and inbox cards use
 `ops_next_action_v1` to name one next recorded action and deep-link the
-matching workspace. Apply-terms (`booking_terms_apply_v1`) merges reviewed
-analysis onto the opportunity and will not erase a recorded fee, currency,
-condition, or date when analysis left that field null or blank. Travis books;
-StoryBoard does not auto-pitch.
+matching workspace. Band operations also projects `ops_show_control_v1` above
+the tab strip so the live/next/overdue recorded gig, assigned set, and open
+booking work are visible before the editors. The control action is navigate
+only; it never writes, pitches, or invents a show. Apply-terms
+(`booking_terms_apply_v1`) merges reviewed analysis onto the opportunity and
+will not erase a recorded fee, currency, condition, or date when analysis left
+that field null or blank. Travis books; StoryBoard does not auto-pitch.
 
 **Adapter registry (phase 2B):** `IntegrationsModule` still exposes the
 `MOCK_ADAPTERS` token (env-only registry for compatibility). **Request paths**

@@ -3,11 +3,12 @@
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { CATALOG_NON_VAULT_EMPTY_SETLIST_HINT, CATALOG_NON_VAULT_LIBRARY_INTRO, catalogSourceLabel, catalogWorkspaceUsesVaultFraming, dateTimeLocalToIso, describeSongCatalogStatus, eventReadinessNextAction, instantToDateTimeLocal, invoicePaymentNextAction, isValidIanaTimeZone, type OpsWorkspaceFocus, type OpsWorkspaceTab, settlementWorkspaceNextAction, summarizeSetlist } from "@storyboard/shared";
 import { CatalogImportForm } from "./catalog-import-form";
+import { OperationsShowControl } from "./operations-show-control";
 import { ArrowDown, ArrowUp, BriefcaseBusiness, CalendarDays, ListMusic, Pencil, Plus, Rocket, Save, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import type { ArtistProject, BandEvent, BandMember, Contact, DealOffer, DocumentTemplate, Expense, Invoice, Setlist, Settlement, ShowReadiness, Song, Venue } from "@/lib/types";
+import type { ArtistProject, BandEvent, BandMember, BookingOpportunity, Contact, DealOffer, DocumentTemplate, Expense, Invoice, Setlist, Settlement, ShowReadiness, Song, Venue } from "@/lib/types";
 
 type Tab = OpsWorkspaceTab;
 type Mutate = (path: string, json: unknown, method?: string) => Promise<void>;
@@ -26,7 +27,7 @@ function replaceOpsWorkspaceUrl(tab: Tab, eventId?: string, focus?: OpsWorkspace
   window.history.replaceState(null, "", `${url.pathname}${url.search}`);
 }
 
-export function OperationsClient({ initialTab = "events", focusEventId = null, focusField = null, initialEvents, initialReadiness, initialSongs, initialSetlists, initialProjects, initialDeals, initialInvoices, initialExpenses, initialSettlements, initialTemplates, members, contacts, venues, accessState, isOwner, loadError }: { initialTab?: Tab; focusEventId?: string | null; focusField?: OpsWorkspaceFocus | null; initialEvents: BandEvent[]; initialReadiness: ShowReadiness[]; initialSongs: Song[]; initialSetlists: Setlist[]; initialProjects: ArtistProject[]; initialDeals: DealOffer[]; initialInvoices: Invoice[]; initialExpenses: Expense[]; initialSettlements: Settlement[]; initialTemplates: DocumentTemplate[]; members: BandMember[]; contacts: Contact[]; venues: Venue[]; accessState: OperationsAccessState; isOwner: boolean; loadError: string | null }) {
+export function OperationsClient({ initialTab = "events", focusEventId = null, focusField = null, eventsAvailable, readinessAvailable, setlistsAvailable, bookingsAvailable, initialEvents, initialReadiness, initialSongs, initialSetlists, initialBookings, initialProjects, initialDeals, initialInvoices, initialExpenses, initialSettlements, initialTemplates, members, contacts, venues, accessState, isOwner, loadError }: { initialTab?: Tab; focusEventId?: string | null; focusField?: OpsWorkspaceFocus | null; eventsAvailable: boolean; readinessAvailable: boolean; setlistsAvailable: boolean; bookingsAvailable: boolean; initialEvents: BandEvent[]; initialReadiness: ShowReadiness[]; initialSongs: Song[]; initialSetlists: Setlist[]; initialBookings: BookingOpportunity[]; initialProjects: ArtistProject[]; initialDeals: DealOffer[]; initialInvoices: Invoice[]; initialExpenses: Expense[]; initialSettlements: Settlement[]; initialTemplates: DocumentTemplate[]; members: BandMember[]; contacts: Contact[]; venues: Venue[]; accessState: OperationsAccessState; isOwner: boolean; loadError: string | null }) {
   const [tab, setTab] = useState<Tab>(initialTab); const [focusEvent, setFocusEvent] = useState<string | null>(focusEventId); const [focus, setFocus] = useState<OpsWorkspaceFocus | null>(focusField); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const router = useRouter();
   const canManage = accessState === "manage";
   function openWorkspace(nextTab: Tab, eventId?: string, nextFocus?: OpsWorkspaceFocus) {
@@ -53,6 +54,20 @@ export function OperationsClient({ initialTab = "events", focusEventId = null, f
     {!loadError && accessState === "read_only" ? <div role="status" className="rounded-xl border border-[var(--border)] bg-[var(--surface-subtle)] p-4 text-sm text-[var(--text-muted)]">You have read-only access. You can review operations, but an owner or member must make changes.</div> : null}
     {!loadError && accessState === "unavailable" ? <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">Your operations permissions could not be verified. Changes are disabled until you refresh.</div> : null}
     {error ? <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">{error}</div> : null}
+    <OperationsShowControl
+      eventsAvailable={eventsAvailable}
+      readinessAvailable={readinessAvailable}
+      setlistsAvailable={setlistsAvailable}
+      bookingsAvailable={bookingsAvailable}
+      events={initialEvents}
+      readiness={initialReadiness}
+      setlists={initialSetlists}
+      bookings={initialBookings}
+      invoices={initialInvoices}
+      settlements={initialSettlements}
+      canManage={canManage}
+      onOpenWorkspace={openWorkspace}
+    />
     <div className="flex gap-2 overflow-x-auto border-b border-[var(--border)] pb-3" role="tablist">{tabs.map(({ id, label, icon: Icon }) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "sb-btn-primary shrink-0" : "sb-btn-secondary shrink-0"} onClick={() => openWorkspace(id)}><Icon className="h-4 w-4" />{label}</button>)}</div>
     <fieldset className="m-0 min-w-0 border-0 p-0" disabled={!canManage} aria-disabled={!canManage}>
       {tab === "events" ? <Events events={initialEvents} readiness={initialReadiness} members={members} contacts={contacts} venues={venues} setlists={initialSetlists} focusEventId={focusEvent} focusField={focus} busy={busy} create={create} openWorkspace={openWorkspace} /> : tab === "music" ? <Music songs={initialSongs} setlists={initialSetlists} events={initialEvents} readiness={initialReadiness} busy={busy} create={create} openWorkspace={openWorkspace} /> : tab === "projects" ? <Projects projects={initialProjects} busy={busy} create={create} /> : <Deals deals={initialDeals} invoices={initialInvoices} expenses={initialExpenses} settlements={initialSettlements} templates={initialTemplates} events={initialEvents} readiness={initialReadiness} projects={initialProjects} members={members} isOwner={isOwner} busy={busy} create={create} />}

@@ -20,6 +20,10 @@ function futureChicagoShow(daysAhead = 45) {
   return { chatDate, eventStart: new Date(iso.value) };
 }
 
+function operationsEventCard(page: Page, eventTitle: string) {
+  return page.locator("article").filter({ has: page.locator("p.font-medium", { hasText: eventTitle }) });
+}
+
 async function signInForBrowserTest(page: Page) {
   await page.goto(browserTestWebUrl);
   const devLogin = page.getByRole("link", { name: "Dev login (local only)" });
@@ -670,12 +674,16 @@ test("manager-created gigs become practical day-of workspaces", async ({ page })
   await page.goto("/operations");
   const localTime = (date: Date) => dateTimeLocalInZone(date, "America/Chicago");
   const localEventStart = localTime(eventStart);
-  await expect(page.getByText(eventTitle, { exact: true })).toBeVisible();
-  await expect(page.getByText(/not show-ready yet/i)).toBeVisible();
-  await expect(page.getByText(/confidence/i).first()).toBeVisible();
-  await page.getByRole("button", { name: "Generate advance checklist" }).click();
+  const eventCard = operationsEventCard(page, eventTitle);
+  const eventCardTitle = eventCard.locator(":scope > div.flex.items-start p.font-medium");
+  const eventCardMeta = eventCard.locator("p.text-xs.capitalize");
+  await expect(page.getByTestId("ops-show-control")).toContainText(eventTitle);
+  await expect(eventCardTitle).toHaveText(eventTitle);
+  await expect(eventCard.getByText(/not show-ready yet/i)).toBeVisible();
+  await expect(eventCard.getByText(/confidence/i).first()).toBeVisible();
+  await eventCard.getByRole("button", { name: "Generate advance checklist" }).click();
   await expect(page.getByRole("button", { name: "Generate advance checklist" })).toHaveCount(0);
-  await page.getByText("Manage readiness details", { exact: true }).click();
+  await eventCard.getByText("Manage readiness details", { exact: true }).click();
   await page.getByLabel(`Availability for Alex at E2E rehearsal ${suffix}`).selectOption("available");
   await expect(page.getByLabel(`Availability for Alex at E2E rehearsal ${suffix}`)).toHaveValue("available");
   await expect(page.getByLabel(`Availability for Morgan at E2E rehearsal ${suffix}`)).toHaveValue("available");
@@ -688,11 +696,12 @@ test("manager-created gigs become practical day-of workspaces", async ({ page })
   await page.getByLabel(`Guarantee for E2E rehearsal ${suffix}`).fill("500");
   await page.getByLabel(`Deposit for E2E rehearsal ${suffix}`).fill("100");
   await page.getByLabel(`Production notes for E2E rehearsal ${suffix}`).fill("House PA, four vocal microphones, and shared backline.");
-  await page.getByRole("button", { name: "Save event details" }).click();
-  await expect(page.getByText(/E2E Working Room/)).toBeVisible();
-  await expect(page.getByText("Availability: 2/2 active members available", { exact: true })).toBeVisible();
-  await expect(page.getByText("20/20", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "Open day-of view" }).click();
+  await eventCard.getByRole("button", { name: "Save event details" }).click();
+  await expect(page.getByTestId("ops-show-control")).toContainText("E2E Working Room");
+  await expect(eventCardMeta).toContainText("E2E Working Room");
+  await expect(eventCard.getByText("Availability: 2/2 active members available", { exact: true })).toBeVisible();
+  await expect(eventCard.getByText("20/20", { exact: true })).toBeVisible();
+  await eventCard.getByRole("link", { name: "Open day-of view" }).click();
   await expect(page.getByRole("heading", { name: "Run of show" })).toBeVisible();
   await expect(page.getByText(/Next checkpoint: Load-in/i)).toBeVisible();
   await page.getByRole("button", { name: "Add checkpoint" }).click();
@@ -832,7 +841,7 @@ test("show finance records produce grounded outcome answers", async ({ page }) =
   await expect(page.getByText("finalized", { exact: true }).last()).toBeVisible();
 
   await page.getByRole("tab", { name: "Events" }).click();
-  const completedShow = page.locator("article").filter({ hasText: eventTitle });
+  const completedShow = operationsEventCard(page, eventTitle);
   await completedShow.getByText("Manage readiness details", { exact: true }).click();
   const completedSetAt = new Date(Date.now() - 2 * 3600000);
   await page.getByLabel(`Event start for ${eventTitle}`).fill(localTime(completedSetAt));
@@ -933,12 +942,18 @@ test("confirmed event logistics move through approvals before provider execution
 
   await ensureManagerFoundation(page);
   await page.goto("/operations");
+  await expect(page.getByTestId("ops-show-control")).toBeVisible();
+  await expect(page.getByTestId("ops-show-control")).toContainText(/Travis books/i);
+  await expect(page.getByTestId("ops-show-control")).toContainText(/will not pitch/i);
   await page.getByLabel("Title", { exact: true }).fill(eventTitle);
   await page.getByLabel("Starts", { exact: true }).fill(localTime(eventStart));
   await page.getByRole("button", { name: "Add event" }).click();
 
-  let eventCard = page.locator("article").filter({ hasText: eventTitle });
+  let eventCard = operationsEventCard(page, eventTitle);
   await expect(eventCard).toBeVisible();
+  await expect(eventCard.locator(":scope > div.flex.items-start p.font-medium")).toHaveText(eventTitle);
+  await expect(page.getByTestId("ops-show-control")).toContainText(eventTitle);
+  await expect(page.getByTestId("ops-show-control-next")).toBeVisible();
   await eventCard.getByText("Manage readiness details", { exact: true }).click();
   await eventCard.getByLabel(`Status for ${eventTitle}`).selectOption("confirmed");
   await eventCard.getByLabel(`Event end for ${eventTitle}`).fill(localTime(eventEnd));
@@ -948,7 +963,7 @@ test("confirmed event logistics move through approvals before provider execution
   await eventCard.getByRole("button", { name: "Save event details" }).click();
   await eventSaved;
 
-  eventCard = page.locator("article").filter({ hasText: eventTitle });
+  eventCard = operationsEventCard(page, eventTitle);
   if ((await eventCard.locator("details").getAttribute("open")) === null) await eventCard.getByText("Manage readiness details", { exact: true }).click();
   const logistics = eventCard.locator('[data-testid^="event-logistics-"]');
   await expect(logistics.getByText("No external Calendar event is linked yet.", { exact: true })).toBeVisible();
@@ -998,7 +1013,7 @@ test("confirmed event logistics move through approvals before provider execution
   await expect(readyCard(driveTitle)).toHaveCount(0);
 
   await page.goto("/operations");
-  eventCard = page.locator("article").filter({ hasText: eventTitle });
+  eventCard = operationsEventCard(page, eventTitle);
   await eventCard.getByText("Manage readiness details", { exact: true }).click();
   const completedLogistics = eventCard.locator('[data-testid^="event-logistics-"]');
   await expect(completedLogistics.getByText("simulated", { exact: true })).toHaveCount(2);
@@ -1130,7 +1145,7 @@ test("stale event logistics execution is quarantined, reconciled append-only, an
   ).toBe(true);
 
   await page.goto("/operations");
-  const eventCard = page.locator("article").filter({ hasText: eventTitle });
+  const eventCard = operationsEventCard(page, eventTitle);
   await expect(eventCard).toBeVisible();
   await eventCard.getByText("Manage readiness details", { exact: true }).click();
   const logistics = eventCard.locator(`[data-testid="event-logistics-${event.id}"]`);
