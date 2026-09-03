@@ -117,10 +117,12 @@ The NestJS orchestration backend. Current responsibilities:
 - **Band operations:** tenant-safe events, editable custom run-of-show
   checkpoints, availability, readiness/day-of projections, practical
   song/setlist editing with shared `setlist_summary_v1` timing truth,
+  `ops_next_action_v1` next-step links on existing workspaces,
   source-keyed Calendar/Drive approval planning in `event-logistics.ts`,
   projects, deal documents, invoices, expenses, and settlements in
   `src/operations/` (invoice balances stay payment-derived; voided invoices and
-  finalized settlement expenses fail closed)
+  finalized settlement expenses fail closed). Booking apply-terms uses
+  `booking_terms_apply_v1` so null analysis cannot wipe recorded fees.
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
 - Global **`CsrfOriginGuard`** (OAuth + Telegram webhook paths excluded for POST)
 
@@ -137,7 +139,7 @@ Approval reconciliation write.
 
 ### `packages/shared`
 
-Cross-app domain contracts, validation schemas, and shared types (including **workflow notify prefs**, **Telegram notify** Zod schemas, and **`catalog-import.ts`** for Vault/Show Night song-library planning). **`pnpm test`** runs `build` + `node:test` on `test/*.mjs`.
+Cross-app domain contracts, validation schemas, and shared types (including **workflow notify prefs**, **Telegram notify** Zod schemas, **`catalog-import.ts`** for Vault/Show Night song-library planning, **`ops-next-action.ts`** (`ops_next_action_v1`), and **`operator-api-error.ts`**). **`pnpm test`** runs `build` + `node:test` on `test/*.mjs`.
 
 ### `packages/ui`
 

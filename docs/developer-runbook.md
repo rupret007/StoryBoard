@@ -991,6 +991,15 @@ payloads must be local JSON; remote catalog URLs are rejected. Details:
 `SEED_DEMO_OPS=true` can add generic demo songs/invoice rows for local UI
 practice; prefer Vault import. It does not load a live catalog.
 
+`ops_next_action_v1` is the shared next-step projection for existing Band
+operations, booking pipeline, and Booking inbox surfaces. Event cards repeat
+`ShowReadiness.nextAction` and deep-link setlist attach, duration gaps, and
+unpaid deposits to the matching tab. Invoice rows refuse payment on voided
+invoices, keep a stable payment idempotency key for a retry, and require an
+optional show link so deposit readiness can see the invoice. Settlement create
+is labeled as a draft write. Booking cards name Travis's next recorded step
+and warn that confirming creates a gig; they never auto-pitch.
+
 Open **Music & setlists** in Band operations to correct duration/key and build
 running orders after Vault import. Song duration uses `m:ss` in the UI and remains
 nullable. A setlist may contain up to 100 ordered songs, breaks, and notes;
@@ -1124,6 +1133,9 @@ reconnect Google with `gmail.readonly` and opt the artist into tracked replies:
 - `POST /booking-replies/sync` — bounded manual check of StoryBoard-created threads.
 - `POST /booking-replies/:id/analyze` — transient, explicitly enabled AI analysis.
 - `POST /booking-replies/:id/apply-terms` — explicitly apply reviewed facts to the linked opportunity.
+  Null analysis fields do not erase a previously recorded fee, currency,
+  date, or condition (`booking_terms_apply_v1`). Closed opportunities still
+  fail closed; replay stays idempotent.
 - `POST /booking-replies/:id/prepare-confirmation` — validate reviewed terms and prepare an
   approval that marks the linked opportunity as confirmed and upserts a gig event
   (reviewed, idempotent). Closed opportunities are rejected, idempotent

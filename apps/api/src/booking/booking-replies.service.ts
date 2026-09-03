@@ -15,6 +15,7 @@ import { AuditService } from "../audit/audit.service";
 import { AdapterRegistryResolver } from "../integrations/adapter-registry.resolver";
 import { GMAIL_READONLY_SCOPE } from "../integrations/google-oauth.constants";
 import { PrismaService } from "../prisma/prisma.service";
+import { mergeAppliedBookingTerms } from "./booking-terms-apply";
 
 const ANALYSIS_PROMPT_VERSION = "booking-reply-v1";
 const ACTIVE_SINCE_MS = 180 * 86400000;
@@ -136,13 +137,27 @@ export class BookingRepliesService {
           const opportunity = await tx.bookingOpportunity.findFirst({ where: { id: fresh.opportunityId, artistId } });
           if (!opportunity) throw new NotFoundException("Booking opportunity not found");
           if (opportunity.stage === BookingStage.closed) throw new BadRequestException("Cannot apply terms to a closed opportunity");
+          const terms = mergeAppliedBookingTerms(
+            {
+              targetDate: opportunity.targetDate,
+              proposedFeeMinor: opportunity.proposedFeeMinor,
+              proposedCurrency: opportunity.proposedCurrency,
+              negotiationConditions: opportunity.negotiationConditions
+            },
+            {
+              proposedDate: fresh.proposedDate,
+              proposedFeeMinor: fresh.proposedFeeMinor,
+              proposedCurrency: fresh.proposedCurrency,
+              materialConditions: fresh.materialConditions
+            }
+          );
           const changedOpportunity = await tx.bookingOpportunity.updateMany({
             where: { id: opportunity.id, artistId, stage: { not: BookingStage.closed } },
             data: {
-              targetDate: fresh.proposedDate ?? opportunity.targetDate,
-              proposedFeeMinor: fresh.proposedFeeMinor,
-              proposedCurrency: fresh.proposedCurrency,
-              negotiationConditions: fresh.materialConditions
+              targetDate: terms.targetDate,
+              proposedFeeMinor: terms.proposedFeeMinor,
+              proposedCurrency: terms.proposedCurrency,
+              negotiationConditions: terms.negotiationConditions
             }
           });
           if (changedOpportunity.count !== 1) throw new ConflictException("Opportunity changed while terms were being applied");

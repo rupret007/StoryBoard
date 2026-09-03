@@ -300,6 +300,43 @@ test("apply terms refuses closed opportunities and is idempotent after the first
   assert.equal(open.state.opportunities[0].proposedFeeMinor, 100000);
 });
 
+test("apply terms keeps recorded fee and conditions when analysis fields are null", async () => {
+  const fixture = serviceFixture({
+    existingOpportunity: {
+      id: "opp-a",
+      artistId: "artist-a",
+      stage: "offer",
+      targetDate: "2026-10-01T00:00:00.000Z",
+      proposedFeeMinor: 75000,
+      proposedCurrency: "USD",
+      negotiationConditions: "Deposit due 14 days out"
+    }
+  });
+  fixture.state.replies.push({
+    id: "reply-a",
+    artistId: "artist-a",
+    recipientId: "recipient-a",
+    opportunityId: "opp-a",
+    analyzedAt: new Date().toISOString(),
+    termsAppliedAt: null,
+    proposedFeeMinor: null,
+    proposedCurrency: null,
+    proposedDate: null,
+    materialConditions: null,
+    recipient: {
+      prospect: { id: "prospect-a", name: "A Buyer" },
+      campaign: { id: "campaign-a", name: "Show campaign" },
+      contact: { id: "contact-a", fullName: "A Buyer", email: "buyer@example.test" }
+    }
+  });
+  const applied = await fixture.service.applyTerms("artist-a", "reply-a", "owner@test.invalid", "operator-a");
+  assert.ok(applied.termsAppliedAt);
+  assert.equal(fixture.state.opportunities[0].proposedFeeMinor, 75000);
+  assert.equal(fixture.state.opportunities[0].proposedCurrency, "USD");
+  assert.equal(fixture.state.opportunities[0].negotiationConditions, "Deposit due 14 days out");
+  assert.equal(fixture.state.opportunities[0].targetDate, "2026-10-01T00:00:00.000Z");
+});
+
 test("prepare confirmation requires reply linked to an opportunity", async () => {
   const fixture = serviceFixture({ existingOpportunity: null });
   fixture.service.approvals = {
