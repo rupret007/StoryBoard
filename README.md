@@ -564,8 +564,12 @@ live. Once a recorded show window has passed, show control prioritizes that
 unfinished show ahead of future readiness work and routes straight to the
 existing after-show wrap-up before any stale pre-show readiness gap, so the
 band can record attendance, revenue, lessons, and the buyer or venue outcome
-without hunting. StoryBoard will not substitute a set, auto-pitch, invent a
-schedule or result, or close a gig automatically.
+without hunting. After-show facts use a dedicated version-bound write; a
+stale editor cannot wipe a newer wrap-up, and saving event details cannot
+overwrite those facts. Once facts exist, show control hands off to a draft
+settlement without inventing net or closing the gig. StoryBoard will not
+substitute a set, auto-pitch, invent a schedule or result, or close a gig
+automatically.
 Travis still books; StoryBoard does not auto-pitch. Invoice create can link a
 show. Apply-terms will not erase a recorded fee when analysis left that field
 null.

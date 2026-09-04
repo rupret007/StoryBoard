@@ -121,6 +121,28 @@ test("upcoming gigs keep after-show facts closed until the recorded start", () =
   });
   assert.equal(upcoming.phase, "upcoming");
   assert.equal(upcoming.wrapUp.available, false);
+  assert.equal(upcoming.wrapUp.recorded, false);
+  assert.equal(upcoming.wrapUp.nextAction, null);
   assert.match(upcoming.wrapUp.reason, /until this recorded gig has started/i);
   assert.equal(upcoming.set.nextItemId, "item-1");
+});
+
+test("recorded wrap-up names the settlement handoff without closing the gig", () => {
+  const run = shared.projectOpsLiveRun({
+    event: gig({
+      startsAt: "2026-09-03T16:00:00.000Z",
+      endsAt: "2026-09-03T17:00:00.000Z",
+      attendance: 142,
+      grossRevenueMinor: 35000,
+      postShowNotes: "Late house",
+      relationshipOutcome: "Asked back"
+    }),
+    setlist: setlist(),
+    now
+  });
+  assert.equal(run.phase, "overdue");
+  assert.equal(run.wrapUp.available, true);
+  assert.equal(run.wrapUp.recorded, true);
+  assert.equal(run.wrapUp.nextAction?.code, "after_show_settlement");
+  assert.match(run.wrapUp.nextAction?.nextAction ?? "", /will not invent net or close the gig/i);
 });

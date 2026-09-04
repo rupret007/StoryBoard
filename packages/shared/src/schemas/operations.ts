@@ -16,9 +16,21 @@ const eventTimezone = z.string().trim().min(1).max(80).refine(isIanaTimezone, "U
 export const eventTypes = ["gig","rehearsal","studio","release","promotion","travel","meeting"] as const;
 export const eventCreateSchema = z.object({ type: z.enum(eventTypes), status: z.enum(["draft","hold","confirmed","completed","cancelled"]).default("draft"), title: z.string().trim().min(1).max(240), opportunityId: nullableId, venueId: nullableId, contactId: nullableId, projectId: nullableId, setlistId: nullableId, startsAt: nullableDate, endsAt: nullableDate, timezone: eventTimezone, locationName: z.string().trim().max(240).nullable().optional(), address: z.string().trim().max(500).nullable().optional(), loadInAt: nullableDate, soundcheckAt: nullableDate, doorsAt: nullableDate, setAt: nullableDate, curfewAt: nullableDate, travelNotes: z.string().trim().max(3000).nullable().optional(), hospitalityNotes: z.string().trim().max(3000).nullable().optional(), productionNotes: z.string().trim().max(3000).nullable().optional(), cancellationTerms: z.string().trim().max(3000).nullable().optional(), guaranteeMinor: money, depositMinor: money, depositDueAt: nullableDate, balanceDueAt: nullableDate, currency: z.string().trim().length(3).default("USD"), stagePlotUrl: nullableSafeHttpUrl, inputListUrl: nullableSafeHttpUrl, techRiderUrl: nullableSafeHttpUrl, hospitalityRiderUrl: nullableSafeHttpUrl, parkingNotes: z.string().trim().max(2000).nullable().optional(), guestListNotes: z.string().trim().max(2000).nullable().optional(), attendance: z.number().int().nonnegative().nullable().optional(), grossRevenueMinor: money, postShowNotes: z.string().trim().max(5000).nullable().optional(), relationshipOutcome: z.string().trim().max(1000).nullable().optional() }).strict();
 export const eventLiveSetPositionSchema = z.object({ setlistItemId: z.string().trim().min(1).max(128).nullable() }).strict();
-export const eventPatchSchema = eventCreateSchema.partial().extend({
+export const eventPatchSchema = eventCreateSchema.omit({
+  attendance: true,
+  grossRevenueMinor: true,
+  postShowNotes: true,
+  relationshipOutcome: true
+}).partial().extend({
   status: z.enum(["draft","hold","confirmed","completed","cancelled"]).optional(),
   currency: z.string().trim().length(3).optional()
+}).strict();
+export const eventAfterShowPatchSchema = z.object({
+  expectedUpdatedAt: z.string().datetime({ offset: true }),
+  attendance: z.number().int().nonnegative().nullable(),
+  grossRevenueMinor: z.number().int().nonnegative().nullable(),
+  postShowNotes: z.string().trim().max(5000).nullable(),
+  relationshipOutcome: z.string().trim().max(1000).nullable()
 }).strict();
 export const eventParticipantSchema = z.object({ bandMemberId: z.string().trim().min(1), response: z.enum(["unknown","available","tentative","unavailable"]).default("unknown"), assignment: z.string().trim().max(300).nullable().optional(), notes: z.string().trim().max(1000).nullable().optional() }).strict();
 const eventScheduleFields = {

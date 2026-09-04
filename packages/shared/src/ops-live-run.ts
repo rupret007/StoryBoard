@@ -1,3 +1,5 @@
+import { afterShowFactsRecorded, afterShowNextAction } from "./ops-after-show";
+import { type OpsNextAction } from "./ops-next-action";
 import { formatSetlistDuration, summarizeSetlist, type SetlistSummary, type SetlistSummaryItem } from "./setlist-summary";
 import { selectLiveOrNextOpsGig, type OpsShowPhase } from "./ops-show-control";
 
@@ -81,7 +83,9 @@ export type OpsLiveRun = {
   };
   wrapUp: {
     available: boolean;
+    recorded: boolean;
     reason: string;
+    nextAction: OpsNextAction | null;
   };
 };
 
@@ -215,11 +219,13 @@ export function projectOpsLiveRun(input: {
     },
     wrapUp: {
       available: wrapAvailable,
+      recorded: afterShowFactsRecorded(input.event),
       reason: wrapAvailable
         ? "Record attendance, money, and lessons from this show. StoryBoard will not invent a result or close the gig for you."
         : phase === "upcoming"
           ? "After-show facts stay closed until this recorded gig has started."
-          : "After-show facts apply to a recorded gig that has started or been closed."
+          : "After-show facts apply to a recorded gig that has started or been closed.",
+      nextAction: wrapAvailable ? afterShowNextAction({ event: input.event, now }) : null
     }
   };
 }

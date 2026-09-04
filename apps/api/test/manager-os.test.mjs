@@ -4375,6 +4375,102 @@ test("live set position stays on the assigned set, is tenant-bound, and does not
   assert.deepEqual(audits.map((entry) => entry.action), ["event.live_set_positioned"]);
 });
 
+test("after-show writes are version-bound, refuse upcoming gigs, and do not close the show", async () => {
+  let updates = 0;
+  const audits = [];
+  const isolationLevels = [];
+  const now = new Date("2026-09-03T18:00:00.000Z");
+  let event = {
+    id: "event-a",
+    artistId: "artist-a",
+    type: "gig",
+    status: "confirmed",
+    title: "Tonight",
+    startsAt: new Date("2026-09-03T17:00:00.000Z"),
+    endsAt: new Date("2026-09-03T20:00:00.000Z"),
+    timezone: "America/Chicago",
+    locationName: "Bluebird",
+    updatedAt: new Date("2026-09-03T17:30:00.000Z"),
+    attendance: null,
+    grossRevenueMinor: null,
+    postShowNotes: null,
+    relationshipOutcome: null,
+    setlistId: "set-a",
+    liveSetlistItemId: null,
+    setlist: { id: "set-a", name: "Friday set", sourceKey: null, items: [] },
+    participants: [],
+    tasks: [],
+    schedule: [],
+    deals: [],
+    invoices: [],
+    expenses: [],
+    approvals: [],
+    settlement: null
+  };
+  const facts = {
+    expectedUpdatedAt: "2026-09-03T17:30:00.000Z",
+    attendance: 142,
+    grossRevenueMinor: 35000,
+    postShowNotes: "Late house",
+    relationshipOutcome: "Asked back"
+  };
+  const client = {
+    $transaction: async (work, options) => {
+      isolationLevels.push(options?.isolationLevel);
+      return work({
+        bandEvent: {
+          findFirst: async ({ where }) => where.id === "event-a" && where.artistId === "artist-a" ? event : null,
+          updateMany: async ({ where, data }) => {
+            if (where.updatedAt.getTime() !== event.updatedAt.getTime()) return { count: 0 };
+            updates += 1;
+            event = { ...event, ...data };
+            return { count: 1 };
+          }
+        },
+        auditEvent: { create: async () => ({ id: "audit-a" }) }
+      });
+    },
+    bandEvent: {
+      findFirst: async ({ where }) => where.id === "event-a" && where.artistId === "artist-a" ? event : null
+    },
+    bandMember: { findMany: async () => [] }
+  };
+  const service = new operationsMod.OperationsService({ client }, { log: async (entry) => audits.push(entry) }, {});
+  const saved = await service.recordAfterShow("artist-a", "event-a", facts, "owner@test", "operator-a", now);
+  assert.equal(saved.event.attendance, 142);
+  assert.equal(saved.liveRun.wrapUp.recorded, true);
+  assert.equal(saved.liveRun.wrapUp.nextAction?.code, "after_show_settlement");
+  assert.equal(saved.event.status, "confirmed");
+  assert.equal(updates, 1);
+  assert.deepEqual(isolationLevels, ["Serializable"]);
+  const replay = await service.recordAfterShow("artist-a", "event-a", { ...facts, expectedUpdatedAt: event.updatedAt.toISOString() }, "owner@test", "operator-a", now);
+  assert.equal(replay.event.attendance, 142);
+  assert.equal(updates, 1);
+  await assert.rejects(
+    () => service.recordAfterShow("artist-a", "event-a", { ...facts, expectedUpdatedAt: "2026-09-03T17:29:59.000Z" }, "owner@test", "operator-a", now),
+    (error) => error?.getStatus?.() === 409 && /changed since you opened them/i.test(error.message)
+  );
+  assert.equal(updates, 1);
+  await assert.rejects(
+    () => service.recordAfterShow("artist-b", "event-a", facts, "owner@test", "operator-b", now),
+    (error) => error?.getStatus?.() === 404
+  );
+  event.startsAt = new Date("2026-09-10T01:00:00.000Z");
+  event.endsAt = new Date("2026-09-10T04:00:00.000Z");
+  await assert.rejects(
+    () => service.recordAfterShow("artist-a", "event-a", { ...facts, expectedUpdatedAt: event.updatedAt.toISOString() }, "owner@test", "operator-a", now),
+    /until this recorded gig has started/i
+  );
+  assert.equal(updates, 1);
+  await assert.rejects(
+    () => service.patchEvent("artist-a", "event-a", { attendance: 99 }, "owner@test", "operator-a"),
+    /dedicated after-show write/i
+  );
+  assert.deepEqual(audits.map((entry) => entry.action), ["event.after_show_recorded"]);
+  assert.equal(audits[0].metadata.policyVersion, "ops_after_show_v1");
+  assert.equal(audits[0].metadata.status, "confirmed");
+});
+
 test("payment recording is idempotent and never double-applies the balance", async () => {
   let transactions = 0;
   const isolationLevels = [];

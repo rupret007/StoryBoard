@@ -937,6 +937,15 @@ Operations routes:
   live-set cursor on the assigned set only. Null clears it. A missing set
   fails closed (`will not substitute a set`). A foreign item is 404. Same
   cursor is a no-op. Returns the full day-of payload.
+- `POST /events/:id/after-show` — owner/member `ops_after_show_v1` write of
+  attendance, gross revenue, lessons, and relationship outcome. Requires the
+  read receipt in `expectedUpdatedAt`. The service compares that value inside
+  a serializable transaction, writes only those four facts, and records
+  `event.after_show_recorded` in the same transaction. A stale receipt
+  returns `409` without changing facts, status, or audit. Upcoming, undated,
+  and non-gig events fail closed. Same-facts replay is a no-op. The write
+  never marks the gig completed and never creates a settlement. Returns the
+  full day-of payload. `PATCH /events/:id` cannot include wrap-up fields.
 - `POST /events/:id/schedule`, `PATCH /events/:id/schedule/:itemId`, and
   `DELETE /events/:id/schedule/:itemId` — strict, tenant-scoped custom
   run-of-show checkpoints; owner/member writes only. Day-of checkpoint
@@ -1018,10 +1027,13 @@ booking posture. The single next action is navigate-only; viewers and members
 use the same deep-link. A booking-read failure does not lock event or setlist
 edits. After the recorded show window, the same control opens the existing
 day-of after-show wrap-up before stale pre-show or future-show readiness gaps;
-it still does not invent results or close the gig. Day-of then runs
+it still does not invent results or close the gig. Once wrap-up facts exist,
+the same control hands off to a draft settlement on Deals (`focus=money`)
+without creating or finalizing money. Day-of then runs
 `ops_live_run_v1`: the assigned set is advanced only
 from an explicit recorded cursor, after-show facts stay closed until the
-recorded start, and wrap-up never auto-completes the gig. Invoice rows refuse payment on voided
+recorded start, wrap-up uses the dedicated version-bound write, and wrap-up
+never auto-completes the gig. Invoice rows refuse payment on voided
 invoices, keep a stable payment idempotency key for a retry, and require an
 optional show link so deposit readiness can see the invoice. Settlement create
 is labeled as a draft write. Booking cards name Travis's next recorded step
@@ -1044,9 +1056,11 @@ overwritten.
 In Band operations, expand **Manage readiness details** on an event to record
 each active member's availability, attach an artist-owned venue/contact/setlist,
 and edit the location, show-day schedule, guarantee/deposit, production notes,
-and technical URLs. For gigs, **After the show** also records attendance,
-gross revenue, lessons, and the buyer/venue relationship outcome. Blank values
-remain unknown. Relationship IDs are revalidated by the API. Schedule
+and technical URLs. For gigs, **After the show** is a separate save:
+attendance, gross revenue, lessons, and the buyer/venue relationship outcome
+go through `POST /events/:id/after-show` with the last-seen event `updatedAt`.
+Saving event details cannot overwrite those facts. Blank values remain
+unknown. Relationship IDs are revalidated by the API. Schedule
 patches are validated against both the submitted fields and the event's saved
 timestamps; load-in, soundcheck, doors, set, and curfew cannot be reordered by
 a partial update. Every successful event or availability write is audited.

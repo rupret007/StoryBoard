@@ -1914,6 +1914,53 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   assert.equal((await client.bandEvent.findUniqueOrThrow({ where: { id: event.id } })).liveSetlistItemId, firstSetItem.id);
   const cleared = await operations.setLiveSetPosition(artist.id, event.id, { setlistItemId: null }, operator.email, operator.id);
   assert.equal(cleared.liveRun.set.currentItemId, null);
+  const wrapNow = new Date("2026-09-18T21:00:00.000Z");
+  const wrapEvent = await operations.event(artist.id, event.id);
+  await assert.rejects(
+    () => operations.recordAfterShow(artist.id, event.id, {
+      expectedUpdatedAt: wrapEvent.updatedAt.toISOString(),
+      attendance: 140,
+      grossRevenueMinor: 100000,
+      postShowNotes: "Too early",
+      relationshipOutcome: null
+    }, operator.email, operator.id, new Date("2026-09-18T16:00:00.000Z")),
+    /until this recorded gig has started/i
+  );
+  await assert.rejects(
+    () => operations.patchEvent(artist.id, event.id, { attendance: 140 }, operator.email, operator.id),
+    /dedicated after-show write/i
+  );
+  const wrapped = await operations.recordAfterShow(artist.id, event.id, {
+    expectedUpdatedAt: wrapEvent.updatedAt.toISOString(),
+    attendance: 140,
+    grossRevenueMinor: 100000,
+    postShowNotes: "Strong room response; tighten changeover next time",
+    relationshipOutcome: "Buyer invited a return pitch"
+  }, operator.email, operator.id, wrapNow);
+  assert.equal(wrapped.event.attendance, 140);
+  assert.equal(wrapped.event.grossRevenueMinor, 100000);
+  assert.equal(wrapped.event.status, "confirmed");
+  assert.equal(wrapped.liveRun.wrapUp.recorded, true);
+  assert.equal(wrapped.liveRun.wrapUp.nextAction?.code, "after_show_settlement");
+  await assert.rejects(
+    () => operations.recordAfterShow(artist.id, event.id, {
+      expectedUpdatedAt: wrapEvent.updatedAt.toISOString(),
+      attendance: 1,
+      grossRevenueMinor: 1,
+      postShowNotes: "Stale overwrite",
+      relationshipOutcome: null
+    }, operator.email, operator.id, wrapNow),
+    (error) => error?.getStatus?.() === 409
+  );
+  assert.equal((await operations.event(artist.id, event.id)).attendance, 140);
+  assert.equal((await operations.event(artist.id, event.id)).postShowNotes, "Strong room response; tighten changeover next time");
+  await assert.rejects(() => operations.recordAfterShow(foreignArtist.id, event.id, {
+    expectedUpdatedAt: wrapEvent.updatedAt.toISOString(),
+    attendance: 9,
+    grossRevenueMinor: null,
+    postShowNotes: null,
+    relationshipOutcome: null
+  }, operator.email, operator.id, wrapNow), (error) => error?.getStatus?.() === 404);
   await assert.rejects(() => operations.eventDayOf(foreignArtist.id, event.id), (error) => error?.getStatus?.() === 404);
   assert.deepEqual(await operations.removeEventScheduleItem(artist.id, event.id, mealCheckpoint.id, operator.email, operator.id), { id: mealCheckpoint.id, deleted: true });
   assert.equal((await operations.eventDayOf(artist.id, event.id, new Date("2026-09-18T16:00:00.000Z"))).dayOf.nextCheckpoint.label, "Load-in");
@@ -2034,7 +2081,7 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
     () => operations.createExpense(artist.id, { eventId: event.id, category: "travel", description: "Post-settle fuel", amountMinor: 2500, currency: "USD", incurredAt: "2026-09-19T12:00:00.000Z" }, operator.email, operator.id),
     /finalized settlement are immutable/i
   );
-  await operations.patchEvent(artist.id, event.id, { status: "completed", attendance: 140, grossRevenueMinor: 100000, postShowNotes: "Strong room response; tighten changeover next time", relationshipOutcome: "Buyer invited a return pitch" }, operator.email, operator.id);
+  await operations.patchEvent(artist.id, event.id, { status: "completed" }, operator.email, operator.id);
   const outcomeReview = await manager.outcomeReview(artist.id, 90, new Date("2026-10-01T12:00:00.000Z"));
   assert.equal(outcomeReview.activity.completedShows, 1);
   assert.equal(outcomeReview.live.attendanceTotal, 140);

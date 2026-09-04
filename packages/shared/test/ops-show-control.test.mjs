@@ -283,6 +283,70 @@ test("overdue open gigs outrank upcoming readiness and route to after-show wrap-
   assert.equal(overdue.nextAction?.kind, "navigate");
   assert.equal(overdue.nextAction?.tab, undefined);
   assert.equal(overdue.nextAction?.focus, undefined);
+  assert.equal(overdue.show.wrapUpRecorded, false);
+});
+
+test("recorded overdue wrap-up hands off to draft settlement before future readiness", () => {
+  const recorded = project({
+    events: [
+      gig({
+        id: "next-a",
+        title: "Next Friday",
+        startsAt: "2026-09-10T01:00:00.000Z",
+        endsAt: "2026-09-10T04:00:00.000Z"
+      }),
+      gig({
+        id: "late-a",
+        title: "Last Friday",
+        startsAt: "2026-08-28T01:00:00.000Z",
+        endsAt: "2026-08-28T04:00:00.000Z",
+        attendance: 142,
+        grossRevenueMinor: 35000,
+        postShowNotes: "Late house",
+        relationshipOutcome: "Asked back"
+      })
+    ],
+    readiness: [{
+      eventId: "late-a",
+      status: "not_ready",
+      score: 40,
+      confidenceLabel: "medium",
+      headline: "Set was never attached",
+      gaps: [{ code: "setlist_missing", nextAction: "Attach a practical setlist." }]
+    }]
+  });
+
+  assert.equal(recorded.show.phase, "overdue");
+  assert.equal(recorded.show.eventId, "late-a");
+  assert.equal(recorded.show.wrapUpRecorded, true);
+  assert.equal(recorded.nextAction?.code, "after_show_settlement");
+  assert.equal(recorded.nextAction?.kind, "navigate");
+  assert.equal(recorded.nextAction?.tab, "deals");
+  assert.equal(recorded.nextAction?.focus, "money");
+  assert.equal(recorded.nextAction?.label, "Open draft settlement");
+  assert.equal(recorded.nextAction?.href, "/operations?tab=deals&event=late-a&focus=money");
+  assert.match(recorded.nextAction?.nextAction ?? "", /will not invent net or close the gig/i);
+});
+
+test("recorded overdue wrap-up uses the workspace settlement when the event row omits it", () => {
+  const draft = project({
+    events: [
+      gig({
+        id: "late-a",
+        title: "Last Friday",
+        startsAt: "2026-08-28T01:00:00.000Z",
+        endsAt: "2026-08-28T04:00:00.000Z",
+        attendance: 142
+      })
+    ],
+    settlements: [{ id: "set-a", status: "draft", event: { id: "late-a", title: "Last Friday" } }]
+  });
+
+  assert.equal(draft.show.wrapUpRecorded, true);
+  assert.equal(draft.nextAction?.code, "finalize_settlement");
+  assert.equal(draft.nextAction?.label, "Open draft settlement");
+  assert.equal(draft.nextAction?.href, "/operations?tab=deals&event=late-a&focus=money");
+  assert.match(draft.nextAction?.nextAction ?? "", /will not close the gig automatically/i);
 });
 
 test("settlement leftover is offered only after show readiness, still as a draft path", () => {

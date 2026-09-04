@@ -168,9 +168,11 @@ export function OperationsShowControl({
               <p className="mt-1 text-sm text-[var(--text-muted)]">{control.show.location ?? "Location not recorded"}</p>
               {control.show.phase === "overdue" ? (
                 <div data-testid="ops-show-control-wrap-up" className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-                  <p className="text-sm font-semibold text-amber-100">After-show wrap-up is ready</p>
+                  <p className="text-sm font-semibold text-amber-100">{control.show.wrapUpRecorded ? "After-show facts are recorded" : "After-show wrap-up is ready"}</p>
                   <p className="mt-1 text-xs leading-relaxed text-amber-100/80">
-                    Record attendance, gross revenue, lessons, and the buyer or venue relationship outcome. Pre-show gaps stay visible in the record, but they no longer hide this follow-through.
+                    {control.show.wrapUpRecorded
+                      ? "Attendance, money, lessons, or the relationship outcome is already saved. Next is a draft settlement when you are ready. StoryBoard will not invent net or close the gig."
+                      : "Record attendance, gross revenue, lessons, and the buyer or venue relationship outcome. Pre-show gaps stay visible in the record, but they no longer hide this follow-through."}
                   </p>
                 </div>
               ) : control.show.readinessAvailability === "ok" ? (
