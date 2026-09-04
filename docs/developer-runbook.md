@@ -1024,8 +1024,11 @@ Band operations tab strip: it selects the live, overdue, or next recorded gig
 (without inventing live from a missing end), names the exact assigned set or
 an honest unassigned/unavailable/missing state, and shows Travis's open
 booking posture. The single next action is navigate-only; viewers and members
-use the same deep-link. A booking-read failure does not lock event or setlist
-edits. After the recorded show window, the same control opens the existing
+use the same deep-link. It is rendered before the compact recorded-posture
+cards, with a code-owned source label such as Live show, Set readiness, Show
+money, or Booking pipeline. Those show/set/booking cards are evidence for the
+priority and expose no additional controls. A booking-read failure does not
+lock event or setlist edits. After the recorded show window, the same control opens the existing
 day-of after-show wrap-up before stale pre-show or future-show readiness gaps;
 it still does not invent results or close the gig. Once wrap-up facts exist,
 the same control hands off to a draft settlement on Deals (`focus=money`)

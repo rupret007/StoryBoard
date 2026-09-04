@@ -962,9 +962,19 @@ test("confirmed event logistics move through approvals before provider execution
 
   await ensureManagerFoundation(page);
   await page.goto("/operations");
-  await expect(page.getByTestId("ops-show-control")).toBeVisible();
-  await expect(page.getByTestId("ops-show-control")).toContainText(/Travis books/i);
-  await expect(page.getByTestId("ops-show-control")).toContainText(/will not pitch/i);
+  const showControl = page.getByTestId("ops-show-control");
+  const primaryAction = showControl.getByTestId("ops-show-control-action");
+  const recordedPosture = showControl.getByTestId("ops-show-control-posture");
+  await expect(showControl).toBeVisible();
+  await expect(showControl).toContainText(/Travis books/i);
+  await expect(showControl).toContainText(/will not pitch/i);
+  await expect(primaryAction).toBeVisible();
+  await expect(primaryAction.getByTestId("ops-show-control-primary")).toHaveCount(1);
+  await expect(recordedPosture.locator("a, button")).toHaveCount(0);
+  expect(await primaryAction.evaluate((node) => {
+    const posture = node.parentElement?.querySelector('[data-testid="ops-show-control-posture"]');
+    return Boolean(posture && (node.compareDocumentPosition(posture) & Node.DOCUMENT_POSITION_FOLLOWING));
+  })).toBe(true);
   await page.getByLabel("Title", { exact: true }).fill(eventTitle);
   await page.getByLabel("Starts", { exact: true }).fill(localTime(eventStart));
   await page.getByRole("button", { name: "Add event" }).click();

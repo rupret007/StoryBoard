@@ -118,7 +118,8 @@ The NestJS orchestration backend. Current responsibilities:
   checkpoints, availability, readiness/day-of projections, practical
   song/setlist editing with shared `setlist_summary_v1` timing truth,
   `ops_next_action_v1` next-step links on existing workspaces,
-  `ops_show_control_v1` Band operations show-control posture,
+  `ops_show_control_v1` action-first Band operations show-control posture
+  (one primary navigate-only action followed by compact evidence cards),
   `ops_live_run_v1` day-of live-run projection and recorded set cursor,
   source-keyed Calendar/Drive approval planning in `event-logistics.ts`,
   projects, deal documents, invoices, expenses, and settlements in

@@ -48,8 +48,11 @@ Existing Events, Music, Deals, booking, and inbox cards use
 `ops_next_action_v1` to name one next recorded action and deep-link the
 matching workspace. Band operations also projects `ops_show_control_v1` above
 the tab strip so the live/next/overdue recorded gig, assigned set, and open
-booking work are visible before the editors. The control action is navigate
-only; it never writes, pitches, or invents a show. Day-of then projects
+booking work are visible before the editors. Its presentation is action-first:
+one primary navigate-only destination precedes compact show/set/booking
+evidence, and the evidence cards contain no competing controls. The action's
+source label is derived from its existing code-owned action code; it does not
+grant a new capability. The control never writes, pitches, or invents a show. Day-of then projects
 `ops_live_run_v1` from the same live/next/overdue selection plus an explicit
 `BandEvent.liveSetlistItemId` cursor: current/next song are never inferred
 from the clock, another set is never substituted, and a missing end does not

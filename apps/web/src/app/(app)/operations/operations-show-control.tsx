@@ -4,6 +4,7 @@ import { Badge, SurfaceCard } from "@storyboard/ui";
 import {
   catalogSourceLabel,
   projectOpsShowControl,
+  showControlActionContextLabel,
   type OpsShowControl,
   type OpsShowControlBooking,
   type OpsShowControlEvent,
@@ -118,6 +119,7 @@ export function OperationsShowControl({
         };
       })()
     : null;
+  const nextContext = next ? showControlActionContextLabel(next.code) : "Recorded posture";
 
   return (
     <section
@@ -125,18 +127,81 @@ export function OperationsShowControl({
       aria-labelledby="ops-show-control-heading"
       className="rounded-[var(--radius-xl)] border border-[var(--border-strong)] bg-[var(--surface-1)] p-5 shadow-[var(--shadow-sm)]"
     >
-      <header className="mb-5">
+      <header className="mb-4">
         <p className="sb-kicker">Show control</p>
         <h2 id="ops-show-control-heading" className="mt-2 text-xl font-semibold text-[var(--text-primary)]">
-          Live show, set, and booking posture
+          One clear next move
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--text-secondary)]">
-          Recorded facts only. Travis books and owns connections. StoryBoard will not pitch, post, or invent a schedule.
+          StoryBoard puts one recorded action first, then shows the facts behind it. Travis books and owns connections; StoryBoard will not pitch, post, or invent a schedule.
         </p>
       </header>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <SurfaceCard padding="sm" className="flex min-h-52 flex-col">
+      <div
+        data-testid="ops-show-control-action"
+        className="relative overflow-hidden rounded-[var(--radius-xl)] border border-[var(--accent)]/40 bg-[var(--surface-0)] p-5 shadow-[var(--shadow-sm)]"
+      >
+        <div className="absolute inset-y-0 left-0 w-1 bg-[var(--accent)]" aria-hidden />
+        <div className="flex flex-col gap-5 pl-1 sm:flex-row sm:items-center sm:justify-between">
+          <div className="max-w-3xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">
+              {next ? `Do this next · ${nextContext}` : "Current records"}
+            </p>
+            <h3 id="ops-show-control-next-heading" className="mt-2 text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
+              {next?.label ?? "No recorded action right now"}
+            </h3>
+            <p
+              id="ops-show-control-next-description"
+              className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]"
+              data-testid="ops-show-control-next"
+            >
+              {next?.nextAction ?? "Review the recorded posture below. StoryBoard will not invent work to fill an empty queue."}
+            </p>
+            {!canManage ? (
+              <p className="mt-3 text-xs text-[var(--text-muted)]">
+                Read-only. An owner or member must make changes; this action only opens existing records.
+              </p>
+            ) : null}
+          </div>
+          {next ? (
+            workspaceTarget ? (
+              <button
+                type="button"
+                data-testid="ops-show-control-primary"
+                className="sb-btn-primary w-full shrink-0 justify-center sm:w-auto"
+                aria-describedby="ops-show-control-next-description"
+                onClick={() => onOpenWorkspace(workspaceTarget.tab, workspaceTarget.eventId, workspaceTarget.focus)}
+              >
+                {next.label}
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            ) : (
+              <a
+                data-testid="ops-show-control-primary"
+                className="sb-btn-primary w-full shrink-0 justify-center sm:w-auto"
+                href={next.href}
+                aria-describedby="ops-show-control-next-description"
+              >
+                {next.label}
+                <ArrowRight className="h-4 w-4" />
+              </a>
+            )
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="sb-kicker">Recorded posture</p>
+          <h3 className="mt-1 text-base font-semibold text-[var(--text-primary)]">Why this action is first</h3>
+        </div>
+        <p className="max-w-xl text-xs leading-relaxed text-[var(--text-muted)]">
+          Show, set, and booking records support the priority above. These cards are evidence, not extra action choices.
+        </p>
+      </div>
+
+      <div data-testid="ops-show-control-posture" className="mt-3 grid gap-3 lg:grid-cols-3">
+        <SurfaceCard padding="sm" className="flex flex-col">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Show</p>
             <CalendarDays className="h-4 w-4 text-[var(--accent)]" aria-hidden />
@@ -199,7 +264,7 @@ export function OperationsShowControl({
           )}
         </SurfaceCard>
 
-        <SurfaceCard padding="sm" className="flex min-h-52 flex-col">
+        <SurfaceCard padding="sm" className="flex flex-col">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Set</p>
             <ListMusic className="h-4 w-4 text-[var(--accent)]" aria-hidden />
@@ -249,7 +314,7 @@ export function OperationsShowControl({
           )}
         </SurfaceCard>
 
-        <SurfaceCard padding="sm" className="flex min-h-52 flex-col">
+        <SurfaceCard padding="sm" className="flex flex-col">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Booking</p>
             <Ticket className="h-4 w-4 text-[var(--accent)]" aria-hidden />
@@ -283,31 +348,6 @@ export function OperationsShowControl({
         </SurfaceCard>
       </div>
 
-      <div className="mt-5 flex flex-col gap-3 border-t border-[var(--border)] pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm font-medium text-[var(--text-primary)]" data-testid="ops-show-control-next">
-          {next ? `Next: ${next.nextAction}` : "No recorded next action."}
-        </p>
-        {next ? (
-          workspaceTarget ? (
-            <button
-              type="button"
-              className="sb-btn-primary w-fit shrink-0"
-              onClick={() => onOpenWorkspace(workspaceTarget.tab, workspaceTarget.eventId, workspaceTarget.focus)}
-            >
-              {next.label}
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          ) : (
-            <a className="sb-btn-primary w-fit shrink-0" href={next.href}>
-              {next.label}
-              <ArrowRight className="h-4 w-4" />
-            </a>
-          )
-        ) : null}
-        {!canManage ? (
-          <p className="text-xs text-[var(--text-muted)]">Read-only. An owner or member must make changes. This control only opens existing records.</p>
-        ) : null}
-      </div>
     </section>
   );
 }
