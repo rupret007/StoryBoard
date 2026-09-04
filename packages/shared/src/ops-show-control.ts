@@ -204,6 +204,45 @@ export function showControlActionLabel(code: string): string {
 }
 
 /**
+ * Give the primary Show control action a short, stable source label.
+ *
+ * This is presentation context only. It never widens an action beyond the
+ * navigate-only destination chosen by `projectOpsShowControl`.
+ */
+export function showControlActionContextLabel(code: string): string {
+  switch (code) {
+    case "open_day_of":
+      return "Live show";
+    case "review_overdue_gig":
+    case "after_show_recorded":
+    case "after_show_settlement":
+    case "create_settlement":
+    case "finalize_settlement":
+      return "After the show";
+    case "setlist_missing":
+    case "setlist_duration_incomplete":
+      return "Set readiness";
+    case "deposit_unpaid":
+    case "record_payment":
+      return "Show money";
+    case "advance_missing":
+      return "Show readiness";
+    case "hold":
+    case "offer":
+    case "conversation":
+    case "outreach":
+    case "target":
+      return "Booking pipeline";
+    case "record_gig":
+      return "Show calendar";
+    case "refresh_ops":
+      return "Record check";
+    default:
+      return "Recorded work";
+  }
+}
+
+/**
  * Pick the live, overdue, or next recorded gig for Band operations.
  *
  * Live requires a recorded end that still covers now. A started gig with no

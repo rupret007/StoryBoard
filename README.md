@@ -558,7 +558,11 @@ the next recorded action is named and linked (attach set, fix durations, record
 a payment, create a draft settlement, review inbox terms). Band operations
 opens with `ops_show_control_v1`: the live, unfinished past, or next recorded
 gig, its exact assigned set, Travis's booking posture, and one navigate-only
-next action sit above the Events / Music / Projects / Deals editors. Unavailable records stay
+next action sit above the Events / Music / Projects / Deals editors. The action
+is intentionally first and visually dominant; its short source label explains
+whether it came from the live show, after-show follow-through, set readiness,
+show money, booking pipeline, or missing records. Show, set, and booking then
+appear as compact supporting evidence with no competing action controls. Unavailable records stay
 distinct from empty ones; a started gig with no end is overdue, not assumed
 live. Once a recorded show window has passed, show control prioritizes that
 unfinished show ahead of future readiness work and routes straight to the

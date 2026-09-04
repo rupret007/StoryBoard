@@ -381,3 +381,21 @@ test("every projected action stays navigate-only and never invents outreach", ()
   assert.match(JSON.stringify(control), /Travis|will not pitch|will not auto-pitch|will not invent/i);
   assert.doesNotMatch(JSON.stringify(control), /auto-pitch now|send outreach|post to/i);
 });
+
+test("labels the source of the one primary action without widening its authority", () => {
+  assert.equal(shared.showControlActionContextLabel("open_day_of"), "Live show");
+  assert.equal(shared.showControlActionContextLabel("review_overdue_gig"), "After the show");
+  assert.equal(shared.showControlActionContextLabel("setlist_missing"), "Set readiness");
+  assert.equal(shared.showControlActionContextLabel("deposit_unpaid"), "Show money");
+  assert.equal(shared.showControlActionContextLabel("hold"), "Booking pipeline");
+  assert.equal(shared.showControlActionContextLabel("record_gig"), "Show calendar");
+  assert.equal(shared.showControlActionContextLabel("refresh_ops"), "Record check");
+  assert.equal(shared.showControlActionContextLabel("unknown_future_code"), "Recorded work");
+
+  const control = project({
+    events: [gig()],
+    bookings: [{ id: "hold-a", title: "Room on hold", stage: "hold" }]
+  });
+  assert.equal(control.nextAction?.kind, "navigate");
+  assert.equal("execute" in (control.nextAction ?? {}), false);
+});
