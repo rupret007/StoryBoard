@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
-import { eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, eventLiveSetPositionSchema, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, summarizeSetlist, catalogImportRequestSchema, planCatalogImport, reconcileCatalogImport, describeSongCatalogStatus, projectOpsLiveRun } from "@storyboard/shared";
+import { AFTER_SHOW_STALE_WRITE_MESSAGE, afterShowFactsEqual, afterShowFactsRecorded, afterShowWriteAllowed, eventAfterShowPatchSchema, eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, eventLiveSetPositionSchema, OPS_AFTER_SHOW_POLICY_VERSION, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, summarizeSetlist, catalogImportRequestSchema, planCatalogImport, reconcileCatalogImport, describeSongCatalogStatus, projectOpsLiveRun } from "@storyboard/shared";
 import type { Prisma } from "../generated/prisma/client";
 import { ApprovalStatus, InvoiceStatus, SettlementStatus } from "../generated/prisma/enums";
 import { ApprovalsService } from "../approvals/approvals.service";
@@ -16,6 +16,7 @@ import { EVENT_LOGISTICS_POLICY_VERSION, assessEventLogistics, planEventLogistic
 type EventCreate = z.infer<typeof eventCreateSchema>;
 type EventPatch = z.infer<typeof eventPatchSchema>;
 type EventLiveSetPosition = z.infer<typeof eventLiveSetPositionSchema>;
+type EventAfterShowPatch = z.infer<typeof eventAfterShowPatchSchema>;
 type ParticipantInput = z.infer<typeof eventParticipantSchema>;
 type EventScheduleItemCreate = z.infer<typeof eventScheduleItemCreateSchema>;
 type EventScheduleItemPatch = z.infer<typeof eventScheduleItemPatchSchema>;
@@ -203,6 +204,9 @@ export class OperationsService {
   }
   async createEvent(artistId: string, input: EventCreate, actorLabel: string, actorOperatorId: string) { await this.validateEventRelations(artistId, input); validateEventTimeline(input); const row = await this.prisma.client.bandEvent.create({ data: { artistId, ...cleanDates(input) } as Prisma.BandEventUncheckedCreateInput }); await this.auditWrite(artistId, "BandEvent", row.id, "event.created", actorLabel, actorOperatorId, { type: row.type, status: row.status }); return this.event(artistId, row.id); }
   async patchEvent(artistId: string, id: string, input: EventPatch, actorLabel: string, actorOperatorId: string) {
+    if (["attendance", "grossRevenueMinor", "postShowNotes", "relationshipOutcome"].some((key) => Object.hasOwn(input, key))) {
+      throw new BadRequestException("After-show facts use the dedicated after-show write. Event details cannot overwrite them.");
+    }
     const existing = await this.prisma.client.bandEvent.findFirst({
       where: { id, artistId },
       select: { startsAt: true, endsAt: true, loadInAt: true, soundcheckAt: true, doorsAt: true, setAt: true, curfewAt: true, setlistId: true }
@@ -237,6 +241,66 @@ export class OperationsService {
       await this.auditWrite(artistId, "BandEvent", eventId, "event.live_set_positioned", actorLabel, actorOperatorId, { setlistId: event.setlistId, setlistItemId: input.setlistItemId });
     }
     return this.eventDayOf(artistId, eventId);
+  }
+  async recordAfterShow(artistId: string, eventId: string, input: EventAfterShowPatch, actorLabel: string, actorOperatorId: string, now = new Date()) {
+    const expectedVersion = new Date(input.expectedUpdatedAt);
+    if (Number.isNaN(expectedVersion.getTime())) throw new BadRequestException("A valid event version is required");
+    const facts = {
+      attendance: input.attendance,
+      grossRevenueMinor: input.grossRevenueMinor,
+      postShowNotes: input.postShowNotes?.trim() || null,
+      relationshipOutcome: input.relationshipOutcome?.trim() || null
+    };
+    try {
+      await this.prisma.client.$transaction(async (tx) => {
+        const current = await tx.bandEvent.findFirst({
+          where: { id: eventId, artistId },
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            startsAt: true,
+            updatedAt: true,
+            attendance: true,
+            grossRevenueMinor: true,
+            postShowNotes: true,
+            relationshipOutcome: true
+          }
+        });
+        if (!current) throw new NotFoundException("Event not found");
+        const write = afterShowWriteAllowed(current, now);
+        if (!write.allowed) throw new BadRequestException(write.reason);
+        if (current.updatedAt.getTime() !== expectedVersion.getTime()) {
+          throw new ConflictException(AFTER_SHOW_STALE_WRITE_MESSAGE);
+        }
+        if (afterShowFactsEqual(current, facts)) return;
+        const updated = await tx.bandEvent.updateMany({
+          where: { id: eventId, artistId, updatedAt: current.updatedAt },
+          data: {
+            ...facts,
+            updatedAt: new Date(Math.max(now.getTime(), current.updatedAt.getTime() + 1))
+          }
+        });
+        if (updated.count !== 1) throw new ConflictException(AFTER_SHOW_STALE_WRITE_MESSAGE);
+        await this.audit.log({
+          artistId,
+          aggregateType: "BandEvent",
+          aggregateId: eventId,
+          action: "event.after_show_recorded",
+          actorLabel,
+          actorOperatorId,
+          metadata: {
+            policyVersion: OPS_AFTER_SHOW_POLICY_VERSION,
+            recorded: afterShowFactsRecorded(facts),
+            status: current.status
+          }
+        }, tx);
+      }, { isolationLevel: "Serializable" });
+    } catch (error) {
+      if (prismaErrorCode(error) === "P2034") throw new ConflictException(AFTER_SHOW_STALE_WRITE_MESSAGE);
+      throw error;
+    }
+    return this.eventDayOf(artistId, eventId, now);
   }
   async createEventScheduleItem(artistId: string, eventId: string, input: EventScheduleItemCreate, actorLabel: string, actorOperatorId: string) {
     await this.assertArtistRecord("event", artistId, eventId);

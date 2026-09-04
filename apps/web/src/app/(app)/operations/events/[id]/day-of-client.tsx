@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  afterShowWriteAllowed,
   catalogSourceLabel,
   dateTimeLocalToIso,
   instantToDateTimeLocal,
@@ -163,6 +164,7 @@ function LiveSetPanel({ liveRun, eventId, busy, onMutate }: { liveRun: OpsLiveRu
 
 function LiveWrapPanel({ data, busy, onMutate, onError }: { data: EventDayOfResponse; busy: boolean; onMutate: (key: string, path: string, json?: unknown, method?: string) => Promise<void>; onError: (message: string) => void }) {
   const event = data.event;
+  const write = afterShowWriteAllowed(event);
   const [attendance, setAttendance] = useState(event.attendance?.toString() ?? "");
   const [grossRevenue, setGrossRevenue] = useState(dollars(event.grossRevenueMinor));
   const [postShowNotes, setPostShowNotes] = useState(event.postShowNotes ?? "");
@@ -174,6 +176,14 @@ function LiveWrapPanel({ data, busy, onMutate, onError }: { data: EventDayOfResp
     setRelationshipOutcome(event.relationshipOutcome ?? "");
   }, [event.attendance, event.grossRevenueMinor, event.postShowNotes, event.relationshipOutcome]);
   async function save() {
+    if (!event.updatedAt) {
+      onError("Refresh before saving. StoryBoard could not verify which after-show version you opened.");
+      return;
+    }
+    if (!write.allowed) {
+      onError(write.reason);
+      return;
+    }
     const attendanceValue = attendance.trim() === "" ? null : Number(attendance);
     if (attendanceValue != null && (!Number.isInteger(attendanceValue) || attendanceValue < 0)) {
       onError("Attendance must be a whole number. StoryBoard will not invent a count.");
@@ -184,24 +194,29 @@ function LiveWrapPanel({ data, busy, onMutate, onError }: { data: EventDayOfResp
       onError("Gross revenue must be a non-negative amount. StoryBoard will not invent a result.");
       return;
     }
-    await onMutate("live-wrap", `/events/${event.id}`, {
+    await onMutate("live-wrap", `/events/${event.id}/after-show`, {
+      expectedUpdatedAt: event.updatedAt,
       attendance: attendanceValue,
       grossRevenueMinor: revenueValue,
       postShowNotes: postShowNotes.trim() || null,
       relationshipOutcome: relationshipOutcome.trim() || null
-    }, "PATCH");
+    });
   }
+  const next = data.liveRun.wrapUp.nextAction;
   return <section data-testid="ops-live-wrap" aria-labelledby="ops-live-wrap-heading">
     <SurfaceCard>
       <div className="flex items-center gap-2"><ClipboardCheck className="h-4 w-4 text-[var(--accent)]" /><h2 id="ops-live-wrap-heading" className="font-semibold">After the show</h2></div>
       <p className="mt-2 text-sm text-[var(--text-secondary)]">{data.liveRun.wrapUp.reason}</p>
+      {data.liveRun.wrapUp.recorded ? <p className="mt-2 text-xs text-[var(--text-muted)]" data-testid="ops-live-wrap-recorded">Facts are recorded. StoryBoard will not invent a result or close the gig.</p> : null}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <label><span className="sb-label">Attendance</span><input aria-label="Attendance" className="sb-input mt-1.5" type="number" min="0" step="1" value={attendance} onChange={(change) => setAttendance(change.target.value)} /></label>
         <label><span className="sb-label">Gross revenue ({event.currency})</span><input aria-label={`Gross revenue (${event.currency})`} className="sb-input mt-1.5" type="number" min="0" step="0.01" value={grossRevenue} onChange={(change) => setGrossRevenue(change.target.value)} /></label>
       </div>
       <label className="mt-3 block"><span className="sb-label">What happened and what should change?</span><textarea aria-label="What happened and what should change?" className="sb-input mt-1.5 min-h-24" maxLength={5000} value={postShowNotes} onChange={(change) => setPostShowNotes(change.target.value)} placeholder="Draw, audience response, production issues, merch, promotion, and lessons for next time" /></label>
       <label className="mt-3 block"><span className="sb-label">Buyer / venue relationship outcome</span><textarea aria-label="Buyer / venue relationship outcome" className="sb-input mt-1.5 min-h-20" maxLength={1000} value={relationshipOutcome} onChange={(change) => setRelationshipOutcome(change.target.value)} placeholder="Invited back, requested follow-up, neutral, or relationship issue" /></label>
-      <button type="button" className="sb-btn-primary mt-4" disabled={busy} onClick={() => void save()}><Save className="h-4 w-4" /> Save after-show facts</button>
+      {!event.updatedAt ? <p role="alert" className="mt-3 text-sm text-amber-200">Refresh before saving. StoryBoard could not verify which after-show version you opened.</p> : null}
+      <button type="button" className="sb-btn-primary mt-4" disabled={busy || !event.updatedAt || !write.allowed} onClick={() => void save()}><Save className="h-4 w-4" /> Save after-show facts</button>
+      {next ? <a className="sb-btn-secondary mt-3 w-fit" data-testid="ops-live-wrap-next" href={next.href}>{next.code === "finalize_settlement" ? "Open draft settlement" : next.code === "after_show_recorded" ? "Review recorded wrap-up" : "Open draft settlement"}</a> : null}
     </SurfaceCard>
   </section>;
 }

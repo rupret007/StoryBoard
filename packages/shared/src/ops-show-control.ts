@@ -1,4 +1,8 @@
 import {
+  afterShowFactsRecorded,
+  afterShowNextAction
+} from "./ops-after-show";
+import {
   bookingStageNextAction,
   eventReadinessNextAction,
   invoicePaymentNextAction,
@@ -26,6 +30,10 @@ export type OpsShowControlEvent = {
   venue?: { name?: string | null } | null;
   locationName?: string | null;
   setlistId?: string | null;
+  attendance?: number | null;
+  grossRevenueMinor?: number | null;
+  postShowNotes?: string | null;
+  relationshipOutcome?: string | null;
   settlement?: { id: string; status: string } | null;
 };
 
@@ -101,6 +109,7 @@ export type OpsShowControl = {
     readinessScore: number | null;
     readinessHeadline: string | null;
     confidenceLabel: string | null;
+    wrapUpRecorded: boolean;
   };
   set: {
     availability: OpsSetAvailability;
@@ -169,7 +178,10 @@ export function showControlActionLabel(code: string): string {
     case "finalize_settlement":
       return "Open draft settlement";
     case "create_settlement":
-      return "Open settlement";
+    case "after_show_settlement":
+      return "Open draft settlement";
+    case "after_show_recorded":
+      return "Review recorded wrap-up";
     case "record_payment":
       return "Open invoices";
     case "hold":
@@ -281,7 +293,7 @@ export function projectOpsShowControl(input: OpsShowControlInput): OpsShowContro
   const show = projectShow(input, selected, readiness);
   const set = projectSet(input, selected);
   const booking = projectBooking(input, now);
-  const nextAction = projectNextAction(input, selected, readiness, booking);
+  const nextAction = projectNextAction(input, selected, readiness, booking, now);
 
   return {
     policyVersion: OPS_SHOW_CONTROL_POLICY_VERSION,
@@ -311,7 +323,8 @@ function projectShow(
       readinessStatus: null,
       readinessScore: null,
       readinessHeadline: null,
-      confidenceLabel: null
+      confidenceLabel: null,
+      wrapUpRecorded: false
     };
   }
   if (!selected) {
@@ -328,7 +341,8 @@ function projectShow(
       readinessStatus: null,
       readinessScore: null,
       readinessHeadline: null,
-      confidenceLabel: null
+      confidenceLabel: null,
+      wrapUpRecorded: false
     };
   }
 
@@ -346,7 +360,8 @@ function projectShow(
     readinessStatus: readiness?.status ?? null,
     readinessScore: readiness?.score ?? null,
     readinessHeadline: readiness?.headline ?? null,
-    confidenceLabel: readiness?.confidenceLabel ?? null
+    confidenceLabel: readiness?.confidenceLabel ?? null,
+    wrapUpRecorded: afterShowFactsRecorded(selected.event)
   };
 }
 
@@ -442,7 +457,8 @@ function projectNextAction(
   input: OpsShowControlInput,
   selected: ReturnType<typeof selectLiveOrNextOpsGig>,
   readiness: OpsShowControlReadiness | null,
-  booking: OpsShowControl["booking"]
+  booking: OpsShowControl["booking"],
+  now: Date
 ): OpsShowControlAction | null {
   if (!input.eventsAvailable) {
     return navigateAction(
@@ -461,11 +477,21 @@ function projectNextAction(
   }
 
   if (selected?.phase === "overdue") {
-    return navigateAction(
-      "review_overdue_gig",
-      `${selected.event.title} is still open after its recorded show window. Open after-show wrap-up to record attendance, money, lessons, and the relationship outcome; StoryBoard will not invent a result and will not close the gig automatically.`,
-      `/operations/events/${selected.event.id}`
-    );
+    if (!afterShowFactsRecorded(selected.event)) {
+      return navigateAction(
+        "review_overdue_gig",
+        `${selected.event.title} is still open after its recorded show window. Open after-show wrap-up to record attendance, money, lessons, and the relationship outcome; StoryBoard will not invent a result and will not close the gig automatically.`,
+        `/operations/events/${selected.event.id}`
+      );
+    }
+    const recorded = afterShowNextAction({
+      event: selected.event,
+      settlement: selected.event.settlement
+        ?? input.settlements?.find((row) => row.event.id === selected.event.id)
+        ?? null,
+      now
+    });
+    if (recorded) return withActionLabel(recorded);
   }
 
   if (selected && readiness?.gaps.length) {

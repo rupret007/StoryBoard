@@ -867,15 +867,19 @@ test("show finance records produce grounded outcome answers", async ({ page }) =
   await page.getByLabel(`Set time for ${eventTitle}`).fill(localTime(completedSetAt));
   await page.getByLabel(`Curfew for ${eventTitle}`).fill(localTime(new Date(completedSetAt.getTime() + 3600000)));
   await page.getByLabel(`Status for ${eventTitle}`).selectOption("completed");
-  await page.getByLabel(`Attendance for ${eventTitle}`).fill("135");
-  await page.getByLabel(`Gross revenue for ${eventTitle}`).fill("500");
-  await page.getByLabel(`Post-show notes for ${eventTitle}`).fill("Strong audience response; tighten the changeover next time.");
-  await page.getByLabel(`Relationship outcome for ${eventTitle}`).fill("Buyer invited a return pitch.");
   const eventSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().endsWith(`/events/${financeEvent.id}`) && response.ok());
   await completedShow.getByRole("button", { name: "Save event details" }).click();
-  const savedEvent = await (await eventSaved).json() as { attendance: number | null; grossRevenueMinor: number | null; status: string };
-  expect(savedEvent).toMatchObject({ attendance: 135, grossRevenueMinor: 50_000, status: "completed" });
+  const savedEvent = await (await eventSaved).json() as { status: string };
+  expect(savedEvent).toMatchObject({ status: "completed" });
   await expect(completedShow.locator("span").filter({ hasText: /^completed$/ })).toBeVisible();
+  await completedShow.getByLabel(`Attendance for ${eventTitle}`).fill("135");
+  await completedShow.getByLabel(`Gross revenue for ${eventTitle}`).fill("500");
+  await completedShow.getByLabel(`Post-show notes for ${eventTitle}`).fill("Strong audience response; tighten the changeover next time.");
+  await completedShow.getByLabel(`Relationship outcome for ${eventTitle}`).fill("Buyer invited a return pitch.");
+  const wrapSaved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith(`/events/${financeEvent.id}/after-show`) && response.ok());
+  await completedShow.getByRole("button", { name: "Save after-show facts" }).click();
+  const wrapPayload = await (await wrapSaved).json() as { event: { attendance: number | null; grossRevenueMinor: number | null; status: string } };
+  expect(wrapPayload.event).toMatchObject({ attendance: 135, grossRevenueMinor: 50_000, status: "completed" });
 
   await page.goto("/manager");
   const outcomes = page.getByTestId("manager-outcome-review");
@@ -1311,11 +1315,14 @@ test("day-of live run advances the assigned set without inventing a song", async
   await wrap.getByLabel(/relationship outcome/).fill("Asked back for October.");
   await wrap.getByRole("button", { name: "Save after-show facts" }).click();
   await expect(wrap.getByLabel("Attendance")).toHaveValue("142");
+  await expect(wrap.getByTestId("ops-live-wrap-recorded")).toBeVisible();
+  await expect(wrap.getByTestId("ops-live-wrap-next")).toContainText("Open draft settlement");
   await page.reload();
   await expect(page.getByTestId("ops-live-run").getByTestId("ops-live-run-title")).toHaveText(eventTitle);
   await expect(page.getByTestId("ops-live-set").locator("li[data-state='current']")).toContainText(closerTitle);
   await expect(page.getByTestId("ops-live-wrap").getByLabel("Attendance")).toHaveValue("142");
   await expect(page.getByTestId("ops-live-wrap").getByLabel(/Gross revenue/)).toHaveValue("350.00");
+  await expect(page.getByTestId("ops-live-wrap-next")).toContainText("Open draft settlement");
   // Keep the serial browser fixture honest for the next test: this show's
   // recorded live window must not outrank an intentionally overdue show.
   await artistApi(page, artistId, `/events/${liveEvent.id}`, "PATCH", { status: "completed" });
@@ -1346,6 +1353,62 @@ test("an overdue show leads to after-show wrap-up before stale readiness work", 
   await control.getByRole("link", { name: "Open after-show wrap-up" }).click();
   await expect(page.getByTestId("ops-live-run-title")).toHaveText(eventTitle);
   await expect(page.getByTestId("ops-live-wrap")).toBeVisible();
+});
+
+test("recorded after-show facts hand off to draft settlement and refuse a stale overwrite", async ({ page }) => {
+  const suffix = Date.now().toString(36);
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const eventTitle = `Recorded wrap-up ${suffix}`;
+  const event = await artistApi<{ id: string; updatedAt: string }>(page, artistId, "/events", "POST", {
+    type: "gig",
+    status: "confirmed",
+    title: eventTitle,
+    startsAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
+    endsAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+    timezone: "America/Chicago",
+    locationName: "E2E Working Room",
+    setlistId: null,
+    currency: "USD"
+  });
+
+  await page.goto(`/operations/events/${event.id}`);
+  const wrap = page.getByTestId("ops-live-wrap");
+  await expect(wrap).toBeVisible();
+  await wrap.getByLabel("Attendance").fill("142");
+  await wrap.getByLabel(/Gross revenue/).fill("350");
+  await wrap.getByLabel(/What happened/).fill("House was late; last song held.");
+  await wrap.getByLabel(/relationship outcome/).fill("Asked back for October.");
+  const saved = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith(`/events/${event.id}/after-show`) && response.ok());
+  await wrap.getByRole("button", { name: "Save after-show facts" }).click();
+  await saved;
+  await expect(wrap.getByTestId("ops-live-wrap-recorded")).toBeVisible();
+
+  const current = await artistApi<{ id: string; updatedAt: string; attendance: number | null }>(page, artistId, `/events/${event.id}`);
+  await artistApi(page, artistId, `/events/${event.id}/after-show`, "POST", {
+    expectedUpdatedAt: current.updatedAt,
+    attendance: 200,
+    grossRevenueMinor: 40000,
+    postShowNotes: "Updated by another band member",
+    relationshipOutcome: "Asked back for October."
+  });
+  await wrap.getByLabel("Attendance").fill("1");
+  const rejected = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes(`/events/${event.id}/after-show`) && response.status() === 409);
+  await wrap.getByRole("button", { name: "Save after-show facts" }).click();
+  await rejected;
+  await expect(page.getByRole("alert").filter({ hasText: /changed since you opened them/i })).toBeVisible();
+  const preserved = await artistApi<{ attendance: number | null; postShowNotes: string | null; status: string }>(page, artistId, `/events/${event.id}`);
+  expect(preserved).toMatchObject({ attendance: 200, postShowNotes: "Updated by another band member", status: "confirmed" });
+
+  await page.goto("/operations");
+  const control = page.getByTestId("ops-show-control");
+  await expect(control).toContainText(eventTitle);
+  await expect(control.getByTestId("ops-show-control-wrap-up")).toContainText("After-show facts are recorded");
+  await expect(control.getByTestId("ops-show-control-next")).toContainText(/will not invent net or close the gig/i);
+  await control.getByRole("button", { name: "Open draft settlement" }).click();
+  await expect(page.getByRole("heading", { name: "Settle a recorded gig" })).toBeVisible();
+  await expect(page.getByLabel("Settlement event")).toHaveValue(event.id);
+  await expect(page.getByPlaceholder("Gross USD")).toHaveValue("400.00");
 });
 
 test("day-of setlist keeps a mixed-duration subtotal explicit", async ({ page }) => {

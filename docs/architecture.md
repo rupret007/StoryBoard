@@ -461,6 +461,10 @@ so clients can bypass brittle substring ordering; see `docs/developer-runbook.md
   Mode uses a recorded end (`curfewAt` or `endsAt`); a started gig without one
   is post-show rather than in-progress. `ops_live_run_v1` adds the assigned
   running order and wrap-up availability from the same recorded facts.
+  After-show facts use `ops_after_show_v1`: a version-bound write separate
+  from event logistics, so a stale details save cannot wipe attendance,
+  revenue, lessons, or the relationship outcome. Recorded wrap-up names a
+  navigate-only draft-settlement next step and never auto-completes the gig.
   Manager consumes the day-of signal only inside the 24-hour show window,
   keeping longer-range planning distinct from live operational guidance.
 - Manager outcome review is another deterministic, non-persistent projection.

@@ -11,6 +11,7 @@ export * from "./schemas/operations";
 export * from "./setlist-summary";
 export * from "./catalog-import";
 export * from "./ops-next-action";
+export * from "./ops-after-show";
 export * from "./ops-show-control";
 export * from "./ops-live-run";
 export * from "./operator-href";
