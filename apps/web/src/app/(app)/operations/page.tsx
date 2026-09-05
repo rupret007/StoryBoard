@@ -43,10 +43,31 @@ export default async function OperationsPage({
   let bookings: BookingOpportunity[] = [];
   let eventsAvailable = false;
   let readinessAvailable = false;
+  let songsAvailable = false;
   let setlistsAvailable = false;
   let bookingsAvailable = false;
   let accessState: OperationsAccessState = "unavailable";
   let isOwner = false;
+
+  // Resolve one band before loading its editors. A later band switch must not
+  // pair one band's running order with another band's write context.
+  const [meResult] = await Promise.allSettled([
+    serverApiFetch<{
+      currentArtistId: string | null;
+      memberships: { artistId: string; role: string }[];
+    }>("/auth/me", { cache: "no-store" })
+  ]);
+  let artistId: string | null = null;
+  if (meResult.status === "fulfilled") {
+    const me = meResult.value;
+    artistId = me.currentArtistId && me.memberships.some((membership) => membership.artistId === me.currentArtistId)
+      ? me.currentArtistId
+      : me.memberships[0]?.artistId ?? null;
+    const role = me.memberships.find((membership) => membership.artistId === artistId)?.role;
+    isOwner = role === "owner";
+    accessState = role === "owner" || role === "member" ? "manage" : role === "viewer" ? "read_only" : "unavailable";
+  }
+  const readOptions = { cache: "no-store" as const, ...(artistId ? { artistId } : {}) };
 
   const [
     eventRows,
@@ -62,27 +83,22 @@ export default async function OperationsPage({
     memberRows,
     contactRows,
     venueRows,
-    bookingRows,
-    meResult
+    bookingRows
   ] = await Promise.allSettled([
-    serverApiFetch<BandEvent[]>("/events", { cache: "no-store" }),
-    serverApiFetch<ShowReadiness[]>("/events/readiness?days=120", { cache: "no-store" }),
-    serverApiFetch<Song[]>("/songs", { cache: "no-store" }),
-    serverApiFetch<Setlist[]>("/setlists", { cache: "no-store" }),
-    serverApiFetch<ArtistProject[]>("/projects", { cache: "no-store" }),
-    serverApiFetch<DealOffer[]>("/deals", { cache: "no-store" }),
-    serverApiFetch<Invoice[]>("/invoices", { cache: "no-store" }),
-    serverApiFetch<Expense[]>("/expenses", { cache: "no-store" }),
-    serverApiFetch<Settlement[]>("/settlements", { cache: "no-store" }),
-    serverApiFetch<DocumentTemplate[]>("/document-templates", { cache: "no-store" }),
-    serverApiFetch<BandMember[]>("/manager/members", { cache: "no-store" }),
-    serverApiFetch<Contact[]>("/contacts", { cache: "no-store" }),
-    serverApiFetch<Venue[]>("/venues", { cache: "no-store" }),
-    serverApiFetch<BookingOpportunity[]>("/booking-opportunities", { cache: "no-store" }),
-    serverApiFetch<{
-      currentArtistId: string | null;
-      memberships: { artistId: string; role: string }[];
-    }>("/auth/me", { cache: "no-store" })
+    serverApiFetch<BandEvent[]>("/events", readOptions),
+    serverApiFetch<ShowReadiness[]>("/events/readiness?days=120", readOptions),
+    serverApiFetch<Song[]>("/songs", readOptions),
+    serverApiFetch<Setlist[]>("/setlists", readOptions),
+    serverApiFetch<ArtistProject[]>("/projects", readOptions),
+    serverApiFetch<DealOffer[]>("/deals", readOptions),
+    serverApiFetch<Invoice[]>("/invoices", readOptions),
+    serverApiFetch<Expense[]>("/expenses", readOptions),
+    serverApiFetch<Settlement[]>("/settlements", readOptions),
+    serverApiFetch<DocumentTemplate[]>("/document-templates", readOptions),
+    serverApiFetch<BandMember[]>("/manager/members", readOptions),
+    serverApiFetch<Contact[]>("/contacts", readOptions),
+    serverApiFetch<Venue[]>("/venues", readOptions),
+    serverApiFetch<BookingOpportunity[]>("/booking-opportunities", readOptions)
   ]);
 
   if (eventRows.status === "fulfilled") {
@@ -93,7 +109,10 @@ export default async function OperationsPage({
     readiness = readinessRows.value;
     readinessAvailable = true;
   }
-  if (songRows.status === "fulfilled") songs = songRows.value;
+  if (songRows.status === "fulfilled") {
+    songs = songRows.value;
+    songsAvailable = true;
+  }
   if (setlistRows.status === "fulfilled") {
     setlists = setlistRows.value;
     setlistsAvailable = true;
@@ -110,20 +129,6 @@ export default async function OperationsPage({
   if (bookingRows.status === "fulfilled") {
     bookings = bookingRows.value;
     bookingsAvailable = true;
-  }
-
-  if (meResult.status === "fulfilled") {
-    const me = meResult.value;
-    const activeArtistId = me.currentArtistId && me.memberships.some((membership) => membership.artistId === me.currentArtistId)
-      ? me.currentArtistId
-      : me.memberships[0]?.artistId ?? null;
-    const role = me.memberships.find((membership) => membership.artistId === activeArtistId)?.role;
-    isOwner = role === "owner";
-    accessState = role === "owner" || role === "member"
-      ? "manage"
-      : role === "viewer"
-        ? "read_only"
-        : "unavailable";
   }
 
   const dataLoadFailed = [
@@ -156,12 +161,14 @@ export default async function OperationsPage({
         description="Show control names the live or next recorded gig, its assigned set, booking posture, and one safe next action before the editors. Travis still books. StoryBoard does not auto-pitch."
       />
       <OperationsClient
+        artistId={artistId}
         initialTab={parseOpsWorkspaceTab(params.tab)}
         focusEventId={params.event?.trim() || null}
         focusField={parseOpsWorkspaceFocus(params.focus)}
         eventsAvailable={eventsAvailable}
         readinessAvailable={readinessAvailable}
         setlistsAvailable={setlistsAvailable}
+        songsAvailable={songsAvailable}
         bookingsAvailable={bookingsAvailable}
         initialEvents={events}
         initialReadiness={readiness}

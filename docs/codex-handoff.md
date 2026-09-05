@@ -10,6 +10,41 @@ This document orients an autonomous coding agent so work continues without losin
 
 ## Delivery state (what already exists)
 
+### 2026-09-04: recoverable running-order drafts
+
+This product slice preserves unfinished setlists across Operations tab switches,
+background refreshes, and save failures. A newly saved version appears alongside
+the local draft for explicit whole-version review; keeping or discarding the
+draft never writes until a separate **Save running order**. A later competing
+save is still refused. Status, order, song timing, transition cues, provenance,
+and show links remain on the existing screen; no new customer page or store.
+
+Implementation: `packages/shared/src/setlist-draft.ts` and its focused tests;
+`apps/web/src/app/(app)/operations/setlist-builder.tsx`; the parent retains the
+same band's last complete music snapshot on failed refresh and keys editors by
+setlist ID, not version. Operations resolves one band before its data reads and
+pins review/save and catalog preview/apply to that band. The in-page **Retry
+workspace** keeps drafts through a failed loader result; 15-second read/save
+deadlines release a stalled editor without pretending the write did not arrive.
+The music grid fits a phone, and command/integration tools remain below the
+content on smaller screens so they cannot cover the comparison. The #30 action-first show-control layer is
+unchanged. Parked #21 stays untouched; Travis still books; no provider call,
+auto-pitch, merge, deploy, tag, release, schema, or dependency change.
+
+Local proof: typecheck/lint, 83 shared + 295 API unit tests, 5 integration
+workflows, 24 Chromium journeys, both production builds (21 web routes), and
+99/99 Manager checks at 100% safety. This session created disposable localhost
+PostgreSQL 15.18 and Redis 7.4.11 solely for synthetic test data; the older notes
+below about unavailable local PostgreSQL describe earlier sessions. Hosted
+Quality at the draft tip is the PostgreSQL 16 and container-smoke authority;
+consult the PR for its exact tip/run receipt, not an earlier main run.
+
+Remaining boundary: drafts exist only in the open Operations page, not after a
+full reload, closing the page, leaving Operations, or changing bands. Nothing
+claims autosave or cross-device recovery. Do not replace this version-bound
+review with a prop-based version update or an automatic retry; backend item IDs
+are replaced on save, so index/ID-based automatic merging would be misleading.
+
 Phases referenced in **README** / **docs** reflect what was built (the file [`.cursor/plans/storyboard-master-plan.md`](../.cursor/plans/storyboard-master-plan.md) is an **older roadmap**; trust the README phase bullets and this list for “current” scope).
 
 | Area | Status |
@@ -37,7 +72,7 @@ Phases referenced in **README** / **docs** reflect what was built (the file [`.c
 | Notifications page, prefs, escalation thresholds | Done |
 | Telegram **outbound** urgent alerts + operational intelligence (`GET /dashboard/insights`) | Done (5A) |
 | Telegram **inbound** `/start` registration webhook + `TelegramRegistrationToken` | Done (5B) |
-| Current product gate | 2026-09-04 action-first Band operations: Prisma generate; root typecheck/lint; 62/62 shared tests; 295/295 API unit tests; both production builds (21 web routes); 99/99 `manager_evals_v44` at 100% safety. The focused browser journey asserts that exactly one primary action appears before compact show/set/booking evidence and that the evidence cards expose no competing controls. Local Docker/Postgres is unavailable in this environment, so this draft's hosted Quality run is the real `verify` (integration + Chromium) and `container-smoke` authority. |
+| Current product gate | 2026-09-04 recoverable running-order drafts: root typecheck/lint; 83/83 shared tests; 295/295 API unit tests; 5/5 disposable database integration workflows; 24/24 Chromium journeys; both production builds (21 web routes); 99/99 `manager_evals_v44` at 100% safety. Browser coverage includes repeated competing saves, no-write review choices, tab/background-refresh retention, interrupted/stalled requests, loader-failure retry, phone layout, and band-pinned catalog import. The #30 one-primary-action browser assertion still passes. Hosted Quality on the exact draft tip remains the PostgreSQL 16 and container-smoke authority. |
 | Tests | 2026-09-04 after-show wrap-up handoff: Prisma generate; root typecheck/lint; 61/61 shared tests; 295/295 API unit tests; both production builds; 99/99 `manager_evals_v44` at 100% safety. Local Docker/Postgres unavailable; hosted Quality #29 is the real integration, Chromium, and container-smoke suite. The unchanged lockfile's `pnpm audit --prod` currently reports 4 low, 46 moderate, and 32 high advisories (0 critical), including direct Fastify and transitive Nest/Prisma paths; remediation needs a dedicated pinned-dependency update, not an unreviewed product-PR version change. 2026-09-03 day-of live run leftover+security: Prisma generate; root typecheck/lint; 54/54 shared tests; 293/293 API unit tests; both production builds; 99/99 `manager_evals_v44` at 100% safety. Local Chromium/e2e/integration not run in this environment (no Docker). Hosted Quality is the real suite. 2026-09-03 operations show-control: Prisma generate; root typecheck/lint; 47/47 shared tests; 291/291 API unit tests; both production builds; 99/99 `manager_evals_v44` at 100% safety. Local Chromium/e2e/integration not run in this environment (no Docker). 2026-09-03 leftover ops next-action: Prisma generate; root typecheck/lint; 34/34 shared tests; 291/291 API unit tests; both production builds; 99/99 `manager_evals_v44` at 100% safety. Local Chromium/e2e/integration not run in this environment (no Docker). 2026-08-23 Show Night/Vault bind honesty: Prisma generation; root typecheck/lint; 25/25 shared tests; 269/269 API unit tests; both production builds; 98/98 `manager_evals_v44` checks at 100% safety. Last full hosted package (2026-07-13) also recorded 5/5 Postgres workflows across all 40 migrations; catalog import added song/setlist `sourceKey` (41 migrations after apply). 15/15 Chromium journeys; no Prisma schema drift; no relationship-integrity violations (plus one expected non-fatal skip on older DB snapshots without `ApprovalReconciliation`); and rebuilt Compose health, readiness, Dev-login session, and authenticated-Dashboard smoke. The suites emit one tracked, non-fatal `pg@8.14.1` concurrent-query deprecation warning. |
 
 The final web role audit fails mutation affordances closed as well as relying on

@@ -9,30 +9,37 @@ import type { CatalogImportResult } from "@/lib/types";
 
 type PreviewPayload = { vault?: unknown; showNight?: unknown };
 
-export function CatalogImportForm() {
+export function CatalogImportForm({ artistId, canManage }: { artistId: string | null; canManage: boolean }) {
   const router = useRouter();
   const [vaultText, setVaultText] = useState("");
   const [showNightText, setShowNightText] = useState("");
   const [preview, setPreview] = useState<CatalogImportResult | null>(null);
   const [previewPayload, setPreviewPayload] = useState<PreviewPayload | null>(null);
+  const [previewArtistId, setPreviewArtistId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const review = preview ? describeCatalogImportPreview(preview) : null;
+  const confirmedArtistId = artistId?.trim() || null;
+  const controlsDisabled = busy || !canManage || !confirmedArtistId;
+  const review = preview && previewArtistId === confirmedArtistId ? describeCatalogImportPreview(preview) : null;
 
   function updateVault(value: string) {
+    if (controlsDisabled) return;
     setVaultText(value);
     setPreview(null);
     setPreviewPayload(null);
+    setPreviewArtistId(null);
   }
 
   function updateShowNight(value: string) {
+    if (controlsDisabled) return;
     setShowNightText(value);
     setPreview(null);
     setPreviewPayload(null);
+    setPreviewArtistId(null);
   }
 
   async function readLocalFile(file: File | undefined, apply: (value: string) => void) {
-    if (!file) return;
+    if (controlsDisabled || !file) return;
     apply(await file.text());
   }
 
@@ -49,18 +56,22 @@ export function CatalogImportForm() {
   }
 
   async function submit(dryRun: boolean) {
+    if (controlsDisabled || !confirmedArtistId) return;
     setBusy(true);
     setError("");
     try {
       const payload = dryRun ? parsePayload() : previewPayload;
-      if (!payload || (payload.vault == null && payload.showNight == null)) {
+      if (!payload || (payload.vault == null && payload.showNight == null)
+        || (!dryRun && (preview?.dryRun !== true || previewArtistId !== confirmedArtistId))) {
         throw new Error("Preview this local JSON before applying");
       }
       const result = await apiFetch<CatalogImportResult>("/songs/import", {
         method: "POST",
+        artistId: confirmedArtistId,
         json: { ...payload, dryRun }
       });
       setPreview(result);
+      setPreviewArtistId(confirmedArtistId);
       if (dryRun) setPreviewPayload(payload);
       else {
         setPreviewPayload(null);
@@ -87,14 +98,14 @@ export function CatalogImportForm() {
             className="sb-input mt-1.5"
             type="file"
             accept=".json,application/json"
-            disabled={busy}
+            disabled={controlsDisabled}
             onChange={(event) => void readLocalFile(event.target.files?.[0], updateVault)}
           />
           <textarea
             aria-label="Vault JSON"
             className="sb-input mt-2 min-h-28 font-mono text-xs"
             value={vaultText}
-            disabled={busy}
+            disabled={controlsDisabled}
             onChange={(event) => updateVault(event.target.value)}
             placeholder='{"schema_version":3,"songs":[],"setlist_ready_default_import":[]}'
           />
@@ -106,24 +117,24 @@ export function CatalogImportForm() {
             className="sb-input mt-1.5"
             type="file"
             accept=".json,application/json"
-            disabled={busy}
+            disabled={controlsDisabled}
             onChange={(event) => void readLocalFile(event.target.files?.[0], updateShowNight)}
           />
           <textarea
             aria-label="Show Night JSON"
             className="sb-input mt-2 min-h-28 font-mono text-xs"
             value={showNightText}
-            disabled={busy}
+            disabled={controlsDisabled}
             onChange={(event) => updateShowNight(event.target.value)}
             placeholder='{"radDadSet":[]}'
           />
         </label>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        <button type="button" className="sb-btn-primary" disabled={busy} onClick={() => void submit(true)}>
+        <button type="button" className="sb-btn-primary" disabled={controlsDisabled} onClick={() => void submit(true)}>
           Preview import
         </button>
-        <button type="button" className="sb-btn-secondary" disabled={busy || !previewPayload || preview?.dryRun !== true} onClick={() => void submit(false)}>
+        <button type="button" className="sb-btn-secondary" disabled={controlsDisabled || !previewPayload || preview?.dryRun !== true || previewArtistId !== confirmedArtistId} onClick={() => void submit(false)}>
           Apply import
         </button>
       </div>
