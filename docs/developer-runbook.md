@@ -1051,10 +1051,46 @@ status are persisted through `PATCH /setlists/:id`. The displayed duration is
 song time only. Breaks are excluded because their duration is not modeled, and
 missing song durations remain explicit. Show readiness awards full setlist
 timing credit only when at least one song is present and every song duration is
-known. The editor sends the setlist's last-seen `updatedAt` with every save and
-disables saving if that receipt is unavailable. If another band member saved
-first, the visible conflict asks for a refresh and the newer server copy is not
-overwritten.
+known. The editor sends its explicitly reviewed base `updatedAt` with every
+save, not a newer value that happened to arrive as refreshed page props.
+`packages/shared/src/setlist-draft.ts` owns the browser-memory draft lifecycle:
+new saved snapshots cannot replace dirty fields, save attempts bind an exact
+submitted draft/revision, and only a matching same-record, newer saved receipt
+can confirm that write. Missing versions, malformed responses, and uncertain
+writes disable saving until a fresh read can be reviewed.
+
+**Review latest saved version** uses the existing band-scoped `GET /setlists`
+and requires exactly one matching record. The inline comparison shows name,
+status, set notes, every ordered song/break/note, and transition cues. **Keep my
+draft** changes only the reviewed base; **Use latest saved version** explicitly
+discards the whole local draft. Neither sends a request to save. The separate
+**Save running order** still refuses a concurrent save made after that review.
+There is no automatic merge, resend, localStorage, or second setlist store.
+
+`operations/setlist-builder.tsx` stays mounted with a stable setlist ID within a
+band-keyed music workspace. Switching Operations tabs or receiving a background
+refresh preserves drafts. An incomplete workspace read retains only the last
+complete view for that same band, marks it as stale, and pauses edits. Initial
+read failures never claim the library is empty. **Retry workspace** is outside
+the disabled edit fieldset and calls `router.refresh`, retaining the draft
+while a new view loads. Review/save requests have a 15-second deadline covering
+the response body too; timeout is an uncertain result requiring a fresh review,
+not proof that no server write happened. Reads and writes are pinned to
+the confirmed band; a confirmed band change resets the music editors. A full
+reload, leaving Operations, closing the page, or changing bands **does not
+persist unsaved drafts**. Save before doing those things. Catalog preview/apply
+also pins its requests and reviewed payload to this band. The Music grid fits a
+phone viewport; below the desktop breakpoint, shell command/integration tools
+remain below content instead of sticking over the setlist editor.
+
+Verification for the 2026-09-04 setlist draft slice: 83 shared tests (21 new
+draft-lifecycle cases), 295 API unit tests, 5 disposable database integration
+workflows, and 24 Chromium journeys including stale/repeated conflicts,
+explicit no-write review, tab/refresh retention, interrupted saves, and failed
+review reads, real request deadlines, injected loader-failure/in-place retry,
+mobile layout, and band-pinned catalog requests. Typecheck, lint, both production builds, and 99 Manager evaluation
+checks also pass locally. Local test PostgreSQL is 15.18 with Redis 7.4.11;
+hosted Quality remains the PostgreSQL 16/container verification authority.
 
 In Band operations, expand **Manage readiness details** on an event to record
 each active member's availability, attach an artist-owned venue/contact/setlist,

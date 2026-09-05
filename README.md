@@ -605,8 +605,23 @@ does not ship or fetch the private catalog. After import, Band operations
 corrects duration and key and builds the practical setlist of ordered songs, breaks, notes, transition cues,
 status, and reusable set notes. Every edit is bound to the exact setlist version
 the band member opened. If somebody else saves first, StoryBoard refuses the
-stale overwrite, keeps the newer running order intact, and asks the editor to
-refresh before reapplying their changes. `setlist_summary_v1` derives song count and
+stale overwrite and keeps both the newer saved running order and the editor's
+unfinished draft. **Review latest saved version** compares name, status, notes,
+and the complete ordered set. **Keep my draft** stages it against that reviewed
+version; **Use latest saved version** explicitly discards the local draft.
+Neither choice writes—**Save running order** is a separate action. A newer save
+after review is still refused. Unsaved, saving, review-needed, and unconfirmed
+states are visible; an interrupted save never triggers an automatic retry.
+Drafts survive Operations tab switches and background refreshes in the open
+page. They are **not autosaved or stored across a full page reload, closing the
+page, leaving Operations, or changing bands**. A failed workspace refresh keeps
+the last loaded view and unfinished drafts visible with edits paused. **Retry
+workspace** reloads that view in place without discarding the draft; browser
+Reload does not. Review/save requests have a 15-second confirmation deadline;
+a timeout means the outcome is unknown, not that the write could not have
+reached StoryBoard. Phone-width editors fit the page, and the command/integration
+panel stays below the content instead of covering the running-order comparison.
+`setlist_summary_v1` derives song count and
 known performance time from the canonical library; break time is never guessed,
 and any song without a duration remains a visible readiness gap rather than
 turning the known subtotal into a false set length. Song title, duration, key,

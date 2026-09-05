@@ -139,6 +139,7 @@ async function ensureQualifiedProspect(page: Page, artistId: string) {
 test("mobile navigation closes and unlocks scrolling at the desktop breakpoint", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signInForBrowserTest(page);
+  await expect(page.getByTestId("workspace-command-panel")).toHaveCSS("position", "static");
 
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(page.getByRole("dialog", { name: "Navigation" })).toBeVisible();
@@ -148,6 +149,7 @@ test("mobile navigation closes and unlocks scrolling at the desktop breakpoint",
   await expect(page.getByRole("dialog", { name: "Navigation" })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
   await expect(page.getByRole("navigation", { name: "Main" }).first()).toBeVisible();
+  await expect(page.getByTestId("workspace-command-panel")).toHaveCSS("position", "sticky");
 });
 
 test("manual prospect can gain a buyer and enter an approval-ready campaign", async ({ page }) => {
@@ -269,6 +271,256 @@ test("band can build, time, annotate, and reorder a practical setlist", async ({
   await expect(page.getByRole("alert").filter({ hasText: /changed since you opened it/i })).toBeVisible();
   const preserved = (await artistApi<Array<{ id: string; notes: string | null }>>(page, artistId, "/setlists")).find((setlist) => setlist.id === current!.id);
   expect(preserved?.notes).toBe("Updated by another band member");
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("My stale local notes");
+  await expect(builder.getByRole("button", { name: "Save running order" })).toBeDisabled();
+  await builder.getByRole("button", { name: "Review latest saved version" }).click();
+  const review = builder.getByTestId("setlist-version-review");
+  await expect(review).toContainText("Updated by another band member");
+  await expect(review).toContainText("My stale local notes");
+  await builder.getByRole("button", { name: "Keep my draft", exact: true }).click();
+  const afterReview = (await artistApi<Array<{ id: string; notes: string | null; updatedAt: string }>>(page, artistId, "/setlists")).find((setlist) => setlist.id === current!.id)!;
+  expect(afterReview.notes, "Review must only stage the choice, never save it").toBe("Updated by another band member");
+  // A second writer can still advance the record after review. Do not weaken
+  // the existing expected-version contract or silently retry that new conflict.
+  await artistApi(page, artistId, `/setlists/${current!.id}`, "PATCH", {
+    expectedUpdatedAt: afterReview.updatedAt, notes: "A still newer band decision"
+  });
+  const rejectedAgain = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes(`/setlists/${current!.id}`) && response.status() === 409);
+  await builder.getByRole("button", { name: "Save running order" }).click();
+  await rejectedAgain;
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("My stale local notes");
+  await builder.getByRole("button", { name: "Review latest saved version" }).click();
+  await expect(review).toContainText("A still newer band decision");
+  await builder.getByRole("button", { name: "Use latest saved version", exact: true }).click();
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("A still newer band decision");
+  await expect(builder.getByRole("button", { name: "Save running order" })).toBeDisabled();
+});
+
+test("unfinished running order survives tabs and a newer saved version arriving on refresh", async ({ page }, testInfo) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const suffix = Date.now().toString(36);
+  const songName = `E2E retained draft song ${suffix}`;
+  const setName = `E2E retained draft set ${suffix}`;
+  const song = await artistApi<{ id: string }>(page, artistId, "/songs", "POST", { title: songName, durationSeconds: 180, active: true });
+  const setlist = await artistApi<{ id: string; updatedAt: string }>(page, artistId, "/setlists", "POST", {
+    name: setName, status: "draft", notes: "Original band notes",
+    items: [{ songId: song.id, itemType: "song" }]
+  });
+  await page.goto("/operations?tab=music");
+  const builder = page.getByTestId(`setlist-${setlist.id}`);
+  await builder.locator("summary").click();
+  await builder.getByLabel(`Notes for setlist ${setName}`).fill("My unfinished show cues");
+  await builder.getByLabel(`Add break to ${setName}`).click();
+  await builder.getByLabel(`Move position 2 up in ${setName}`).click();
+  await builder.getByLabel(`Transition after position 1 in ${setName}`).fill("Check tuning before the opener");
+  await page.getByRole("tab", { name: "Events", exact: true }).click();
+  await expect(builder).toBeHidden();
+  await page.getByRole("tab", { name: "Music & setlists" }).click();
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("My unfinished show cues");
+  await expect(builder.getByLabel(`Break at position 1 in ${setName}`)).toHaveValue("Set break");
+
+  await artistApi(page, artistId, `/setlists/${setlist.id}`, "PATCH", { expectedUpdatedAt: setlist.updatedAt, notes: "Bandmate moved the soundcheck" });
+  // A song edit causes the existing router.refresh path to deliver new server
+  // props. The running-order editor must stay mounted, with its old base held.
+  await page.getByLabel(`Edit song ${songName}`).click();
+  await page.getByLabel(`Duration for ${songName}`).fill("3:15");
+  const refreshed = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().endsWith(`/songs/${song.id}`) && response.ok());
+  await page.getByRole("button", { name: "Save song", exact: true }).click();
+  await refreshed;
+  await expect(builder.getByTestId("setlist-draft-status")).toContainText(/review/i);
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("My unfinished show cues");
+  await expect(builder.getByLabel(`Transition after position 1 in ${setName}`)).toHaveValue("Check tuning before the opener");
+  await expect(builder.getByRole("button", { name: "Save running order" })).toBeDisabled();
+  await builder.getByRole("button", { name: "Review latest saved version" }).click();
+  await expect(builder.getByTestId("setlist-version-review")).toContainText("Bandmate moved the soundcheck");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(builder.getByRole("button", { name: "Keep my draft", exact: true })).toBeVisible();
+  const mobileLayout = await page.evaluate(() => ({
+    width: document.documentElement.scrollWidth,
+    viewport: window.innerWidth,
+    overflowing: [...document.querySelectorAll<HTMLElement>("body *")]
+      .filter((node) => node.getBoundingClientRect().right > window.innerWidth + 1 && node.getBoundingClientRect().width > 0)
+      .slice(0, 15).map((node) => ({ tag: node.tagName, className: node.className, right: node.getBoundingClientRect().right }))
+  }));
+  expect(mobileLayout.width, JSON.stringify(mobileLayout)).toBeLessThanOrEqual(mobileLayout.viewport);
+  await builder.getByTestId("setlist-version-review").screenshot({ path: testInfo.outputPath("setlist-review-mobile.png") });
+  await builder.getByRole("button", { name: "Keep my draft", exact: true }).click();
+  const stagedOnly = (await artistApi<Array<{ id: string; notes: string }>>(page, artistId, "/setlists")).find((row) => row.id === setlist.id);
+  expect(stagedOnly?.notes).toBe("Bandmate moved the soundcheck");
+  const saved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().endsWith(`/setlists/${setlist.id}`) && response.ok());
+  await builder.getByRole("button", { name: "Save running order" }).click();
+  await saved;
+  await expect(builder.getByTestId("setlist-draft-status")).toContainText(/saved/i);
+  const persisted = (await artistApi<Array<{ id: string; notes: string; items: Array<{ itemType: string; transitionNotes: string }> }>>(page, artistId, "/setlists")).find((row) => row.id === setlist.id)!;
+  expect(persisted.notes).toBe("My unfinished show cues");
+  expect(persisted.items.map((item) => item.itemType)).toEqual(["break", "song"]);
+  expect(persisted.items[0]!.transitionNotes).toBe("Check tuning before the opener");
+});
+
+test("uncertain setlist save and failed review retain the draft without automatic writes", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const setName = `E2E interrupted set ${Date.now().toString(36)}`;
+  const setlist = await artistApi<{ id: string }>(page, artistId, "/setlists", "POST", { name: setName, status: "draft", notes: "Known saved notes", items: [] });
+  await page.goto("/operations?tab=music");
+  const builder = page.getByTestId(`setlist-${setlist.id}`);
+  await builder.locator("summary").click();
+  await builder.getByLabel(`Notes for setlist ${setName}`).fill("Do not lose these show notes");
+  let writeAttempts = 0;
+  const writeUrl = `${browserTestApiUrl}/setlists/${setlist.id}`;
+  await page.route(writeUrl, async (route) => {
+    writeAttempts += 1;
+    await route.abort("failed");
+  });
+  await builder.getByRole("button", { name: "Save running order" }).click();
+  await expect(builder.getByTestId("setlist-draft-status")).toContainText(/not confirmed/i);
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("Do not lose these show notes");
+  await expect(builder.getByRole("button", { name: "Save running order" })).toBeDisabled();
+  expect(writeAttempts).toBe(1);
+  await page.unroute(writeUrl);
+  const readUrl = `${browserTestApiUrl}/setlists`;
+  await page.route(readUrl, (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "Fixture read temporarily unavailable" }) }));
+  await builder.getByRole("button", { name: "Review latest saved version" }).click();
+  await expect(builder.getByTestId("setlist-draft-status")).toContainText(/could not|unavailable/i);
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("Do not lose these show notes");
+  await expect(builder.getByRole("button", { name: "Save running order" })).toBeDisabled();
+  await page.unroute(readUrl);
+  await builder.getByRole("button", { name: "Review latest saved version" }).click();
+  // The fresh read may confirm that the old base is still current. It is never
+  // a saved receipt for the local notes, and it must not issue a PATCH itself.
+  await expect(builder.getByTestId("setlist-version-review")).toHaveCount(0);
+  await expect(builder.getByRole("button", { name: "Save running order" })).toBeEnabled();
+  const beforeRetry = (await artistApi<Array<{ id: string; notes: string }>>(page, artistId, "/setlists")).find((row) => row.id === setlist.id);
+  expect(beforeRetry?.notes).toBe("Known saved notes");
+  const saved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url() === writeUrl && response.ok());
+  await builder.getByRole("button", { name: "Save running order" }).click();
+  await saved;
+  await expect(builder.getByTestId("setlist-draft-status")).toContainText(/saved/i);
+  expect(pageErrors, "Handled write/read failures must not escape as unhandled page errors").toEqual([]);
+});
+
+test("stalled setlist requests time out without losing the draft or automatically resending", async ({ page }) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const setName = `E2E stalled set ${Date.now().toString(36)}`;
+  const setlist = await artistApi<{ id: string }>(page, artistId, "/setlists", "POST", { name: setName, status: "draft", items: [] });
+  await page.goto("/operations?tab=music");
+  const builder = page.getByTestId(`setlist-${setlist.id}`);
+  await builder.locator("summary").click();
+  await builder.getByLabel(`Notes for setlist ${setName}`).fill("Keep the tuning plan");
+  let writeAttempts = 0;
+  const writeUrl = `${browserTestApiUrl}/setlists/${setlist.id}`;
+  await page.route(writeUrl, () => { writeAttempts += 1; /* Deliberately no response: exercise the real deadline. */ });
+  await builder.getByRole("button", { name: "Save running order" }).click();
+  await expect(builder.getByTestId("setlist-draft-status")).toContainText(/not confirmed/i, { timeout: 20_000 });
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("Keep the tuning plan");
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toBeEnabled();
+  expect(writeAttempts).toBe(1);
+  await page.unroute(writeUrl);
+  const readUrl = `${browserTestApiUrl}/setlists`;
+  await page.route(readUrl, () => { /* The read is deliberately stalled too. */ });
+  await builder.getByRole("button", { name: "Review latest saved version" }).click();
+  await expect(builder.getByTestId("setlist-draft-status")).toContainText(/could not|unavailable/i, { timeout: 20_000 });
+  await expect(builder.getByRole("button", { name: "Review latest saved version" })).toBeEnabled();
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("Keep the tuning plan");
+  await page.unroute(readUrl);
+  await builder.getByRole("button", { name: "Review latest saved version" }).click();
+  await expect(builder.getByRole("button", { name: "Save running order" })).toBeEnabled();
+  const current = (await artistApi<Array<{ id: string; notes: string | null }>>(page, artistId, "/setlists")).find((row) => row.id === setlist.id);
+  expect(current?.notes).toBeNull();
+});
+
+test("workspace retry restores a failed loader view without discarding unfinished setlists", async ({ page }) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const setName = `E2E workspace retry ${Date.now().toString(36)}`;
+  const song = await artistApi<{ id: string; title: string }>(page, artistId, "/songs", "POST", { title: `${setName} song`, durationSeconds: 180, active: true });
+  const setlist = await artistApi<{ id: string }>(page, artistId, "/setlists", "POST", { name: setName, status: "draft", items: [] });
+  await page.goto("/operations?tab=music");
+  const builder = page.getByTestId(`setlist-${setlist.id}`);
+  await builder.locator("summary").click();
+  await builder.getByLabel(`Notes for setlist ${setName}`).fill("Keep me through an unavailable workspace");
+  let injectedFailures = 0;
+  let recoveringWorkspace = false;
+  let recoveredResponses = 0;
+  let setlistWriteAttempts = 0;
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && request.url() === `${browserTestApiUrl}/setlists/${setlist.id}`) setlistWriteAttempts += 1;
+  });
+  // Inject the server loader's unavailable result into the real RSC boundary.
+  // This tests client recovery, not a claim that the API itself failed.
+  await page.route("**/operations?**", async (route) => {
+    const headers = route.request().headers();
+    // Next also fetches metadata and segment-prefetch responses in parallel.
+    // They contain no OperationsClient props and must not consume this fixture.
+    if (headers.rsc !== "1" || headers["next-router-prefetch"] === "1" || headers["next-router-segment-prefetch"]) return route.continue();
+    const response = await route.fetch();
+    const body = await response.text();
+    if (!body.includes('"initialSetlists":')) return route.fulfill({ response, body });
+    expect(body).toContain('"setlistsAvailable":true');
+    expect(body).toMatch(/"initialSetlists":.*?,"initialBookings":/);
+    if (injectedFailures) {
+      if (recoveringWorkspace) {
+        expect(body, "Retry must fetch real available workspace props").toContain('"accessState":"manage"');
+        recoveredResponses += 1;
+      }
+      // Inspect the full streamed response here, while its body is available,
+      // then deliver it unchanged. No fixture values are substituted on retry.
+      return route.fulfill({ response, body });
+    }
+    injectedFailures += 1;
+    await route.fulfill({ response, body: body
+      .replace('"setlistsAvailable":true', '"setlistsAvailable":false')
+      .replace(/"initialSetlists":.*?,"initialBookings":/, '"initialSetlists":[],"initialBookings":')
+      .replace('"accessState":"manage"', '"accessState":"unavailable"')
+      .replace('"loadError":null', '"loadError":"Fixture: the latest setlist read is unavailable."')
+    });
+  });
+  await page.getByLabel(`Edit song ${song.title}`).click();
+  await page.getByLabel(`Duration for ${song.title}`).fill("3:20");
+  await page.getByRole("button", { name: "Save song", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Retry workspace", exact: true })).toBeEnabled();
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("Keep me through an unavailable workspace");
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toBeDisabled();
+  await expect(page.getByText(/last loaded view/i)).toBeVisible();
+  recoveringWorkspace = true;
+  await page.getByRole("button", { name: "Retry workspace", exact: true }).click();
+  await expect.poll(() => recoveredResponses).toBe(1);
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toBeEnabled();
+  await expect(builder.getByLabel(`Notes for setlist ${setName}`)).toHaveValue("Keep me through an unavailable workspace");
+  await expect(builder.getByRole("button", { name: "Save running order" })).toBeEnabled();
+  await expect(page.getByText(/last loaded view/i)).toBeHidden();
+  expect(injectedFailures).toBe(1);
+  await page.unroute("**/operations?**");
+  expect(setlistWriteAttempts, "Retrying the workspace must not save an unfinished setlist").toBe(0);
+  const unchanged = (await artistApi<Array<{ id: string; notes: string | null }>>(page, artistId, "/setlists")).find((row) => row.id === setlist.id);
+  expect(unchanged?.notes).toBeNull();
+});
+
+test("catalog preview and explicit apply stay pinned to the music workspace band", async ({ page }) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  await page.goto("/operations?tab=music");
+  await page.getByLabel("Show Night JSON").fill(JSON.stringify({
+    event: { name: `Fixture pinned show ${Date.now().toString(36)}` },
+    radDadSet: [{ number: 1, song: "Fixture pinned opener", transition: false, special: false }]
+  }));
+  const previewRequest = page.waitForRequest((request) => request.url().endsWith("/songs/import") && request.method() === "POST");
+  await page.getByRole("button", { name: "Preview import", exact: true }).click();
+  const preview = await previewRequest;
+  expect(preview.headers()["x-artist-id"]).toBe(artistId);
+  expect(preview.postDataJSON().dryRun).toBe(true);
+  await expect(page.getByRole("button", { name: "Apply import", exact: true })).toBeEnabled();
+  await page.getByRole("tab", { name: "Events", exact: true }).click();
+  await page.getByRole("tab", { name: "Music & setlists" }).click();
+  const applyRequest = page.waitForRequest((request) => request.url().endsWith("/songs/import") && request.method() === "POST");
+  await page.getByRole("button", { name: "Apply import", exact: true }).click();
+  const apply = await applyRequest;
+  expect(apply.headers()["x-artist-id"]).toBe(artistId);
+  expect(apply.postDataJSON().dryRun).toBe(false);
 });
 
 test("novice manager intake produces grounded work and band operations records", async ({ page }) => {

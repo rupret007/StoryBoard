@@ -36,7 +36,7 @@ export function AppShell({
         <main className="relative flex-1 px-4 py-5 sm:px-6 sm:py-8 md:px-10 lg:px-12">
           <div className="mx-auto max-w-6xl"><MobileAppNav approvalAttention={approvalAttention} {...(operatorEmail ? { operatorEmail } : {})} memberships={memberships ?? []} currentArtistId={currentArtistId ?? null} {...(showTeamLink ? { showTeamLink: true } : {})} />{children}</div>
         </main>
-        <div className="sticky bottom-0 z-30 border-t border-[var(--border)] bg-[var(--canvas)]/90 px-6 py-4 backdrop-blur-lg md:px-10 lg:px-12">
+        <div data-testid="workspace-command-panel" className="z-30 border-t border-[var(--border)] bg-[var(--canvas)]/90 px-6 py-4 backdrop-blur-lg md:px-10 lg:sticky lg:bottom-0 lg:px-12">
           <div className="mx-auto flex max-w-6xl flex-col gap-3">
             {artistId ? <WorkflowNotificationsStrip artistId={artistId} /> : null}
             {artistId ? <IntegrationStatusStrip artistId={artistId} /> : null}
