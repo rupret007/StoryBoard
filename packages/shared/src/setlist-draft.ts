@@ -77,6 +77,58 @@ function equal(left: SetlistDraftValues, right: SetlistDraftValues): boolean {
   return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 }
 
+export type SetlistDraftDifference = {
+  identical: boolean;
+  changes: string[];
+  summary: string;
+};
+
+function joinPhrases(phrases: string[]): string {
+  if (phrases.length <= 1) return phrases.join("");
+  if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
+  return `${phrases.slice(0, -1).join(", ")}, and ${phrases[phrases.length - 1]}`;
+}
+
+/**
+ * Plain-language, position-based description of how a local draft differs from
+ * another saved version. It never claims a semantic merge or reorder detection:
+ * fields and overlapping running-order positions that changed are simply named
+ * and counted so a reviewer can decide which whole version to keep.
+ */
+export function describeSetlistDraftDifference(
+  mine: SetlistDraftValues,
+  theirs: SetlistDraftValues,
+): SetlistDraftDifference {
+  const left = canonical(mine);
+  const right = canonical(theirs);
+  const changes: string[] = [];
+  if (left.name !== right.name) changes.push("name");
+  if (left.status !== right.status) changes.push(`status (${right.status} saved, ${left.status} in draft)`);
+  if (left.notes !== right.notes) changes.push("set notes");
+
+  const delta = left.items.length - right.items.length;
+  if (delta > 0) changes.push(`${delta} item${delta === 1 ? "" : "s"} added`);
+  else if (delta < 0) changes.push(`${-delta} item${delta === -1 ? "" : "s"} removed`);
+
+  const overlap = Math.min(left.items.length, right.items.length);
+  let positionsChanged = 0;
+  for (let index = 0; index < overlap; index += 1) {
+    if (JSON.stringify(left.items[index]) !== JSON.stringify(right.items[index])) positionsChanged += 1;
+  }
+  if (positionsChanged > 0) {
+    changes.push(`${positionsChanged} earlier running-order position${positionsChanged === 1 ? "" : "s"} changed`);
+  }
+
+  const identical = changes.length === 0;
+  return {
+    identical,
+    changes,
+    summary: identical
+      ? "This draft and the latest saved version match; either choice keeps the same running order."
+      : `This draft differs from the latest saved version: ${joinPhrases(changes)}.`,
+  };
+}
+
 function readValues(value: unknown, recordId: string): SetlistDraftValues | null {
   const row = object(value);
   if (!row || row.id !== recordId || !Array.isArray(row.items) || row.items.length > 100) return null;

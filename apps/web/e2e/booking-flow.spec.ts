@@ -313,6 +313,7 @@ test("band can build, time, annotate, and reorder a practical setlist", async ({
   const review = builder.getByTestId("setlist-version-review");
   await expect(review).toContainText("Updated by another band member");
   await expect(review).toContainText("My stale local notes");
+  await expect(builder.getByTestId("setlist-version-difference")).toContainText("differs from the latest saved version: set notes");
   await builder.getByRole("button", { name: "Keep my draft", exact: true }).click();
   const afterReview = (await artistApi<Array<{ id: string; notes: string | null; updatedAt: string }>>(page, artistId, "/setlists")).find((setlist) => setlist.id === current!.id)!;
   expect(afterReview.notes, "Review must only stage the choice, never save it").toBe("Updated by another band member");

@@ -10,6 +10,22 @@ This document orients an autonomous coding agent so work continues without losin
 
 ## Delivery state (what already exists)
 
+### Running-order version-review difference line
+
+The setlist compare-and-set review ("Compare before continuing") now names, in
+plain language, how the open draft differs from the latest saved version: which
+fields changed (name, status, set notes), the net item count change, and how
+many overlapping running-order positions differ. It is a factual,
+position-based description — no semantic reorder detection, no merge, no write.
+Choosing keep/discard is unchanged; the line only makes that choice better
+informed so a reviewer is less likely to discard a bandmate's save by mistake.
+Pure helper `describeSetlistDraftDifference` in
+`packages/shared/src/setlist-draft.ts`; rendered in
+`apps/web/src/app/(app)/operations/setlist-builder.tsx`
+(`data-testid="setlist-version-difference"`). Parked #21 untouched; no provider,
+send, schema, or dependency change. Marker:
+`OVERNIGHT_CLAUDE_STORYBOARD_20260907_0944`.
+
 ### Unsaved running-order reload guard
 
 Dirty setlist editors attach a native reload/close warning; save, revert, or
