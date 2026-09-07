@@ -4,6 +4,7 @@ import { Badge } from "@storyboard/ui";
 import {
   catalogSourceLabel,
   createSetlistDraftState,
+  describeSetlistDraftDifference,
   reduceSetlistDraft,
   setlistDraftSavePayload,
   setlistDraftStatus,
@@ -314,6 +315,9 @@ export function SetlistBuilder({
           <section aria-label={`Compare saved running order for ${setlist.name}`} className="mb-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4" data-testid="setlist-version-review">
             <h3 className="font-semibold">Compare before continuing</h3>
             <p className="mt-1 text-xs text-[var(--text-muted)]">No automatic merge or resend. Keeping your draft replaces the reviewed running order only after you separately save.</p>
+            <p className="mt-2 text-xs font-medium text-[var(--text-secondary)]" data-testid="setlist-version-difference">
+              {describeSetlistDraftDifference(draft, state.latest).summary}
+            </p>
             {state.issue ? <p className="mt-2 text-xs text-amber-200">Review latest again before choosing. The saved version below has not been reverified after the failed check.</p> : null}
             <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-2">
               <DraftComparison title="Your unsaved draft" values={draft} songs={songs} />

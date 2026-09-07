@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { createSetlistDraftState: create, reduceSetlistDraft: reduce, setlistDraftStatus: status, setlistDraftSavePayload: payload } = require("../dist/index.js");
+const { createSetlistDraftState: create, reduceSetlistDraft: reduce, setlistDraftStatus: status, setlistDraftSavePayload: payload, describeSetlistDraftDifference: difference } = require("../dist/index.js");
 const versions = ["2026-09-04T20:00:00.000Z", "2026-09-04T20:00:00.001Z", "2026-09-04T20:00:00.002Z", "2026-09-04T20:00:00.003Z"];
 const song = (songId) => ({ songId, itemType: "song", label: null, transitionNotes: null });
 function saved(version = 0, overrides = {}) {
@@ -231,6 +231,51 @@ test("ordered repeated songs and markers stay exact, without index or ID merging
   const reordered = edit(state, { items: [...state.draft.items].reverse() });
   assert.deepEqual(payload(reordered).items.map((item) => item.itemType), ["break", "song", "note", "song"]);
   assert.equal(status(receive(reordered, saved(1, { items }))).needsReview, true);
+});
+
+test("version-review difference names changed fields and counts without claiming a merge", () => {
+  const base = { name: "Friday running order", status: "active", notes: "", items: [
+    { songId: "opener", itemType: "song", label: "", transitionNotes: "" },
+    { songId: "closer", itemType: "song", label: "", transitionNotes: "" }
+  ] };
+  assert.deepEqual(difference(base, { ...base, items: base.items.map((item) => ({ ...item })) }), {
+    identical: true,
+    changes: [],
+    summary: "This draft and the latest saved version match; either choice keeps the same running order."
+  });
+
+  const mine = {
+    name: "  Friday running order  ",
+    status: "draft",
+    notes: "Count in quietly",
+    items: [
+      { songId: "closer", itemType: "song", label: "", transitionNotes: "Retune to drop D" },
+      { songId: "opener", itemType: "song", label: "", transitionNotes: "" },
+      { songId: null, itemType: "break", label: "Set break", transitionNotes: "" }
+    ]
+  };
+  const result = difference(mine, base);
+  assert.equal(result.identical, false);
+  assert.deepEqual(result.changes, [
+    "status (active saved, draft in draft)",
+    "set notes",
+    "1 item added",
+    "2 earlier running-order positions changed"
+  ]);
+  assert.equal(
+    result.summary,
+    "This draft differs from the latest saved version: status (active saved, draft in draft), set notes, 1 item added, and 2 earlier running-order positions changed."
+  );
+});
+
+test("version-review difference reports removed items and singular phrasing", () => {
+  const theirs = { name: "Set", status: "draft", notes: "", items: [
+    { songId: "a", itemType: "song", label: "", transitionNotes: "" },
+    { songId: "b", itemType: "song", label: "", transitionNotes: "" }
+  ] };
+  const mine = { ...theirs, items: [{ songId: "a", itemType: "song", label: "", transitionNotes: "" }] };
+  assert.deepEqual(difference(mine, theirs).changes, ["1 item removed"]);
+  assert.equal(difference({ ...theirs, name: "Renamed" }, theirs).summary, "This draft differs from the latest saved version: name.");
 });
 
 test("snapshots and caller draft objects are copied, not retained by reference", () => {
