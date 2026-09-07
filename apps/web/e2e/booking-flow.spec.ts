@@ -209,6 +209,42 @@ test("booking advisor produces reviewable, non-automated guidance", async ({ pag
   await page.getByRole("button", { name: "Helpful", exact: true }).click();
 });
 
+test("unsaved running order warns on reload and releases the warning after save", async ({ page }) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const name = `E2E reload guard ${Date.now()}`;
+  const setlist = await artistApi<{ id: string }>(page, artistId, "/setlists", "POST", {
+    name, status: "draft", notes: "Saved notes", items: []
+  });
+  await page.goto("/operations");
+  await page.getByRole("tab", { name: "Music & setlists" }).click();
+  const builder = page.locator(`details[data-testid="setlist-${setlist.id}"]`);
+  await builder.locator("summary").click();
+  const notes = builder.getByLabel(`Notes for setlist ${name}`);
+  const guarded = () => page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(await guarded()).toBe(false);
+  await notes.fill("Unfinished cues");
+  await expect.poll(guarded).toBe(true);
+  const dialogPromise = page.waitForEvent("dialog");
+  const reload = page.reload({ timeout: 5_000 }).catch(() => null);
+  const dialog = await dialogPromise;
+  expect(dialog.type()).toBe("beforeunload");
+  await dialog.dismiss();
+  await reload;
+  await expect(notes).toHaveValue("Unfinished cues");
+  await builder.getByRole("button", { name: "Save running order" }).click();
+  await expect(builder.getByRole("button", { name: "Save running order" })).toBeDisabled();
+  await expect.poll(guarded).toBe(false);
+  await notes.fill("Another edit");
+  await expect.poll(guarded).toBe(true);
+  await notes.fill("Unfinished cues");
+  await expect.poll(guarded).toBe(false);
+});
+
 test("band can build, time, annotate, and reorder a practical setlist", async ({ page }) => {
   const suffix = Date.now().toString(36);
   const firstSong = `E2E opener ${suffix}`;
