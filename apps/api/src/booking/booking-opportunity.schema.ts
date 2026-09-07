@@ -1,14 +1,7 @@
 import { z } from "zod";
+import { bookingStages } from "@storyboard/shared";
 
-const bookingStageValues = [
-  "target",
-  "outreach",
-  "conversation",
-  "offer",
-  "hold",
-  "confirmed",
-  "closed"
-] as const;
+const bookingStageValues = bookingStages;
 
 const relatedVenueId = z.string().trim().min(1);
 const targetDate = z.union([
@@ -38,8 +31,13 @@ export const bookingOpportunityPatchSchema = z
   .strict();
 
 export const bookingOpportunityStageSchema = z
-  .object({ stage: z.enum(bookingStageValues) })
+  .object({
+    stage: z.enum(bookingStageValues),
+    expectedUpdatedAt: z.iso.datetime({ offset: true })
+  })
   .strict();
+
+export type BookingOpportunityStageInput = z.infer<typeof bookingOpportunityStageSchema>;
 
 export type BookingOpportunityCreateInput = z.infer<
   typeof bookingOpportunityCreateSchema

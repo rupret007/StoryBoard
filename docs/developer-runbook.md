@@ -1166,6 +1166,31 @@ release/project questions and weekly prioritization.
 
 ## Booking acquisition
 
+### Reviewed pipeline stage changes
+
+`PATCH /booking-opportunities/:id/stage` accepts exactly:
+
+```json
+{ "stage": "confirmed", "expectedUpdatedAt": "2026-09-06T18:00:00.123Z" }
+```
+
+Use the `updatedAt` returned by the opportunity read that the operator reviewed.
+Owner/member membership and the existing CSRF boundary remain required. Missing
+or malformed versions return 400; stale versions and concurrent changes return
+409 without committing the stage, gig, or audit. Load current details and review
+again; do not automatically retry. A fresh same-stage request is a no-op. A
+stale same-stage request still returns conflict so a lost response is resolved
+by reading the record.
+
+The shared stage policy preserves hold → offer negotiation and confirmed →
+closed, and disallows reopening closed opportunities. Confirmation creates a
+missing linked internal gig using the opportunity title, venue, and target date;
+it preserves an existing linked gig unchanged. Closing the opportunity leaves
+the gig unchanged. The UI displays missing details and explicitly labels the
+stored target instant as UTC because the opportunity has no show-timezone
+field. No Calendar/Drive/Gmail call, contract, payment, or pitch is implied.
+
+
 All routes below require a signed-in artist member. `GET` is available to
 viewers; `POST`, `PUT`, and `PATCH` require an owner or member. Every write is
 audited and rejects cross-artist relationship IDs with a generic not-found

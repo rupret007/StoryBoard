@@ -1654,8 +1654,8 @@ test("database integration: manager intake, confirmed gig, payment, and settleme
   const foreignVenue = await client.venue.create({ data: { artistId: foreignArtist.id, name: "Foreign Room", city: "Elsewhere" } });
   const booking = new bookingMod.BookingOpportunitiesService(prisma, audit);
   const opportunity = await booking.create(artist.id, { title: "Friday show", venueId: venue.id, targetDate: "2026-09-18T20:00:00.000Z" }, operator.email, operator.id);
-  await booking.updateStage(artist.id, opportunity.id, "confirmed", operator.email, operator.id);
-  await booking.updateStage(artist.id, opportunity.id, "confirmed", operator.email, operator.id);
+  const confirmedOpportunity = await booking.updateStage(artist.id, opportunity.id, { stage: "confirmed", expectedUpdatedAt: opportunity.updatedAt.toISOString() }, operator.email, operator.id);
+  await booking.updateStage(artist.id, opportunity.id, { stage: "confirmed", expectedUpdatedAt: confirmedOpportunity.updatedAt.toISOString() }, operator.email, operator.id);
   assert.equal(await client.bandEvent.count({ where: { artistId: artist.id, opportunityId: opportunity.id } }), 1);
   const event = await client.bandEvent.findUniqueOrThrow({ where: { opportunityId: opportunity.id } });
 
@@ -2608,4 +2608,51 @@ test("database integration: manager follow-through reconciles durable work witho
     () => manager.conversation(foreignArtist.id, conversation.id, operator.id),
     (error) => error?.getStatus?.() === 404
   );
+});
+
+test("database integration: reviewed booking races cannot reopen or duplicate a gig", async () => {
+  const artist = await client.artist.create({ data: { name: "Booking review race", slug: `booking-review-${randomUUID()}` } });
+  const booking = new bookingMod.BookingOpportunitiesService(prisma, audit);
+  const opportunity = await booking.create(artist.id, { title: "Travis reviewed this date", targetDate: "2026-10-02T19:00:00Z" });
+  const expectedUpdatedAt = opportunity.updatedAt.toISOString();
+  const results = await Promise.allSettled([
+    booking.updateStage(artist.id, opportunity.id, { stage: "confirmed", expectedUpdatedAt }),
+    booking.updateStage(artist.id, opportunity.id, { stage: "closed", expectedUpdatedAt })
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  const rejected = results.find((result) => result.status === "rejected");
+  assert.equal(rejected.reason.getStatus(), 409);
+  const saved = await booking.get(artist.id, opportunity.id);
+  assert.equal(await client.bandEvent.count({ where: { opportunityId: opportunity.id } }), saved.stage === "confirmed" ? 1 : 0);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: "booking.stage_changed" } }), 1);
+  await assert.rejects(() => booking.updateStage(artist.id, opportunity.id, { stage: saved.stage, expectedUpdatedAt }), (error) => error.getStatus() === 409);
+  const afterNoOp = await booking.updateStage(artist.id, opportunity.id, { stage: saved.stage, expectedUpdatedAt: saved.updatedAt.toISOString() });
+  assert.equal(afterNoOp.updatedAt.getTime(), saved.updatedAt.getTime());
+  const another = await booking.create(artist.id, { title: "Old terms" });
+  await booking.patch(artist.id, another.id, { title: "New terms" });
+  await assert.rejects(() => booking.updateStage(artist.id, another.id, { stage: "confirmed", expectedUpdatedAt: another.updatedAt.toISOString() }), (error) => error.getStatus() === 409);
+  assert.equal(await client.bandEvent.count({ where: { opportunityId: another.id } }), 0);
+});
+
+test("database integration: booking confirmation rolls back on audit failure and preserves advanced gigs", async () => {
+  const artist = await client.artist.create({ data: { name: "Booking atomic review", slug: `booking-atomic-${randomUUID()}` } });
+  const booking = new bookingMod.BookingOpportunitiesService(prisma, audit);
+  const opportunity = await booking.create(artist.id, { title: "Reviewed confirmation" });
+  const failAudit = new bookingMod.BookingOpportunitiesService(prisma, {
+    log: async (input, tx) => {
+      await audit.log(input, tx);
+      if (input.action === "booking.stage_changed") throw new Error("fixture audit unavailable");
+    }
+  });
+  const input = { stage: "confirmed", expectedUpdatedAt: opportunity.updatedAt.toISOString() };
+  await assert.rejects(() => failAudit.updateStage(artist.id, opportunity.id, input), /fixture audit unavailable/);
+  assert.equal((await booking.get(artist.id, opportunity.id)).stage, "target");
+  assert.equal(await client.bandEvent.count({ where: { opportunityId: opportunity.id } }), 0);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: { in: ["booking.stage_changed", "event.confirmed_from_opportunity"] } } }), 0);
+  const event = await client.bandEvent.create({ data: { artistId: artist.id, opportunityId: opportunity.id, title: "Independently advanced gig", type: "gig", status: "cancelled", startsAt: new Date("2026-11-02T22:00:00Z") } });
+  await booking.updateStage(artist.id, opportunity.id, input);
+  const preserved = await client.bandEvent.findUniqueOrThrow({ where: { id: event.id } });
+  assert.deepEqual(preserved, event);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: "event.confirmed_from_opportunity" } }), 0);
+  assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: "booking.stage_changed" } }), 1);
 });

@@ -1707,3 +1707,127 @@ test("day-of setlist keeps a mixed-duration subtotal explicit", async ({ page })
   await expect(page.getByText("4:05 known + 1 song duration missing", { exact: true })).toBeVisible();
   await expect(page.getByText("4 min", { exact: true })).toHaveCount(0);
 });
+
+test("booking stage review explains confirmation and writes only after reviewed Save", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const booking = await artistApi<{ id: string; updatedAt: string }>(page, artistId, "/booking-opportunities", "POST", { title: "E2E Travis booked this room", stage: "hold" });
+  let writes = 0;
+  page.on("request", (request) => { if (request.method() === "PATCH" && request.url().endsWith(`/booking-opportunities/${booking.id}/stage`)) { writes += 1; expect(request.headers()["x-artist-id"]).toBe(artistId); } });
+  await page.goto("/booking");
+  const editor = page.getByTestId(`booking-stage-editor-${booking.id}`);
+  const choice = editor.getByRole("combobox");
+  await expect(choice.locator("option")).toHaveText(["hold (recorded)", "offer", "confirmed", "closed"]);
+  await choice.selectOption("confirmed");
+  await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
+  const review = editor.getByRole("region", { name: "Review stage for E2E Travis booked this room" });
+  await expect(review).toContainText("hold → confirmed");
+  await expect(review).toContainText("Not recorded — the new gig will need a start time");
+  await expect(review).toContainText("only after Travis has booked it");
+  expect(writes).toBe(0);
+  await editor.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "test-results/booking-stage-mobile-review.png", fullPage: true });
+  await review.getByRole("button", { name: "Cancel review" }).click();
+  expect(writes).toBe(0);
+  expect((await artistApi<{ stage: string }>(page, artistId, `/booking-opportunities/${booking.id}`)).stage).toBe("hold");
+  await choice.selectOption("confirmed");
+  await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
+  await editor.getByRole("button", { name: "Save reviewed stage" }).click();
+  await expect(page.getByText("E2E Travis booked this room: recorded as confirmed.", { exact: true })).toBeVisible();
+  expect(writes).toBe(1);
+  const events = await artistApi<Array<{ id: string; opportunityId: string; startsAt: string | null; status: string }>>(page, artistId, "/events");
+  const gig = events.find((event) => event.opportunityId === booking.id);
+  expect(gig).toMatchObject({ status: "confirmed", startsAt: null });
+  await expect(choice.locator("option")).toHaveText(["confirmed (recorded)", "closed"]);
+  await choice.selectOption("closed");
+  await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
+  await expect(editor).toContainText("does not cancel an existing gig");
+  await editor.getByRole("button", { name: "Save reviewed stage" }).click();
+  await expect(page.getByText("E2E Travis booked this room: recorded as closed.", { exact: true })).toBeVisible();
+  expect((await artistApi<{ status: string }>(page, artistId, `/events/${gig!.id}`)).status).toBe("confirmed");
+  await expect(editor.getByRole("combobox")).toBeDisabled();
+});
+
+test("booking review preserves the selection through repeated competing changes", async ({ page }) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const booking = await artistApi<{ id: string; updatedAt: string }>(page, artistId, "/booking-opportunities", "POST", { title: "E2E original booking terms", stage: "hold" });
+  await page.goto("/booking");
+  const editor = page.getByTestId(`booking-stage-editor-${booking.id}`);
+  await editor.getByRole("combobox").selectOption("confirmed");
+  await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
+  const changed = await artistApi<{ updatedAt: string }>(page, artistId, `/booking-opportunities/${booking.id}`, "PATCH", { title: "E2E teammate revised booking terms", targetDate: "2026-12-04T20:00:00Z" });
+  await editor.getByRole("button", { name: "Save reviewed stage" }).click();
+  await expect(editor.getByRole("alert")).toContainText("changed after you reviewed");
+  await expect(editor.getByRole("combobox")).toHaveValue("confirmed");
+  await expect(editor.getByRole("button", { name: "Save reviewed stage" })).toBeDisabled();
+  await editor.getByRole("button", { name: "Load latest details" }).click();
+  await expect(editor.getByRole("region", { name: "Latest saved booking details" })).toContainText("E2E teammate revised booking terms");
+  await expect(editor.getByRole("button", { name: "Save reviewed stage" })).toBeDisabled();
+  await editor.getByRole("button", { name: "Review latest details" }).click();
+  await expect(editor.getByRole("region", { name: "Review stage for E2E original booking terms" })).toContainText("2026-12-04 20:00:00 UTC");
+  expect((await artistApi<{ stage: string }>(page, artistId, `/booking-opportunities/${booking.id}`)).stage).toBe("hold");
+  await artistApi(page, artistId, `/booking-opportunities/${booking.id}/stage`, "PATCH", { stage: "closed", expectedUpdatedAt: changed.updatedAt });
+  await editor.getByRole("button", { name: "Save reviewed stage" }).click();
+  await expect(editor.getByRole("alert")).toContainText("changed after you reviewed");
+  await editor.getByRole("button", { name: "Load latest details" }).click();
+  await expect(editor).toContainText("selected move is no longer available");
+  await expect(editor.getByRole("combobox")).toHaveValue("confirmed");
+  await expect(editor.getByRole("button", { name: "Save reviewed stage" })).toBeDisabled();
+  const events = await artistApi<Array<{ opportunityId: string }>>(page, artistId, "/events");
+  expect(events.filter((event) => event.opportunityId === booking.id)).toHaveLength(0);
+});
+
+test("booking save with a lost response is reconciled by reading without a duplicate confirmation", async ({ page }) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const booking = await artistApi<{ id: string }>(page, artistId, "/booking-opportunities", "POST", { title: "E2E interrupted confirmation" });
+  await page.goto("/booking");
+  const editor = page.getByTestId(`booking-stage-editor-${booking.id}`);
+  await editor.getByRole("combobox").selectOption("confirmed");
+  await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
+  let writes = 0;
+  await page.route(`**/booking-opportunities/${booking.id}/stage`, async (route) => {
+    writes += 1;
+    const response = await route.fetch();
+    expect(response.ok()).toBe(true);
+    await route.abort("failed");
+  });
+  await editor.getByRole("button", { name: "Save reviewed stage" }).click();
+  await expect(editor.getByRole("alert")).toContainText("Save is not confirmed here");
+  await expect(editor.getByRole("combobox")).toHaveValue("confirmed");
+  await editor.getByRole("button", { name: "Load latest details" }).click();
+  await expect(editor).toContainText("latest record already has the selected stage");
+  await expect(editor.getByRole("button", { name: "Save reviewed stage" })).toBeDisabled();
+  expect(writes).toBe(1);
+  const events = await artistApi<Array<{ opportunityId: string }>>(page, artistId, "/events");
+  expect(events.filter((event) => event.opportunityId === booking.id)).toHaveLength(1);
+});
+
+test("booking viewer has no mutation controls and stage API refuses writes", async ({ page }) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const booking = await artistApi<{ id: string; updatedAt: string }>(page, artistId, "/booking-opportunities", "POST", { title: "E2E viewer booking boundary" });
+  const { createRequire } = await import("node:module");
+  const requireFixture = createRequire(__filename);
+  const { requireTestDatabaseUrl } = requireFixture("../../../scripts/test-database.mjs");
+  const { Client } = requireFixture("pg");
+  const db = new Client({ connectionString: requireTestDatabaseUrl() });
+  await db.connect();
+  const me = await (await page.request.get(`${browserTestApiUrl}/auth/me`)).json();
+  const operatorId = me.operator.id;
+  try {
+    await db.query('UPDATE "ArtistMembership" SET role = $1 WHERE "artistId" = $2 AND "operatorId" = $3', ["viewer", artistId, operatorId]);
+    await page.goto("/booking");
+    await expect(page.getByText("You have read-only access.", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create", exact: true })).toHaveCount(0);
+    await expect(page.getByTestId(`booking-stage-editor-${booking.id}`)).toHaveCount(0);
+    const response = await page.request.patch(`${browserTestApiUrl}/booking-opportunities/${booking.id}/stage`, { headers: { "x-artist-id": artistId, origin: browserTestWebUrl }, data: { stage: "confirmed", expectedUpdatedAt: booking.updatedAt } });
+    expect(response.status()).toBe(403);
+    expect((await artistApi<{ stage: string }>(page, artistId, `/booking-opportunities/${booking.id}`)).stage).toBe("target");
+  } finally {
+    await db.query('UPDATE "ArtistMembership" SET role = $1 WHERE "artistId" = $2 AND "operatorId" = $3', ["owner", artistId, operatorId]);
+    await db.end();
+  }
+});
