@@ -93,6 +93,16 @@ export function SetlistBuilder({
   }, [setlist]);
 
   const draftStatus = setlistDraftStatus(state);
+  useEffect(() => {
+    if (!draftStatus.dirty) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [draftStatus.dirty]);
+
   const { draft } = state;
   const { name, status, notes, items } = draft;
   const controlsDisabled = busy || draftStatus.saving || readingLatest || !canManage || !artistId;

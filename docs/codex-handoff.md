@@ -10,6 +10,14 @@ This document orients an autonomous coding agent so work continues without losin
 
 ## Delivery state (what already exists)
 
+### Unsaved running-order reload guard
+
+Dirty setlist editors attach a native reload/close warning; save, revert, or
+unmount removes that editor's listener. Cancelling reload retains the in-page
+draft. This is a best-effort browser prompt, not autosave: mobile process kills
+and client-side navigation are not covered. Existing tab retention and version
+review remain unchanged. Parked #21 stays held; no provider or send changes.
+
 ### 2026-09-06: reviewed booking stage changes
 
 The existing Booking pipeline offers only legal next stages and separates
