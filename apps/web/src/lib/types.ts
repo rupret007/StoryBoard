@@ -85,6 +85,8 @@ export type Contact = {
 
 export type BookingOpportunity = {
   id: string;
+  artistId?: string;
+  updatedAt?: string;
   title: string;
   stage: string;
   venueId?: string | null;

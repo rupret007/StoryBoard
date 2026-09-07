@@ -1,11 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BOOKING_STAGE_STALE_MESSAGE, nextBookingStages } from "@storyboard/shared";
 import { Prisma } from "../generated/prisma/client";
 import { BookingStage } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import type {
   BookingOpportunityCreateInput,
-  BookingOpportunityPatchInput
+  BookingOpportunityPatchInput,
+  BookingOpportunityStageInput
 } from "./booking-opportunity.schema";
 
 @Injectable()
@@ -14,52 +16,6 @@ export class BookingOpportunitiesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService
   ) {}
-
-  private readonly stageTransitionPolicy: Record<
-    BookingStage,
-    readonly BookingStage[]
-  > = {
-    [BookingStage.target]: [
-      BookingStage.outreach,
-      BookingStage.conversation,
-      BookingStage.offer,
-      BookingStage.hold,
-      BookingStage.confirmed,
-      BookingStage.closed
-    ],
-    [BookingStage.outreach]: [
-      BookingStage.conversation,
-      BookingStage.offer,
-      BookingStage.hold,
-      BookingStage.confirmed,
-      BookingStage.closed
-    ],
-    [BookingStage.conversation]: [
-      BookingStage.offer,
-      BookingStage.hold,
-      BookingStage.confirmed,
-      BookingStage.closed
-    ],
-    [BookingStage.offer]: [
-      BookingStage.hold,
-      BookingStage.confirmed,
-      BookingStage.closed
-    ],
-    [BookingStage.hold]: [
-      BookingStage.offer,
-      BookingStage.confirmed,
-      BookingStage.closed
-    ],
-    [BookingStage.confirmed]: [BookingStage.closed],
-    [BookingStage.closed]: []
-  };
-
-  private assertValidStageTransition(from: BookingStage, to: BookingStage) {
-    if (from === to) return;
-    if (!this.stageTransitionPolicy[from].includes(to)) {
-      throw new BadRequestException("Invalid booking stage transition");
-    }
-  }
 
   list(artistId: string) {
     return this.prisma.client.bookingOpportunity.findMany({
@@ -128,52 +84,69 @@ export class BookingOpportunitiesService {
   async updateStage(
     artistId: string,
     id: string,
-    stage: BookingStage,
+    input: BookingOpportunityStageInput,
     actorLabel?: string | null,
     actorOperatorId?: string | null
   ) {
-    const existing = await this.get(artistId, id);
-    this.assertValidStageTransition(existing.stage, stage);
-    if (existing.stage === stage) {
-      return existing;
+    const expectedVersion = new Date(input.expectedUpdatedAt);
+    if (!Number.isFinite(expectedVersion.getTime())) {
+      throw new BadRequestException("A valid opportunity version is required");
     }
-    const { row, event } = await this.prisma.client.$transaction(async (tx) => {
-      const updated = await tx.bookingOpportunity.update({ where: { id }, data: { stage }, include: { venue: true } });
-      const linkedEvent = stage === BookingStage.confirmed ? await tx.bandEvent.upsert({
-        where: { opportunityId: updated.id },
-        create: {
-          artistId,
-          opportunityId: updated.id,
-          venueId: updated.venueId,
-          type: "gig",
-          status: "confirmed",
-          title: updated.title,
-          startsAt: updated.targetDate,
-          locationName: updated.venue?.name ?? null
-        },
-        update: {
-          status: "confirmed",
-          venueId: updated.venueId,
-          title: updated.title,
-          startsAt: updated.targetDate,
-          locationName: updated.venue?.name ?? null
+    const { stage } = input;
+    try {
+      return await this.prisma.client.$transaction(async (tx) => {
+        const existing = await tx.bookingOpportunity.findFirst({
+          where: { id, artistId }, include: { venue: true }
+        });
+        if (!existing) throw new NotFoundException("Booking opportunity not found");
+        if (existing.updatedAt.getTime() !== expectedVersion.getTime()) {
+          throw new ConflictException(BOOKING_STAGE_STALE_MESSAGE);
         }
-      }) : null;
-      return { row: updated, event: linkedEvent };
-    });
-    if (event) {
-      await this.audit.log({ artistId, aggregateType: "BandEvent", aggregateId: event.id, action: "event.confirmed_from_opportunity", actorLabel, actorOperatorId: actorOperatorId ?? null, metadata: { opportunityId: row.id } });
+        if (existing.stage === stage) return existing;
+        if (!nextBookingStages(existing.stage).includes(stage)) {
+          throw new BadRequestException("Invalid booking stage transition");
+        }
+        const updated = await tx.bookingOpportunity.updateMany({
+          where: { id, artistId, updatedAt: expectedVersion, stage: existing.stage },
+          data: { stage, updatedAt: new Date(Math.max(Date.now(), expectedVersion.getTime() + 1)) }
+        });
+        if (updated.count !== 1) throw new ConflictException(BOOKING_STAGE_STALE_MESSAGE);
+        // A gig may already have been advanced independently. Confirmation must
+        // never replace that show's edited time, status, or venue with pipeline data.
+        if (stage === BookingStage.confirmed) {
+          const linkedEvent = await tx.bandEvent.findUnique({ where: { opportunityId: id } });
+          if (linkedEvent && linkedEvent.artistId !== artistId) {
+            throw new NotFoundException("Linked event not found");
+          }
+          if (!linkedEvent) {
+            const event = await tx.bandEvent.create({
+              data: {
+                artistId, opportunityId: id, venueId: existing.venueId,
+                type: "gig", status: "confirmed", title: existing.title,
+                startsAt: existing.targetDate, locationName: existing.venue?.name ?? null
+              }
+            });
+            await this.audit.log({
+              artistId, aggregateType: "BandEvent", aggregateId: event.id,
+              action: "event.confirmed_from_opportunity", actorLabel,
+              actorOperatorId: actorOperatorId ?? null, metadata: { opportunityId: id }
+            }, tx);
+          }
+        }
+        await this.audit.log({
+          artistId, aggregateType: "BookingOpportunity", aggregateId: id,
+          action: "booking.stage_changed", actorLabel,
+          actorOperatorId: actorOperatorId ?? null,
+          metadata: { from: existing.stage, to: stage, expectedUpdatedAt: input.expectedUpdatedAt }
+        }, tx);
+        return tx.bookingOpportunity.findFirstOrThrow({ where: { id, artistId }, include: { venue: true } });
+      }, { isolationLevel: "Serializable" });
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && (error.code === "P2034" || error.code === "P2002")) {
+        throw new ConflictException(BOOKING_STAGE_STALE_MESSAGE);
+      }
+      throw error;
     }
-    await this.audit.log({
-      artistId,
-      aggregateType: "BookingOpportunity",
-      aggregateId: row.id,
-      action: "booking.stage_changed",
-      actorLabel,
-      actorOperatorId: actorOperatorId ?? null,
-      metadata: { from: existing.stage, to: stage }
-    });
-    return row;
   }
 
   async patch(

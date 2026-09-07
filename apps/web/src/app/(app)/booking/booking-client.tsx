@@ -1,22 +1,15 @@
 "use client";
 
-import { bookingStageNextAction } from "@storyboard/shared";
+import { bookingStageNextAction, bookingStages } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Kanban, Plus } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import type { BookingOpportunity, Venue } from "@/lib/types";
+import { BookingStageEditor } from "./booking-stage-editor";
 
-const STAGES = [
-  "target",
-  "outreach",
-  "conversation",
-  "offer",
-  "hold",
-  "confirmed",
-  "closed"
-] as const;
+const STAGES = bookingStages;
 
 const stageStyle: Record<string, "accent" | "violet" | "neutral" | "success" | "warning"> = {
   target: "neutral",
@@ -31,13 +24,23 @@ const stageStyle: Record<string, "accent" | "violet" | "neutral" | "success" | "
 export function BookingClient({
   initialOpportunities,
   venues,
-  opportunityRisks = {}
+  opportunityRisks = {},
+  artistId,
+  accessState,
+  loadError
 }: {
   initialOpportunities: BookingOpportunity[];
   venues: Venue[];
+  artistId: string | null;
+  accessState: "manage" | "read_only" | "unavailable";
+  loadError: string;
   opportunityRisks?: Record<string, "low" | "med" | "high">;
 }) {
   const router = useRouter();
+  const [opportunities, setOpportunities] = useState(initialOpportunities);
+  const [notice, setNotice] = useState("");
+  const canManage = accessState === "manage" && Boolean(artistId);
+  useEffect(() => setOpportunities(initialOpportunities), [initialOpportunities]);
   const [title, setTitle] = useState("");
   const [venueId, setVenueId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,7 +51,7 @@ export function BookingClient({
     for (const s of STAGES) {
       m[s] = [];
     }
-    for (const o of initialOpportunities) {
+    for (const o of opportunities) {
       const stage: (typeof STAGES)[number] = STAGES.includes(
         o.stage as (typeof STAGES)[number]
       )
@@ -57,15 +60,18 @@ export function BookingClient({
       m[stage].push(o);
     }
     return m;
-  }, [initialOpportunities]);
+  }, [opportunities]);
 
   async function createOpp(e: React.FormEvent) {
     e.preventDefault();
+    if (!canManage || !artistId || !title.trim()) return;
     setBusy(true);
     setError("");
     try {
       await apiFetch("/booking-opportunities", {
         method: "POST",
+        artistId,
+        signal: AbortSignal.timeout(15_000),
         json: {
           title: title.trim(),
           venueId: venueId || undefined
@@ -83,12 +89,15 @@ export function BookingClient({
 
   return (
     <div className="space-y-8">
+      {notice ? <p role="status" className="text-sm text-emerald-200">{notice}</p> : null}
+      {accessState !== "manage" ? <p role="status" className="text-sm text-[var(--text-muted)]">{accessState === "read_only" ? "You have read-only access. An owner or member can record booking changes." : "Booking access could not be verified. Reload before making changes."}</p> : null}
+      {loadError ? <div role="alert" className="text-sm text-amber-200">{loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload pipeline</button></div> : null}
       {error ? (
         <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
           {error}
         </div>
       ) : null}
-      <SurfaceCard>
+      {canManage ? <SurfaceCard>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">
@@ -138,7 +147,7 @@ export function BookingClient({
             Create
           </button>
         </form>
-      </SurfaceCard>
+      </SurfaceCard> : null}
 
       <div>
         <div className="mb-4 flex items-center gap-2">
@@ -147,7 +156,7 @@ export function BookingClient({
             Pipeline
           </h2>
         </div>
-        {initialOpportunities.length === 0 ? (
+        {opportunities.length === 0 && !loadError ? (
           <EmptyState
             title="No opportunities yet"
             description="Create your first deal above. Cards group by stage so you can scan momentum like a CRM board."
@@ -176,8 +185,13 @@ export function BookingClient({
                       {...(o.id in opportunityRisks
                         ? { risk: opportunityRisks[o.id]! }
                         : {})}
-                      onStageChange={() => router.refresh()}
-                      onError={setError}
+                      artistId={artistId}
+                      canManage={canManage}
+                      onSaved={(saved) => {
+                        setOpportunities((rows) => rows.map((row) => row.id === saved.id ? saved : row));
+                        setNotice(`${saved.title}: recorded as ${saved.stage}.`);
+                        router.refresh();
+                      }}
                     />
                   ))}
                 </div>
@@ -193,41 +207,17 @@ export function BookingClient({
 function OppCard({
   opportunity: o,
   risk,
-  onStageChange,
-  onError
+  artistId,
+  canManage,
+  onSaved
 }: {
   opportunity: BookingOpportunity;
   risk?: "low" | "med" | "high";
-  onStageChange: () => void;
-  onError: (message: string) => void;
+  artistId: string | null;
+  canManage: boolean;
+  onSaved: (saved: BookingOpportunity) => void;
 }) {
-  const [stage, setStage] = useState(o.stage);
-  const [busy, setBusy] = useState(false);
   const next = bookingStageNextAction(o.stage);
-
-  useEffect(() => {
-    setStage(o.stage);
-  }, [o.stage]);
-
-  async function updateStage() {
-    if (stage === o.stage) {
-      return;
-    }
-    setBusy(true);
-    onError("");
-    try {
-      await apiFetch(`/booking-opportunities/${o.id}/stage`, {
-        method: "PATCH",
-        json: { stage }
-      });
-      onStageChange();
-    } catch (err) {
-      setStage(o.stage);
-      onError(err instanceof Error ? err.message : "Could not update the booking stage");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <SurfaceCard padding="sm" className="border-[var(--border-strong)]">
@@ -253,34 +243,10 @@ function OppCard({
         Next: {next.nextAction}
       </p>
       <div className="mt-3 flex flex-col gap-2">
-        <select
-          className="sb-select text-xs"
-          value={stage}
-          onChange={(e) => setStage(e.target.value)}
-        >
-          {STAGES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        {stage === "confirmed" && o.stage !== "confirmed" ? (
-          <p className="text-xs text-amber-200">
-            Confirming creates a gig event. Travis still books; StoryBoard will
-            not pitch.
-          </p>
-        ) : null}
+        <BookingStageEditor opportunity={o} artistId={artistId} canManage={canManage} onSaved={onSaved} />
         <a className="text-xs font-medium text-[var(--accent)]" href={next.href}>
           Open next workspace
         </a>
-        <button
-          type="button"
-          disabled={busy || stage === o.stage}
-          className="sb-btn-secondary py-2 text-xs disabled:opacity-40"
-          onClick={() => void updateStage()}
-        >
-          Apply stage
-        </button>
       </div>
     </SurfaceCard>
   );

@@ -98,7 +98,7 @@ export class BookingOpportunitiesController {
     return this.booking.updateStage(
       artistId,
       id,
-      parsed.data.stage,
+      parsed.data,
       operator.email,
       operator.id
     );

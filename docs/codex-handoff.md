@@ -10,6 +10,38 @@ This document orients an autonomous coding agent so work continues without losin
 
 ## Delivery state (what already exists)
 
+### 2026-09-06: reviewed booking stage changes
+
+The existing Booking pipeline offers only legal next stages and separates
+selection, review, and **Save reviewed stage**. The review shows the recorded
+opportunity title, venue, target date in explicitly labelled UTC, fee, and
+conditions. Missing facts stay missing. Confirmation creates an internal gig
+only when none is linked; independently advanced gig details are preserved.
+Closing an opportunity does not cancel its gig. Travis books; no provider call,
+contract, payment, pitch, or message is prepared or sent by this workflow.
+
+The stage endpoint requires the reviewed opportunity's `expectedUpdatedAt`.
+Version/transition checks, conditional update, any new gig, and audit records
+commit in one serializable transaction. Stale changes and serialization races
+return conflict; an uncertain response requires a read and another explicit
+review before retrying. The open card keeps the selected stage through that
+process, including repeated conflicts. These are in-page drafts, not persisted
+autosave. Pipeline reads and writes are pinned to one verified band; viewer and
+unverified access have no mutation controls.
+
+Files: `packages/shared/src/booking-stage-review.ts`, the booking stage API,
+`apps/web/src/app/(app)/booking/booking-stage-editor.tsx`, and focused unit,
+disposable-database, and Chromium coverage. Parked #21 and existing send fences
+are unchanged. Marker: `BOB_NEW_SESSION_FREELANE_20260906_2216`.
+
+Local validation: typecheck/lint; 84 shared and 299 API unit tests; seven
+PostgreSQL 15.18 integration workflows, including competing stage writes and
+rollback on audit failure; both production builds; 28 Chromium journeys with
+`CI=true` / `TZ=UTC`; and 99/99 Manager checks at 100% safety. Tests used
+synthetic data, a disposable localhost database/Redis, and disabled live
+providers. Exact-tip hosted Quality remains the PostgreSQL 16/container-smoke
+receipt; consult the draft PR for that result.
+
 ### 2026-09-04: recoverable running-order drafts
 
 This product slice preserves unfinished setlists across Operations tab switches,
