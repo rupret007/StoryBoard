@@ -19,3 +19,4 @@ export * from "./operator-href";
 export * from "./operator-api-error";
 export * from "./zoned-date-time";
 export * from "./booking-stage-review";
+export * from "./booking-target";

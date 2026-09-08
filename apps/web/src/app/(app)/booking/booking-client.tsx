@@ -1,6 +1,6 @@
 "use client";
 
-import { bookingStageNextAction, bookingStages } from "@storyboard/shared";
+import { bookingStageNextAction, bookingStages, describeBookingTarget } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -218,6 +218,7 @@ function OppCard({
   onSaved: (saved: BookingOpportunity) => void;
 }) {
   const next = bookingStageNextAction(o.stage);
+  const target = describeBookingTarget({ targetDate: o.targetDate, stage: o.stage });
 
   return (
     <SurfaceCard padding="sm" className="border-[var(--border-strong)]">
@@ -233,6 +234,19 @@ function OppCard({
       </div>
       <p className="mt-1 text-xs text-[var(--text-muted)]">
         {o.venue ? `${o.venue.name} · ${o.venue.city}` : "No venue"}
+      </p>
+      <p
+        className={`mt-1 text-xs ${
+          target.timing === "past"
+            ? "text-amber-300"
+            : target.timing === "none"
+              ? "text-[var(--text-muted)]"
+              : "text-[var(--text-secondary)]"
+        }`}
+        data-testid={`booking-target-${o.id}`}
+      >
+        {target.label}
+        {target.note ? ` — ${target.note}` : ""}
       </p>
       {o.proposedFeeMinor != null ? (
         <p className="mt-1 text-xs text-[var(--text-secondary)]">

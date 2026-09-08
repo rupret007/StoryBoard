@@ -10,6 +10,24 @@ This document orients an autonomous coding agent so work continues without losin
 
 ## Delivery state (what already exists)
 
+### Booking pipeline card target date
+
+Every opportunity card on the Booking pipeline board now shows its recorded
+target/show date in an explicitly UTC calendar label, and flags a passed target
+date (`"Target date passed"`) when the deal is still open (stages `target`,
+`outreach`, `conversation`, `offer`, `hold`) so a slipping window is visible
+while scanning momentum. A `confirmed` or `closed` deal shows the date without
+the flag — the show already happened or the pipeline history is done. Comparison
+is by UTC calendar day, matching the target date shown in the stage-change
+review, so a show later the same day is never called "passed". Pure helper
+`describeBookingTarget` in `packages/shared/src/booking-target.ts`
+(`booking_target_v1`); rendered in
+`apps/web/src/app/(app)/booking/booking-client.tsx`
+(`data-testid="booking-target-<id>"`). Presentational plus one pure helper — no
+change to the opportunity risk engine, Manager evals, schema, API, provider, or
+send path. Parked #21 untouched; Travis still books. Marker:
+`OVERNIGHT_CLAUDE_STORYBOARD_20260907_1906`.
+
 ### Running-order version-review difference line
 
 The setlist compare-and-set review ("Compare before continuing") now names, in
