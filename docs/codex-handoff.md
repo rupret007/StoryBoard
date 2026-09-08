@@ -10,6 +10,26 @@ This document orients an autonomous coding agent so work continues without losin
 
 ## Delivery state (what already exists)
 
+### Phone booking-stage navigation
+
+Below 640px, Booking shows one stage at a time with a **View booking stage**
+picker and recorded per-stage/total counts. First open selects the first
+populated stage in pipeline order; an empty selected stage says where the
+remaining deals can be found. The full board stays available on wider screens.
+Switching stages hides columns without unmounting their editors, preserving
+open stage reviews and unsaved choices. A successful Create or reviewed stage
+save selects the destination stage so its card remains reachable on a phone.
+An unavailable pipeline does not display made-up zero counts; an empty viewer
+board directs the user to an owner/member instead of a hidden Create form.
+
+This is navigation and presentation on the existing booking board. No API,
+schema, provider, auth, or send change; Travis books / NEVER_AUTO_POST. The
+fixture browser journey covers empty and populated boards, stage counts,
+no-write review retention, 320/390px fit, and the desktop board; existing
+confirmation/viewer journeys cover saved-card visibility and read-only access.
+Parked #21 remains untouched. Marker:
+`OVERNIGHT_FREELANE_STORYBOARD_20260908_0056`.
+
 ### Booking pipeline card target date
 
 Every opportunity card on the Booking pipeline board now shows its recorded
