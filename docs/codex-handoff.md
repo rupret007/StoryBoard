@@ -10,6 +10,10 @@ This document orients an autonomous coding agent so work continues without losin
 
 ## Delivery state (what already exists)
 
+Current [dependency security assessment](dependency-security-assessment-2026-09-08.md)
+records fresh advisory counts, actual runtime/build paths and feature/deployment
+reassessment gates. No dependency upgrade or blanket security clearance is implied.
+
 ### Phone booking-stage navigation
 
 Below 640px, Booking shows one stage at a time with a **View booking stage**
