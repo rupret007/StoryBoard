@@ -1756,6 +1756,7 @@ test("phone pipeline opens a populated stage and keeps review drafts while brows
   const db = new Client({ connectionString: requireTestDatabaseUrl() });
   await db.connect();
   const artistId = `phone-pipeline-${Date.now()}`;
+  const bookingTitle = `Offline Friday hold ${"BookingReference".repeat(10)}`;
   const me = await (await page.request.get(`${browserTestApiUrl}/auth/me`)).json();
   try {
     await db.query('INSERT INTO "Artist" (id, name, slug, "createdAt", "updatedAt") VALUES ($1, $2, $1, NOW(), NOW())', [artistId, "Offline phone pipeline fixture"]);
@@ -1764,7 +1765,7 @@ test("phone pipeline opens a populated stage and keeps review drafts while brows
     await page.goto("/booking");
     await expect(page.getByText("No opportunities yet", { exact: true })).toBeVisible();
     await expect(page.getByLabel("View booking stage", { exact: true })).toHaveCount(0);
-    const booking = await artistApi<{ id: string }>(page, artistId, "/booking-opportunities", "POST", { title: "Offline Friday room hold", stage: "hold" });
+    const booking = await artistApi<{ id: string }>(page, artistId, "/booking-opportunities", "POST", { title: bookingTitle, stage: "hold" });
     let writes = 0;
     page.on("request", (request) => { if (request.method() !== "GET" && request.url().includes("/booking-opportunities")) writes += 1; });
     await page.reload();
@@ -1776,7 +1777,7 @@ test("phone pipeline opens a populated stage and keeps review drafts while brows
     const editor = page.getByTestId(`booking-stage-editor-${booking.id}`);
     await editor.getByRole("combobox").selectOption("confirmed");
     await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
-    const review = editor.getByRole("region", { name: "Review stage for Offline Friday room hold" });
+    const review = editor.getByRole("region", { name: `Review stage for ${bookingTitle}` });
     await expect(review).toBeVisible();
     await picker.selectOption("target");
     await expect(page.getByTestId("booking-column-target")).toContainText("No opportunities in target. Choose another stage");
@@ -1786,6 +1787,7 @@ test("phone pipeline opens a populated stage and keeps review drafts while brows
     await expect(review).toBeVisible();
     await expect(editor.getByRole("combobox")).toHaveValue("confirmed");
     expect(writes).toBe(0);
+    await expect(page.getByRole("heading", { name: bookingTitle, exact: true })).toHaveText(bookingTitle);
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 844 });
       await picker.scrollIntoViewIfNeeded();

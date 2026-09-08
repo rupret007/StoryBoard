@@ -21,6 +21,9 @@ open stage reviews and unsaved choices. A successful Create or reviewed stage
 save selects the destination stage so its card remains reachable on a phone.
 An unavailable pipeline does not display made-up zero counts; an empty viewer
 board directs the user to an owner/member instead of a hidden Create form.
+Long unbroken booking titles and review labels wrap within the available
+width, retaining their full text. The phone regression includes such a title
+while retaining an open stage review, with no write from navigation.
 
 This is navigation and presentation on the existing booking board. No API,
 schema, provider, auth, or send change; Travis books / NEVER_AUTO_POST. The

@@ -91,7 +91,7 @@ export function BookingClient({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="min-w-0 space-y-8 [overflow-wrap:anywhere]">
       {notice ? <p role="status" className="text-sm text-emerald-200">{notice}</p> : null}
       {accessState !== "manage" ? <p role="status" className="text-sm text-[var(--text-muted)]">{accessState === "read_only" ? "You have read-only access. An owner or member can record booking changes." : "Booking access could not be verified. Reload before making changes."}</p> : null}
       {loadError ? <div role="alert" className="text-sm text-amber-200">{loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload pipeline</button></div> : null}
