@@ -1786,6 +1786,31 @@ test("booking stage review explains confirmation and writes only after reviewed 
   await expect(editor.getByRole("combobox")).toBeDisabled();
 });
 
+test("pipeline cards show the recorded target date and flag a passed one on an open deal", async ({ page }) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const passed = await artistApi<{ id: string }>(page, artistId, "/booking-opportunities", "POST", {
+    title: "E2E slipped window",
+    stage: "outreach",
+    targetDate: "2026-01-10T20:00:00Z"
+  });
+  const upcoming = await artistApi<{ id: string }>(page, artistId, "/booking-opportunities", "POST", {
+    title: "E2E future window",
+    stage: "outreach",
+    targetDate: "2099-06-01T20:00:00Z"
+  });
+  const undated = await artistApi<{ id: string }>(page, artistId, "/booking-opportunities", "POST", {
+    title: "E2E no window yet",
+    stage: "outreach"
+  });
+  await page.goto("/booking");
+  await expect(page.getByTestId(`booking-target-${passed.id}`)).toContainText("(UTC) — Target date passed");
+  const upcomingLine = page.getByTestId(`booking-target-${upcoming.id}`);
+  await expect(upcomingLine).toContainText("(UTC)");
+  await expect(upcomingLine).not.toContainText("passed");
+  await expect(page.getByTestId(`booking-target-${undated.id}`)).toHaveText("No target date");
+});
+
 test("booking review preserves the selection through repeated competing changes", async ({ page }) => {
   await signInForBrowserTest(page);
   const artistId = await activeArtistId(page);
