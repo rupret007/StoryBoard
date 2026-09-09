@@ -3,6 +3,7 @@
 import { Badge, SurfaceCard } from "@storyboard/ui";
 import {
   catalogSourceLabel,
+  formatRecordedShowTime,
   projectOpsShowControl,
   showControlActionContextLabel,
   type OpsShowControl,
@@ -39,28 +40,6 @@ function readinessVariant(status: string | null): BadgeVariant {
   return "neutral";
 }
 
-function formatRecordedShowTime(startsAt: string | null, timezone?: string | null) {
-  if (!startsAt) return "Date not recorded";
-  const instant = new Date(startsAt);
-  if (!Number.isFinite(instant.getTime())) return "Recorded date is invalid";
-  const options: Intl.DateTimeFormatOptions = {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short"
-  };
-  if (timezone) {
-    try {
-      return new Intl.DateTimeFormat("en-US", { ...options, timeZone: timezone }).format(instant);
-    } catch {
-      return `${new Intl.DateTimeFormat("en-US", options).format(instant)} · recorded timezone is invalid`;
-    }
-  }
-  return `${new Intl.DateTimeFormat("en-US", options).format(instant)} · timezone not recorded`;
-}
 
 function phaseLabel(phase: OpsShowControl["show"]["phase"]) {
   if (phase === "live") return "live now";

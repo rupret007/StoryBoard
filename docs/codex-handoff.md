@@ -14,6 +14,20 @@ Current [dependency security assessment](dependency-security-assessment-2026-09-
 records fresh advisory counts, actual runtime/build paths and feature/deployment
 reassessment gates. No dependency upgrade or blanket security clearance is implied.
 
+### Recorded show time across devices
+
+Operations event cards and Show Control share `formatRecordedShowTime`: a
+Chicago show saved as `2030-06-16T00:30:00Z` appears as June 15, 7:30 PM CDT on
+UTC and Tokyo devices, matching the recorded-zone editor. Missing or invalid
+timezones display labeled UTC plus an explicit warning; missing/invalid dates
+remain explicit. This display-only fix does not reinterpret saved instants,
+change status/readiness, or submit an event. Existing zone-less editor fields
+still follow their prior device-local behavior; record a valid IANA timezone
+before relying on local show-clock interpretation.
+
+Validation and continuation limits are in
+[the recorded-time handoff](recorded-show-time-handoff-2026-09-09.md).
+
 ### Phone booking-stage navigation
 
 Below 640px, Booking shows one stage at a time with a **View booking stage**

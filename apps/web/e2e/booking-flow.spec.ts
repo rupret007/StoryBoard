@@ -1959,3 +1959,30 @@ test("booking viewer has no mutation controls and stage API refuses writes", asy
     await db.end();
   }
 });
+
+for (const timezoneId of ["UTC", "Asia/Tokyo"]) {
+  test.describe(`recorded show time on a ${timezoneId} device`, () => {
+    test.use({ timezoneId, viewport: { width: timezoneId === "UTC" ? 390 : 320, height: 844 } });
+    test("event card and editor retain the show's recorded date and time", async ({ page }) => {
+      await signInForBrowserTest(page);
+      const artistId = await activeArtistId(page);
+      const title = `E2E Chicago time ${timezoneId} ${Date.now().toString(36)}`;
+      const event = await artistApi<{ id: string }>(page, artistId, "/events", "POST", {
+        type: "gig", status: "draft", title,
+        startsAt: "2030-06-16T00:30:00.000Z", timezone: "America/Chicago"
+      });
+      const writes: string[] = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).origin === new URL(browserTestApiUrl).origin && !["GET", "HEAD", "OPTIONS"].includes(request.method())) writes.push(request.method());
+      });
+      await page.goto(`/operations?tab=events&event=${event.id}&focus=details`);
+      const card = operationsEventCard(page, title);
+      await expect(card).toContainText("Jun 15, 2030");
+      await expect(card).toContainText("7:30 PM CDT");
+      await expect(card.getByLabel(`Event start for ${title}`, { exact: true })).toHaveValue("2030-06-15T19:30");
+      await expect(card.getByLabel(`Event timezone for ${title}`)).toHaveValue("America/Chicago");
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+      expect(writes, "Viewing the recorded time must not submit or rewrite the event").toEqual([]);
+    });
+  });
+}
