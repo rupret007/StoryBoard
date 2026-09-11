@@ -14,6 +14,27 @@ Current [dependency security assessment](dependency-security-assessment-2026-09-
 records fresh advisory counts, actual runtime/build paths and feature/deployment
 reassessment gates. No dependency upgrade or blanket security clearance is implied.
 
+### Day-of task due dates no longer shift by a day on phone
+
+The Band operations day-of (show-day) view's **Advance work** panel rendered
+an open task's due date with `new Date(dueAt).toLocaleDateString()`. Task due
+dates are recorded as a calendar day (the editor is a plain date input), so
+that call parsed the value as UTC midnight and then displayed it in the
+viewer's local timezone — on any phone west of UTC (all of North America), a
+task due "Sept 15" read as "Sept 14," a full day early, right when an operator
+is checking advance work before a show. The label now formats the same UTC
+calendar day the value was recorded as, and flags a still-open task past that
+day as `(overdue)` or due `(today)` — clarity the aggregate open/overdue
+counts above the list did not give per task. Pure helper `describeTaskDueDate`
+in `packages/shared/src/task-due-date.ts` (`task_due_date_v1`); rendered in
+`apps/web/src/app/(app)/operations/events/[id]/day-of-client.tsx`. Comparison
+and formatting stay in UTC so a task due later today is never mislabeled or
+called overdue, matching the existing `describeBookingTarget` pattern.
+Presentational plus one pure helper — no API, schema, provider, or send
+change; the existing `overdueTaskCount`/`openTaskCount` server aggregate is
+untouched. Parked #21 untouched; Travis still books. Marker:
+`OVERNIGHT_CLAUDE_STORYBOARD_20260910_2231`.
+
 ### Phone booking-stage navigation
 
 Below 640px, Booking shows one stage at a time with a **View booking stage**
