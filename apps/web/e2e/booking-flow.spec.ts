@@ -1745,6 +1745,66 @@ test("day-of setlist keeps a mixed-duration subtotal explicit", async ({ page })
   await expect(page.getByText("4 min", { exact: true })).toHaveCount(0);
 });
 
+test("phone pipeline opens a populated stage and keeps review drafts while browsing stages", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await signInForBrowserTest(page);
+  const originalArtistId = await activeArtistId(page);
+  const { createRequire } = await import("node:module");
+  const requireFixture = createRequire(__filename);
+  const { requireTestDatabaseUrl } = requireFixture("../../../scripts/test-database.mjs");
+  const { Client } = requireFixture("pg");
+  const db = new Client({ connectionString: requireTestDatabaseUrl() });
+  await db.connect();
+  const artistId = `phone-pipeline-${Date.now()}`;
+  const bookingTitle = `Offline Friday hold ${"BookingReference".repeat(10)}`;
+  const me = await (await page.request.get(`${browserTestApiUrl}/auth/me`)).json();
+  try {
+    await db.query('INSERT INTO "Artist" (id, name, slug, "createdAt", "updatedAt") VALUES ($1, $2, $1, NOW(), NOW())', [artistId, "Offline phone pipeline fixture"]);
+    await db.query('INSERT INTO "ArtistMembership" (id, "artistId", "operatorId", role, "createdAt") VALUES ($1, $1, $2, $3, NOW())', [artistId, me.operator.id, "owner"]);
+    await artistApi(page, artistId, "/auth/session/artist", "POST", { artistId });
+    await page.goto("/booking");
+    await expect(page.getByText("No opportunities yet", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("View booking stage", { exact: true })).toHaveCount(0);
+    const booking = await artistApi<{ id: string }>(page, artistId, "/booking-opportunities", "POST", { title: bookingTitle, stage: "hold" });
+    let writes = 0;
+    page.on("request", (request) => { if (request.method() !== "GET" && request.url().includes("/booking-opportunities")) writes += 1; });
+    await page.reload();
+    const picker = page.getByLabel("View booking stage", { exact: true });
+    await expect(picker).toHaveValue("hold");
+    await expect(picker.locator("option")).toHaveText(["target (0)", "outreach (0)", "conversation (0)", "offer (0)", "hold (1)", "confirmed (0)", "closed (0)"]);
+    await expect(page.locator("#booking-stage-count")).toHaveText("1 of 1 recorded opportunities shown.");
+    await expect(page.locator('[data-testid^="booking-column-"]:visible')).toHaveCount(1);
+    const editor = page.getByTestId(`booking-stage-editor-${booking.id}`);
+    await editor.getByRole("combobox").selectOption("confirmed");
+    await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
+    const review = editor.getByRole("region", { name: `Review stage for ${bookingTitle}` });
+    await expect(review).toBeVisible();
+    await picker.selectOption("target");
+    await expect(page.getByTestId("booking-column-target")).toContainText("No opportunities in target. Choose another stage");
+    await expect(page.locator("#booking-stage-count")).toHaveText("0 of 1 recorded opportunities shown.");
+    await expect(review).toBeHidden();
+    await picker.selectOption("hold");
+    await expect(review).toBeVisible();
+    await expect(editor.getByRole("combobox")).toHaveValue("confirmed");
+    expect(writes).toBe(0);
+    await expect(page.getByRole("heading", { name: bookingTitle, exact: true })).toHaveText(bookingTitle);
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await picker.scrollIntoViewIfNeeded();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.screenshot({ path: `test-results/booking-stage-picker-${width}.png`, fullPage: true });
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(picker).toBeHidden();
+    await expect(page.locator('[data-testid^="booking-column-"]:visible')).toHaveCount(7);
+    await expect(review).toBeVisible();
+    expect(writes).toBe(0);
+  } finally {
+    await artistApi(page, originalArtistId, "/auth/session/artist", "POST", { artistId: originalArtistId });
+    await db.end();
+  }
+});
+
 test("booking stage review explains confirmation and writes only after reviewed Save", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signInForBrowserTest(page);
@@ -1753,6 +1813,7 @@ test("booking stage review explains confirmation and writes only after reviewed 
   let writes = 0;
   page.on("request", (request) => { if (request.method() === "PATCH" && request.url().endsWith(`/booking-opportunities/${booking.id}/stage`)) { writes += 1; expect(request.headers()["x-artist-id"]).toBe(artistId); } });
   await page.goto("/booking");
+  await page.getByLabel("View booking stage", { exact: true }).selectOption("hold");
   const editor = page.getByTestId(`booking-stage-editor-${booking.id}`);
   const choice = editor.getByRole("combobox");
   await expect(choice.locator("option")).toHaveText(["hold (recorded)", "offer", "confirmed", "closed"]);
@@ -1772,6 +1833,8 @@ test("booking stage review explains confirmation and writes only after reviewed 
   await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
   await editor.getByRole("button", { name: "Save reviewed stage" }).click();
   await expect(page.getByText("E2E Travis booked this room: recorded as confirmed.", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("View booking stage", { exact: true })).toHaveValue("confirmed");
+  await expect(editor).toBeVisible();
   expect(writes).toBe(1);
   const events = await artistApi<Array<{ id: string; opportunityId: string; startsAt: string | null; status: string }>>(page, artistId, "/events");
   const gig = events.find((event) => event.opportunityId === booking.id);
@@ -1868,6 +1931,7 @@ test("booking save with a lost response is reconciled by reading without a dupli
 });
 
 test("booking viewer has no mutation controls and stage API refuses writes", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await signInForBrowserTest(page);
   const artistId = await activeArtistId(page);
   const booking = await artistApi<{ id: string; updatedAt: string }>(page, artistId, "/booking-opportunities", "POST", { title: "E2E viewer booking boundary" });
@@ -1882,6 +1946,8 @@ test("booking viewer has no mutation controls and stage API refuses writes", asy
   try {
     await db.query('UPDATE "ArtistMembership" SET role = $1 WHERE "artistId" = $2 AND "operatorId" = $3', ["viewer", artistId, operatorId]);
     await page.goto("/booking");
+    await page.getByLabel("View booking stage", { exact: true }).selectOption("target");
+    await expect(page.getByTestId("booking-column-target")).toContainText("E2E viewer booking boundary");
     await expect(page.getByText("You have read-only access.", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: "Create", exact: true })).toHaveCount(0);
     await expect(page.getByTestId(`booking-stage-editor-${booking.id}`)).toHaveCount(0);

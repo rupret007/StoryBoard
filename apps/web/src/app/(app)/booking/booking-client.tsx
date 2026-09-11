@@ -45,6 +45,7 @@ export function BookingClient({
   const [venueId, setVenueId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [chosenStage, setChosenStage] = useState<(typeof STAGES)[number] | null>(null);
 
   const byStage = useMemo(() => {
     const m = {} as Record<(typeof STAGES)[number], BookingOpportunity[]>;
@@ -61,6 +62,7 @@ export function BookingClient({
     }
     return m;
   }, [opportunities]);
+  const visibleStage = chosenStage ?? STAGES.find((stage) => byStage[stage].length > 0) ?? "target";
 
   async function createOpp(e: React.FormEvent) {
     e.preventDefault();
@@ -79,6 +81,7 @@ export function BookingClient({
       });
       setTitle("");
       setVenueId("");
+      setChosenStage("target");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create the opportunity");
@@ -88,7 +91,7 @@ export function BookingClient({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="min-w-0 space-y-8 [overflow-wrap:anywhere]">
       {notice ? <p role="status" className="text-sm text-emerald-200">{notice}</p> : null}
       {accessState !== "manage" ? <p role="status" className="text-sm text-[var(--text-muted)]">{accessState === "read_only" ? "You have read-only access. An owner or member can record booking changes." : "Booking access could not be verified. Reload before making changes."}</p> : null}
       {loadError ? <div role="alert" className="text-sm text-amber-200">{loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload pipeline</button></div> : null}
@@ -156,18 +159,37 @@ export function BookingClient({
             Pipeline
           </h2>
         </div>
-        {opportunities.length === 0 && !loadError ? (
+        {loadError ? null : opportunities.length === 0 ? (
           <EmptyState
             title="No opportunities yet"
-            description="Create your first deal above. Cards group by stage so you can scan momentum like a CRM board."
+            description={canManage ? "Create your first deal above. Cards group by stage so you can scan momentum like a CRM board." : "An owner or member can record the first opportunity. Travis books; this board tracks recorded deals."}
             icon={<Kanban className="h-6 w-6" />}
           />
         ) : (
-          <div className="flex gap-4 overflow-x-auto pb-2">
+          <div>
+            <div className="mb-4 sm:hidden">
+              <label className="sb-label" htmlFor="booking-stage-view">View booking stage</label>
+              <select
+                id="booking-stage-view"
+                className="sb-select mt-1.5 min-h-11 w-full"
+                value={visibleStage}
+                aria-describedby="booking-stage-count"
+                onChange={(event) => setChosenStage(event.target.value as (typeof STAGES)[number])}
+              >
+                {STAGES.map((stage) => (
+                  <option key={stage} value={stage}>{stage} ({byStage[stage].length})</option>
+                ))}
+              </select>
+              <p id="booking-stage-count" className="mt-2 text-xs text-[var(--text-muted)]" role="status">
+                {byStage[visibleStage].length} of {opportunities.length} recorded opportunities shown.
+              </p>
+            </div>
+            <div className="flex min-w-0 gap-4 pb-2 sm:overflow-x-auto">
             {STAGES.map((stage) => (
               <div
                 key={stage}
-                className="flex w-[280px] shrink-0 flex-col gap-3"
+                data-testid={`booking-column-${stage}`}
+                className={`${visibleStage === stage ? "flex" : "hidden sm:flex"} w-full min-w-0 shrink-0 flex-col gap-3 sm:w-[280px]`}
               >
                 <div className="flex items-center justify-between px-1">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
@@ -178,6 +200,7 @@ export function BookingClient({
                   </Badge>
                 </div>
                 <div className="min-h-[120px] space-y-2 rounded-[var(--radius-xl)] border border-dashed border-[var(--border)] bg-[var(--surface-0)]/50 p-2">
+                  {byStage[stage].length === 0 ? <p className="p-2 text-sm text-[var(--text-muted)] sm:hidden">No opportunities in {stage}. Choose another stage to see this band's recorded deals.</p> : null}
                   {(byStage[stage] ?? []).map((o) => (
                     <OppCard
                       key={o.id}
@@ -189,6 +212,7 @@ export function BookingClient({
                       canManage={canManage}
                       onSaved={(saved) => {
                         setOpportunities((rows) => rows.map((row) => row.id === saved.id ? saved : row));
+                        setChosenStage(saved.stage as (typeof STAGES)[number]);
                         setNotice(`${saved.title}: recorded as ${saved.stage}.`);
                         router.refresh();
                       }}
@@ -197,6 +221,7 @@ export function BookingClient({
                 </div>
               </div>
             ))}
+            </div>
           </div>
         )}
       </div>
