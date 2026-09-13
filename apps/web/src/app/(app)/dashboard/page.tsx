@@ -6,6 +6,7 @@ import type {
   Task,
   WeeklySummary
 } from "@/lib/types";
+import { describeTaskDueDate } from "@storyboard/shared";
 import {
   ArrowRight,
   CircleAlert,
@@ -37,12 +38,11 @@ export default async function DashboardPage() {
   const now = new Date();
   const overdueList =
     stats && !error
-      ? tasks.filter(
-          (t) =>
-            t.status !== "done" &&
-            t.dueAt &&
-            new Date(t.dueAt) < now
-        )
+      ? tasks.filter((t) => {
+          if (t.status === "done" || !t.dueAt) return false;
+          const due = describeTaskDueDate(t.dueAt, now);
+          return due?.timing === "past";
+        })
       : [];
 
   if (error) {
@@ -372,8 +372,15 @@ export default async function DashboardPage() {
                 className="flex justify-between gap-4 py-3 text-sm first:pt-0"
               >
                 <span className="text-[var(--text-primary)]">{t.title}</span>
-                <span className="shrink-0 tabular-nums text-[var(--text-muted)]">
-                  {t.dueAt ? new Date(t.dueAt).toLocaleDateString() : "—"}
+                <span
+                  className="shrink-0 tabular-nums text-[var(--text-muted)]"
+                  data-testid={`dashboard-overdue-due-${t.id}`}
+                >
+                  {(() => {
+                    const due = describeTaskDueDate(t.dueAt, now);
+                    if (!due) return "—";
+                    return due.timing === "past" ? `${due.label} (overdue)` : due.label;
+                  })()}
                 </span>
               </li>
             ))}
