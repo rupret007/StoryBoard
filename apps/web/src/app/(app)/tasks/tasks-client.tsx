@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { BandMember, BookingOpportunity, Task } from "@/lib/types";
+import { describeTaskDueDate } from "@storyboard/shared";
 
 const STATUSES = ["todo", "in_progress", "blocked", "done"] as const;
 
@@ -34,7 +35,7 @@ export function TasksClient({
         blocked.push(t);
         continue;
       }
-      if (t.dueAt && new Date(t.dueAt) < now) {
+      if (describeTaskDueDate(t.dueAt, now)?.timing === "past") {
         overdue.push(t);
       } else {
         open.push(t);
