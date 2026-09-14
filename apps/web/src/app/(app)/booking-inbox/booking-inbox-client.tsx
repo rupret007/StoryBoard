@@ -1,6 +1,6 @@
 "use client";
 
-import { bookingReplyNextAction } from "@storyboard/shared";
+import { bookingReplyNextAction, describeTaskDueDate } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { CalendarClock, CheckCircle2, MailSearch, RefreshCw, Sparkles } from "lucide-react";
 import { useState } from "react";
@@ -240,7 +240,7 @@ function ReplyCard({
             {reply.proposedFeeMinor != null
               ? ` · proposed ${reply.proposedCurrency ?? ""} ${(reply.proposedFeeMinor / 100).toFixed(2)}`
               : ""}
-            {reply.proposedDate ? ` · ${new Date(reply.proposedDate).toLocaleDateString()}` : ""}
+            {reply.proposedDate ? (() => { const due = describeTaskDueDate(reply.proposedDate); return due ? ` · ${due.label}${due.timing === "past" ? " (passed)" : due.timing === "today" ? " (today)" : ""}` : ""; })() : ""}
           </p>
         </div>
       ) : null}

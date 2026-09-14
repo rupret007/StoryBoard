@@ -48,3 +48,26 @@ test("accepts a Date instance", () => {
   const result = describeTaskDueDate(new Date("2026-09-15T00:00:00.000Z"), now);
   assert.equal(result.timing, "today");
 });
+
+test("a noon-UTC campaign follow-up keeps its recorded UTC calendar day (not viewer-local)", () => {
+  // Pitch campaigns store follow-up dates as YYYY-MM-DDT12:00:00.000Z from a plain date input.
+  const result = describeTaskDueDate("2026-09-15T12:00:00.000Z", now);
+  assert.equal(result.policyVersion, "task_due_date_v1");
+  assert.equal(result.timing, "today");
+  assert.equal(result.label, "Tue, Sep 15");
+});
+
+test("a noon-UTC follow-up earlier than today is past with the UTC calendar label", () => {
+  const result = describeTaskDueDate("2026-09-10T12:00:00.000Z", now);
+  assert.equal(result.timing, "past");
+  assert.equal(result.label, "Thu, Sep 10");
+});
+
+test("a midnight-UTC proposed show date keeps the UTC calendar label even when a west-of-UTC clock is already on the previous local evening", () => {
+  // Inbox proposedDate values can be midnight-UTC calendar days. 2026-09-15T00:00Z is
+  // still Mon Sep 14 evening in America/Los_Angeles; toLocaleDateString would say Sep 14.
+  const laEvening = new Date("2026-09-14T20:00:00.000-07:00"); // == 2026-09-15T03:00Z
+  const result = describeTaskDueDate("2026-09-15T00:00:00.000Z", laEvening);
+  assert.equal(result.timing, "today");
+  assert.equal(result.label, "Tue, Sep 15");
+});
