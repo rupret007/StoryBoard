@@ -35,6 +35,22 @@ change; the existing `overdueTaskCount`/`openTaskCount` server aggregate is
 untouched. Parked #21 untouched; Travis still books. Marker:
 `OVERNIGHT_CLAUDE_STORYBOARD_20260910_2231`.
 
+### Manager calendar due dates match Dashboard truth
+
+Dashboard, Tasks overdue grouping, day-of Advance work, and project due
+labels already use `describeTaskDueDate` so a calendar due day never shifts
+west of UTC. Manager still rendered goal deadlines, initiative/pressure task
+dues, waiting-on checkpoints, capacity-through dates, and decision review
+dates with `toLocaleDateString()`, and flagged a decision review as due by
+comparing the stored noon-UTC instant to the device clock. Those Manager
+surfaces now reuse `describeTaskDueDate` (`task_due_date_v1`) for UTC
+calendar labels plus `(overdue)` / `(today)` flags, and a decision review is
+due when timing is `past` or `today`. Instant stamps (conversation updated,
+feedback, outcomeAt via `briefDate`, memory confirmedAt) stay local.
+Presentational reuse — no API, schema, provider, or send change. Closed #21
+remains closed; Travis still books. Marker:
+`GROK_STORYBOARD_20260913_2013`.
+
 ### Dashboard and project due dates match day-of calendar truth
 
 Day-of Advance work already used `describeTaskDueDate` so a task due "Sept 15"
