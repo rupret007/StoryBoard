@@ -51,6 +51,21 @@ Presentational reuse — no API, schema, provider, or send change. Closed #21
 remains closed; Travis still books. Marker:
 `GROK_STORYBOARD_20260913_2013`.
 
+### Pitch-campaign and inbox calendar dates match task due truth
+
+Dashboard, Manager, day-of, and project due labels already use
+`describeTaskDueDate` so a calendar due day never shifts west of UTC. Pitch
+campaign prepare-preview still rendered follow-up dates with
+`toLocaleDateString()`, and Booking inbox AI summaries did the same for a
+reply's proposed show date — both are calendar days (campaign follow-ups are
+edited with a plain date input stored as noon-UTC). Those surfaces now reuse
+`describeTaskDueDate` (`task_due_date_v1`) for UTC calendar labels plus
+`(overdue)` / `(today)` on campaign follow-ups and `(passed)` / `(today)` on
+inbox proposed dates; drafted/sent recipient rows also show the same
+follow-up label beside the date input. Presentational reuse — no API, schema,
+provider, or send change. Closed #21 remains closed; Travis still books.
+Marker: `GROK_STORYBOARD_20260913_2153`.
+
 ### Dashboard and project due dates match day-of calendar truth
 
 Day-of Advance work already used `describeTaskDueDate` so a task due "Sept 15"
