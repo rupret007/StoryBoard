@@ -794,7 +794,7 @@ test("manager feedback and reviewed memory feed the release gate", async ({ page
   await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("Where does our money stand?", { exact: true })).toBeVisible();
-  const moneyReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: /books currently show/i }).last().locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
+  const moneyReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: /unpaid invoices?/i }).last().locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
   await expect(moneyReply).toBeVisible();
   await moneyReply.getByRole("button", { name: "Needs work", exact: true }).click();
   await moneyReply.getByLabel("What should improve?").selectOption("too_vague");

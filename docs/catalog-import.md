@@ -160,3 +160,10 @@ calls non-Vault songs or running orders a Vault import. Band operations keeps
 the Vault-slice intro for an empty table, a Vault-only library, or Vault song
 rows plus a Show Night official-set / running-order setlist. Demo, manual, and
 Show Night-minted song rows still use the non-Vault intro.
+
+Manager desk snapshots also distinguish an empty library from an empty recorded
+running order. If the library is empty, preview a local Vault `app_api.json`
+through Music & setlists before applying it. If songs are already recorded but
+no running order exists, build one from those recorded songs. An empty setlist
+is not a ready-to-play set. See the synthetic [Manager desk verification](manager-desk-verification-20260924.md)
+for reproducible empty-data answers; no import is performed by chat.
