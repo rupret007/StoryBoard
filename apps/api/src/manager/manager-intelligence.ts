@@ -1074,6 +1074,19 @@ export function managerQuestionAsksAboutSchedule(question: string) {
     || /\b(load[- ]?in|soundcheck|doors|set time|curfew|changeover|support slot|band meal|travel call|meet[- ]?and[- ]?greet)\b/i.test(question);
 }
 
+export function managerQuestionAsksForDeskSnapshot(question: string) {
+  const normalized = question.toLowerCase();
+  if (/\b(manager desk|ops desk|operator desk|desk snapshot|desk view|at[- ]a[- ]glance board|morning desk)\b/.test(normalized)) return true;
+  const asksForSnapshot = /\b(snapshot|summary|status|at[- ]a[- ]glance|where do we stand|what should i manage|what needs attention|desk)\b/.test(normalized);
+  if (!asksForSnapshot) return false;
+  let domains = 0;
+  if (/\b(book(?:ing)?|buyer|venue|prospect|campaign|outreach)\b/.test(normalized)) domains += 1;
+  if (/\b(setlists?|songs?|catalog|vault|show night)\b/.test(normalized)) domains += 1;
+  if (/\b(invoice|settlement|deposit|receivable|cash|money)\b/.test(normalized)) domains += 1;
+  if (/\b(run[- ]?of[- ]?show|day[- ]?of|load[- ]?in|soundcheck|doors|set time|curfew|timeline|show schedule)\b/.test(normalized)) domains += 1;
+  return domains >= 2;
+}
+
 export function managerQuestionAsksAboutCatalog(question: string) {
   return /\b(setlists?|song library|song catalog|vault|app_api|master_catalog|what songs|our songs|import (?:the )?(?:catalog|songs)|show night)\b/i.test(question);
 }
@@ -1126,6 +1139,7 @@ function deterministicManagerChatBase(
   const moneyQuestion = ["deal", "invoice", "settlement"].includes(subject?.kind ?? "") || questionHas(question, /\b(money|invoice|paid|payment|deposit|deal|settlement|settle|profit|revenue|expense|cash)\b/);
   const catalogQuestion = managerQuestionAsksAboutCatalog(question) && subject?.kind !== "event";
   const scheduleQuestion = managerQuestionAsksAboutSchedule(question);
+  const deskSnapshotQuestion = !subject && managerQuestionAsksForDeskSnapshot(question);
   const liveQuestion = subject?.kind === "event" || (!catalogQuestion && !scheduleQuestion && questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/));
   const bookingQuestion = ["opportunity", "prospect"].includes(subject?.kind ?? "") || questionHas(question, /\b(booking|buyer|venue|festival|prospect|campaign|reply|outreach|pitch)\b/);
   const teamQuestion = questionHas(question, /\b(member|lineup|bandmate|who|available)\b/);
@@ -1488,6 +1502,73 @@ function deterministicManagerChatBase(
     return {
       answer: `${unrealistic ? "The ambition is useful as a direction, but the recorded timeframe or constraints do not support treating it as a forecast. " : ""}${health.summary} The plan-health score is ${health.score}/100; it checks target direction, deadlines, measurement integrity, linked work, and blockers—not elapsed-time pace or probability.${drift ? `\n\nBefore trusting the recorded value for “${drift.goalTitle},” reconcile it: ${drift.summary} ${drift.nextAction}` : attention ? `\n\nFor “${attention.title}”: ${attention.target.summary} ${attention.reasons[0]} ${attention.target.nextAction}` : nextPlannedTask ? `\n\nThe next recorded step is “${nextPlannedTask.title}”. Assign a real owner if it still says the band generally.` : "\n\nSet one measurable goal with a deadline, then link an initiative and a next task."}`,
       citations: unique(subject?.kind === "goal" ? (namedGoal?.evidenceIds ?? [subject.id]) : [...health.goals.flatMap((goal) => goal.evidenceIds), ...(nextPlannedTask ? [nextPlannedTask.id] : [])]).slice(0, 10),
+      recommendation: actionableRecommendation(recommendation)
+    };
+  }
+
+  if (deskSnapshotQuestion) {
+    const activeSongs = (facts.songs ?? []).filter((song) => song.active !== false);
+    const setlists = facts.setlists ?? [];
+    const unreadReplies = facts.bookingReplies.filter((reply) => reply.processingStatus === "unread");
+    const qualifiedProspects = facts.prospects.filter((prospect) => prospect.status === "qualified");
+    const overdueFollowUps = facts.campaignRecipients.filter((recipient) => recipient.followUpDueAt && recipient.followUpDueAt < now && ["drafted", "sent"].includes(recipient.status));
+    const unpaidInvoices = facts.invoices.filter((invoice) => invoice.totalMinor > invoice.paidMinor);
+    const overdueInvoices = unpaidInvoices.filter((invoice) => invoice.dueAt && invoice.dueAt < now);
+    const nextDatedInvoice = unpaidInvoices
+      .filter((invoice) => invoice.dueAt && invoice.dueAt >= now)
+      .sort((left, right) => (left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER))[0] ?? null;
+    const balances = new Map<string, number>();
+    for (const invoice of unpaidInvoices) {
+      const balance = Math.max(0, invoice.totalMinor - invoice.paidMinor);
+      if (balance) balances.set(invoice.currency, (balances.get(invoice.currency) ?? 0) + balance);
+    }
+    const balanceText = balances.size
+      ? [...balances.entries()].map(([currency, total]) => money(total, currency)).join(" and ")
+      : "no unpaid balance";
+    const oldestOverdue = overdueInvoices
+      .sort((left, right) => (left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER))[0] ?? null;
+    const setlistLine = !activeSongs.length && !setlists.length
+      ? "No songs or setlists are recorded yet. Import the local Vault default-live slice with `pnpm catalog:import` (dry-run) and rerun with `--apply` when ready."
+      : `${activeSongs.length} active song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded${setlists[0] ? `; first in view: "${setlists[0].name}"` : ""}.`;
+    const bookingLine = `${facts.opportunities.length} active opportunit${facts.opportunities.length === 1 ? "y" : "ies"}, ${qualifiedProspects.length} qualified prospect${qualifiedProspects.length === 1 ? "" : "s"}, ${unreadReplies.length} unread repl${unreadReplies.length === 1 ? "y" : "ies"}, and ${overdueFollowUps.length} overdue follow-up${overdueFollowUps.length === 1 ? "" : "s"}.`;
+    const invoiceLine = !unpaidInvoices.length
+      ? "No unpaid invoices are recorded."
+      : `${unpaidInvoices.length} unpaid invoice${unpaidInvoices.length === 1 ? "" : "s"} total ${balanceText}; ${overdueInvoices.length ? `${overdueInvoices.length} overdue (oldest due ${eventDate(oldestOverdue?.dueAt ?? null)}).` : nextDatedInvoice?.dueAt ? `next recorded due date is ${eventDate(nextDatedInvoice.dueAt)}.` : "remaining balances have no recorded due date."}`;
+    const upcomingEvents = facts.events
+      .filter((event) => event.startsAt && event.startsAt >= now)
+      .sort((left, right) => (left.startsAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (right.startsAt?.getTime() ?? Number.MAX_SAFE_INTEGER));
+    const nextUpcomingEvent = upcomingEvents[0] ?? null;
+    const eventWithSchedule = upcomingEvents.find((event) => event.dayOf?.timeline.length) ?? null;
+    let runOfShowLine: string;
+    let runOfShowEvidence: string[] = [];
+    if (eventWithSchedule?.dayOf && eventWithSchedule.dayOf.timeline.length) {
+      const dayOf = eventWithSchedule.dayOf;
+      const nextCheckpoint = dayOf.nextCheckpoint ?? dayOf.timeline.find((item) => item.state === "later") ?? dayOf.timeline[dayOf.timeline.length - 1] ?? null;
+      const timezone = eventWithSchedule.timezone ?? "UTC";
+      const checkpointTime = nextCheckpoint
+        ? new Date(nextCheckpoint.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: timezone })
+        : null;
+      runOfShowLine = `${eventWithSchedule.title} (${eventDate(eventWithSchedule.startsAt)}) — ${nextCheckpoint && checkpointTime ? `next checkpoint is ${nextCheckpoint.label} at ${checkpointTime} ${timezone}.` : "timeline is recorded."}${dayOf.depositRemainingMinor > 0 ? ` Deposit remaining ${money(dayOf.depositRemainingMinor, dayOf.currency)}.` : ""}${dayOf.overdueTaskCount > 0 ? ` ${dayOf.overdueTaskCount} advance task${dayOf.overdueTaskCount === 1 ? " is" : "s are"} overdue.` : ""}`;
+      runOfShowEvidence = dayOf.evidenceIds.slice(0, 8);
+    } else if (nextUpcomingEvent) {
+      runOfShowLine = `${nextUpcomingEvent.title} (${eventDate(nextUpcomingEvent.startsAt)}) has no recorded day-of timeline yet. Add load-in, soundcheck, doors, set, and curfew before relying on run-of-show.`;
+      runOfShowEvidence = [nextUpcomingEvent.id];
+    } else {
+      runOfShowLine = "No upcoming event is recorded, so run-of-show is not available yet.";
+    }
+    const recommendation = matchingRecommendation(brief, ["live", "business", "relationships", "band_operations"]);
+    return {
+      answer: `Manager desk snapshot (recorded now):\n\nBooking: ${bookingLine}\nSetlists: ${setlistLine}\nInvoices: ${invoiceLine}\nRun-of-show: ${runOfShowLine}\n\n${recommendation ? `First move: ${recommendation.nextAction}` : "First move: record the missing booking, setlist, invoice, or day-of data before making a decision from this snapshot."}`,
+      citations: unique([
+        ...facts.opportunities.slice(0, 3).map((opportunity) => opportunity.id),
+        ...qualifiedProspects.slice(0, 2).map((prospect) => prospect.id),
+        ...unreadReplies.slice(0, 2).map((reply) => reply.id),
+        ...overdueFollowUps.slice(0, 2).map((recipient) => recipient.id),
+        ...unpaidInvoices.slice(0, 3).map((invoice) => invoice.id),
+        ...activeSongs.slice(0, 2).map((song) => song.id),
+        ...setlists.slice(0, 2).map((setlist) => setlist.id),
+        ...runOfShowEvidence
+      ]).slice(0, 10),
       recommendation: actionableRecommendation(recommendation)
     };
   }
