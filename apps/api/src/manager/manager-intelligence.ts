@@ -1165,6 +1165,14 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
     email: "info@mystompinggrounds.com",
     phone: "(817) 231-8080",
     applyUrl: "https://mystompinggrounds.com/book-music"
+  },
+  "birdie's social club": {
+    email: "hiring@birdiessocialclub.com",
+    applyUrl: "https://www.birdiessocialclub.com/music-submission"
+  },
+  "birdies social club": {
+    email: "hiring@birdiessocialclub.com",
+    applyUrl: "https://www.birdiessocialclub.com/music-submission"
   }
 };
 
