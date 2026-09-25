@@ -25,6 +25,12 @@ function event(overrides: Partial<EventDayOfInput> = {}, timezone: string | null
 const invoice = { id: "fixture-invoice", number: "FIXTURE-TODAY", status: "sent", currency: "USD", totalMinor: 10000, paidMinor: 2500, dueAt: new Date("2026-09-24T00:00:00Z") };
 const populated: ManagerFacts = { ...empty, events: [event()], invoices: [invoice] };
 const cases: { name: string; question: string; facts: ManagerFacts; check: (answer: string, citations: string[]) => boolean }[] = [
+  { name: "desk-pitch-pack-missing-records", question: "Draft a venue pitch pack from records only", facts: empty,
+    check: (a, c) => /Pitch pack blocked: no open booking opportunity/.test(a) && /Travis owns booking/.test(a) && c.length === 0 },
+  { name: "desk-travis-decision-missing-records", question: "What needs a Travis decision next?", facts: empty,
+    check: (a, c) => /No open booking or follow-up decision is supported/.test(a) && /no auto-pitch/.test(a) && c.length === 0 },
+  { name: "desk-travis-follow-up-missing-booking", question: "What needs a Travis decision next?", facts: { ...empty, campaignRecipients: [{ id: "fixture-follow-up", status: "sent", followUpDueAt: null, followUpTaskId: null }] },
+    check: (a, c) => /Preparation blocked/.test(a) && /due not recorded/.test(a) && c.includes("fixture-follow-up") },
   { name: "desk-in-progress-recorded-timeline", question: "What is today's schedule?", facts: populated,
     check: (a, c) => /Load-in/.test(a) && /Soundcheck/.test(a) && /Recorded break/.test(a) && /CDT/.test(a) && /Recorded note/.test(a) && c.includes("fixture-checkpoint") },
   { name: "desk-invoice-calendar-today", question: "Which invoices are unpaid and next due?", facts: populated,
