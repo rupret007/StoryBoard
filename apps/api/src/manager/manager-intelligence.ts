@@ -1154,6 +1154,28 @@ export function managerQuestionAsksAboutVenuePack(question: string, opportunitie
   return null;
 }
 
+type VenuePackDetails = { email: string; phone?: string; applyUrl: string };
+
+const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
+  "herman marshall": {
+    email: "info@hmwhiskey.com",
+    applyUrl: "https://hermanmarshall.com/herman-marshall-tasting-room-live-music-application/"
+  },
+  "my stomping grounds": {
+    email: "info@mystompinggrounds.com",
+    phone: "(817) 231-8080",
+    applyUrl: "https://mystompinggrounds.com/book-music"
+  }
+};
+
+export function lookupVenuePackDetails(opportunityTitle: string): VenuePackDetails | null {
+  const normalized = opportunityTitle.toLowerCase();
+  for (const [key, details] of Object.entries(VENUE_PACK_REGISTRY)) {
+    if (normalized.includes(key)) return details;
+  }
+  return null;
+}
+
 export function managerQuestionAsksAboutPipelineStages(question: string) {
   const normalized = question.toLowerCase();
   if (/\b(pipeline|funnel)\b/.test(normalized) && /\b(stage|breakdown|by stage|each stage|status|health|stuck|stale)\b/.test(normalized)) return true;
@@ -1379,9 +1401,9 @@ function deterministicManagerChatBase(
 
   const venuePackTarget = managerQuestionAsksAboutVenuePack(question, facts.opportunities);
   if (venuePackTarget) {
-    const isHermanMarshall = /herman marshall/i.test(venuePackTarget.title);
-    const applyDetails = isHermanMarshall 
-      ? `\nContact: info@hmwhiskey.com\nApply URL: https://hermanmarshall.com/herman-marshall-tasting-room-live-music-application/\n`
+    const venuePackDetails = lookupVenuePackDetails(venuePackTarget.title);
+    const applyDetails = venuePackDetails 
+      ? `\nContact: ${venuePackDetails.email}${venuePackDetails.phone ? ` / ${venuePackDetails.phone}` : ""}\nApply URL: ${venuePackDetails.applyUrl}\n`
       : "";
       
     return {

@@ -61,6 +61,9 @@ const cases: { name: string; question: string; facts: ManagerFacts; check: (answ
   { name: "desk-herman-marshall-venue-pack", question: "Package Herman Marshall", 
     facts: { ...empty, opportunities: [{ id: "opp-hm", title: "Herman Marshall Tasting Room (Wylie)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
     check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /hermanmarshall\.com/.test(a) && /info@hmwhiskey\.com/.test(a) && c.includes("opp-hm") },
+  { name: "desk-my-stomping-grounds-venue-pack", question: "Package My Stomping Grounds", 
+    facts: { ...empty, opportunities: [{ id: "opp-msg", title: "My Stomping Grounds (Haltom City)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /mystompinggrounds\.com/.test(a) && /info@mystompinggrounds\.com/.test(a) && /817.*231.*8080/.test(a) && c.includes("opp-msg") },
   { name: "desk-pipeline-stage-breakdown", question: "Show me the pipeline by stage",
     facts: { ...empty, opportunities: [
       { id: "opp-1", title: "Bluebird hold", stage: "hold", targetDate: new Date("2026-10-15T00:00:00Z"), updatedAt: new Date("2026-09-20T00:00:00Z") },
