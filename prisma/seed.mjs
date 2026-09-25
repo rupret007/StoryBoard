@@ -84,8 +84,6 @@ async function main() {
     if (demoOps) {
       demo = await seedGenericDemoOps(client, artistId);
     }
-    
-    await seedHermanMarshallOpportunity(client, artistId);
 
     const vaultImport = importLocalVaultCatalog();
     if (vaultImport.empty) {
@@ -176,39 +174,3 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
-
-async function seedHermanMarshallOpportunity(client, artistId) {
-  const now = new Date();
-  const oppId = cuidLike();
-  const venueId = cuidLike();
-
-  // Insert the venue first
-  await client.query(
-    `INSERT INTO "Venue" ("id","artistId","name","city","region","createdAt","updatedAt")
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
-     ON CONFLICT DO NOTHING`,
-    [venueId, artistId, "Herman Marshall Tasting Room (Wylie)", "Wylie", "TX", now, now]
-  );
-  
-  // Need to get the actual venue ID if it was inserted or fetch it
-  const venueRes = await client.query(
-    `SELECT id FROM "Venue" WHERE "artistId" = $1 AND "name" = $2`,
-    [artistId, "Herman Marshall Tasting Room (Wylie)"]
-  );
-  const actualVenueId = venueRes.rows[0]?.id || venueId;
-
-  // Insert the opportunity
-  const oppTitle = "Herman Marshall Tasting Room (Wylie)";
-  const oppRes = await client.query(
-    `SELECT id FROM "BookingOpportunity" WHERE "artistId" = $1 AND "title" = $2`,
-    [artistId, oppTitle]
-  );
-  
-  if (oppRes.rows.length === 0) {
-    await client.query(
-      `INSERT INTO "BookingOpportunity" ("id","artistId","venueId","title","stage","marketNotes","createdAt","updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [oppId, artistId, actualVenueId, oppTitle, "target", "Contact: info@hmwhiskey.com\nApply URL: https://hermanmarshall.com/herman-marshall-tasting-room-live-music-application/", now, now]
-    );
-  }
-}
