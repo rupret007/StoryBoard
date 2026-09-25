@@ -1128,6 +1128,7 @@ export function managerQuestionAsksAboutCatalog(question: string) {
 export function managerQuestionNeedsRecordedDeskAnswer(question: string) {
   return managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
     || managerQuestionAsksAboutCatalog(question) || managerQuestionAsksAboutPipelineStages(question)
+    || /\b(package|pack|packs)\b/i.test(question)
     || /\b(invoices?|unpaid|overdue|receivables?|next[- ]due|money|paid|payment|deposit|cash)\b/i.test(question);
 }
 
@@ -1140,6 +1141,17 @@ export function managerQuestionAsksAboutPromoCopy(question: string) {
 export function managerQuestionAsksAboutBookerPitch(question: string) {
   if (/\b(?:bob|package|pack|packs)\b/i.test(question) && /\b(?:booking|pitch|buyer|venue|show)\b/i.test(question)) return true;
   return /\b(?:travis|bob)\b/i.test(question) && /\b(?:pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send|email|contact|package|pack|packs)\b/i.test(question);
+}
+
+export function managerQuestionAsksAboutVenuePack(question: string, opportunities: ManagerFacts["opportunities"]): { id: string; title: string } | null {
+  if (!/\b(?:package|pack|packs)\b/i.test(question)) return null;
+  for (const opp of opportunities) {
+    const words = opp.title.split(/\s+/).filter(w => w.length > 3 && !/target|hold|offer|confirmed/i.test(w));
+    if (words.some(w => new RegExp(`\\b${w}\\b`, "i").test(question))) {
+      return opp;
+    }
+  }
+  return null;
 }
 
 export function managerQuestionAsksAboutPipelineStages(question: string) {
@@ -1361,6 +1373,20 @@ function deterministicManagerChatBase(
     return {
       answer: "StoryBoard is the band-business OS: booking, setlists, invoices, and recorded ops. StoryLiner is promo-only. I won't send, sign, pay, publish, or execute a caption or social post from this conversation.",
       citations: [],
+      recommendation: null
+    };
+  }
+
+  const venuePackTarget = managerQuestionAsksAboutVenuePack(question, facts.opportunities);
+  if (venuePackTarget) {
+    const isHermanMarshall = /herman marshall/i.test(venuePackTarget.title);
+    const applyDetails = isHermanMarshall 
+      ? `\nContact: info@hmwhiskey.com\nApply URL: https://hermanmarshall.com/herman-marshall-tasting-room-live-music-application/\n`
+      : "";
+      
+    return {
+      answer: `Package summary for ${venuePackTarget.title}:\n\nPositioning: Live music application target in DFW.${applyDetails}\nLinks: [Live links placeholders]\nSet formats: Standard sets\n\nTravis owns the send. Jeff+Travis yes before pitch. StoryBoard will not auto-pitch venues. Nothing posts from this conversation.`,
+      citations: [venuePackTarget.id],
       recommendation: null
     };
   }

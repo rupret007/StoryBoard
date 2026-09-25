@@ -58,6 +58,9 @@ const cases: { name: string; question: string; facts: ManagerFacts; check: (answ
     check: (a) => /has no recorded day-of timeline/.test(a) && !/next checkpoint is/.test(a) },
   { name: "desk-cross-domain-plural-routing", question: "Summary of booking and invoices", facts: populated,
     check: (a) => /Manager desk snapshot/.test(a) && /Invoices:/.test(a) },
+  { name: "desk-herman-marshall-venue-pack", question: "Package Herman Marshall", 
+    facts: { ...empty, opportunities: [{ id: "opp-hm", title: "Herman Marshall Tasting Room (Wylie)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /hermanmarshall\.com/.test(a) && /info@hmwhiskey\.com/.test(a) && c.includes("opp-hm") },
   { name: "desk-pipeline-stage-breakdown", question: "Show me the pipeline by stage",
     facts: { ...empty, opportunities: [
       { id: "opp-1", title: "Bluebird hold", stage: "hold", targetDate: new Date("2026-10-15T00:00:00Z"), updatedAt: new Date("2026-09-20T00:00:00Z") },
