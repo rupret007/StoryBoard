@@ -1069,6 +1069,11 @@ export function managerQuestionAsksAboutFollowThrough(question: string) {
   return /\b(follow[- ]?through|accepted recommendations?|accepted work|status of (?:the |that )?recommendation)\b/i.test(question);
 }
 
+export function managerQuestionAsksAboutSchedule(question: string) {
+  return /\b(run[- ]?of[- ]?show|day[- ]?of schedule|show schedule|what time|when (?:do we|is|are)|itinerary|timeline)\b/i.test(question)
+    || /\b(load[- ]?in|soundcheck|doors|set time|curfew|changeover|support slot|band meal|travel call|meet[- ]?and[- ]?greet)\b/i.test(question);
+}
+
 export function managerQuestionAsksAboutCatalog(question: string) {
   return /\b(setlists?|song library|song catalog|vault|app_api|master_catalog|what songs|our songs|import (?:the )?(?:catalog|songs)|show night)\b/i.test(question);
 }
@@ -1120,7 +1125,8 @@ function deterministicManagerChatBase(
   const subject = subjectReference?.status === "resolved" ? subjectReference.subject : null;
   const moneyQuestion = ["deal", "invoice", "settlement"].includes(subject?.kind ?? "") || questionHas(question, /\b(money|invoice|paid|payment|deposit|deal|settlement|settle|profit|revenue|expense|cash)\b/);
   const catalogQuestion = managerQuestionAsksAboutCatalog(question) && subject?.kind !== "event";
-  const liveQuestion = subject?.kind === "event" || (!catalogQuestion && questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/));
+  const scheduleQuestion = managerQuestionAsksAboutSchedule(question);
+  const liveQuestion = subject?.kind === "event" || (!catalogQuestion && !scheduleQuestion && questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/));
   const bookingQuestion = ["opportunity", "prospect"].includes(subject?.kind ?? "") || questionHas(question, /\b(booking|buyer|venue|festival|prospect|campaign|reply|outreach|pitch)\b/);
   const teamQuestion = questionHas(question, /\b(member|lineup|bandmate|who|available)\b/);
   const planQuestion = subject?.kind === "goal" || managerQuestionAsksAboutPlanHealth(question);
@@ -1554,6 +1560,49 @@ function deterministicManagerChatBase(
     return {
       answer: `${activeSongs.length} song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded.${songLines.length ? `\n\nSongs:\n${songLines.join("\n")}` : ""}${setlistLines.length ? `\n\nSetlists:\n${setlistLines.join("\n")}` : ""}\n\n${provenance}`,
       citations: unique([...activeSongs.map((song) => song.id), ...setlists.map((setlist) => setlist.id)]).slice(0, 10),
+      recommendation: null
+    };
+  }
+
+  if (scheduleQuestion) {
+    const eventsWithSchedule = (subject?.kind === "event"
+      ? facts.events.filter((event) => event.id === subject.id)
+      : facts.events.filter((event) => event.startsAt && event.startsAt >= now && event.dayOf?.timeline.length)).slice(0, responsePolicy.itemLimit);
+    const targetEvent = eventsWithSchedule[0];
+    if (!targetEvent) {
+      const upcomingEvents = facts.events.filter((event) => event.startsAt && event.startsAt >= now);
+      return {
+        answer: upcomingEvents.length
+          ? "I see upcoming events, but none have a recorded schedule yet. Open Day-of view to add load-in, soundcheck, doors, set, and curfew times."
+          : "There are no upcoming events with a recorded schedule in StoryBoard. Create the event and its day-of timeline before asking about run-of-show.",
+        citations: upcomingEvents.slice(0, 3).map((event) => event.id),
+        recommendation: null
+      };
+    }
+    const dayOf = targetEvent.dayOf;
+    if (!dayOf || !dayOf.timeline.length) {
+      return {
+        answer: `"${targetEvent.title}" does not have a recorded schedule. Open Day-of view to add load-in, soundcheck, doors, set, curfew, and any custom checkpoints (meals, support slots, changeovers).`,
+        citations: [targetEvent.id],
+        recommendation: null
+      };
+    }
+    const scheduleLines = dayOf.timeline.map((item) => {
+      const time = new Date(item.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: targetEvent.timezone ?? "UTC" });
+      const marker = item.state === "passed" ? " ✓" : item.state === "next" ? " ←" : "";
+      const locationNote = item.location ? ` at ${item.location}` : "";
+      const notes = item.notes ? ` — ${item.notes}` : "";
+      return `• ${time} — ${item.label}${locationNote}${notes}${marker}`;
+    });
+    const moneyNote = dayOf.depositRemainingMinor > 0
+      ? `\n\nDeposit remaining: ${money(dayOf.depositRemainingMinor, dayOf.currency)}. Verify payment before doors if not already received.`
+      : "";
+    const taskNote = dayOf.overdueTaskCount > 0
+      ? `\n\n${dayOf.overdueTaskCount} advance task${dayOf.overdueTaskCount === 1 ? " is" : "s are"} overdue for this show.`
+      : "";
+    return {
+      answer: `Run-of-show for "${targetEvent.title}" (${eventDate(targetEvent.startsAt)}):\n\n${scheduleLines.join("\n")}${moneyNote}${taskNote}\n\n${dayOf.headline} ${dayOf.nextAction}`,
+      citations: dayOf.evidenceIds.slice(0, 10),
       recommendation: null
     };
   }
