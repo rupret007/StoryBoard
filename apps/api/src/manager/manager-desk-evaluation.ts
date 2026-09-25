@@ -1,4 +1,4 @@
-import { deterministicManagerBrief, deterministicManagerChat, managerQuestionAsksAboutSchedule, managerQuestionNeedsRecordedDeskAnswer, type ManagerFacts } from "./manager-intelligence";
+import { deterministicManagerBrief, deterministicManagerChat, managerQuestionAsksAboutSchedule, managerQuestionAsksAboutPipelineStages, managerQuestionNeedsRecordedDeskAnswer, type ManagerFacts } from "./manager-intelligence";
 import { deterministicEventDayOf, type EventDayOfInput } from "../operations/event-day-of";
 import { deterministicShowReadiness } from "../operations/event-readiness";
 
@@ -58,6 +58,24 @@ const cases: { name: string; question: string; facts: ManagerFacts; check: (answ
     check: (a) => /has no recorded day-of timeline/.test(a) && !/next checkpoint is/.test(a) },
   { name: "desk-cross-domain-plural-routing", question: "Summary of booking and invoices", facts: populated,
     check: (a) => /Manager desk snapshot/.test(a) && /Invoices:/.test(a) },
+  { name: "desk-pipeline-stage-breakdown", question: "Show me the pipeline by stage",
+    facts: { ...empty, opportunities: [
+      { id: "opp-1", title: "Bluebird hold", stage: "hold", targetDate: new Date("2026-10-15T00:00:00Z"), updatedAt: new Date("2026-09-20T00:00:00Z") },
+      { id: "opp-2", title: "Exit offer", stage: "offer", targetDate: new Date("2026-11-01T00:00:00Z"), updatedAt: new Date("2026-09-22T00:00:00Z") },
+      { id: "opp-3", title: "Hideaway target", stage: "target", targetDate: null, updatedAt: new Date("2026-09-23T00:00:00Z") },
+      { id: "opp-4", title: "Skylark offer", stage: "offer", targetDate: new Date("2026-10-20T00:00:00Z"), updatedAt: new Date("2026-09-21T00:00:00Z") }
+    ] },
+    check: (a, c) => /Pipeline by stage:/.test(a) && /target: 1/.test(a) && /offer: 2/.test(a) && /hold: 1/.test(a) && c.includes("opp-1") && c.includes("opp-2") },
+  { name: "desk-pipeline-stale-opportunity-warning", question: "What is the pipeline status by stage?",
+    facts: { ...empty, opportunities: [
+      { id: "opp-stale", title: "Old hold", stage: "hold", targetDate: null, updatedAt: new Date("2026-08-01T00:00:00Z") }
+    ] },
+    check: (a, c) => /Pipeline by stage:/.test(a) && /hold: 1/.test(a) && /very stale/.test(a) && /Old hold/.test(a) && /has not changed in/.test(a) && c.includes("opp-stale") },
+  { name: "desk-pipeline-21-day-stale-check", question: "Pipeline stage breakdown",
+    facts: { ...empty, opportunities: [
+      { id: "opp-21", title: "Three week old", stage: "conversation", targetDate: null, updatedAt: new Date("2026-09-02T00:00:00Z") }
+    ] },
+    check: (a) => /Pipeline by stage:/.test(a) && /conversation: 1/.test(a) && /may need a status check/.test(a) && /Three week old/.test(a) },
 ];
 
 export function managerDeskTranscripts() {
@@ -72,6 +90,8 @@ export function evaluateManagerDesk() {
     { name: "desk-calendar-brief-agrees-with-chat", source: "golden" as const,
       passed: !JSON.stringify(deterministicManagerBrief(populated, now)).includes("Collect overdue"), detail: "An invoice due today never becomes overdue advice in the brief." },
     { name: "desk-provider-route-and-intent-boundary", source: "golden" as const,
-      passed: cases.every((item) => managerQuestionNeedsRecordedDeskAnswer(item.question)) && !managerQuestionAsksAboutSchedule("When is our invoice due?") && !managerQuestionAsksAboutSchedule("What time should we discuss the album?"), detail: "Desk questions bypass provider rewriting without classifying every when/what-time question as run-of-show." }
+      passed: cases.every((item) => managerQuestionNeedsRecordedDeskAnswer(item.question)) && !managerQuestionAsksAboutSchedule("When is our invoice due?") && !managerQuestionAsksAboutSchedule("What time should we discuss the album?"), detail: "Desk questions bypass provider rewriting without classifying every when/what-time question as run-of-show." },
+    { name: "desk-pipeline-stage-question-boundary", source: "golden" as const,
+      passed: managerQuestionAsksAboutPipelineStages("Show me the pipeline by stage") && managerQuestionAsksAboutPipelineStages("What is the funnel breakdown?") && managerQuestionAsksAboutPipelineStages("How many are in each stage?") && !managerQuestionAsksAboutPipelineStages("What's the booking status?") && !managerQuestionAsksAboutPipelineStages("Any new prospects?"), detail: "Pipeline stage questions are routed to stage breakdown without overly broad matching." }
   ];
 }
