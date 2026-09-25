@@ -11,6 +11,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import {
   deterministicManagerBriefCandidates,
   deterministicManagerChat,
+  managerQuestionNeedsRecordedDeskAnswer,
   deterministicManagerPlanHealth,
   mergeManagerBriefCandidates,
   managerQuestionAsksAboutFollowThrough,
@@ -2363,6 +2364,7 @@ export class ManagerService {
     const workSequenceRoute = managerQuestionAsksAboutWorkSequence(input.message);
     const goalPathRoute = managerQuestionAsksAboutGoalPath(input.message);
     const planHealthRoute = managerQuestionAsksAboutPlanHealth(input.message);
+    const recordedDeskRoute = managerQuestionNeedsRecordedDeskAnswer(input.message);
     const followThroughRoute = managerQuestionAsksAboutFollowThrough(input.message);
     const continuityRoute = continuity.status !== "not_follow_up";
     const subjectRoute = subjectReference.status !== "not_requested";
@@ -2379,7 +2381,7 @@ export class ManagerService {
     const providerPolicy = managerProviderContextPolicy(facts.memoryFacts, { ...settings, fullContextEnabled: fullProviderContextEnabled });
     const providerHistory = projectManagerConversationMessages(rawHistory, fullProviderContextEnabled ? "provider_full" : "provider_redacted");
     let providerAttempted = false;
-    if (!memoryCaptureRoute && !naturalFeedbackRoute && !contextCaptureRoute && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventAvailabilityRoute && !eventCaptureRoute && !writeClaimRoute && !continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && !followThroughRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
+    if (!memoryCaptureRoute && !naturalFeedbackRoute && !contextCaptureRoute && !taskCaptureRoute && !taskUpdateRoute && !taskAssignmentRoute && !projectCaptureRoute && !eventAvailabilityRoute && !eventCaptureRoute && !writeClaimRoute && !continuityRoute && !subjectRoute && !coachingRoute && !workSequenceRoute && !goalPathRoute && !planHealthRoute && !followThroughRoute && !recordedDeskRoute && settings.aiEnabled && this.config.get<boolean>("OPENAI_ENABLED")) {
       try {
         model = this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra";
         const client = new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
@@ -2476,6 +2478,7 @@ export class ManagerService {
           projectCapture: { policyVersion: MANAGER_PROJECT_CAPTURE_POLICY_VERSION, status: projectCapture.status, sourceMessageId: projectCapture.action?.sourceMessageId ?? null, projectType: projectCapture.action?.projectType ?? null, dueDatePresent: Boolean(projectCapture.action?.dueDate), duplicateProjectId: projectCapture.duplicateProjectId, providerBypassed: projectCaptureRoute },
           eventAvailability: { policyVersion: MANAGER_EVENT_AVAILABILITY_POLICY_VERSION, status: eventAvailability.status, sourceMessageId: eventAvailability.action?.sourceMessageId ?? null, eventId: eventAvailability.eventId, memberId: eventAvailability.memberId, previousResponse: eventAvailability.action?.previousResponse ?? null, response: eventAvailability.action?.response ?? null, providerBypassed: eventAvailabilityRoute },
           eventCapture: { policyVersion: MANAGER_EVENT_CAPTURE_POLICY_VERSION, status: eventCapture.status, sourceMessageId: eventCapture.action?.sourceMessageId ?? null, eventType: eventCapture.action?.eventType ?? null, eventStatus: eventCapture.action?.status ?? null, startsAtPresent: Boolean(eventCapture.action?.startsAt), participantCount: eventCapture.action?.bandMemberIds.length ?? 0, duplicateEventId: eventCapture.duplicateEventId, providerBypassed: eventCaptureRoute },
+          recordedDesk: { providerBypassed: recordedDeskRoute },
           writeClaim: { policyVersion: MANAGER_WRITE_CLAIM_POLICY_VERSION, status: writeClaim.status, kind: writeClaim.kind, providerBypassed: writeClaimRoute },
           responseAdaptation: responseAdaptation,
           responseQuality,

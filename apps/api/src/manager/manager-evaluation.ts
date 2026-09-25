@@ -1,3 +1,4 @@
+import { evaluateManagerDesk } from "./manager-desk-evaluation";
 import { managerRecordsFromCatalogPlan, planCatalogImport } from "@storyboard/shared";
 import type { ManagerWorkstream } from "../generated/prisma/enums";
 import { APPROVAL_EXECUTION_LEASE_MS } from "../approvals/approval-lifecycle";
@@ -30,7 +31,7 @@ import { assessEventLogistics, eventLogisticsApprovalSourceKey, eventLogisticsFi
 import { projectManagerFollowThrough, projectManagerFollowThroughForProvider, summarizeManagerFollowThrough, type ManagerFollowThroughSource } from "./manager-follow-through";
 
 export const MANAGER_PROMPT_VERSION = "manager_os_v33";
-export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v44";
+export const MANAGER_EVAL_DATASET_VERSION = "manager_evals_v45";
 
 type ReviewedExample = { id: string; label: string; promptVersion: string; snapshot: unknown };
 type ReviewedResponseExample = { id: string; label: string; promptVersion: string; expectedBehavior: string | null; resolutionVersion: string | null; resolvedAt: Date | null; snapshot: unknown; inputFacts: unknown };
@@ -667,13 +668,13 @@ function reviewedResponseResult(example: ReviewedResponseExample, candidateVersi
 }
 
 export function runManagerEvaluation(candidateVersion: string, reviewedExamples: ReviewedExample[] = [], reviewedResponseExamples: ReviewedResponseExample[] = []) {
-  const results = [...goldenResults(candidateVersion), ...reviewedExamples.map((example) => reviewedResult(example, candidateVersion)), ...reviewedResponseExamples.map((example) => reviewedResponseResult(example, candidateVersion))];
+  const results = [...goldenResults(candidateVersion), ...evaluateManagerDesk(), ...reviewedExamples.map((example) => reviewedResult(example, candidateVersion)), ...reviewedResponseExamples.map((example) => reviewedResponseResult(example, candidateVersion))];
   const golden = results.filter((result) => result.source === "golden");
   const reviewedRecommendations = results.filter((result) => result.source === "owner_reviewed");
   const reviewedResponses = results.filter((result) => result.source === "owner_reviewed_response");
   const reviewed = [...reviewedRecommendations, ...reviewedResponses];
   const safetyNames = new Set(["adversarial-crm-text", "adversarial-direct-action", "reject-assistant-meta-and-false-action", "memory-sensitivity-provider-boundary", "knowledge-source-precedence", "goal-record-reconciliation", "explicit-memory-confirmation", "sensitive-memory-refusal", "novice-settlement-coaching", "deal-structure-comparison", "unknown-education-clarification", "role-grounded-team-assignment", "ambiguous-team-assignment", "prerequisite-aware-work-sequence", "prerequisite-aware-priority", "goal-path-reuses-existing-work", "goal-path-avoids-orphan-task", "lumpy-goal-no-linear-forecast", "budget-cap-remains-provisional", "exact-target-deadline-miss", "grounded-follow-up-explanation", "pronoun-action-remains-reviewed", "stale-follow-up-rechecked", "ambiguous-follow-up-clarifies", "named-show-selects-exact-record", "ambiguous-record-name-clarifies", "named-invoice-beats-generic-coaching", "explicit-natural-response-feedback", "feedback-never-approves-or-completes-work", "reviewed-context-answer-stages-only", "context-capture-refuses-sensitive-detail", "reviewed-task-request-stages-only", "task-capture-refuses-secrets-and-implicit-plans", "reviewed-project-request-stages-project-and-plan", "project-capture-refuses-ambiguous-sensitive-and-implicit-work", "reviewed-event-request-stages-timezone-safe-lineup-review", "event-capture-refuses-missing-timezone-secrets-and-implicit-work", "reviewed-event-availability-stages-one-exact-response", "event-availability-refuses-secrets-implicit-and-missing-records", "event-logistics-stages-approval-only", "event-logistics-does-not-duplicate-pending-approval", "event-logistics-linked-results-stop-proposal", "response-adaptation-never-invents-authority", "actionless-acceptance-does-not-disappear", "approval-follow-through-separates-human-stages", "unknown-provider-execution-never-retries", "simulated-provider-work-is-not-real-completion", "manager-follow-through-answer-is-grounded", "manager-brief-surfaces-accepted-work-gaps", "follow-through-memory-reclassification-boundary", "active-completed-at-acceptance-work-stays-suppressed", "pronoun-follow-through-uses-authoritative-receipt", "human-reconciliation-never-claims-provider-success", "empty-seed-setlist-honesty", "empty-seed-booking-does-not-pitch", "post-show-review-is-not-a-publish-request", "recorded-catalog-stays-record-bound", "vault-import-catalog-stays-record-bound", "travis-books-is-not-a-pitch-target", "parked-catalog-is-not-a-fourth-live-band", "imported-catalog-does-not-auto-post", "caption-request-is-not-ops", "published-empty-default-import-stays-empty", "live-vault-default-import-uses-published-slice", "published-default-live-stalemate-is-not-a-fourth-band", "jeff-story-is-default-live-repertoire", "demo-seed-is-not-a-vault-catalog", "shownight-setlist-on-vault-titles-is-not-vault-only", "chat-write-claim-honesty"]);
-  const safety = golden.filter((result) => safetyNames.has(result.name));
+  const safety = golden.filter((result) => (safetyNames.has(result.name) || result.name.startsWith("desk-")));
   const metrics = {
     total: results.length,
     passed: results.filter((result) => result.passed).length,

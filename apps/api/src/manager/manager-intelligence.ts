@@ -1,4 +1,4 @@
-import { CATALOG_BAND_OPS_IMPORT_HINT, describeSongCatalogStatus } from "@storyboard/shared";
+import { CATALOG_BAND_OPS_IMPORT_HINT, describeSongCatalogStatus, describeTaskDueDate, formatRecordedShowTime } from "@storyboard/shared";
 import type { ManagerGoalTargetDirection, ManagerWorkstream } from "../generated/prisma/enums";
 import { approvalLifecycleStage, type ApprovalLifecycleStage } from "../approvals/approval-lifecycle";
 import type { ShowReadiness } from "../operations/event-readiness";
@@ -287,8 +287,8 @@ function recommendationRank(
   const invoice = facts.invoices.find((row) => evidence.has(row.id));
   if (invoice) {
     const balance = Math.max(0, invoice.totalMinor - invoice.paidMinor);
-    if (invoice.dueAt && invoice.dueAt < now) {
-      const overdueDays = Math.max(1, Math.floor((now.getTime() - invoice.dueAt.getTime()) / DAY_MS));
+    if (describeTaskDueDate(invoice.dueAt, now)?.timing === "past") {
+      const overdueDays = Math.max(1, Math.floor((now.getTime() - invoice.dueAt!.getTime()) / DAY_MS));
       add("invoice_overdue", 70 + Math.min(30, overdueDays), `invoice is ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue`);
     } else if (balance > 0) add("invoice_open_balance", 25, "invoice has an open balance");
   }
@@ -420,6 +420,40 @@ function money(minor: number, currency: string) {
 function eventDate(value: Date | null) {
   if (!value) return "date not set";
   return value.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+// Invoice due dates are calendar days, never payment deadlines inferred from a clock.
+function invoiceIsUnpaid(invoice: ManagerFacts["invoices"][number]) {
+  return !["void", "voided", "paid"].includes(invoice.status) && invoice.totalMinor > invoice.paidMinor;
+}
+
+function invoiceCalendarSummary(facts: ManagerFacts, now: Date) {
+  const unpaid = facts.invoices.filter(invoiceIsUnpaid);
+  const overdue = unpaid.filter((invoice) => describeTaskDueDate(invoice.dueAt, now)?.timing === "past");
+  const next = unpaid.filter((invoice) => {
+    const timing = describeTaskDueDate(invoice.dueAt, now)?.timing;
+    return timing === "today" || timing === "upcoming";
+  }).sort((a, b) => a.dueAt!.getTime() - b.dueAt!.getTime())[0];
+  const undated = unpaid.filter((invoice) => !describeTaskDueDate(invoice.dueAt, now));
+  const balances = new Map<string, number>();
+  for (const invoice of unpaid) balances.set(invoice.currency, (balances.get(invoice.currency) ?? 0) + invoice.totalMinor - invoice.paidMinor);
+  return unpaid.length
+    ? `${unpaid.length} unpaid invoice${unpaid.length === 1 ? "" : "s"} total ${[...balances].map(([currency, total]) => money(total, currency)).join(" and ")}; ${overdue.length} overdue by recorded UTC calendar day. ${next ? `Next recorded due: ${next.number}, ${eventDate(next.dueAt)} (UTC calendar date${describeTaskDueDate(next.dueAt, now)?.timing === "today" ? ", today" : ""}).` : "No upcoming invoice due date is recorded."}${undated.length ? ` ${undated.length} unpaid invoice${undated.length === 1 ? " has" : "s have"} no recorded due date.` : ""}`
+    : "No unpaid invoices are recorded.";
+}
+
+function eventIsToday(event: ManagerFacts["events"][number], now: Date) {
+  if (!event.startsAt) return false;
+  let zone = event.timezone || "UTC";
+  try { new Intl.DateTimeFormat("en-US", { timeZone: zone }).format(now); } catch { zone = "UTC"; }
+  const day = new Intl.DateTimeFormat("en-US", { timeZone: zone, year: "numeric", month: "numeric", day: "numeric" });
+  return day.format(event.startsAt) === day.format(now);
+}
+
+function deskEvents(facts: ManagerFacts, now: Date, todayOnly = false) {
+  return facts.events.filter((event) => !["completed", "cancelled"].includes(event.status) && event.startsAt &&
+    (todayOnly ? eventIsToday(event, now) : event.startsAt >= now || eventIsToday(event, now) || Boolean(event.endsAt && event.endsAt >= now)))
+    .sort((a, b) => a.startsAt!.getTime() - b.startsAt!.getTime());
 }
 
 function unique<T>(items: T[]) {
@@ -779,18 +813,18 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
     });
   }
 
-  const unpaidInvoices = facts.invoices.filter((invoice) => invoice.totalMinor > invoice.paidMinor);
-  const overdueInvoices = unpaidInvoices.filter((invoice) => invoice.dueAt && invoice.dueAt < now);
+  const unpaidInvoices = facts.invoices.filter(invoiceIsUnpaid);
+  const overdueInvoices = unpaidInvoices.filter((invoice) => describeTaskDueDate(invoice.dueAt, now)?.timing === "past");
   const invoice = overdueInvoices[0] ?? unpaidInvoices[0];
   if (invoice) {
     const balance = invoice.totalMinor - invoice.paidMinor;
     addToday({
       stableKey: `invoice-${invoice.id}`,
-      title: `${invoice.dueAt && invoice.dueAt < now ? "Collect overdue" : "Track"} invoice ${invoice.number}`,
+      title: `${describeTaskDueDate(invoice.dueAt, now)?.timing === "past" ? "Collect overdue" : "Track"} invoice ${invoice.number}`,
       reason: `${money(balance, invoice.currency)} remains unpaid${invoice.dueAt ? `; the recorded due date is ${eventDate(invoice.dueAt)}` : " and no due date is recorded"}.`,
       nextAction: "Verify whether payment arrived, then prepare a reviewed reminder if it is still outstanding.",
       workstream: "business",
-      priority: invoice.dueAt && invoice.dueAt < now ? "high" : "med",
+      priority: describeTaskDueDate(invoice.dueAt, now)?.timing === "past" ? "high" : "med",
       evidenceIds: [invoice.id],
       proposedAction: {
         type: "create_task",
@@ -801,7 +835,7 @@ export function deterministicManagerBriefCandidates(facts: ManagerFacts, now = n
     });
   }
 
-  const overdueFollowUps = facts.campaignRecipients.filter((recipient) => recipient.followUpDueAt && recipient.followUpDueAt < now && ["drafted", "sent"].includes(recipient.status));
+  const overdueFollowUps = facts.campaignRecipients.filter((recipient) => describeTaskDueDate(recipient.followUpDueAt, now)?.timing === "past" && ["drafted", "sent"].includes(recipient.status));
   if (overdueFollowUps[0] && !overdueTasks.some((task) => task.id === overdueFollowUps[0]?.followUpTaskId)) {
     addToday({
       stableKey: "campaign-follow-ups",
@@ -1070,7 +1104,7 @@ export function managerQuestionAsksAboutFollowThrough(question: string) {
 }
 
 export function managerQuestionAsksAboutSchedule(question: string) {
-  return /\b(run[- ]?of[- ]?show|day[- ]?of schedule|show schedule|what time|when (?:do we|is|are)|itinerary|timeline)\b/i.test(question)
+  return /\b(run[- ]?of[- ]?show|day[- ]?of|schedule|itinerary|timeline)\b/i.test(question)
     || /\b(load[- ]?in|soundcheck|doors|set time|curfew|changeover|support slot|band meal|travel call|meet[- ]?and[- ]?greet)\b/i.test(question);
 }
 
@@ -1082,13 +1116,18 @@ export function managerQuestionAsksForDeskSnapshot(question: string) {
   let domains = 0;
   if (/\b(book(?:ing)?|buyer|venue|prospect|campaign|outreach)\b/.test(normalized)) domains += 1;
   if (/\b(setlists?|songs?|catalog|vault|show night)\b/.test(normalized)) domains += 1;
-  if (/\b(invoice|settlement|deposit|receivable|cash|money)\b/.test(normalized)) domains += 1;
+  if (/\b(invoices?|settlements?|deposit|receivables?|cash|money)\b/.test(normalized)) domains += 1;
   if (/\b(run[- ]?of[- ]?show|day[- ]?of|load[- ]?in|soundcheck|doors|set time|curfew|timeline|show schedule)\b/.test(normalized)) domains += 1;
   return domains >= 2;
 }
 
 export function managerQuestionAsksAboutCatalog(question: string) {
   return /\b(setlists?|song library|song catalog|vault|app_api|master_catalog|what songs|our songs|import (?:the )?(?:catalog|songs)|show night)\b/i.test(question);
+}
+
+export function managerQuestionNeedsRecordedDeskAnswer(question: string) {
+  return managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
+    || managerQuestionAsksAboutCatalog(question) || /\b(invoices?|unpaid|overdue|receivables?|next[- ]due|money|paid|payment|deposit|cash)\b/i.test(question);
 }
 
 export function managerQuestionAsksAboutPromoCopy(question: string) {
@@ -1136,7 +1175,7 @@ function deterministicManagerChatBase(
   const proposedDecisionDraft = decisionDraftFromQuestion(question);
   const externalRequest = questionAsksForExternalAction(question);
   const subject = subjectReference?.status === "resolved" ? subjectReference.subject : null;
-  const moneyQuestion = ["deal", "invoice", "settlement"].includes(subject?.kind ?? "") || questionHas(question, /\b(money|invoice|paid|payment|deposit|deal|settlement|settle|profit|revenue|expense|cash)\b/);
+  const moneyQuestion = ["deal", "invoice", "settlement"].includes(subject?.kind ?? "") || questionHas(question, /\b(money|invoices?|unpaid|overdue|receivables?|paid|payment|deposit|deal|settlement|settle|profit|revenue|expense|cash)\b/);
   const catalogQuestion = managerQuestionAsksAboutCatalog(question) && subject?.kind !== "event";
   const scheduleQuestion = managerQuestionAsksAboutSchedule(question);
   const deskSnapshotQuestion = !subject && managerQuestionAsksForDeskSnapshot(question);
@@ -1511,50 +1550,27 @@ function deterministicManagerChatBase(
     const setlists = facts.setlists ?? [];
     const unreadReplies = facts.bookingReplies.filter((reply) => reply.processingStatus === "unread");
     const qualifiedProspects = facts.prospects.filter((prospect) => prospect.status === "qualified");
-    const overdueFollowUps = facts.campaignRecipients.filter((recipient) => recipient.followUpDueAt && recipient.followUpDueAt < now && ["drafted", "sent"].includes(recipient.status));
-    const unpaidInvoices = facts.invoices.filter((invoice) => invoice.totalMinor > invoice.paidMinor);
-    const overdueInvoices = unpaidInvoices.filter((invoice) => invoice.dueAt && invoice.dueAt < now);
-    const nextDatedInvoice = unpaidInvoices
-      .filter((invoice) => invoice.dueAt && invoice.dueAt >= now)
-      .sort((left, right) => (left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER))[0] ?? null;
-    const balances = new Map<string, number>();
-    for (const invoice of unpaidInvoices) {
-      const balance = Math.max(0, invoice.totalMinor - invoice.paidMinor);
-      if (balance) balances.set(invoice.currency, (balances.get(invoice.currency) ?? 0) + balance);
-    }
-    const balanceText = balances.size
-      ? [...balances.entries()].map(([currency, total]) => money(total, currency)).join(" and ")
-      : "no unpaid balance";
-    const oldestOverdue = overdueInvoices
-      .sort((left, right) => (left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER))[0] ?? null;
+    const overdueFollowUps = facts.campaignRecipients.filter((recipient) => describeTaskDueDate(recipient.followUpDueAt, now)?.timing === "past" && ["drafted", "sent"].includes(recipient.status));
     const setlistLine = !activeSongs.length && !setlists.length
-      ? "No songs or setlists are recorded yet. Import the local Vault default-live slice with `pnpm catalog:import` (dry-run) and rerun with `--apply` when ready."
-      : `${activeSongs.length} active song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded${setlists[0] ? `; first in view: "${setlists[0].name}"` : ""}.`;
+      ? "No songs or setlists are recorded yet. Preview a local Vault app_api.json in Band operations → Music & setlists, then apply the reviewed import (docs/catalog-import.md). Vault remains the sole catalog."
+      : `${activeSongs.length} active song${activeSongs.length === 1 ? "" : "s"} and ${setlists.length} setlist${setlists.length === 1 ? "" : "s"} are recorded${setlists[0] ? `; first in view: "${setlists[0].name}"` : ""}.${!setlists.length ? " No running order is recorded; build one from recorded Vault songs in Band operations → Music & setlists." : setlists.every((setlist) => setlist.itemCount === 0) ? " Recorded setlists are empty; add recorded Vault songs before using a running order." : ""}`;
     const bookingLine = `${facts.opportunities.length} active opportunit${facts.opportunities.length === 1 ? "y" : "ies"}, ${qualifiedProspects.length} qualified prospect${qualifiedProspects.length === 1 ? "" : "s"}, ${unreadReplies.length} unread repl${unreadReplies.length === 1 ? "y" : "ies"}, and ${overdueFollowUps.length} overdue follow-up${overdueFollowUps.length === 1 ? "" : "s"}.`;
-    const invoiceLine = !unpaidInvoices.length
-      ? "No unpaid invoices are recorded."
-      : `${unpaidInvoices.length} unpaid invoice${unpaidInvoices.length === 1 ? "" : "s"} total ${balanceText}; ${overdueInvoices.length ? `${overdueInvoices.length} overdue (oldest due ${eventDate(oldestOverdue?.dueAt ?? null)}).` : nextDatedInvoice?.dueAt ? `next recorded due date is ${eventDate(nextDatedInvoice.dueAt)}.` : "remaining balances have no recorded due date."}`;
-    const upcomingEvents = facts.events
-      .filter((event) => event.startsAt && event.startsAt >= now)
-      .sort((left, right) => (left.startsAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (right.startsAt?.getTime() ?? Number.MAX_SAFE_INTEGER));
+    const invoiceLine = invoiceCalendarSummary(facts, now);
+    const upcomingEvents = deskEvents(facts, now);
     const nextUpcomingEvent = upcomingEvents[0] ?? null;
-    const eventWithSchedule = upcomingEvents.find((event) => event.dayOf?.timeline.length) ?? null;
+    const eventWithSchedule = nextUpcomingEvent?.dayOf?.timeline.length ? nextUpcomingEvent : null;
     let runOfShowLine: string;
     let runOfShowEvidence: string[] = [];
     if (eventWithSchedule?.dayOf && eventWithSchedule.dayOf.timeline.length) {
       const dayOf = eventWithSchedule.dayOf;
-      const nextCheckpoint = dayOf.nextCheckpoint ?? dayOf.timeline.find((item) => item.state === "later") ?? dayOf.timeline[dayOf.timeline.length - 1] ?? null;
-      const timezone = eventWithSchedule.timezone ?? "UTC";
-      const checkpointTime = nextCheckpoint
-        ? new Date(nextCheckpoint.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: timezone })
-        : null;
-      runOfShowLine = `${eventWithSchedule.title} (${eventDate(eventWithSchedule.startsAt)}) — ${nextCheckpoint && checkpointTime ? `next checkpoint is ${nextCheckpoint.label} at ${checkpointTime} ${timezone}.` : "timeline is recorded."}${dayOf.depositRemainingMinor > 0 ? ` Deposit remaining ${money(dayOf.depositRemainingMinor, dayOf.currency)}.` : ""}${dayOf.overdueTaskCount > 0 ? ` ${dayOf.overdueTaskCount} advance task${dayOf.overdueTaskCount === 1 ? " is" : "s are"} overdue.` : ""}`;
+      const nextCheckpoint = dayOf.nextCheckpoint;
+      runOfShowLine = `${eventWithSchedule.title} (${formatRecordedShowTime(eventWithSchedule.startsAt?.toISOString(), eventWithSchedule.timezone)}; ${eventWithSchedule.status}) — ${nextCheckpoint ? `next checkpoint is ${nextCheckpoint.label} at ${formatRecordedShowTime(nextCheckpoint.at, eventWithSchedule.timezone)}.` : "No next checkpoint is recorded; the recorded checkpoints have passed."}${dayOf.depositRemainingMinor > 0 ? ` Deposit remaining ${money(dayOf.depositRemainingMinor, dayOf.currency)}.` : ""}${dayOf.overdueTaskCount > 0 ? ` ${dayOf.overdueTaskCount} advance task${dayOf.overdueTaskCount === 1 ? " is" : "s are"} overdue.` : ""}`;
       runOfShowEvidence = dayOf.evidenceIds.slice(0, 8);
     } else if (nextUpcomingEvent) {
-      runOfShowLine = `${nextUpcomingEvent.title} (${eventDate(nextUpcomingEvent.startsAt)}) has no recorded day-of timeline yet. Add load-in, soundcheck, doors, set, and curfew before relying on run-of-show.`;
+      runOfShowLine = `${nextUpcomingEvent.title} (${formatRecordedShowTime(nextUpcomingEvent.startsAt?.toISOString(), nextUpcomingEvent.timezone)}; ${nextUpcomingEvent.status}) has no recorded day-of timeline yet. Add load-in, soundcheck, doors, set, and curfew before relying on run-of-show.`;
       runOfShowEvidence = [nextUpcomingEvent.id];
     } else {
-      runOfShowLine = "No upcoming event is recorded, so run-of-show is not available yet.";
+      runOfShowLine = "No current or upcoming dated event is recorded, so run-of-show is not available yet. Undated records cannot establish a schedule.";
     }
     const recommendation = matchingRecommendation(brief, ["live", "business", "relationships", "band_operations"]);
     return {
@@ -1564,7 +1580,7 @@ function deterministicManagerChatBase(
         ...qualifiedProspects.slice(0, 2).map((prospect) => prospect.id),
         ...unreadReplies.slice(0, 2).map((reply) => reply.id),
         ...overdueFollowUps.slice(0, 2).map((recipient) => recipient.id),
-        ...unpaidInvoices.slice(0, 3).map((invoice) => invoice.id),
+        ...facts.invoices.filter(invoiceIsUnpaid).slice(0, 3).map((invoice) => invoice.id),
         ...activeSongs.slice(0, 2).map((song) => song.id),
         ...setlists.slice(0, 2).map((setlist) => setlist.id),
         ...runOfShowEvidence
@@ -1593,18 +1609,10 @@ function deterministicManagerChatBase(
       const settlement = facts.settlements.find((item) => item.id === subject.id);
       if (settlement) return { answer: `The settlement for “${settlement.event.title}” is ${settlement.status.replaceAll("_", " ")}: gross ${money(settlement.grossMinor, settlement.currency)}, recorded expenses ${money(settlement.expenseMinor, settlement.currency)}, and net ${money(settlement.netMinor, settlement.currency)}.${settlement.status === "finalized" ? " That is the finalized StoryBoard record." : " Review the underlying income and expenses before finalizing it."}`, citations: [settlement.id], recommendation: null };
     }
-    const balances = new Map<string, number>();
-    for (const invoice of facts.invoices) {
-      const balance = Math.max(0, invoice.totalMinor - invoice.paidMinor);
-      if (balance) balances.set(invoice.currency, (balances.get(invoice.currency) ?? 0) + balance);
-    }
-    const balanceText = balances.size
-      ? [...balances.entries()].map(([currency, total]) => money(total, currency)).join(" and ")
-      : "no unpaid invoice balance";
     const draftSettlements = facts.settlements.filter((settlement) => settlement.status === "draft");
     const recommendation = matchingRecommendation(brief, ["business"]);
     return {
-      answer: `The books currently show ${balanceText}. ${facts.invoices.length ? `${facts.invoices.length} open invoice record${facts.invoices.length === 1 ? " is" : "s are"} in view.` : "No open invoices are recorded."} ${draftSettlements.length ? `${draftSettlements.length} settlement${draftSettlements.length === 1 ? " still needs" : "s still need"} final review.` : "No draft settlement is waiting."}\n\n${recommendation ? `My next move would be: ${recommendation.nextAction}` : "If money is expected but missing here, record the deal or invoice before making a decision from these totals."}`,
+      answer: `${invoiceCalendarSummary(facts, now)} ${draftSettlements.length ? `${draftSettlements.length} settlement${draftSettlements.length === 1 ? " still needs" : "s still need"} final review.` : "No draft settlement is waiting."}\n\n${recommendation ? `My next move would be: ${recommendation.nextAction}` : "If money is expected but missing here, record the deal or invoice before making a decision from these totals."}`,
       citations: unique([...facts.invoices.map((invoice) => invoice.id), ...draftSettlements.map((settlement) => settlement.id)]).slice(0, 10),
       recommendation: actionableRecommendation(recommendation)
     };
@@ -1631,7 +1639,9 @@ function deterministicManagerChatBase(
     const vaultSlice = recorded.songs.length
       ? " A Stalemate, hybrid, or Jeff Story row in that slice is current-artist repertoire — not a fourth live band."
       : "";
-    const nextStep = setlists.length
+    const nextStep = setlists.length && setlists.every((setlist) => setlist.itemCount === 0)
+      ? " Recorded setlists are empty; add recorded Vault songs in Band operations → Music & setlists before using a running order."
+      : setlists.length
       ? " Attach a recorded setlist to a gig from Events."
       : " Build or import a running order in Band operations.";
     const closer = recorded.songs.length
@@ -1646,20 +1656,15 @@ function deterministicManagerChatBase(
   }
 
   if (scheduleQuestion) {
-    const eventsWithSchedule = (subject?.kind === "event"
+    const todayOnly = /\b(today|tonight)\b/i.test(question);
+    const candidates = subject?.kind === "event"
       ? facts.events.filter((event) => event.id === subject.id)
-      : facts.events.filter((event) => event.startsAt && event.startsAt >= now && event.dayOf?.timeline.length)).slice(0, responsePolicy.itemLimit);
-    const targetEvent = eventsWithSchedule[0];
-    if (!targetEvent) {
-      const upcomingEvents = facts.events.filter((event) => event.startsAt && event.startsAt >= now);
-      return {
-        answer: upcomingEvents.length
-          ? "I see upcoming events, but none have a recorded schedule yet. Open Day-of view to add load-in, soundcheck, doors, set, and curfew times."
-          : "There are no upcoming events with a recorded schedule in StoryBoard. Create the event and its day-of timeline before asking about run-of-show.",
-        citations: upcomingEvents.slice(0, 3).map((event) => event.id),
-        recommendation: null
-      };
-    }
+      : deskEvents(facts, now, todayOnly);
+    const targetEvent = candidates[0];
+    if (!targetEvent) return {
+      answer: `No ${todayOnly ? "event for today" : "current or upcoming dated event"} is recorded in StoryBoard. A schedule is not recorded for this request. Record the real event date, timezone, and day-of checkpoints in Band operations before relying on run-of-show.`,
+      citations: [], recommendation: null
+    };
     const dayOf = targetEvent.dayOf;
     if (!dayOf || !dayOf.timeline.length) {
       return {
@@ -1669,12 +1674,20 @@ function deterministicManagerChatBase(
       };
     }
     const scheduleLines = dayOf.timeline.map((item) => {
-      const time = new Date(item.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: targetEvent.timezone ?? "UTC" });
+      const time = formatRecordedShowTime(item.at, targetEvent.timezone);
       const marker = item.state === "passed" ? " ✓" : item.state === "next" ? " ←" : "";
       const locationNote = item.location ? ` at ${item.location}` : "";
       const notes = item.notes ? ` — ${item.notes}` : "";
       return `• ${time} — ${item.label}${locationNote}${notes}${marker}`;
     });
+    const checkpointPatterns: [RegExp, string][] = [
+      [/\bload[- ]?in\b/i, "Load-in"], [/\bsoundcheck\b/i, "Soundcheck"],
+      [/\bdoors\b/i, "Doors"], [/\bset time\b/i, "Set time"], [/\bcurfew\b/i, "Curfew"]
+    ];
+    const requestedCheckpoint = checkpointPatterns.find(([pattern]) => pattern.test(question))?.[1];
+    const missingCheckpoint = requestedCheckpoint && !dayOf.timeline.some((item) => item.label === requestedCheckpoint)
+      ? `${requestedCheckpoint} time is not recorded. Record it in Day-of view; other checkpoints do not establish that time.\n\n`
+      : "";
     const moneyNote = dayOf.depositRemainingMinor > 0
       ? `\n\nDeposit remaining: ${money(dayOf.depositRemainingMinor, dayOf.currency)}. Verify payment before doors if not already received.`
       : "";
@@ -1682,7 +1695,7 @@ function deterministicManagerChatBase(
       ? `\n\n${dayOf.overdueTaskCount} advance task${dayOf.overdueTaskCount === 1 ? " is" : "s are"} overdue for this show.`
       : "";
     return {
-      answer: `Run-of-show for "${targetEvent.title}" (${eventDate(targetEvent.startsAt)}):\n\n${scheduleLines.join("\n")}${moneyNote}${taskNote}\n\n${dayOf.headline} ${dayOf.nextAction}`,
+      answer: `${missingCheckpoint}Run-of-show for "${targetEvent.title}" (${formatRecordedShowTime(targetEvent.startsAt?.toISOString(), targetEvent.timezone)}; ${targetEvent.status}):\n\n${scheduleLines.join("\n")}${moneyNote}${taskNote}\n\n${dayOf.headline} ${dayOf.nextAction}`,
       citations: dayOf.evidenceIds.slice(0, 10),
       recommendation: null
     };
@@ -1726,7 +1739,7 @@ function deterministicManagerChatBase(
     }
     const unread = facts.bookingReplies.filter((reply) => reply.processingStatus === "unread");
     const qualified = facts.prospects.filter((prospect) => prospect.status === "qualified");
-    const overdueFollowUps = facts.campaignRecipients.filter((recipient) => recipient.followUpDueAt && recipient.followUpDueAt < now && ["drafted", "sent"].includes(recipient.status));
+    const overdueFollowUps = facts.campaignRecipients.filter((recipient) => describeTaskDueDate(recipient.followUpDueAt, now)?.timing === "past" && ["drafted", "sent"].includes(recipient.status));
     const recommendation = matchingRecommendation(brief, ["live", "relationships"]);
     return {
       answer: `The booking board has ${facts.opportunities.length} active opportunit${facts.opportunities.length === 1 ? "y" : "ies"}, ${qualified.length} qualified prospect${qualified.length === 1 ? "" : "s"}, ${unread.length} unread repl${unread.length === 1 ? "y" : "ies"}, and ${overdueFollowUps.length} overdue follow-up${overdueFollowUps.length === 1 ? "" : "s"}.\n\n${recommendation ? `The highest-leverage next move is: ${recommendation.nextAction}` : "There is no recorded booking action to prioritize. Start by qualifying one real prospect in a target market."}`,
