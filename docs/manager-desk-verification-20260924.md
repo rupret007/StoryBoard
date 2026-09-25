@@ -75,3 +75,15 @@ nearest dated event; ask for a named event to inspect another. “Today” and
 zone is missing/invalid. Missing data still needs deliberate operator entry.
 Hosted integration/browser/container checks are separate from the local gate
 above; consult the PR's exact-tip Quality result for their status.
+
+## Hosted continuation
+
+At `f97f7af173e83d83cd621350b28e1589774c0a6c`, hosted Quality passed
+container smoke, typecheck, lint, unit tests, Manager evals, database integration,
+and production builds. Browser tests passed 32/33; the feedback journey still
+located the money answer by the removed phrase “books currently show.”
+`gh run view 36085432409 --log-failed` (exit 0) identified that stale locator
+at `apps/web/e2e/booking-flow.spec.ts:797`. The locator now uses the recorded
+unpaid-invoice summary. Feedback, memory, and release-gate assertions remain
+intact. Next experiment: the full hosted Quality run on the follow-up tip;
+its final result is linked in the PRE_KAREN PR body.
