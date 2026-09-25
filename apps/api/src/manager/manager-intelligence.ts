@@ -1137,7 +1137,8 @@ export function managerQuestionAsksAboutPromoCopy(question: string) {
 }
 
 export function managerQuestionAsksAboutBookerPitch(question: string) {
-  return /\btravis\b/i.test(question) && /\b(pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send|email|contact)\b/i.test(question);
+  if (/\b(?:bob|package|pack|packs)\b/i.test(question) && /\b(?:booking|pitch|buyer|venue|show)\b/i.test(question)) return true;
+  return /\b(?:travis|bob)\b/i.test(question) && /\b(?:pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send|email|contact|package|pack|packs)\b/i.test(question);
 }
 
 export function managerQuestionAsksAboutFourthBand(question: string) {
@@ -1312,7 +1313,7 @@ function deterministicManagerChatBase(
 
   if (managerQuestionAsksAboutBookerPitch(question)) {
     return {
-      answer: "Travis books. StoryBoard will not auto-pitch him or invent a buyer. Record a real prospect, then review a campaign in Approvals. Nothing posts from this conversation.",
+      answer: "Travis books. Bob packages. StoryBoard will not auto-pitch venues or invent a buyer. Record a real prospect, then review a booking pack or campaign in Approvals. Nothing posts from this conversation.",
       citations: [],
       recommendation: null
     };
@@ -1645,7 +1646,7 @@ function deterministicManagerChatBase(
       ? " Attach a recorded setlist to a gig from Events."
       : " Build or import a running order in Band operations.";
     const closer = recorded.songs.length
-      ? " StoryBoard will not invent titles, auto-post, or auto-pitch Travis."
+      ? " StoryBoard will not invent titles, auto-post, or auto-pitch venues."
       : " StoryBoard will not invent titles, auto-post, or treat a parked catalog as another live band.";
     const provenance = `${status.message}${vaultSlice}${nextStep}${closer}`;
     return {
