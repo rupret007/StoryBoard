@@ -14,7 +14,7 @@ export type ManagerWriteClaimAssessment = {
 
 const WRITE_CLAIM_MESSAGES: Record<ManagerWriteClaimKind, string> = {
   booking:
-    "I did not book anyone or change a booking record. Manager chat is ops talk, not a silent writer. Confirm a gig from the Booking inbox or Approvals, or update the opportunity in Booking. Travis books, and StoryBoard will not auto-pitch.",
+    "I did not book anyone or change a booking record. Manager chat is ops talk, not a silent writer. Confirm a gig from the Booking inbox or Approvals, or update the opportunity in Booking. Travis books; Bob packages; no auto-pitch.",
   invoice:
     "I did not create an invoice, record a payment, or settle a show. Open Band operations to issue an invoice, record a payment from real evidence, or settle a completed show. This chat reply is not a money write.",
   catalog_import: `I did not import or apply a catalog. Preview a local Vault app_api.json, then apply it in Band operations or with \`pnpm catalog:import --apply\`. ${CATALOG_BAND_OPS_IMPORT_HINT} A chat POST is talk only.`,
