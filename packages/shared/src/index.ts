@@ -24,3 +24,4 @@ export * from "./task-due-date";
 export * from "./recorded-show-time";
 export * from "./dfw-venue-packs";
 export * from "./dfw-venue-pack-seed";
+export * from "./venue-pack-resolve";

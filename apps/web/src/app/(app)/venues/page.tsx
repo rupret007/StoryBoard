@@ -15,7 +15,7 @@ export default async function VenuesPage() {
     <div className="space-y-8">
       <PageHeader
         title="Venues"
-        description="Venue CRM — fit scores and drive-time hints for smarter routing and outreach."
+        description="Find a venue, review its pack, and start an opportunity or prospect without manager chat. Travis books; StoryBoard does not send outreach on its own."
       />
       <VenuesClient initialVenues={venues} />
     </div>
