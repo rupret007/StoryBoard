@@ -1255,6 +1255,14 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
   "adairs saloon": {
     email: "joel@adairssaloon.com",
     applyUrl: "https://www.adairssaloon.com/contact"
+  },
+  "club dada": {
+    email: "booking@dadadallas.com",
+    applyUrl: "https://www.dadadallas.com/contact"
+  },
+  "club dada dallas": {
+    email: "booking@dadadallas.com",
+    applyUrl: "https://www.dadadallas.com/contact"
   }
 };
 
