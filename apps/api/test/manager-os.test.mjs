@@ -3725,6 +3725,21 @@ test("venue pack questions match apostrophe variants and avoid regex traps in ti
   assert.match(kesslerAnswer.answer, /outreach on Booking/);
   assert.ok(kesslerAnswer.citations.includes("opp-kessler"));
 
+  const granada = { id: "opp-granada", title: "Granada Theater (Lower Greenville)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Granada", [granada])?.id, "opp-granada");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack granada theater", [granada])?.id, "opp-granada");
+  assert.equal(intelligence.lookupVenuePackDetails(granada.title)?.email, "booking@granadatheater.com");
+  assert.match(intelligence.lookupVenuePackDetails(granada.title)?.applyUrl ?? "", /granadatheater\.com\/faqs/);
+
+  const granadaAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [granada] }),
+    "Package Granada Theater",
+    now
+  );
+  assert.match(granadaAnswer.answer, /booking@granadatheater\.com/);
+  assert.match(granadaAnswer.answer, /outreach on Booking/);
+  assert.ok(granadaAnswer.citations.includes("opp-granada"));
+
   const unknown = intelligence.deterministicManagerChat(
     managerFacts({ opportunities: [{ id: "opp-x", title: "New Room (Dallas)", stage: "target" }] }),
     "Package New Room Dallas",

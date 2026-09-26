@@ -1207,6 +1207,16 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
     email: "booking@kesslerpresents.com",
     phone: "(214) 272-8346",
     applyUrl: "https://thekessler.org/faq/"
+  },
+  "granada theater": {
+    email: "booking@granadatheater.com",
+    phone: "(214) 841-4900",
+    applyUrl: "https://www.granadatheater.com/faqs"
+  },
+  "the granada": {
+    email: "booking@granadatheater.com",
+    phone: "(214) 841-4900",
+    applyUrl: "https://www.granadatheater.com/faqs"
   }
 };
 
