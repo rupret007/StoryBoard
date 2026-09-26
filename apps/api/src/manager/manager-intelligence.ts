@@ -1247,6 +1247,14 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
     email: "sohhgm@gmail.com",
     phone: "(972) 834-6899",
     applyUrl: "https://www.sonsofhermannhall.com/services-4"
+  },
+  "adair's saloon": {
+    email: "joel@adairssaloon.com",
+    applyUrl: "https://www.adairssaloon.com/contact"
+  },
+  "adairs saloon": {
+    email: "joel@adairssaloon.com",
+    applyUrl: "https://www.adairssaloon.com/contact"
   }
 };
 

@@ -88,6 +88,9 @@ const cases: { name: string; question: string; facts: ManagerFacts; check: (answ
   { name: "desk-sons-of-hermann-hall-venue-pack", question: "Package Sons of Hermann Hall", 
     facts: { ...empty, opportunities: [{ id: "opp-sohh", title: "Sons of Hermann Hall (Deep Ellum)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
     check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /sonsofhermannhall\.com\/services-4/.test(a) && /sohhgm@gmail\.com/.test(a) && /972.*834.*6899/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-sohh") },
+  { name: "desk-adairs-saloon-venue-pack", question: "Package Adair's Saloon", 
+    facts: { ...empty, opportunities: [{ id: "opp-adairs", title: "Adair's Saloon (Deep Ellum)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /adairssaloon\.com\/contact/.test(a) && /joel@adairssaloon\.com/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-adairs") },
   { name: "desk-pipeline-stage-breakdown", question: "Show me the pipeline by stage",
     facts: { ...empty, opportunities: [
       { id: "opp-1", title: "Bluebird hold", stage: "hold", targetDate: new Date("2026-10-15T00:00:00Z"), updatedAt: new Date("2026-09-20T00:00:00Z") },
