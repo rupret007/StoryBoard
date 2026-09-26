@@ -94,6 +94,15 @@ const cases: { name: string; question: string; facts: ManagerFacts; check: (answ
   { name: "desk-club-dada-venue-pack", question: "Package Club Dada", 
     facts: { ...empty, opportunities: [{ id: "opp-club-dada", title: "Club Dada (Deep Ellum)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
     check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /dadadallas\.com\/contact/.test(a) && /booking@dadadallas\.com/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-club-dada") },
+  { name: "desk-venue-pack-linked-venue-name", question: "Package Birdie's Social Club",
+    facts: { ...empty, opportunities: [{ id: "opp-ryman-bsc", title: "Ryman — fall window", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z"), venueName: "Birdie's Social Club" }] },
+    check: (a, c) => /hiring@birdiessocialclub\.com/.test(a) && /birdiessocialclub\.com\/music-submission/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && c.includes("opp-ryman-bsc") },
+  { name: "desk-venue-pack-theater-no-crosswire", question: "pack the granada theater",
+    facts: { ...empty, opportunities: [
+      { id: "opp-kessler", title: "The Kessler Theater (Oak Cliff)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") },
+      { id: "opp-granada", title: "Granada Theater (Lower Greenville)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }
+    ] },
+    check: (a, c) => /booking@granadatheater\.com/.test(a) && !/booking@kesslerpresents\.com/.test(a) && c.includes("opp-granada") && !c.includes("opp-kessler") },
   { name: "desk-pipeline-stage-breakdown", question: "Show me the pipeline by stage",
     facts: { ...empty, opportunities: [
       { id: "opp-1", title: "Bluebird hold", stage: "hold", targetDate: new Date("2026-10-15T00:00:00Z"), updatedAt: new Date("2026-09-20T00:00:00Z") },

@@ -3822,6 +3822,27 @@ test("venue pack questions match apostrophe variants and avoid regex traps in ti
   );
   assert.match(unknown.answer, /No venue-pack registry entry yet/);
   assert.doesNotMatch(unknown.answer, /Apply URL:/);
+
+  const linkedBirdies = {
+    id: "opp-ryman-bsc",
+    title: "Ryman — fall window",
+    stage: "target",
+    targetDate: null,
+    updatedAt: now,
+    venueName: "Birdie's Social Club"
+  };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Birdie's Social Club", [linkedBirdies])?.id, "opp-ryman-bsc");
+  assert.equal(intelligence.lookupVenuePackDetails(linkedBirdies.venueName)?.email, "hiring@birdiessocialclub.com");
+  const linkedBirdiesAnswer = intelligence.deterministicManagerChat(managerFacts({ opportunities: [linkedBirdies] }), "Package Birdie's Social Club", now);
+  assert.match(linkedBirdiesAnswer.answer, /hiring@birdiessocialclub\.com/);
+  assert.ok(linkedBirdiesAnswer.citations.includes("opp-ryman-bsc"));
+
+  const kesslerTheater = { id: "opp-kessler", title: "The Kessler Theater (Oak Cliff)", stage: "target", targetDate: null, updatedAt: now };
+  const granadaTheater = { id: "opp-granada", title: "Granada Theater (Lower Greenville)", stage: "target", targetDate: null, updatedAt: now };
+  const bothTheaters = [kesslerTheater, granadaTheater];
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack the granada theater", bothTheaters)?.id, "opp-granada");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack kessler theater", bothTheaters)?.id, "opp-kessler");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack the theater", bothTheaters), null);
 });
 
 test("empty seed chat stays honest about missing setlists, songs, and booking targets", async () => {
