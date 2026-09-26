@@ -1182,6 +1182,16 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
   "birdies social club": {
     email: "hiring@birdiessocialclub.com",
     applyUrl: "https://www.birdiessocialclub.com/music-submission"
+  },
+  "dan's silverleaf": {
+    email: "booking@danssilverleaf.com",
+    phone: "(940) 252-4369",
+    applyUrl: "https://danssilverleaf.com/contact"
+  },
+  "dans silverleaf": {
+    email: "booking@danssilverleaf.com",
+    phone: "(940) 252-4369",
+    applyUrl: "https://danssilverleaf.com/contact"
   }
 };
 

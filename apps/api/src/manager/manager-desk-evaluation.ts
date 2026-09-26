@@ -67,6 +67,9 @@ const cases: { name: string; question: string; facts: ManagerFacts; check: (answ
   { name: "desk-birdies-social-club-venue-pack", question: "Package Birdies Social Club", 
     facts: { ...empty, opportunities: [{ id: "opp-bsc", title: "Birdie's Social Club (Fort Worth)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
     check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /birdiessocialclub\.com\/music-submission/.test(a) && /hiring@birdiessocialclub\.com/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-bsc") },
+  { name: "desk-dans-silverleaf-venue-pack", question: "Package Dan's Silverleaf", 
+    facts: { ...empty, opportunities: [{ id: "opp-dsl", title: "Dan's Silverleaf (Denton)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /danssilverleaf\.com\/contact/.test(a) && /booking@danssilverleaf\.com/.test(a) && /940.*252.*4369/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-dsl") },
   { name: "desk-pipeline-stage-breakdown", question: "Show me the pipeline by stage",
     facts: { ...empty, opportunities: [
       { id: "opp-1", title: "Bluebird hold", stage: "hold", targetDate: new Date("2026-10-15T00:00:00Z"), updatedAt: new Date("2026-09-20T00:00:00Z") },
