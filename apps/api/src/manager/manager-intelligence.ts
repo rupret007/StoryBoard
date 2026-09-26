@@ -1217,6 +1217,16 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
     email: "booking@granadatheater.com",
     phone: "(214) 841-4900",
     applyUrl: "https://www.granadatheater.com/faqs"
+  },
+  "magnolia motor lounge": {
+    email: "booking@mmlbar.com",
+    phone: "(817) 332-3344",
+    applyUrl: "https://www.magnoliamotorlounge.com/contact"
+  },
+  "magnolia motor": {
+    email: "booking@mmlbar.com",
+    phone: "(817) 332-3344",
+    applyUrl: "https://www.magnoliamotorlounge.com/contact"
   }
 };
 
