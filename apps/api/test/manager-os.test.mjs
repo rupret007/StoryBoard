@@ -3658,6 +3658,37 @@ test("manager chat refuses direct outside action and offers only reviewable inte
   assert.ok(!result.recommendation || result.recommendation.proposedAction?.type === "create_task");
 });
 
+test("venue pack questions match apostrophe variants and avoid regex traps in titles", () => {
+  const parenthesized = [{ id: "opp-fw", title: "(Fort Worth) Ballroom", stage: "target" }];
+  assert.deepEqual(
+    intelligence.managerQuestionAsksAboutVenuePack("Package Fort Worth Ballroom", parenthesized),
+    parenthesized[0]
+  );
+
+  const birdies = { id: "opp-bsc", title: "Birdie's Social Club (Fort Worth)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Birdies", [birdies])?.id, "opp-bsc");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack birdies social", [birdies])?.id, "opp-bsc");
+  assert.equal(intelligence.lookupVenuePackDetails(birdies.title)?.email, "hiring@birdiessocialclub.com");
+  assert.match(intelligence.lookupVenuePackDetails(birdies.title)?.applyUrl ?? "", /music-submission/);
+
+  const answer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [birdies] }),
+    "Package Birdies Social Club",
+    now
+  );
+  assert.match(answer.answer, /hiring@birdiessocialclub\.com/);
+  assert.match(answer.answer, /outreach on Booking/);
+  assert.ok(answer.citations.includes("opp-bsc"));
+
+  const unknown = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [{ id: "opp-x", title: "New Room (Dallas)", stage: "target" }] }),
+    "Package New Room Dallas",
+    now
+  );
+  assert.match(unknown.answer, /No venue-pack registry entry yet/);
+  assert.doesNotMatch(unknown.answer, /Apply URL:/);
+});
+
 test("empty seed chat stays honest about missing setlists, songs, and booking targets", async () => {
   const emptySeed = managerFacts({
     artist: { id: "artist-a", name: "My Artist" },

@@ -1143,13 +1143,22 @@ export function managerQuestionAsksAboutBookerPitch(question: string) {
   return /\b(?:travis|bob)\b/i.test(question) && /\b(?:pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send|email|contact|package|pack|packs)\b/i.test(question);
 }
 
+function normalizeVenuePackMatchText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function managerQuestionAsksAboutVenuePack(question: string, opportunities: ManagerFacts["opportunities"]): { id: string; title: string } | null {
   if (!/\b(?:package|pack|packs)\b/i.test(question)) return null;
+  const questionNorm = normalizeVenuePackMatchText(question);
   for (const opp of opportunities) {
-    const words = opp.title.split(/\s+/).filter(w => w.length > 3 && !/target|hold|offer|confirmed/i.test(w));
-    if (words.some(w => new RegExp(`\\b${w}\\b`, "i").test(question))) {
-      return opp;
-    }
+    const titleNorm = normalizeVenuePackMatchText(opp.title);
+    const words = titleNorm.split(" ").filter((w) => w.length > 3 && !/^(target|hold|offer|confirmed)$/.test(w));
+    if (words.some((w) => questionNorm.includes(w))) return opp;
   }
   return null;
 }
@@ -1410,12 +1419,12 @@ function deterministicManagerChatBase(
   const venuePackTarget = managerQuestionAsksAboutVenuePack(question, facts.opportunities);
   if (venuePackTarget) {
     const venuePackDetails = lookupVenuePackDetails(venuePackTarget.title);
-    const applyDetails = venuePackDetails 
+    const applyDetails = venuePackDetails
       ? `\nContact: ${venuePackDetails.email}${venuePackDetails.phone ? ` / ${venuePackDetails.phone}` : ""}\nApply URL: ${venuePackDetails.applyUrl}\n`
-      : "";
+      : "\nContact: No venue-pack registry entry yet — confirm the buyer email and apply link in CRM.\n";
       
     return {
-      answer: `Package summary for ${venuePackTarget.title}:\n\nPositioning: Live music application target in DFW.${applyDetails}\nLinks: [Live links placeholders]\nSet formats: Standard sets\n\nTravis owns the send. Jeff+Travis yes before pitch. StoryBoard will not auto-pitch venues. Nothing posts from this conversation.`,
+      answer: `Package summary for ${venuePackTarget.title}:\n\nPositioning: Live music application target in DFW.${applyDetails}\nLinks: [Live links placeholders]\nSet formats: Standard sets\n\nTravis owns the send. Jeff+Travis yes before pitch. StoryBoard will not auto-pitch venues.\nNext: After you both agree, Travis submits via the Apply URL when one is listed; move the opportunity to outreach on Booking once the send is recorded.\nNothing posts from this conversation.`,
       citations: [venuePackTarget.id],
       recommendation: null
     };
