@@ -124,10 +124,19 @@ function BookingReviewFacts({ opportunity }: { opportunity: BookingOpportunity }
     targetDate: opportunity.targetDate,
     stage: opportunity.stage
   });
+  const targetDateTime = target.timing !== "none" && opportunity.targetDate
+    ? new Date(opportunity.targetDate).toISOString()
+    : null;
   return <dl className="space-y-2 text-xs break-words">
     <div><dt className="text-[var(--text-muted)]">Title</dt><dd>{opportunity.title}</dd></div>
     <div><dt className="text-[var(--text-muted)]">Venue</dt><dd>{opportunity.venue?.name ?? "Not recorded"}</dd></div>
-    <div><dt className="text-[var(--text-muted)]">Recorded target date</dt><dd>{target.timing === "none" ? "Not recorded — set show start/end/timezone in Shows & calendar after confirming" : `${target.label}${target.note ? ` — ${target.note}` : ""}`}</dd></div>
+    <div>
+      <dt className="text-[var(--text-muted)]">Recorded target date</dt>
+      <dd data-testid="booking-review-target-date">{targetDateTime ? <>
+        <time dateTime={targetDateTime}>{target.label}</time>
+        {target.note ? ` — ${target.note}` : ""}
+      </> : "Not recorded — set show start/end/timezone in Shows & calendar after confirming"}</dd>
+    </div>
     <div><dt className="text-[var(--text-muted)]">Recorded fee</dt><dd>{opportunity.proposedFeeMinor != null ? `${opportunity.proposedCurrency ?? "Currency not recorded"} ${(opportunity.proposedFeeMinor / 100).toFixed(2)}` : "Not recorded"}</dd></div>
     <div><dt className="text-[var(--text-muted)]">Conditions</dt><dd className="whitespace-pre-wrap">{opportunity.negotiationConditions?.trim() || "Not recorded"}</dd></div>
   </dl>;

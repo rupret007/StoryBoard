@@ -185,8 +185,9 @@ test("manual prospect can gain a buyer and enter an approval-ready campaign", as
   await expect(card.getByText("Buyer: Morgan Promoter")).toBeVisible();
 
   await page.goto("/booking-campaigns");
-  const deliveryMode = page.getByLabel("Delivery after approval");
+  const deliveryMode = page.getByLabel("After approval + Execute");
   await expect(deliveryMode).toHaveValue("draft_only");
+  await expect(page.getByText(/Travis still owns the send: both modes require explicit approval and a separate Execute step/)).toBeVisible();
   await page.getByLabel("Campaign name").fill(campaignName);
   await page.getByRole("button", { name: "Create campaign" }).click();
   await page.getByLabel(`Prospect for ${campaignName}`).selectOption({ label: `${prospectName} · Austin` });
@@ -590,6 +591,9 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByText("Daily manager brief refreshed.", { exact: true })).toBeVisible();
   await briefPriorities.getByRole("button", { name: "weekly" }).click();
   await expect(briefPriorities.getByText("Weekly operating brief", { exact: true })).toBeVisible();
+  // Cadence switches read cached briefs; generate this cadence explicitly.
+  await briefPriorities.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Weekly manager brief refreshed.", { exact: true })).toBeVisible();
   await expect(page.getByTestId("manager-priority-explanation")).toContainText("Ranked first because");
   const cadenceCard = page.getByTestId("manager-cadence");
   await expect(cadenceCard.getByText("On request only", { exact: true })).toBeVisible();
@@ -805,7 +809,9 @@ test("manager feedback and reviewed memory feed the release gate", async ({ page
   await page.getByRole("button", { name: "Send message" }).click();
   const planReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "plan-health score is" });
   await expect(planReply).toBeVisible();
-  await expect(planReply).toContainText(/real owner/i);
+  // The next action depends on current goal evidence, including unreconciled progress.
+  await expect(planReply).toContainText(/plan-health score is \d+\/100/);
+  await expect(planReply).toContainText("not elapsed-time pace or probability");
   const adaptationProbeTitle = `Review the E2E Manager answer ${suffix}`;
   await managerMessage.fill(`Add a task to ${adaptationProbeTitle}`);
   await page.getByRole("button", { name: "Send message" }).click();
@@ -1276,7 +1282,7 @@ test("confirmed event logistics move through approvals before provider execution
   await eventCard.getByText("Manage readiness details", { exact: true }).click();
   await eventCard.getByLabel(`Status for ${eventTitle}`).selectOption("confirmed");
   await eventCard.getByLabel(`Event end for ${eventTitle}`).fill(localTime(eventEnd));
-  await eventCard.getByLabel(`Event timezone for ${eventTitle}`).fill("America/Chicago");
+  await eventCard.getByLabel(`Event timezone for ${eventTitle}`).selectOption("America/Chicago");
   await expect(eventCard.getByRole("button", { name: /Prepare .* approval/ })).toHaveCount(0);
   const eventSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/events/") && response.ok());
   await eventCard.getByRole("button", { name: "Save event details" }).click();
@@ -1821,7 +1827,10 @@ test("booking stage review explains confirmation and writes only after reviewed 
   await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
   const review = editor.getByRole("region", { name: "Review stage for E2E Travis booked this room" });
   await expect(review).toContainText("hold → confirmed");
-  await expect(review).toContainText("Not recorded — the new gig will need a start time");
+  const missingTarget = review.getByTestId("booking-review-target-date");
+  await expect(missingTarget).toHaveText("Not recorded — set show start/end/timezone in Shows & calendar after confirming");
+  await expect(missingTarget.locator("time")).toHaveCount(0);
+  await expect(review.getByRole("link", { name: "Set start, end, and timezone in Shows & calendar" })).toHaveAttribute("href", "/operations?tab=events");
   await expect(review).toContainText("only after Travis has booked it");
   expect(writes).toBe(0);
   await editor.scrollIntoViewIfNeeded();
@@ -1888,10 +1897,16 @@ test("booking review preserves the selection through repeated competing changes"
   await expect(editor.getByRole("combobox")).toHaveValue("confirmed");
   await expect(editor.getByRole("button", { name: "Save reviewed stage" })).toBeDisabled();
   await editor.getByRole("button", { name: "Load latest details" }).click();
-  await expect(editor.getByRole("region", { name: "Latest saved booking details" })).toContainText("E2E teammate revised booking terms");
+  const latestDetails = editor.getByRole("region", { name: "Latest saved booking details" });
+  await expect(latestDetails).toContainText("E2E teammate revised booking terms");
+  await expect(latestDetails.getByTestId("booking-review-target-date").locator("time")).toHaveAttribute("datetime", "2026-12-04T20:00:00.000Z");
+  const review = editor.getByRole("region", { name: "Review stage for E2E original booking terms" });
+  await expect(review.getByTestId("booking-review-target-date").locator("time")).toHaveCount(0);
   await expect(editor.getByRole("button", { name: "Save reviewed stage" })).toBeDisabled();
   await editor.getByRole("button", { name: "Review latest details" }).click();
-  await expect(editor.getByRole("region", { name: "Review stage for E2E original booking terms" })).toContainText("2026-12-04 20:00:00 UTC");
+  const reviewedTarget = review.getByTestId("booking-review-target-date").locator("time");
+  await expect(reviewedTarget).toHaveText("Target Fri, Dec 4, 2026 (UTC)");
+  await expect(reviewedTarget).toHaveAttribute("datetime", "2026-12-04T20:00:00.000Z");
   expect((await artistApi<{ stage: string }>(page, artistId, `/booking-opportunities/${booking.id}`)).stage).toBe("hold");
   await artistApi(page, artistId, `/booking-opportunities/${booking.id}/stage`, "PATCH", { stage: "closed", expectedUpdatedAt: changed.updatedAt });
   await editor.getByRole("button", { name: "Save reviewed stage" }).click();
