@@ -1237,6 +1237,16 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
     email: "info@tulipsftw.com",
     phone: "(817) 367-9798",
     applyUrl: "https://tulipsftw.com/book-an-event/"
+  },
+  "sons of hermann hall": {
+    email: "sohhgm@gmail.com",
+    phone: "(972) 834-6899",
+    applyUrl: "https://www.sonsofhermannhall.com/services-4"
+  },
+  "sons of hermann": {
+    email: "sohhgm@gmail.com",
+    phone: "(972) 834-6899",
+    applyUrl: "https://www.sonsofhermannhall.com/services-4"
   }
 };
 
