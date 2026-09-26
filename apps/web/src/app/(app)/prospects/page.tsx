@@ -12,21 +12,48 @@ export default async function ProspectsPage() {
   let prospects: BookingProspect[] = [];
   let contacts: Contact[] = [];
   let sprints: BookingMarketSprint[] = [];
-  try {
-    [profile, prospects, contacts, sprints] = await Promise.all([
-      serverApiFetch<BookingProfileResponse>("/booking-profile", {
-        cache: "no-store"
-      }),
-      serverApiFetch<BookingProspect[]>("/booking-prospects", {
-        cache: "no-store"
-      }),
-      serverApiFetch<Contact[]>("/contacts", {
-        cache: "no-store"
-      }),
-      serverApiFetch<BookingMarketSprint[]>("/market-sprints", { cache: "no-store" })
+  let accessState: "manage" | "read_only" | "unavailable" = "unavailable";
+  let loadError = "";
+  const [profileResult, prospectResult, contactResult, sprintResult, meResult] =
+    await Promise.allSettled([
+      serverApiFetch<BookingProfileResponse>("/booking-profile", { cache: "no-store" }),
+      serverApiFetch<BookingProspect[]>("/booking-prospects", { cache: "no-store" }),
+      serverApiFetch<Contact[]>("/contacts", { cache: "no-store" }),
+      serverApiFetch<BookingMarketSprint[]>("/market-sprints", { cache: "no-store" }),
+      serverApiFetch<{
+        currentArtistId: string | null;
+        memberships: { artistId: string; role: string }[];
+      }>("/auth/me", { cache: "no-store" })
     ]);
-  } catch {
-    // The client renders a usable empty/manual state if the API is unavailable.
+  if (profileResult.status === "fulfilled") profile = profileResult.value;
+  if (prospectResult.status === "fulfilled") prospects = prospectResult.value;
+  if (contactResult.status === "fulfilled") contacts = contactResult.value;
+  if (sprintResult.status === "fulfilled") sprints = sprintResult.value;
+  if (meResult.status === "fulfilled") {
+    const me = meResult.value;
+    const artistId =
+      me.currentArtistId &&
+      me.memberships.some((membership) => membership.artistId === me.currentArtistId)
+        ? me.currentArtistId
+        : me.memberships[0]?.artistId ?? null;
+    const role = me.memberships.find((membership) => membership.artistId === artistId)?.role;
+    accessState =
+      role === "owner" || role === "member"
+        ? "manage"
+        : role === "viewer"
+          ? "read_only"
+          : "unavailable";
+  }
+  const dataFailed = [profileResult, prospectResult, contactResult, sprintResult].some(
+    (result) => result.status === "rejected"
+  );
+  if (meResult.status === "rejected") {
+    loadError = "Your workspace permissions could not be verified. Reload before changing prospects.";
+    accessState = "unavailable";
+  } else if (dataFailed) {
+    loadError =
+      "Find shows data could not be loaded. StoryBoard is not treating this as an empty workspace — reload before qualifying leads.";
+    accessState = "unavailable";
   }
 
   return (
@@ -40,6 +67,8 @@ export default async function ProspectsPage() {
         initialProspects={prospects}
         contacts={contacts}
         sprints={sprints}
+        accessState={accessState}
+        loadError={loadError}
       />
     </div>
   );

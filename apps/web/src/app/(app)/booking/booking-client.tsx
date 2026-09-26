@@ -43,6 +43,7 @@ export function BookingClient({
   useEffect(() => setOpportunities(initialOpportunities), [initialOpportunities]);
   const [title, setTitle] = useState("");
   const [venueId, setVenueId] = useState("");
+  const [targetDate, setTargetDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [chosenStage, setChosenStage] = useState<(typeof STAGES)[number] | null>(null);
@@ -76,11 +77,13 @@ export function BookingClient({
         signal: AbortSignal.timeout(15_000),
         json: {
           title: title.trim(),
-          venueId: venueId || undefined
+          venueId: venueId || undefined,
+          targetDate: targetDate ? `${targetDate}T12:00:00.000Z` : undefined
         }
       });
       setTitle("");
       setVenueId("");
+      setTargetDate("");
       setChosenStage("target");
       router.refresh();
     } catch (err) {
@@ -140,6 +143,15 @@ export function BookingClient({
                 </option>
               ))}
             </select>
+          </label>
+          <label className="block w-full sm:w-44">
+            <span className="sb-label">Target date (optional)</span>
+            <input
+              type="date"
+              className="sb-input mt-1.5"
+              value={targetDate}
+              onChange={(e) => setTargetDate(e.target.value)}
+            />
           </label>
           <button
             type="submit"

@@ -30,12 +30,16 @@ export function ProspectsClient({
   initialProfile,
   initialProspects,
   contacts,
-  sprints
+  sprints,
+  accessState,
+  loadError
 }: {
   initialProfile: BookingProfileResponse;
   initialProspects: BookingProspect[];
   contacts: Contact[];
   sprints: BookingMarketSprint[];
+  accessState: "manage" | "read_only" | "unavailable";
+  loadError: string;
 }) {
   const router = useRouter();
   const profile = initialProfile.profile;
@@ -70,6 +74,7 @@ export function ProspectsClient({
   });
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const canManage = accessState === "manage" && !loadError;
 
   async function saveProfile(event: React.FormEvent) {
     event.preventDefault();
@@ -122,7 +127,7 @@ export function ProspectsClient({
     }
   }
 
-  async function saveProspect(input: Record<string, unknown>, key: string) {
+  async function saveProspect(input: Record<string, unknown>, key: string): Promise<boolean> {
     setBusy(key);
     setError(null);
     try {
@@ -140,8 +145,10 @@ export function ProspectsClient({
             : current
         );
       }
+      return true;
     } catch (caught) {
       setError(messageFrom(caught));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -149,7 +156,7 @@ export function ProspectsClient({
 
   async function createManual(event: React.FormEvent) {
     event.preventDefault();
-    await saveProspect(
+    const saved = await saveProspect(
       {
         kind: manual.kind,
         name: manual.name,
@@ -163,7 +170,9 @@ export function ProspectsClient({
       },
       "manual"
     );
-    setManual((current) => ({ ...current, name: "", websiteUrl: "", capacity: "", notes: "" }));
+    if (saved) {
+      setManual((current) => ({ ...current, name: "", websiteUrl: "", capacity: "", notes: "" }));
+    }
   }
 
   async function updateStatus(id: string, status: (typeof statuses)[number]) {
@@ -201,12 +210,27 @@ export function ProspectsClient({
 
   return (
     <div className="space-y-6">
+      {loadError ? (
+        <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+          {loadError}{" "}
+          <button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}>
+            Reload
+          </button>
+        </div>
+      ) : null}
+      {accessState === "read_only" ? (
+        <p role="status" className="text-sm text-[var(--text-muted)]">
+          You have read-only access. An owner or member can qualify leads and convert them.
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
           {error}
         </p>
       ) : null}
 
+      {loadError ? null : (
+      <>
       <SurfaceCard>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -260,7 +284,7 @@ export function ProspectsClient({
         <SurfaceCard>
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Prospects</h2>
           <p className="mt-1 text-xs text-[var(--text-muted)]">Qualify a lead before conversion. Venue conversion creates a physical venue; festivals, private events, and corporate buyers stay venue-less.</p>
-          {initialProspects.length === 0 ? <div className="mt-5"><EmptyState title="No prospects yet" description="Search a market or add a manual lead — private and corporate buyers are manual-first." icon={<Sparkles className="h-6 w-6" />} /></div> : <div className="mt-4 space-y-3">{initialProspects.map((prospect) => <ProspectRow key={prospect.id} prospect={prospect} contacts={contacts} busy={busy} onStatus={updateStatus} onConvert={convert} onLinked={() => router.refresh()} />)}</div>}
+          {initialProspects.length === 0 ? <div className="mt-5"><EmptyState title="No prospects yet" description={canManage ? "Search a market or add a manual lead — private and corporate buyers are manual-first." : "No prospects are recorded yet. An owner or member can add the first lead."} icon={<Sparkles className="h-6 w-6" />} /></div> : <div className="mt-4 space-y-3">{initialProspects.map((prospect) => <ProspectRow key={prospect.id} prospect={prospect} contacts={contacts} busy={busy} onStatus={updateStatus} onConvert={convert} onLinked={() => router.refresh()} />)}</div>}
         </SurfaceCard>
 
         <div className="space-y-6">
@@ -280,6 +304,8 @@ export function ProspectsClient({
           </SurfaceCard>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

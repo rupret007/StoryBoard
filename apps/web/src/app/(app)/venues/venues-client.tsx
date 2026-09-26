@@ -5,6 +5,7 @@ import { Building2, ChevronRight, ExternalLink, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { sanitizeOperatorHref } from "@storyboard/shared";
 import { apiFetch } from "@/lib/api";
 import type { Contact, Venue } from "@/lib/types";
 
@@ -30,12 +31,29 @@ type ProspectFromVenueResult = {
   travisNote: string;
 };
 
-export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
+type VenueOpportunityResult = {
+  id: string;
+  title: string;
+  created: boolean;
+};
+
+export function VenuesClient({
+  initialVenues,
+  accessState,
+  loadError
+}: {
+  initialVenues: Venue[];
+  accessState: "manage" | "read_only" | "unavailable";
+  loadError: string;
+}) {
   const router = useRouter();
+  const canManage = accessState === "manage";
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [fitScore, setFitScore] = useState("");
   const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [venueOpportunityId, setVenueOpportunityId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [packDetail, setPackDetail] = useState<VenuePackDetail | null>(null);
@@ -74,14 +92,18 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
     if (!selectedId) {
       setPackDetail(null);
       setPackError("");
+      setVenueOpportunityId(null);
       return;
     }
+    setVenueOpportunityId(null);
     void loadPack(selectedId);
   }, [selectedId, loadPack]);
 
   async function createVenue(e: React.FormEvent) {
     e.preventDefault();
+    if (!canManage) return;
     setBusy(true);
+    setFormError("");
     try {
       await apiFetch<Venue>("/venues", {
         method: "POST",
@@ -95,6 +117,8 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
       setCity("");
       setFitScore("");
       router.refresh();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Could not create venue");
     } finally {
       setBusy(false);
     }
@@ -106,11 +130,16 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
     setActionError("");
     setActionNotice("");
     try {
-      const opp = await apiFetch<{ id: string; title: string }>(
+      const opp = await apiFetch<VenueOpportunityResult>(
         `/venues/${selectedId}/opportunities`,
         { method: "POST", json: {} }
       );
-      setActionNotice(`Opportunity recorded: ${opp.title}. Travis books — StoryBoard will not pitch or send.`);
+      setVenueOpportunityId(opp.id);
+      setActionNotice(
+        opp.created
+          ? `Opportunity recorded: ${opp.title}. Travis books — StoryBoard will not pitch or send.`
+          : `Open opportunity already on file: ${opp.title}. Linked prospect actions will use this deal.`
+      );
       router.refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not create opportunity");
@@ -127,7 +156,10 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
     try {
       const result = await apiFetch<ProspectFromVenueResult>(
         `/venues/${selectedId}/prospects`,
-        { method: "POST", json: {} }
+        {
+          method: "POST",
+          json: venueOpportunityId ? { opportunityId: venueOpportunityId } : {}
+        }
       );
       const taskHint = result.applicationTask
         ? ` Application task added: ${result.applicationTask.title}`
@@ -145,6 +177,23 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
 
   return (
     <div className="space-y-8">
+      {loadError ? (
+        <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+          {loadError}{" "}
+          <button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}>
+            Reload venues
+          </button>
+        </div>
+      ) : null}
+      {accessState === "read_only" ? (
+        <p role="status" className="text-sm text-[var(--text-muted)]">
+          You have read-only access. An owner or member can add venues or start booking records.
+        </p>
+      ) : null}
+      {formError ? (
+        <div role="alert" className="text-sm text-red-200">{formError}</div>
+      ) : null}
+      {canManage && !loadError ? (
       <SurfaceCard>
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
           Add venue
@@ -191,6 +240,7 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
           </div>
         </form>
       </SurfaceCard>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <VenueTable
@@ -201,6 +251,8 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
           selectedId={selectedId}
           onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
           onSaved={() => router.refresh()}
+          loadError={loadError}
+          canManage={canManage && !loadError}
         />
         <VenuePackPanel
           selectedId={selectedId}
@@ -210,6 +262,7 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
           actionBusy={actionBusy}
           actionNotice={actionNotice}
           actionError={actionError}
+          canManage={canManage && !loadError}
           onCreateOpportunity={() => void createOpportunityFromVenue()}
           onCreateProspect={() => void createProspectFromVenue()}
           onRetry={() => selectedId && void loadPack(selectedId)}
@@ -226,7 +279,9 @@ function VenueTable({
   onFilterChange,
   selectedId,
   onSelect,
-  onSaved
+  onSaved,
+  loadError,
+  canManage
 }: {
   venues: Venue[];
   allCount: number;
@@ -235,12 +290,27 @@ function VenueTable({
   selectedId: string | null;
   onSelect: (id: string) => void;
   onSaved: () => void;
+  loadError: string;
+  canManage: boolean;
 }) {
+  if (loadError) {
+    return (
+      <SurfaceCard>
+        <p className="text-sm text-[var(--text-muted)]">
+          Venue list unavailable until reload succeeds. StoryBoard is not showing an empty workspace.
+        </p>
+      </SurfaceCard>
+    );
+  }
   if (allCount === 0) {
     return (
       <EmptyState
         title="No venues yet"
-        description="Venues anchor your CRM and booking outreach. Add one above to get started."
+        description={
+          canManage
+            ? "Venues anchor your CRM and booking outreach. Add one above to get started."
+            : "No venues are recorded for this band yet. An owner or member can add the first room."
+        }
         icon={<Building2 className="h-6 w-6" />}
       />
     );
@@ -316,6 +386,7 @@ function VenueRow({
       : ""
   );
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     setName(venue.name);
@@ -330,6 +401,7 @@ function VenueRow({
 
   async function save() {
     setBusy(true);
+    setSaveError("");
     try {
       await apiFetch(`/venues/${venue.id}`, {
         method: "PATCH",
@@ -342,6 +414,8 @@ function VenueRow({
         }
       });
       onSaved();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Could not save venue");
     } finally {
       setBusy(false);
     }
@@ -402,14 +476,19 @@ function VenueRow({
         />
       </td>
       <td className="px-4 py-3">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void save()}
-          className="sb-btn-secondary py-1.5 text-xs"
-        >
-          Save
-        </button>
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void save()}
+            className="sb-btn-secondary py-1.5 text-xs"
+          >
+            Save
+          </button>
+          {saveError ? (
+            <span className="text-[10px] text-red-200" role="alert">{saveError}</span>
+          ) : null}
+        </div>
       </td>
     </tr>
   );
@@ -423,6 +502,7 @@ function VenuePackPanel({
   actionBusy,
   actionNotice,
   actionError,
+  canManage,
   onCreateOpportunity,
   onCreateProspect,
   onRetry
@@ -434,6 +514,7 @@ function VenuePackPanel({
   actionBusy: "opportunity" | "prospect" | null;
   actionNotice: string;
   actionError: string;
+  canManage: boolean;
   onCreateOpportunity: () => void;
   onCreateProspect: () => void;
   onRetry: () => void;
@@ -514,7 +595,7 @@ function VenuePackPanel({
           <dd>
             {pack.applyUrl ? (
               <a
-                href={pack.applyUrl}
+                href={sanitizeOperatorHref(pack.applyUrl) ?? pack.applyUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
@@ -561,13 +642,26 @@ function VenuePackPanel({
         <div role="alert" className="text-sm text-red-200">{actionError}</div>
       ) : null}
       {actionNotice ? (
-        <p role="status" className="text-sm text-emerald-200">{actionNotice}</p>
+        <div role="status" className="space-y-2 text-sm text-emerald-200">
+          <p>{actionNotice}</p>
+          <div className="flex flex-col gap-2">
+            <Link href="/prospects" className="text-[var(--accent)] hover:underline">
+              View in Find shows →
+            </Link>
+            <Link href="/booking-campaigns" className="text-[var(--accent)] hover:underline">
+              Add to a pitch campaign →
+            </Link>
+            <Link href="/booking" className="text-[var(--accent)] hover:underline">
+              Open booking pipeline →
+            </Link>
+          </div>
+        </div>
       ) : null}
 
       <div className="flex flex-col gap-2">
         <button
           type="button"
-          disabled={actionBusy != null}
+          disabled={!canManage || actionBusy != null}
           className="sb-btn-primary w-full justify-center"
           onClick={onCreateOpportunity}
         >
@@ -578,7 +672,11 @@ function VenuePackPanel({
         </button>
         <button
           type="button"
-          disabled={actionBusy != null || (!pack.bookingEmail && !pack.applyUrl)}
+          disabled={
+            !canManage ||
+            actionBusy != null ||
+            (!pack.bookingEmail && !pack.applyUrl)
+          }
           className="sb-btn-secondary w-full justify-center"
           onClick={onCreateProspect}
         >
@@ -587,9 +685,11 @@ function VenuePackPanel({
           ) : null}
           Create prospect
         </button>
-        <Link href="/booking" className="sb-btn-secondary w-full justify-center text-center">
-          Open booking pipeline
-        </Link>
+        {!pack.bookingEmail && !pack.applyUrl ? (
+          <p className="text-xs text-[var(--text-muted)]">
+            Add a booking email or apply URL on this venue before creating a prospect.
+          </p>
+        ) : null}
       </div>
     </SurfaceCard>
   );

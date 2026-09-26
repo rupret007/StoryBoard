@@ -9,6 +9,7 @@ export default async function BookingCampaignsPage() {
   let contacts: Contact[] = [];
   let sprints: BookingMarketSprint[] = [];
   let accessState: "manage" | "read_only" | "unavailable" = "unavailable";
+  let isOwner = false;
   const [campaignRows, prospectRows, contactRows, sprintRows, meResult] =
     await Promise.allSettled([
       serverApiFetch<BookingCampaign[]>("/booking-campaigns", {
@@ -37,6 +38,7 @@ export default async function BookingCampaignsPage() {
       ? me.currentArtistId
       : me.memberships[0]?.artistId ?? null;
     const role = me.memberships.find((membership) => membership.artistId === activeArtistId)?.role;
+    isOwner = role === "owner";
     accessState = role === "owner" || role === "member"
       ? "manage"
       : role === "viewer"
@@ -57,7 +59,7 @@ export default async function BookingCampaignsPage() {
     <div className="space-y-8">
       <PageHeader
         title="Pitch campaigns"
-        description="Compose thoughtful booking outreach, preview every personalized message, then explicitly approve and execute either drafts or immediate sends."
+        description="Compose booking outreach, preview every personalized message, then approve and execute. Travis owns sends — members create Gmail drafts only; immediate send is owner-only after separate Execute."
       />
       <BookingCampaignsClient
         initialCampaigns={campaigns}
@@ -65,6 +67,7 @@ export default async function BookingCampaignsPage() {
         contacts={contacts}
         sprints={sprints}
         accessState={accessState}
+        isOwner={isOwner}
         campaignsLoaded={campaignsLoaded}
         loadError={loadError}
       />

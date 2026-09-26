@@ -74,6 +74,18 @@ export class VenueBookingService {
     actorOperatorId?: string | null
   ) {
     const venue = await this.loadVenue(artistId, venueId);
+    const existing = await this.prisma.client.bookingOpportunity.findFirst({
+      where: {
+        artistId,
+        venueId: venue.id,
+        stage: { not: BookingStage.closed }
+      },
+      orderBy: { updatedAt: "desc" },
+      include: { venue: true }
+    });
+    if (existing) {
+      return { ...existing, created: false };
+    }
     const title = input.title?.trim() || `${venue.name} — booking`;
     const row = await this.prisma.client.bookingOpportunity.create({
       data: {
@@ -94,7 +106,7 @@ export class VenueBookingService {
       actorOperatorId: actorOperatorId ?? null,
       metadata: { title: row.title, stage: row.stage, source: "venue_crm", venueId }
     });
-    return row;
+    return { ...row, created: true };
   }
 
   async createProspectFromVenue(
@@ -126,8 +138,18 @@ export class VenueBookingService {
       include: { venue: true, contact: true, opportunity: { include: { venue: true } } }
     });
     if (existing) {
+      let prospect = existing;
+      if (input.opportunityId && !existing.opportunityId) {
+        prospect = await this.prospects.patch(
+          artistId,
+          existing.id,
+          { opportunityId: input.opportunityId },
+          actorLabel,
+          actorOperatorId
+        );
+      }
       return {
-        prospect: existing,
+        prospect,
         created: false,
         applicationTask: null,
         travisNote:

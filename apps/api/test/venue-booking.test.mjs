@@ -89,7 +89,16 @@ function serviceFixture() {
           ) ?? null
       },
       bookingOpportunity: {
-        findFirst: async () => null,
+        findFirst: async ({ where }) => {
+          if (where.venueId !== state.venue.id || where.artistId !== state.venue.artistId) {
+            return null;
+          }
+          return (
+            state.opportunities.find(
+              (row) => row.venueId === where.venueId && row.stage !== "closed"
+            ) ?? null
+          );
+        },
         create: async ({ data }) => {
           const row = { id: "opp-1", ...data, venue: state.venue };
           state.opportunities.push(row);
@@ -143,5 +152,15 @@ test("createOpportunityFromVenue links venue and defaults title", async () => {
   const opp = await service.createOpportunityFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
   assert.equal(opp.venueId, "venue-bsc");
   assert.equal(opp.title, "Birdie's Social Club — booking");
+  assert.equal(opp.created, true);
+  assert.equal(state.opportunities.length, 1);
+});
+
+test("createOpportunityFromVenue is idempotent while an open opportunity exists", async () => {
+  const { service, state } = serviceFixture();
+  const first = await service.createOpportunityFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
+  const second = await service.createOpportunityFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
+  assert.equal(first.id, second.id);
+  assert.equal(second.created, false);
   assert.equal(state.opportunities.length, 1);
 });
