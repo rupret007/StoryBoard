@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import {
+  isSafeHttpUrl,
   resolveVenuePackOutreachContext,
   venueApplicationTaskTitle
 } from "@storyboard/shared";
@@ -119,6 +120,8 @@ export class VenueBookingService {
     const venue = await this.loadVenue(artistId, venueId);
     const bookingContact = await this.loadBookingContact(artistId, venueId);
     const outreach = resolveVenuePackOutreachContext(venue, bookingContact);
+    const safeApplyUrl =
+      outreach.applyUrl && isSafeHttpUrl(outreach.applyUrl) ? outreach.applyUrl : null;
 
     if (input.opportunityId) {
       const opportunity = await this.prisma.client.bookingOpportunity.findFirst({
@@ -151,24 +154,22 @@ export class VenueBookingService {
       return {
         prospect,
         created: false,
+        contactLinked: Boolean(prospect.contactId),
         applicationTask: null,
         travisNote:
           "Travis owns the send. StoryBoard records prospects and drafts only — nothing auto-pitches from here."
       };
     }
 
-    if (!bookingContact?.email && !outreach.applyUrl) {
+    if (!bookingContact?.email && !safeApplyUrl) {
       throw new BadRequestException(
-        "Add a booking contact email or apply URL on this venue before creating a prospect."
+        "Add a booking contact email or safe apply URL on this venue before creating a prospect."
       );
     }
 
-    const status =
-      bookingContact?.email && !outreach.webApplicationFirst
-        ? BookingProspectStatus.qualified
-        : bookingContact?.email
-          ? BookingProspectStatus.qualified
-          : BookingProspectStatus.discovered;
+    const status = bookingContact?.email
+      ? BookingProspectStatus.qualified
+      : BookingProspectStatus.discovered;
 
     const prospect = await this.prospects.create(
       artistId,
@@ -179,8 +180,8 @@ export class VenueBookingService {
         city: venue.city,
         region: venue.region ?? undefined,
         capacity: venue.capacity ?? undefined,
-        notes: outreach.applyUrl
-          ? `Venue pack apply URL: ${outreach.applyUrl}`
+        notes: safeApplyUrl
+          ? `Venue pack apply URL: ${safeApplyUrl}`
           : undefined,
         sourceSystem: VENUE_PROSPECT_SOURCE,
         sourceRef,
@@ -194,10 +195,10 @@ export class VenueBookingService {
 
     let applicationTask: Awaited<ReturnType<TasksService["create"]>> | null = null;
     const shouldTrackApplication =
-      Boolean(outreach.applyUrl) &&
+      Boolean(safeApplyUrl) &&
       (outreach.webApplicationFirst || !bookingContact?.email);
-    if (shouldTrackApplication && outreach.applyUrl) {
-      const taskTitle = venueApplicationTaskTitle(outreach.applyUrl);
+    if (shouldTrackApplication && safeApplyUrl) {
+      const taskTitle = venueApplicationTaskTitle(safeApplyUrl);
       const existingTask = await this.prisma.client.task.findFirst({
         where: {
           artistId,
@@ -224,6 +225,7 @@ export class VenueBookingService {
     return {
       prospect,
       created: true,
+      contactLinked: Boolean(prospect.contactId),
       applicationTask,
       travisNote:
         "Travis owns the send. StoryBoard records prospects and drafts only — nothing auto-pitches from here."

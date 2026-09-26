@@ -27,6 +27,7 @@ type VenuePackDetail = {
 type ProspectFromVenueResult = {
   prospect: { id: string };
   created: boolean;
+  contactLinked: boolean;
   applicationTask: { id: string; title: string } | null;
   travisNote: string;
 };
@@ -161,11 +162,14 @@ export function VenuesClient({
           json: venueOpportunityId ? { opportunityId: venueOpportunityId } : {}
         }
       );
+      const contactHint = result.contactLinked
+        ? "Venue contact linked."
+        : "No venue contact linked.";
       const taskHint = result.applicationTask
-        ? ` Application task added: ${result.applicationTask.title}`
+        ? ` Application task: ${result.applicationTask.title}`
         : "";
       setActionNotice(
-        `${result.created ? "Prospect created" : "Prospect already on file"} with venue contact linked.${taskHint} ${result.travisNote}`
+        `${result.created ? "Prospect created" : "Prospect already on file"}. ${contactHint}${taskHint} ${result.travisNote}`
       );
       router.refresh();
     } catch (err) {
@@ -559,6 +563,7 @@ function VenuePackPanel({
   }
 
   const { pack, venue } = detail;
+  const safeApplyUrl = sanitizeOperatorHref(pack.applyUrl);
   const displayNotes =
     pack.notes?.replace(/^seed:dfw-venue-pack:[^\s]+\s*—\s*/i, "") ?? null;
 
@@ -593,9 +598,9 @@ function VenuePackPanel({
             Apply URL
           </dt>
           <dd>
-            {pack.applyUrl ? (
+            {safeApplyUrl !== null ? (
               <a
-                href={sanitizeOperatorHref(pack.applyUrl) ?? pack.applyUrl}
+                href={safeApplyUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
@@ -604,7 +609,9 @@ function VenuePackPanel({
                 <ExternalLink className="h-3.5 w-3.5" />
               </a>
             ) : (
-              <span className="text-[var(--text-muted)]">—</span>
+              <span className="text-[var(--text-muted)]">
+                {pack.applyUrl ? "— Not a safe link" : "—"}
+              </span>
             )}
           </dd>
         </div>
@@ -628,8 +635,11 @@ function VenuePackPanel({
 
       {pack.webApplicationFirst ? (
         <p className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--text-muted)]">
-          Primary outreach for this room is a web application. StoryBoard will add a task to
-          track the submit step; Gmail drafts still require Travis review before anything sends.
+          Primary outreach for this room is a web application.{" "}
+          {safeApplyUrl
+            ? "StoryBoard can track the submit step in a task."
+            : "Add a safe apply URL to track the submit step in a task."}{" "}
+          Gmail drafts still require Travis review before anything sends.
         </p>
       ) : null}
 
@@ -675,7 +685,7 @@ function VenuePackPanel({
           disabled={
             !canManage ||
             actionBusy != null ||
-            (!pack.bookingEmail && !pack.applyUrl)
+            (!pack.bookingEmail && !safeApplyUrl)
           }
           className="sb-btn-secondary w-full justify-center"
           onClick={onCreateProspect}
@@ -685,9 +695,9 @@ function VenuePackPanel({
           ) : null}
           Create prospect
         </button>
-        {!pack.bookingEmail && !pack.applyUrl ? (
+        {!pack.bookingEmail && !safeApplyUrl ? (
           <p className="text-xs text-[var(--text-muted)]">
-            Add a booking email or apply URL on this venue before creating a prospect.
+            Add a booking email or safe apply URL on this venue before creating a prospect.
           </p>
         ) : null}
       </div>

@@ -32,10 +32,10 @@ const birdiesContact = {
   notes: "seed:dfw-venue-pack:birdies-social-club booking contact. Apply URL: https://www.birdiessocialclub.com/music-submission"
 };
 
-function serviceFixture() {
+function serviceFixture({ venue = birdiesVenue, contacts = [birdiesContact] } = {}) {
   const state = {
-    venue: birdiesVenue,
-    contacts: [birdiesContact],
+    venue,
+    contacts,
     prospects: [],
     tasks: [],
     opportunities: []
@@ -46,8 +46,9 @@ function serviceFixture() {
         id: "prospect-1",
         artistId,
         ...data,
+        contactId: data.contactId ?? null,
         venue: state.venue,
-        contact: birdiesContact,
+        contact: state.contacts.find((contact) => contact.id === data.contactId) ?? null,
         opportunity: null
       };
       state.prospects.push(row);
@@ -119,6 +120,22 @@ function serviceFixture() {
   return { service, state };
 }
 
+function applicationFixture(applyUrl, { email = null, notesSource = "venue" } = {}) {
+  const notes = `Apply URL: ${applyUrl}`;
+  return serviceFixture({
+    venue: {
+      ...birdiesVenue,
+      name: "Test application venue",
+      notes: notesSource === "venue" ? notes : null
+    },
+    contacts: [{
+      ...birdiesContact,
+      email,
+      notes: notesSource === "contact" ? notes : null
+    }]
+  });
+}
+
 test("getPackDetail surfaces booking email, apply URL, and web-application flag", async () => {
   const { service } = serviceFixture();
   const detail = await service.getPackDetail("artist-a", "venue-bsc");
@@ -131,6 +148,7 @@ test("createProspectFromVenue links contact and creates application task for web
   const { service, state } = serviceFixture();
   const result = await service.createProspectFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
   assert.equal(result.created, true);
+  assert.equal(result.contactLinked, true);
   assert.equal(result.prospect.contactId, "contact-bsc");
   assert.equal(result.prospect.status, "qualified");
   assert.equal(state.tasks.length, 1);
@@ -141,10 +159,81 @@ test("createProspectFromVenue links contact and creates application task for web
 test("createProspectFromVenue is idempotent per venue", async () => {
   const { service, state } = serviceFixture();
   await service.createProspectFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
+  state.contacts = [];
   const second = await service.createProspectFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
   assert.equal(second.created, false);
+  assert.equal(second.contactLinked, true);
   assert.equal(state.prospects.length, 1);
   assert.equal(state.tasks.length, 1);
+});
+
+const unsafeApplyUrls = [
+  ["credentialed HTTPS", "https://user:secret@venue.example.test/apply"],
+  ["credentialed HTTP", "http://user:secret@venue.example.test/apply"],
+  ["malformed HTTPS", "https://[invalid]/apply"],
+  ["oversized HTTPS", `https://venue.example.test/${"a".repeat(2000)}`],
+  ["JavaScript", "javascript:alert(1)"],
+  ["data", "data:text/html,application"],
+  ["file", "file:///tmp/application.html"]
+];
+
+for (const notesSource of ["venue", "contact"]) {
+  for (const [label, applyUrl] of unsafeApplyUrls) {
+    test(`createProspectFromVenue rejects ${label} in ${notesSource} notes without an email`, async () => {
+      const { service, state } = applicationFixture(applyUrl, { notesSource });
+      await assert.rejects(
+        service.createProspectFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1"),
+        (error) => error.getStatus() === 400 && /booking contact email or.*apply URL/.test(error.message)
+      );
+      assert.equal(state.prospects.length, 0);
+      assert.equal(state.tasks.length, 0);
+    });
+
+    test(`createProspectFromVenue ignores ${label} in ${notesSource} notes when an email exists`, async () => {
+      const { service, state } = applicationFixture(applyUrl, {
+        email: "buyer@example.test",
+        notesSource
+      });
+      const result = await service.createProspectFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
+      assert.equal(result.created, true);
+      assert.equal(result.contactLinked, true);
+      assert.equal(result.prospect.status, "qualified");
+      assert.equal(result.prospect.contactId, "contact-bsc");
+      assert.equal(result.prospect.notes ?? null, null);
+      assert.equal(result.applicationTask, null);
+      assert.equal(state.prospects.length, 1);
+      assert.equal(state.tasks.length, 0);
+    });
+  }
+}
+
+for (const protocol of ["http", "https"]) {
+  test(`createProspectFromVenue preserves safe ${protocol} application links without a contact`, async () => {
+    const applyUrl = `${protocol}://venue.example.test/apply`;
+    const { service, state } = applicationFixture(applyUrl);
+    state.contacts = [];
+    const result = await service.createProspectFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
+    assert.equal(result.created, true);
+    assert.equal(result.contactLinked, false);
+    assert.equal(result.prospect.status, "discovered");
+    assert.equal(result.prospect.contactId, null);
+    assert.equal(result.prospect.notes, `Venue pack apply URL: ${applyUrl}`);
+    assert.equal(result.applicationTask.title, `Submit application at ${applyUrl}`);
+    state.contacts = [birdiesContact];
+    const second = await service.createProspectFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
+    assert.equal(second.created, false);
+    assert.equal(second.contactLinked, false);
+    assert.equal(state.prospects.length, 1);
+    assert.equal(state.tasks.length, 1);
+  });
+}
+
+test("createProspectFromVenue reports a linked contact even without an email", async () => {
+  const { service } = applicationFixture("https://venue.example.test/apply");
+  const result = await service.createProspectFromVenue("artist-a", "venue-bsc", {}, "owner", "op-1");
+  assert.equal(result.contactLinked, true);
+  assert.equal(result.prospect.contactId, "contact-bsc");
+  assert.equal(result.prospect.status, "discovered");
 });
 
 test("createOpportunityFromVenue links venue and defaults title", async () => {
