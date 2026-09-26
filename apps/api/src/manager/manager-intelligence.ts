@@ -1197,6 +1197,16 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
     email: "dwbookings@gmail.com",
     phone: "(469) 872-0191",
     applyUrl: "https://www.doublewidedallas.com/contact"
+  },
+  "the kessler": {
+    email: "booking@kesslerpresents.com",
+    phone: "(214) 272-8346",
+    applyUrl: "https://thekessler.org/faq/"
+  },
+  "kessler theater": {
+    email: "booking@kesslerpresents.com",
+    phone: "(214) 272-8346",
+    applyUrl: "https://thekessler.org/faq/"
   }
 };
 
