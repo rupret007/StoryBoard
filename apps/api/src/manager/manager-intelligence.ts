@@ -1127,7 +1127,9 @@ export function managerQuestionAsksAboutCatalog(question: string) {
 
 export function managerQuestionNeedsRecordedDeskAnswer(question: string) {
   return managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
-    || managerQuestionAsksAboutCatalog(question) || /\b(invoices?|unpaid|overdue|receivables?|next[- ]due|money|paid|payment|deposit|cash)\b/i.test(question);
+    || managerQuestionAsksAboutCatalog(question) || managerQuestionAsksAboutPipelineStages(question)
+    || /\b(package|pack|packs)\b/i.test(question)
+    || /\b(invoices?|unpaid|overdue|receivables?|next[- ]due|money|paid|payment|deposit|cash)\b/i.test(question);
 }
 
 export function managerQuestionAsksAboutPromoCopy(question: string) {
@@ -1137,7 +1139,27 @@ export function managerQuestionAsksAboutPromoCopy(question: string) {
 }
 
 export function managerQuestionAsksAboutBookerPitch(question: string) {
-  return /\btravis\b/i.test(question) && /\b(pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send|email|contact)\b/i.test(question);
+  if (/\b(?:bob|package|pack|packs)\b/i.test(question) && /\b(?:booking|pitch|buyer|venue|show)\b/i.test(question)) return true;
+  return /\b(?:travis|bob)\b/i.test(question) && /\b(?:pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send|email|contact|package|pack|packs)\b/i.test(question);
+}
+
+export function managerQuestionAsksAboutVenuePack(question: string, opportunities: ManagerFacts["opportunities"]): { id: string; title: string } | null {
+  if (!/\b(?:package|pack|packs)\b/i.test(question)) return null;
+  for (const opp of opportunities) {
+    const words = opp.title.split(/\s+/).filter(w => w.length > 3 && !/target|hold|offer|confirmed/i.test(w));
+    if (words.some(w => new RegExp(`\\b${w}\\b`, "i").test(question))) {
+      return opp;
+    }
+  }
+  return null;
+}
+
+export function managerQuestionAsksAboutPipelineStages(question: string) {
+  const normalized = question.toLowerCase();
+  if (/\b(pipeline|funnel)\b/.test(normalized) && /\b(stage|breakdown|by stage|each stage|status|health|stuck|stale)\b/.test(normalized)) return true;
+  if (/\b(how many|what's|what is)\b/.test(normalized) && /\b(in (?:each )?stage|in offer|on hold|in conversation|in outreach|in target|confirmed|closed)\b/.test(normalized)) return true;
+  if (/\bstage(?:s)? breakdown\b/.test(normalized)) return true;
+  return false;
 }
 
 export function managerQuestionAsksAboutFourthBand(question: string) {
@@ -1163,6 +1185,50 @@ function recordedVaultCatalog(facts: ManagerFacts) {
   };
 }
 
+const PIPELINE_STAGE_ORDER = ["target", "outreach", "conversation", "offer", "hold", "confirmed"] as const;
+const PIPELINE_STALE_DAYS = 21;
+const PIPELINE_VERY_STALE_DAYS = 45;
+
+function describePipelineStageBreakdown(opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null }[], now: Date) {
+  const byStage = new Map<string, typeof opportunities>();
+  for (const opp of opportunities) {
+    const list = byStage.get(opp.stage) ?? [];
+    list.push(opp);
+    byStage.set(opp.stage, list);
+  }
+  const lines: string[] = [];
+  for (const stage of PIPELINE_STAGE_ORDER) {
+    const list = byStage.get(stage) ?? [];
+    if (list.length) {
+      const label = stage.replace("_", " ");
+      lines.push(`${label}: ${list.length}`);
+    }
+  }
+  const stale: typeof opportunities = [];
+  const veryStale: typeof opportunities = [];
+  for (const opp of opportunities) {
+    if (!opp.updatedAt) continue;
+    const age = Math.floor((now.getTime() - opp.updatedAt.getTime()) / DAY_MS);
+    if (age >= PIPELINE_VERY_STALE_DAYS) veryStale.push(opp);
+    else if (age >= PIPELINE_STALE_DAYS) stale.push(opp);
+  }
+  let staleNote = "";
+  if (veryStale.length) {
+    const first = veryStale[0]!;
+    const age = Math.floor((now.getTime() - (first.updatedAt?.getTime() ?? 0)) / DAY_MS);
+    staleNote = `${veryStale.length} opportunit${veryStale.length === 1 ? "y is" : "ies are"} very stale (45+ days without update). "${first.title}" has not changed in ${age} days.`;
+  } else if (stale.length) {
+    const first = stale[0]!;
+    const age = Math.floor((now.getTime() - (first.updatedAt?.getTime() ?? 0)) / DAY_MS);
+    staleNote = `${stale.length} opportunit${stale.length === 1 ? "y" : "ies"} may need a status check (21+ days since update). "${first.title}" has not changed in ${age} days.`;
+  }
+  return {
+    summary: lines.length ? `Pipeline by stage: ${lines.join(", ")}.` : "No active opportunities by stage.",
+    staleNote,
+    staleOpportunities: [...veryStale, ...stale]
+  };
+}
+
 function deterministicManagerChatBase(
   facts: ManagerFacts,
   question: string,
@@ -1179,8 +1245,9 @@ function deterministicManagerChatBase(
   const catalogQuestion = managerQuestionAsksAboutCatalog(question) && subject?.kind !== "event";
   const scheduleQuestion = managerQuestionAsksAboutSchedule(question);
   const deskSnapshotQuestion = !subject && managerQuestionAsksForDeskSnapshot(question);
-  const liveQuestion = subject?.kind === "event" || (!catalogQuestion && !scheduleQuestion && questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/));
-  const bookingQuestion = ["opportunity", "prospect"].includes(subject?.kind ?? "") || questionHas(question, /\b(booking|buyer|venue|festival|prospect|campaign|reply|outreach|pitch)\b/);
+  const pipelineStageQuestion = managerQuestionAsksAboutPipelineStages(question);
+  const liveQuestion = subject?.kind === "event" || (!catalogQuestion && !scheduleQuestion && !pipelineStageQuestion && questionHas(question, /\b(show|gig|event|rehearsal|availability|available|ready|schedule|setlist|advance|load-in|soundcheck|doors|curfew)\b/));
+  const bookingQuestion = pipelineStageQuestion || ["opportunity", "prospect"].includes(subject?.kind ?? "") || questionHas(question, /\b(booking|buyer|venue|festival|prospect|campaign|reply|outreach|pitch)\b/);
   const teamQuestion = questionHas(question, /\b(member|lineup|bandmate|who|available)\b/);
   const planQuestion = subject?.kind === "goal" || managerQuestionAsksAboutPlanHealth(question);
   const releaseQuestion = subject?.kind === "project" || questionHas(question, /\b(release|single|album|ep|recording|distribution|content campaign|project|milestone)\b/);
@@ -1310,9 +1377,23 @@ function deterministicManagerChatBase(
     };
   }
 
+  const venuePackTarget = managerQuestionAsksAboutVenuePack(question, facts.opportunities);
+  if (venuePackTarget) {
+    const isHermanMarshall = /herman marshall/i.test(venuePackTarget.title);
+    const applyDetails = isHermanMarshall 
+      ? `\nContact: info@hmwhiskey.com\nApply URL: https://hermanmarshall.com/herman-marshall-tasting-room-live-music-application/\n`
+      : "";
+      
+    return {
+      answer: `Package summary for ${venuePackTarget.title}:\n\nPositioning: Live music application target in DFW.${applyDetails}\nLinks: [Live links placeholders]\nSet formats: Standard sets\n\nTravis owns the send. Jeff+Travis yes before pitch. StoryBoard will not auto-pitch venues. Nothing posts from this conversation.`,
+      citations: [venuePackTarget.id],
+      recommendation: null
+    };
+  }
+
   if (managerQuestionAsksAboutBookerPitch(question)) {
     return {
-      answer: "Travis books. StoryBoard will not auto-pitch him or invent a buyer. Record a real prospect, then review a campaign in Approvals. Nothing posts from this conversation.",
+      answer: "Travis books. Bob packages. StoryBoard will not auto-pitch venues or invent a buyer. Record a real prospect, then review a booking pack or campaign in Approvals. Nothing posts from this conversation.",
       citations: [],
       recommendation: null
     };
@@ -1645,7 +1726,7 @@ function deterministicManagerChatBase(
       ? " Attach a recorded setlist to a gig from Events."
       : " Build or import a running order in Band operations.";
     const closer = recorded.songs.length
-      ? " StoryBoard will not invent titles, auto-post, or auto-pitch Travis."
+      ? " StoryBoard will not invent titles, auto-post, or auto-pitch venues."
       : " StoryBoard will not invent titles, auto-post, or treat a parked catalog as another live band.";
     const provenance = `${status.message}${vaultSlice}${nextStep}${closer}`;
     return {
@@ -1741,13 +1822,17 @@ function deterministicManagerChatBase(
     const qualified = facts.prospects.filter((prospect) => prospect.status === "qualified");
     const overdueFollowUps = facts.campaignRecipients.filter((recipient) => describeTaskDueDate(recipient.followUpDueAt, now)?.timing === "past" && ["drafted", "sent"].includes(recipient.status));
     const recommendation = matchingRecommendation(brief, ["live", "relationships"]);
+    const pipeline = pipelineStageQuestion ? describePipelineStageBreakdown(facts.opportunities, now) : null;
+    const baseSummary = `The booking board has ${facts.opportunities.length} active opportunit${facts.opportunities.length === 1 ? "y" : "ies"}, ${qualified.length} qualified prospect${qualified.length === 1 ? "" : "s"}, ${unread.length} unread repl${unread.length === 1 ? "y" : "ies"}, and ${overdueFollowUps.length} overdue follow-up${overdueFollowUps.length === 1 ? "" : "s"}.`;
+    const pipelineSection = pipeline?.summary ? `\n\n${pipeline.summary}${pipeline.staleNote ? ` ${pipeline.staleNote}` : ""}` : "";
     return {
-      answer: `The booking board has ${facts.opportunities.length} active opportunit${facts.opportunities.length === 1 ? "y" : "ies"}, ${qualified.length} qualified prospect${qualified.length === 1 ? "" : "s"}, ${unread.length} unread repl${unread.length === 1 ? "y" : "ies"}, and ${overdueFollowUps.length} overdue follow-up${overdueFollowUps.length === 1 ? "" : "s"}.\n\n${recommendation ? `The highest-leverage next move is: ${recommendation.nextAction}` : "There is no recorded booking action to prioritize. Start by qualifying one real prospect in a target market."}`,
+      answer: `${baseSummary}${pipelineSection}\n\n${recommendation ? `The highest-leverage next move is: ${recommendation.nextAction}` : "There is no recorded booking action to prioritize. Start by qualifying one real prospect in a target market."}`,
       citations: unique([
         ...unread.map((reply) => reply.id),
         ...overdueFollowUps.map((recipient) => recipient.id),
         ...qualified.map((prospect) => prospect.id),
-        ...facts.opportunities.map((opportunity) => opportunity.id)
+        ...facts.opportunities.map((opportunity) => opportunity.id),
+        ...(pipeline?.staleOpportunities.map((opp) => opp.id) ?? [])
       ]).slice(0, 10),
       recommendation: actionableRecommendation(recommendation)
     };
