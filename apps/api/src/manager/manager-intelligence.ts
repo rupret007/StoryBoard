@@ -1227,6 +1227,16 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
     email: "booking@mmlbar.com",
     phone: "(817) 332-3344",
     applyUrl: "https://www.magnoliamotorlounge.com/contact"
+  },
+  "tulips": {
+    email: "info@tulipsftw.com",
+    phone: "(817) 367-9798",
+    applyUrl: "https://tulipsftw.com/book-an-event/"
+  },
+  "tulips ftw": {
+    email: "info@tulipsftw.com",
+    phone: "(817) 367-9798",
+    applyUrl: "https://tulipsftw.com/book-an-event/"
   }
 };
 

@@ -82,6 +82,9 @@ const cases: { name: string; question: string; facts: ManagerFacts; check: (answ
   { name: "desk-magnolia-motor-lounge-venue-pack", question: "Package Magnolia Motor Lounge", 
     facts: { ...empty, opportunities: [{ id: "opp-mml", title: "Magnolia Motor Lounge (Fort Worth)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
     check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /magnoliamotorlounge\.com\/contact/.test(a) && /booking@mmlbar\.com/.test(a) && /817.*332.*3344/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-mml") },
+  { name: "desk-tulips-venue-pack", question: "Package Tulips", 
+    facts: { ...empty, opportunities: [{ id: "opp-tulips", title: "Tulips (Fort Worth)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /tulipsftw\.com\/book-an-event/.test(a) && /info@tulipsftw\.com/.test(a) && /817.*367.*9798/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-tulips") },
   { name: "desk-pipeline-stage-breakdown", question: "Show me the pipeline by stage",
     facts: { ...empty, opportunities: [
       { id: "opp-1", title: "Bluebird hold", stage: "hold", targetDate: new Date("2026-10-15T00:00:00Z"), updatedAt: new Date("2026-09-20T00:00:00Z") },
