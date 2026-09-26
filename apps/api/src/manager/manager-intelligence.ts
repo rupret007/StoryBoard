@@ -1143,13 +1143,22 @@ export function managerQuestionAsksAboutBookerPitch(question: string) {
   return /\b(?:travis|bob)\b/i.test(question) && /\b(?:pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send|email|contact|package|pack|packs)\b/i.test(question);
 }
 
+function normalizeVenuePackMatchText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function managerQuestionAsksAboutVenuePack(question: string, opportunities: ManagerFacts["opportunities"]): { id: string; title: string } | null {
   if (!/\b(?:package|pack|packs)\b/i.test(question)) return null;
+  const questionNorm = normalizeVenuePackMatchText(question);
   for (const opp of opportunities) {
-    const words = opp.title.split(/\s+/).filter(w => w.length > 3 && !/target|hold|offer|confirmed/i.test(w));
-    if (words.some(w => new RegExp(`\\b${w}\\b`, "i").test(question))) {
-      return opp;
-    }
+    const titleNorm = normalizeVenuePackMatchText(opp.title);
+    const words = titleNorm.split(" ").filter((w) => w.length > 3 && !/^(target|hold|offer|confirmed)$/.test(w));
+    if (words.some((w) => questionNorm.includes(w))) return opp;
   }
   return null;
 }
@@ -1165,6 +1174,69 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
     email: "info@mystompinggrounds.com",
     phone: "(817) 231-8080",
     applyUrl: "https://mystompinggrounds.com/book-music"
+  },
+  "birdie's social club": {
+    email: "hiring@birdiessocialclub.com",
+    applyUrl: "https://www.birdiessocialclub.com/music-submission"
+  },
+  "birdies social club": {
+    email: "hiring@birdiessocialclub.com",
+    applyUrl: "https://www.birdiessocialclub.com/music-submission"
+  },
+  "dan's silverleaf": {
+    email: "booking@danssilverleaf.com",
+    phone: "(940) 252-4369",
+    applyUrl: "https://danssilverleaf.com/contact"
+  },
+  "dans silverleaf": {
+    email: "booking@danssilverleaf.com",
+    phone: "(940) 252-4369",
+    applyUrl: "https://danssilverleaf.com/contact"
+  },
+  "double wide": {
+    email: "dwbookings@gmail.com",
+    phone: "(469) 872-0191",
+    applyUrl: "https://www.doublewidedallas.com/contact"
+  },
+  "the kessler": {
+    email: "booking@kesslerpresents.com",
+    phone: "(214) 272-8346",
+    applyUrl: "https://thekessler.org/faq/"
+  },
+  "kessler theater": {
+    email: "booking@kesslerpresents.com",
+    phone: "(214) 272-8346",
+    applyUrl: "https://thekessler.org/faq/"
+  },
+  "granada theater": {
+    email: "booking@granadatheater.com",
+    phone: "(214) 841-4900",
+    applyUrl: "https://www.granadatheater.com/faqs"
+  },
+  "the granada": {
+    email: "booking@granadatheater.com",
+    phone: "(214) 841-4900",
+    applyUrl: "https://www.granadatheater.com/faqs"
+  },
+  "magnolia motor lounge": {
+    email: "booking@mmlbar.com",
+    phone: "(817) 332-3344",
+    applyUrl: "https://www.magnoliamotorlounge.com/contact"
+  },
+  "magnolia motor": {
+    email: "booking@mmlbar.com",
+    phone: "(817) 332-3344",
+    applyUrl: "https://www.magnoliamotorlounge.com/contact"
+  },
+  "tulips": {
+    email: "info@tulipsftw.com",
+    phone: "(817) 367-9798",
+    applyUrl: "https://tulipsftw.com/book-an-event/"
+  },
+  "tulips ftw": {
+    email: "info@tulipsftw.com",
+    phone: "(817) 367-9798",
+    applyUrl: "https://tulipsftw.com/book-an-event/"
   }
 };
 
@@ -1402,12 +1474,12 @@ function deterministicManagerChatBase(
   const venuePackTarget = managerQuestionAsksAboutVenuePack(question, facts.opportunities);
   if (venuePackTarget) {
     const venuePackDetails = lookupVenuePackDetails(venuePackTarget.title);
-    const applyDetails = venuePackDetails 
+    const applyDetails = venuePackDetails
       ? `\nContact: ${venuePackDetails.email}${venuePackDetails.phone ? ` / ${venuePackDetails.phone}` : ""}\nApply URL: ${venuePackDetails.applyUrl}\n`
-      : "";
+      : "\nContact: No venue-pack registry entry yet — confirm the buyer email and apply link in CRM.\n";
       
     return {
-      answer: `Package summary for ${venuePackTarget.title}:\n\nPositioning: Live music application target in DFW.${applyDetails}\nLinks: [Live links placeholders]\nSet formats: Standard sets\n\nTravis owns the send. Jeff+Travis yes before pitch. StoryBoard will not auto-pitch venues. Nothing posts from this conversation.`,
+      answer: `Package summary for ${venuePackTarget.title}:\n\nPositioning: Live music application target in DFW.${applyDetails}\nLinks: [Live links placeholders]\nSet formats: Standard sets\n\nTravis owns the send. Jeff+Travis yes before pitch. StoryBoard will not auto-pitch venues.\nNext: After you both agree, Travis submits via the Apply URL when one is listed; move the opportunity to outreach on Booking once the send is recorded.\nNothing posts from this conversation.`,
       citations: [venuePackTarget.id],
       recommendation: null
     };
