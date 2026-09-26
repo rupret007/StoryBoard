@@ -1,4 +1,4 @@
-import { CATALOG_BAND_OPS_IMPORT_HINT, describeSongCatalogStatus, describeTaskDueDate, formatRecordedShowTime } from "@storyboard/shared";
+import { CATALOG_BAND_OPS_IMPORT_HINT, describeSongCatalogStatus, describeTaskDueDate, formatRecordedShowTime, VENUE_PACK_REGISTRY } from "@storyboard/shared";
 import type { ManagerGoalTargetDirection, ManagerWorkstream } from "../generated/prisma/enums";
 import { approvalLifecycleStage, type ApprovalLifecycleStage } from "../approvals/approval-lifecycle";
 import type { ShowReadiness } from "../operations/event-readiness";
@@ -1230,107 +1230,6 @@ export function managerQuestionAsksAboutVenuePack(question: string, opportunitie
 }
 
 type VenuePackDetails = { email: string; phone?: string; applyUrl: string };
-
-const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
-  "herman marshall": {
-    email: "info@hmwhiskey.com",
-    applyUrl: "https://hermanmarshall.com/herman-marshall-tasting-room-live-music-application/"
-  },
-  "my stomping grounds": {
-    email: "info@mystompinggrounds.com",
-    phone: "(817) 231-8080",
-    applyUrl: "https://mystompinggrounds.com/book-music"
-  },
-  "birdie's social club": {
-    email: "hiring@birdiessocialclub.com",
-    applyUrl: "https://www.birdiessocialclub.com/music-submission"
-  },
-  "birdies social club": {
-    email: "hiring@birdiessocialclub.com",
-    applyUrl: "https://www.birdiessocialclub.com/music-submission"
-  },
-  "dan's silverleaf": {
-    email: "booking@danssilverleaf.com",
-    phone: "(940) 252-4369",
-    applyUrl: "https://danssilverleaf.com/contact"
-  },
-  "dans silverleaf": {
-    email: "booking@danssilverleaf.com",
-    phone: "(940) 252-4369",
-    applyUrl: "https://danssilverleaf.com/contact"
-  },
-  "double wide": {
-    email: "dwbookings@gmail.com",
-    phone: "(469) 872-0191",
-    applyUrl: "https://www.doublewidedallas.com/contact"
-  },
-  "the kessler": {
-    email: "booking@kesslerpresents.com",
-    phone: "(214) 272-8346",
-    applyUrl: "https://thekessler.org/faq/"
-  },
-  "kessler theater": {
-    email: "booking@kesslerpresents.com",
-    phone: "(214) 272-8346",
-    applyUrl: "https://thekessler.org/faq/"
-  },
-  "granada theater": {
-    email: "booking@granadatheater.com",
-    phone: "(214) 841-4900",
-    applyUrl: "https://www.granadatheater.com/faqs"
-  },
-  "the granada": {
-    email: "booking@granadatheater.com",
-    phone: "(214) 841-4900",
-    applyUrl: "https://www.granadatheater.com/faqs"
-  },
-  "magnolia motor lounge": {
-    email: "booking@mmlbar.com",
-    phone: "(817) 332-3344",
-    applyUrl: "https://www.magnoliamotorlounge.com/contact"
-  },
-  "magnolia motor": {
-    email: "booking@mmlbar.com",
-    phone: "(817) 332-3344",
-    applyUrl: "https://www.magnoliamotorlounge.com/contact"
-  },
-  "tulips": {
-    email: "info@tulipsftw.com",
-    phone: "(817) 367-9798",
-    applyUrl: "https://tulipsftw.com/book-an-event/"
-  },
-  "tulips ftw": {
-    email: "info@tulipsftw.com",
-    phone: "(817) 367-9798",
-    applyUrl: "https://tulipsftw.com/book-an-event/"
-  },
-  "sons of hermann hall": {
-    email: "sohhgm@gmail.com",
-    phone: "(972) 834-6899",
-    applyUrl: "https://www.sonsofhermannhall.com/services-4"
-  },
-  "sons of hermann": {
-    email: "sohhgm@gmail.com",
-    phone: "(972) 834-6899",
-    applyUrl: "https://www.sonsofhermannhall.com/services-4"
-  },
-  "adair's saloon": {
-    email: "joel@adairssaloon.com",
-    applyUrl: "https://www.adairssaloon.com/contact"
-  },
-  "adairs saloon": {
-    email: "joel@adairssaloon.com",
-    applyUrl: "https://www.adairssaloon.com/contact"
-  },
-  "club dada": {
-    email: "booking@dadadallas.com",
-    applyUrl: "https://www.dadadallas.com/contact"
-  },
-  "club dada dallas": {
-    email: "booking@dadadallas.com",
-    applyUrl: "https://www.dadadallas.com/contact"
-  }
-};
 
 export function lookupVenuePackDetails(opportunityLabel: string): VenuePackDetails | null {
   const normalized = normalizeVenuePackMatchText(expandParentheticalVenueLabel(opportunityLabel));

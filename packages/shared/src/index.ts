@@ -22,3 +22,5 @@ export * from "./booking-stage-review";
 export * from "./booking-target";
 export * from "./task-due-date";
 export * from "./recorded-show-time";
+export * from "./dfw-venue-packs";
+export * from "./dfw-venue-pack-seed";
