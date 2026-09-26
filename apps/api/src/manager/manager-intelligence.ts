@@ -1192,6 +1192,11 @@ const VENUE_PACK_REGISTRY: Record<string, VenuePackDetails> = {
     email: "booking@danssilverleaf.com",
     phone: "(940) 252-4369",
     applyUrl: "https://danssilverleaf.com/contact"
+  },
+  "double wide": {
+    email: "dwbookings@gmail.com",
+    phone: "(469) 872-0191",
+    applyUrl: "https://www.doublewidedallas.com/contact"
   }
 };
 
