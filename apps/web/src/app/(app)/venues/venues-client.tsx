@@ -5,7 +5,7 @@ import { Building2, ChevronRight, ExternalLink, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { sanitizeOperatorHref } from "@storyboard/shared";
+import { isSafeHttpUrl } from "@storyboard/shared";
 import { apiFetch } from "@/lib/api";
 import type { Contact, Venue } from "@/lib/types";
 
@@ -563,7 +563,8 @@ function VenuePackPanel({
   }
 
   const { pack, venue } = detail;
-  const safeApplyUrl = sanitizeOperatorHref(pack.applyUrl);
+  const safeApplyUrl =
+    pack.applyUrl && isSafeHttpUrl(pack.applyUrl) ? pack.applyUrl : null;
   const displayNotes =
     pack.notes?.replace(/^seed:dfw-venue-pack:[^\s]+\s*—\s*/i, "") ?? null;
 
