@@ -127,13 +127,17 @@ async function ensureManagerFoundation(page: Page, checkIns = false) {
 
 async function ensureQualifiedProspect(page: Page, artistId: string) {
   const prospects = await artistApi<Array<{ status: string }>>(page, artistId, "/booking-prospects");
-  if (prospects.some((prospect) => prospect.status === "qualified" || prospect.status === "converted")) return;
+  const qualifiedCount = prospects.filter(
+    (prospect) => prospect.status === "qualified" || prospect.status === "converted"
+  ).length;
+  if (qualifiedCount > 0) return qualifiedCount;
   await artistApi(page, artistId, "/booking-prospects", "POST", {
     kind: "venue",
     status: "qualified",
     name: `E2E Manager prospect ${Date.now().toString(36)}`,
     city: "Chicago"
   });
+  return 1;
 }
 
 test("/venues keeps same-name and same-slug outreach bound to the selected venue ID", async ({ page }, testInfo) => {
@@ -616,7 +620,8 @@ test("catalog preview and explicit apply stay pinned to the music workspace band
 test("novice manager intake produces grounded work and band operations records", async ({ page }) => {
   const suffix = Date.now().toString(36);
   await signInForBrowserTest(page);
-  await ensureQualifiedProspect(page, await activeArtistId(page));
+  const artistId = await activeArtistId(page);
+  const verifiedProspectCount = await ensureQualifiedProspect(page, artistId);
   await page.goto("/manager");
   const intake = page.getByRole("heading", { name: "Tell StoryBoard enough to manage the tradeoffs" });
   if (await intake.isVisible().catch(() => false)) {
@@ -667,9 +672,16 @@ test("novice manager intake produces grounded work and band operations records",
   const liveGoalCard = planCard.getByText("Grow dependable show revenue", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-lg') and contains(@class,'border')][1]");
   await expect(liveGoalCard.getByLabel("Progress source")).toHaveValue("qualified_prospects");
   const liveGoalMeasurement = liveGoalCard.getByLabel("Progress source").locator("xpath=ancestor::div[@data-testid][1]");
-  await expect(liveGoalMeasurement.getByText(/StoryBoard can verify 1/i)).toBeVisible();
-  await liveGoalMeasurement.getByRole("button", { name: "Reconcile to 1" }).click();
-  await expect(liveGoalMeasurement.getByText(/Recorded progress matches 1 current qualified or converted prospect/i)).toBeVisible();
+  await expect(liveGoalMeasurement.getByText(new RegExp(`StoryBoard can verify ${verifiedProspectCount}`, "i"))).toBeVisible();
+  await liveGoalMeasurement.getByRole("button", { name: `Reconcile to ${verifiedProspectCount}` }).click();
+  await expect(
+    liveGoalMeasurement.getByText(
+      new RegExp(
+        `Recorded progress matches ${verifiedProspectCount} current qualified or converted prospect`,
+        "i"
+      )
+    )
+  ).toBeVisible();
   await expect(page.getByText("Finish the booking profile and define what a good-fit show means", { exact: true }).first()).toBeVisible();
   const context = page.getByTestId("manager-context");
   await expect(context.getByText(/45\/100 · Thin/i)).toBeVisible();
