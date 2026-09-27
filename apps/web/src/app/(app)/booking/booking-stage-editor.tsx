@@ -1,6 +1,7 @@
 "use client";
 
-import { nextBookingStages } from "@storyboard/shared";
+import { describeBookingTarget, nextBookingStages } from "@storyboard/shared";
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -101,7 +102,7 @@ export function BookingStageEditor({ opportunity, artistId, canManage, onSaved }
       <h4 className="text-sm font-semibold">Review stage change</h4>
       <p className="text-sm">{review.opportunity.stage} → {review.stage}</p>
       <BookingReviewFacts opportunity={review.opportunity} />
-      {review.stage === "confirmed" ? <p className="text-xs text-amber-200">Record confirmed only after Travis has booked it. This creates a linked internal gig if one is missing, using the recorded title, venue, and target date. Existing gig details stay as saved. Fees and conditions remain booking notes; this does not create a contract, payment, Calendar hold, or message.</p> : review.stage === "closed" ? <p className="text-xs text-amber-200">Closing ends this opportunity's pipeline history. It does not cancel an existing gig or send a message.</p> : <p className="text-xs text-[var(--text-muted)]">This records the stage only. Travis books; no pitch or message is sent.</p>}
+      {review.stage === "confirmed" ? <div className="space-y-2 text-xs text-amber-200"><p>Record confirmed only after Travis has booked it. This creates a linked internal gig if one is missing, using the recorded title, venue, and target date. Existing gig details stay as saved. Fees and conditions remain booking notes; this does not create a contract, payment, Calendar hold, or message.</p><Link className="font-medium text-[var(--accent)] hover:underline" href="/operations?tab=events">Set start, end, and timezone in Shows &amp; calendar →</Link></div> : review.stage === "closed" ? <p className="text-xs text-amber-200">Closing ends this opportunity's pipeline history. It does not cancel an existing gig or send a message.</p> : <p className="text-xs text-[var(--text-muted)]">This records the stage only. Travis books; no pitch or message is sent.</p>}
       {stale || mustReview ? <p role="status" className="text-xs text-amber-200">Review the latest saved details before another save. Your selected stage remains {stage}.</p> : null}
       <button type="button" className="sb-btn-primary w-full text-xs" disabled={busy || stale || mustReview || needsReload}
         onClick={() => void save()}>{busy ? "Working…" : "Save reviewed stage"}</button>
@@ -119,11 +120,23 @@ export function BookingStageEditor({ opportunity, artistId, canManage, onSaved }
 }
 
 function BookingReviewFacts({ opportunity }: { opportunity: BookingOpportunity }) {
-  const date = opportunity.targetDate ? new Date(opportunity.targetDate) : null;
+  const target = describeBookingTarget({
+    targetDate: opportunity.targetDate,
+    stage: opportunity.stage
+  });
+  const targetDateTime = target.timing !== "none" && opportunity.targetDate
+    ? new Date(opportunity.targetDate).toISOString()
+    : null;
   return <dl className="space-y-2 text-xs break-words">
     <div><dt className="text-[var(--text-muted)]">Title</dt><dd>{opportunity.title}</dd></div>
     <div><dt className="text-[var(--text-muted)]">Venue</dt><dd>{opportunity.venue?.name ?? "Not recorded"}</dd></div>
-    <div><dt className="text-[var(--text-muted)]">Recorded target date (UTC)</dt><dd>{date && Number.isFinite(date.getTime()) ? date.toISOString().replace("T", " ").replace(".000Z", " UTC") : "Not recorded — the new gig will need a start time"}</dd></div>
+    <div>
+      <dt className="text-[var(--text-muted)]">Recorded target date</dt>
+      <dd data-testid="booking-review-target-date">{targetDateTime ? <>
+        <time dateTime={targetDateTime}>{target.label}</time>
+        {target.note ? ` — ${target.note}` : ""}
+      </> : "Not recorded — set show start/end/timezone in Shows & calendar after confirming"}</dd>
+    </div>
     <div><dt className="text-[var(--text-muted)]">Recorded fee</dt><dd>{opportunity.proposedFeeMinor != null ? `${opportunity.proposedCurrency ?? "Currency not recorded"} ${(opportunity.proposedFeeMinor / 100).toFixed(2)}` : "Not recorded"}</dd></div>
     <div><dt className="text-[var(--text-muted)]">Conditions</dt><dd className="whitespace-pre-wrap">{opportunity.negotiationConditions?.trim() || "Not recorded"}</dd></div>
   </dl>;

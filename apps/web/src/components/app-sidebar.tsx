@@ -28,7 +28,7 @@ import type { ApprovalLifecycleCounts } from "@/lib/types";
 const links = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/manager", label: "Manager", icon: BrainCircuit },
-  { href: "/operations", label: "Band operations", icon: CalendarRange },
+  { href: "/operations", label: "Shows & calendar", icon: CalendarRange },
   { href: "/venues", label: "Venues", icon: Building2 },
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/booking", label: "Booking", icon: SquareKanban },

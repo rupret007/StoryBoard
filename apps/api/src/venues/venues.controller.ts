@@ -17,6 +17,11 @@ import { RolePolicyService } from "../auth/role-policy.service";
 import type { RequestOperator } from "../auth/request-operator";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { venuePatchSchema } from "./venue-patch.schema";
+import {
+  venueCreateOpportunitySchema,
+  venueCreateProspectSchema
+} from "./venue-booking.schema";
+import { VenueBookingService } from "./venue-booking.service";
 import { VenuesService } from "./venues.service";
 
 @Controller("venues")
@@ -24,6 +29,7 @@ import { VenuesService } from "./venues.service";
 export class VenuesController {
   constructor(
     private readonly venues: VenuesService,
+    private readonly venueBooking: VenueBookingService,
     private readonly membership: MembershipService,
     private readonly roles: RolePolicyService
   ) {}
@@ -48,6 +54,63 @@ export class VenuesController {
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     return this.venues.list(artistId);
+  }
+
+  @Get(":id/pack")
+  async getPack(
+    @Param("id") id: string,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator.id, req, artistHeader);
+    return this.venueBooking.getPackDetail(artistId, id);
+  }
+
+  @Post(":id/opportunities")
+  async createOpportunity(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator.id, req, artistHeader);
+    await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    const parsed = venueCreateOpportunitySchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    return this.venueBooking.createOpportunityFromVenue(
+      artistId,
+      id,
+      parsed.data,
+      operator.email,
+      operator.id
+    );
+  }
+
+  @Post(":id/prospects")
+  async createProspect(
+    @Param("id") id: string,
+    @Body() body: unknown,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator.id, req, artistHeader);
+    await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    const parsed = venueCreateProspectSchema.safeParse(body ?? {});
+    if (!parsed.success) {
+      throw new BadRequestException(parsed.error.flatten());
+    }
+    return this.venueBooking.createProspectFromVenue(
+      artistId,
+      id,
+      parsed.data,
+      operator.email,
+      operator.id
+    );
   }
 
   @Get(":id")

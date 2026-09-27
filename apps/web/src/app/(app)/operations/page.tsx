@@ -157,7 +157,7 @@ export default async function OperationsPage({
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Band operations"
+        title="Shows & calendar"
         description="Show control names the live or next recorded gig, its assigned set, booking posture, and one safe next action before the editors. Travis still books. StoryBoard does not auto-pitch."
       />
       <OperationsClient

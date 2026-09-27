@@ -9,15 +9,24 @@ import type { BookingReply, BookingReplySettings } from "@/lib/types";
 
 export function BookingInboxClient({
   initialReplies,
-  initialSettings
+  initialSettings,
+  accessState,
+  loadError
 }: {
   initialReplies: BookingReply[];
   initialSettings: BookingReplySettings;
+  accessState: "manage" | "read_only" | "unavailable";
+  loadError: string;
 }) {
   const [replies, setReplies] = useState(initialReplies);
   const [settings, setSettings] = useState(initialSettings);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const canManualSync =
+    accessState === "manage" &&
+    settings.deploymentEnabled &&
+    settings.scopeReady &&
+    !settings.reconnectRequired;
 
   async function reload() {
     setReplies(await apiFetch<BookingReply[]>("/booking-replies"));
@@ -82,6 +91,16 @@ export function BookingInboxClient({
 
   return (
     <div className="space-y-5">
+      {loadError ? (
+        <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+          {loadError}
+        </div>
+      ) : null}
+      {accessState === "read_only" ? (
+        <p role="status" className="text-sm text-[var(--text-muted)]">
+          You have read-only access. An owner or member can sync replies and prepare responses.
+        </p>
+      ) : null}
       {notice ? (
         <div
           role="status"
@@ -105,13 +124,28 @@ export function BookingInboxClient({
           <button
             type="button"
             className="sb-btn-primary"
-            disabled={busy !== null || !settings.syncEnabled}
+            disabled={busy !== null || !canManualSync}
             onClick={() => void sync()}
           >
             <RefreshCw className="h-4 w-4" />
             Check for replies
           </button>
         </div>
+        {!canManualSync && !loadError ? (
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
+            {settings.reconnectRequired
+              ? "Reconnect Google as an owner before manual reply checks."
+              : !settings.deploymentEnabled
+                ? "Reply sync is disabled on this deployment."
+                : !settings.scopeReady
+                  ? "Gmail read scope is not ready yet."
+                  : "Manual checks are unavailable until your workspace role is verified."}
+          </p>
+        ) : !settings.syncEnabled && canManualSync ? (
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
+            Periodic reply checks are off. You can still check manually anytime.
+          </p>
+        ) : null}
         <div className="mt-4 flex flex-wrap gap-3">
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -136,12 +170,12 @@ export function BookingInboxClient({
             Allow AI analysis of a selected reply
           </label>
         </div>
-        {!settings.deploymentEnabled ? (
+        {!loadError && !settings.deploymentEnabled ? (
           <p className="mt-3 text-xs text-amber-300">
             Reply sync is disabled on this deployment. Manual campaign outcomes remain
             available.
           </p>
-        ) : settings.reconnectRequired ? (
+        ) : !loadError && settings.reconnectRequired ? (
           <p className="mt-3 text-xs text-amber-300">
             Reconnect Google as an owner to grant the new read-only Gmail permission.
           </p>
@@ -154,10 +188,10 @@ export function BookingInboxClient({
         ) : null}
       </SurfaceCard>
 
-      {replies.length === 0 ? (
+      {loadError ? null : replies.length === 0 ? (
         <EmptyState
           title="No tracked replies yet"
-          description="After an approved campaign draft is sent or StoryBoard sends an approved pitch, new replies will appear here."
+          description="After Travis sends an approved Gmail draft from a pitch campaign, replies on those threads can appear here for review."
           icon={<MailSearch className="h-6 w-6" />}
         />
       ) : (

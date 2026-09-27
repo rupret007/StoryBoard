@@ -127,14 +127,70 @@ async function ensureManagerFoundation(page: Page, checkIns = false) {
 
 async function ensureQualifiedProspect(page: Page, artistId: string) {
   const prospects = await artistApi<Array<{ status: string }>>(page, artistId, "/booking-prospects");
-  if (prospects.some((prospect) => prospect.status === "qualified" || prospect.status === "converted")) return;
+  const qualifiedCount = prospects.filter(
+    (prospect) => prospect.status === "qualified" || prospect.status === "converted"
+  ).length;
+  if (qualifiedCount > 0) return qualifiedCount;
   await artistApi(page, artistId, "/booking-prospects", "POST", {
     kind: "venue",
     status: "qualified",
     name: `E2E Manager prospect ${Date.now().toString(36)}`,
     city: "Chicago"
   });
+  return 1;
 }
+
+test("/venues keeps same-name and same-slug outreach bound to the selected venue ID", async ({ page }, testInfo) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const name = "Birdie's Social Club";
+  const city = `E2E venue ID ${Date.now().toString(36)}`;
+  const marker = "seed:dfw-venue-pack:birdies-social-club";
+  const applyUrl = "https://other-venue.example.test/apply";
+  const venue = await artistApi<{ id: string }>(page, artistId, "/venues", "POST", { name, city });
+  const contact = await artistApi<{ id: string }>(page, artistId, "/contacts", "POST", {
+    fullName: `${name} booking`,
+    contactKind: "venue_staff",
+    email: "buyer@other-venue.example.test",
+    notes: `${marker} Apply URL: ${applyUrl}`
+  });
+  await page.goto("/venues");
+  await page.getByLabel("Find venue").fill(name);
+  const duplicateRow = page.getByRole("row").filter({ has: page.locator(`input[value="${city}"]`) });
+  await duplicateRow.getByRole("button", { name: `View ${name} pack` }).click();
+  await expect(page.getByText("No contact email on file", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open application" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create prospect", exact: true })).toBeDisabled();
+
+  const seededRow = page.getByRole("row").filter({ has: page.locator('input[value="Fort Worth"]') });
+  await seededRow.getByRole("button", { name: `View ${name} pack` }).click();
+  await expect(page.getByText("hiring@birdiessocialclub.com", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open application" }))
+    .toHaveAttribute("href", "https://www.birdiessocialclub.com/music-submission");
+
+  await artistApi(page, artistId, `/venues/${venue.id}`, "PATCH", { notes: marker });
+  await artistApi(page, artistId, `/contacts/${contact.id}`, "PATCH", { venueId: venue.id });
+  await page.reload();
+  await duplicateRow.getByRole("button", { name: `View ${name} pack` }).click();
+  await expect(page.getByText("buyer@other-venue.example.test", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open application" })).toHaveAttribute("href", applyUrl);
+  const saved = page.waitForResponse((response) =>
+    response.request().method() === "POST" && response.url().endsWith(`/venues/${venue.id}/prospects`)
+  );
+  await page.getByRole("button", { name: "Create prospect", exact: true }).click();
+  const response = await saved;
+  expect(response.ok(), await response.text()).toBe(true);
+  expect(await response.json()).toMatchObject({
+    contactLinked: true,
+    prospect: { venueId: venue.id, contactId: contact.id, notes: `Venue pack apply URL: ${applyUrl}` },
+    applicationTask: { title: `Submit application at ${applyUrl}` }
+  });
+  await expect(page.getByRole("status").filter({ hasText: "Prospect created" }))
+    .toContainText("Travis owns the send");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("link", { name: "Open application" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("venues-selected-id-mobile.png"), fullPage: true });
+});
 
 test("mobile navigation closes and unlocks scrolling at the desktop breakpoint", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -185,8 +241,9 @@ test("manual prospect can gain a buyer and enter an approval-ready campaign", as
   await expect(card.getByText("Buyer: Morgan Promoter")).toBeVisible();
 
   await page.goto("/booking-campaigns");
-  const deliveryMode = page.getByLabel("Delivery after approval");
+  const deliveryMode = page.getByLabel("After approval + Execute");
   await expect(deliveryMode).toHaveValue("draft_only");
+  await expect(page.getByText(/Travis still owns the send: both modes require explicit approval and a separate Execute step/)).toBeVisible();
   await page.getByLabel("Campaign name").fill(campaignName);
   await page.getByRole("button", { name: "Create campaign" }).click();
   await page.getByLabel(`Prospect for ${campaignName}`).selectOption({ label: `${prospectName} · Austin` });
@@ -563,7 +620,8 @@ test("catalog preview and explicit apply stay pinned to the music workspace band
 test("novice manager intake produces grounded work and band operations records", async ({ page }) => {
   const suffix = Date.now().toString(36);
   await signInForBrowserTest(page);
-  await ensureQualifiedProspect(page, await activeArtistId(page));
+  const artistId = await activeArtistId(page);
+  const verifiedProspectCount = await ensureQualifiedProspect(page, artistId);
   await page.goto("/manager");
   const intake = page.getByRole("heading", { name: "Tell StoryBoard enough to manage the tradeoffs" });
   if (await intake.isVisible().catch(() => false)) {
@@ -590,6 +648,9 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByText("Daily manager brief refreshed.", { exact: true })).toBeVisible();
   await briefPriorities.getByRole("button", { name: "weekly" }).click();
   await expect(briefPriorities.getByText("Weekly operating brief", { exact: true })).toBeVisible();
+  // Cadence switches read cached briefs; generate this cadence explicitly.
+  await briefPriorities.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Weekly manager brief refreshed.", { exact: true })).toBeVisible();
   await expect(page.getByTestId("manager-priority-explanation")).toContainText("Ranked first because");
   const cadenceCard = page.getByTestId("manager-cadence");
   await expect(cadenceCard.getByText("On request only", { exact: true })).toBeVisible();
@@ -611,9 +672,16 @@ test("novice manager intake produces grounded work and band operations records",
   const liveGoalCard = planCard.getByText("Grow dependable show revenue", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-lg') and contains(@class,'border')][1]");
   await expect(liveGoalCard.getByLabel("Progress source")).toHaveValue("qualified_prospects");
   const liveGoalMeasurement = liveGoalCard.getByLabel("Progress source").locator("xpath=ancestor::div[@data-testid][1]");
-  await expect(liveGoalMeasurement.getByText(/StoryBoard can verify 1/i)).toBeVisible();
-  await liveGoalMeasurement.getByRole("button", { name: "Reconcile to 1" }).click();
-  await expect(liveGoalMeasurement.getByText(/Recorded progress matches 1 current qualified or converted prospect/i)).toBeVisible();
+  await expect(liveGoalMeasurement.getByText(new RegExp(`StoryBoard can verify ${verifiedProspectCount}`, "i"))).toBeVisible();
+  await liveGoalMeasurement.getByRole("button", { name: `Reconcile to ${verifiedProspectCount}` }).click();
+  await expect(
+    liveGoalMeasurement.getByText(
+      new RegExp(
+        `Recorded progress matches ${verifiedProspectCount} current qualified or converted prospect`,
+        "i"
+      )
+    )
+  ).toBeVisible();
   await expect(page.getByText("Finish the booking profile and define what a good-fit show means", { exact: true }).first()).toBeVisible();
   const context = page.getByTestId("manager-context");
   await expect(context.getByText(/45\/100 · Thin/i)).toBeVisible();
@@ -805,7 +873,9 @@ test("manager feedback and reviewed memory feed the release gate", async ({ page
   await page.getByRole("button", { name: "Send message" }).click();
   const planReply = page.locator("p.whitespace-pre-wrap").filter({ hasText: "plan-health score is" });
   await expect(planReply).toBeVisible();
-  await expect(planReply).toContainText(/real owner/i);
+  // The next action depends on current goal evidence, including unreconciled progress.
+  await expect(planReply).toContainText(/plan-health score is \d+\/100/);
+  await expect(planReply).toContainText("not elapsed-time pace or probability");
   const adaptationProbeTitle = `Review the E2E Manager answer ${suffix}`;
   await managerMessage.fill(`Add a task to ${adaptationProbeTitle}`);
   await page.getByRole("button", { name: "Send message" }).click();
@@ -1276,7 +1346,7 @@ test("confirmed event logistics move through approvals before provider execution
   await eventCard.getByText("Manage readiness details", { exact: true }).click();
   await eventCard.getByLabel(`Status for ${eventTitle}`).selectOption("confirmed");
   await eventCard.getByLabel(`Event end for ${eventTitle}`).fill(localTime(eventEnd));
-  await eventCard.getByLabel(`Event timezone for ${eventTitle}`).fill("America/Chicago");
+  await eventCard.getByLabel(`Event timezone for ${eventTitle}`).selectOption("America/Chicago");
   await expect(eventCard.getByRole("button", { name: /Prepare .* approval/ })).toHaveCount(0);
   const eventSaved = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/events/") && response.ok());
   await eventCard.getByRole("button", { name: "Save event details" }).click();
@@ -1821,7 +1891,10 @@ test("booking stage review explains confirmation and writes only after reviewed 
   await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
   const review = editor.getByRole("region", { name: "Review stage for E2E Travis booked this room" });
   await expect(review).toContainText("hold → confirmed");
-  await expect(review).toContainText("Not recorded — the new gig will need a start time");
+  const missingTarget = review.getByTestId("booking-review-target-date");
+  await expect(missingTarget).toHaveText("Not recorded — set show start/end/timezone in Shows & calendar after confirming");
+  await expect(missingTarget.locator("time")).toHaveCount(0);
+  await expect(review.getByRole("link", { name: "Set start, end, and timezone in Shows & calendar" })).toHaveAttribute("href", "/operations?tab=events");
   await expect(review).toContainText("only after Travis has booked it");
   expect(writes).toBe(0);
   await editor.scrollIntoViewIfNeeded();
@@ -1888,10 +1961,16 @@ test("booking review preserves the selection through repeated competing changes"
   await expect(editor.getByRole("combobox")).toHaveValue("confirmed");
   await expect(editor.getByRole("button", { name: "Save reviewed stage" })).toBeDisabled();
   await editor.getByRole("button", { name: "Load latest details" }).click();
-  await expect(editor.getByRole("region", { name: "Latest saved booking details" })).toContainText("E2E teammate revised booking terms");
+  const latestDetails = editor.getByRole("region", { name: "Latest saved booking details" });
+  await expect(latestDetails).toContainText("E2E teammate revised booking terms");
+  await expect(latestDetails.getByTestId("booking-review-target-date").locator("time")).toHaveAttribute("datetime", "2026-12-04T20:00:00.000Z");
+  const review = editor.getByRole("region", { name: "Review stage for E2E original booking terms" });
+  await expect(review.getByTestId("booking-review-target-date").locator("time")).toHaveCount(0);
   await expect(editor.getByRole("button", { name: "Save reviewed stage" })).toBeDisabled();
   await editor.getByRole("button", { name: "Review latest details" }).click();
-  await expect(editor.getByRole("region", { name: "Review stage for E2E original booking terms" })).toContainText("2026-12-04 20:00:00 UTC");
+  const reviewedTarget = review.getByTestId("booking-review-target-date").locator("time");
+  await expect(reviewedTarget).toHaveText("Target Fri, Dec 4, 2026 (UTC)");
+  await expect(reviewedTarget).toHaveAttribute("datetime", "2026-12-04T20:00:00.000Z");
   expect((await artistApi<{ stage: string }>(page, artistId, `/booking-opportunities/${booking.id}`)).stage).toBe("hold");
   await artistApi(page, artistId, `/booking-opportunities/${booking.id}/stage`, "PATCH", { stage: "closed", expectedUpdatedAt: changed.updatedAt });
   await editor.getByRole("button", { name: "Save reviewed stage" }).click();
