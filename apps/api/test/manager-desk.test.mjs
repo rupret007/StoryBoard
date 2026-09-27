@@ -42,7 +42,9 @@ test("AI-enabled Manager service persists recorded desk answers without attempti
     ["Manager desk snapshot", /Setlists: No songs or setlists/],
     ["What is today's schedule?", /No event for today is recorded/],
     ["Which invoices are unpaid?", /No unpaid invoices are recorded/],
-    ["What is our setlist?", /Vault is the sole catalog/]
+    ["What is our setlist?", /Vault is the sole catalog/],
+    ["What needs a Travis decision next?", /No open booking or follow-up decision is supported/],
+    ["Draft a venue pitch pack from records only", /Pitch pack blocked: no open booking opportunity/]
   ]) {
     const result = await service.chat("fixture", { message: question }, "offline@test", "operator");
     assert.match(result.message.content, expected);
@@ -52,5 +54,14 @@ test("AI-enabled Manager service persists recorded desk answers without attempti
     assert.equal(run.trace.providerContext.attempted, false);
     assert.deepEqual(run.trace.toolsSelected, []);
   }
+  facts.opportunities = [{ id: "booking", title: "Recorded engagement", stage: "confirmed", targetDate: new Date("2026-10-01T00:00:00Z"), packRecords: {
+    venue: { id: "venue", name: "Recorded room", city: "Recorded city" },
+    setlist: { id: "set", name: "Recorded running order", status: "draft", items: [{ itemType: "song", song: { id: "song", title: "Recorded song", active: true, sourceKey: "vault:catalog_import_v1:fixture" } }] }
+  } }];
+  const packed = await service.chat("fixture", { message: "Draft a venue pitch pack for Recorded engagement from records only" }, "offline@test", "operator");
+  assert.match(packed.message.content, /Venue pitch pack — draft for Travis review/);
+  assert.match(packed.message.content, /Recorded song/);
+  assert.equal(runs.at(-1).trace.providerContext.attempted, false);
+  assert.deepEqual(runs.at(-1).output.citations, ["booking", "venue", "set", "song"]);
   assert.equal(providerKeyReads, 0);
 });

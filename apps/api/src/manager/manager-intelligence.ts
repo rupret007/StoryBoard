@@ -30,6 +30,8 @@ import { applyManagerResponseAdaptation, managerResponseAdaptationPolicy, type M
 import { resolveManagerWriteClaim } from "./manager-write-claim";
 import type { ManagerFollowThrough } from "./manager-follow-through";
 
+import { recordedBookingDesk, managerQuestionAsksForBookingPack, managerQuestionAsksForTravisDecision, type BookingPackRecords } from "./manager-booking-desk";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type ManagerProposedAction = {
@@ -97,7 +99,7 @@ export type ManagerFacts = {
   goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
   tasks: { id: string; title: string; status: string; dueAt: Date | null; updatedAt?: Date; initiativeId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null; prerequisites?: { prerequisiteTask: { id: string; title: string; status: string; dueAt: Date | null } }[]; dependents?: { task: { id: string; title: string; status: string; dueAt: Date | null } }[] }[];
-  opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null }[];
+  opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null; packRecords?: BookingPackRecords }[];
   events: {
     id: string;
     title: string;
@@ -122,7 +124,7 @@ export type ManagerFacts = {
   decisions: { id: string; workstream: ManagerWorkstream; title: string; context: string | null; options: unknown; choice: string | null; rationale: string | null; expectedOutcome: string | null; needsFraming?: boolean; evidence: unknown; status: string; reviewAt: Date | null; decidedAt: Date | null; reviewOutcome?: string | null; reviewNote?: string | null; reviewedAt?: Date | null }[];
   approvals: { id: string; title: string; status: string; actionType: string; executionAttemptedAt?: Date | null; updatedAt: Date; reconciliations?: { outcome: string; createdAt: Date }[] }[];
   bookingReplies: { id: string; subject: string | null; fromName: string | null; fromEmail: string; processingStatus: string; receivedAt: Date }[];
-  campaignRecipients: { id: string; status: string; followUpDueAt: Date | null; followUpTaskId: string | null }[];
+  campaignRecipients: { id: string; opportunityId?: string | null; status: string; followUpDueAt: Date | null; followUpTaskId: string | null }[];
   prospects: { id: string; name: string; status: string; kind: string; city: string; updatedAt?: Date }[];
   settlements: { id: string; status: string; currency: string; grossMinor: number; expenseMinor: number; netMinor: number; updatedAt?: Date; event: { title: string } }[];
   outcomeReview?: ManagerOutcomeReview;
@@ -1126,7 +1128,7 @@ export function managerQuestionAsksAboutCatalog(question: string) {
 }
 
 export function managerQuestionNeedsRecordedDeskAnswer(question: string) {
-  return managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
+  return managerQuestionAsksForBookingPack(question) || managerQuestionAsksForTravisDecision(question) || managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
     || managerQuestionAsksAboutCatalog(question) || /\b(invoices?|unpaid|overdue|receivables?|next[- ]due|money|paid|payment|deposit|cash)\b/i.test(question);
 }
 
@@ -1309,6 +1311,9 @@ function deterministicManagerChatBase(
       recommendation: null
     };
   }
+
+  const bookingDesk = recordedBookingDesk(facts, question, now);
+  if (bookingDesk) return bookingDesk;
 
   if (managerQuestionAsksAboutBookerPitch(question)) {
     return {
