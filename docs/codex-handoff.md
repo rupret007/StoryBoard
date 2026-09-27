@@ -10,6 +10,14 @@ This document orients an autonomous coding agent so work continues without losin
 
 ## Delivery state (what already exists)
 
+### Recorded Travis decision and venue pitch-pack answers
+
+Manager now prepares Travis-owned booking review text from recorded facts, with
+explicit missing-fact blockers and no proposed write or provider call. See
+[recorded booking desk](manager-booking-desk.md) for supported questions, linked
+venue/setlist requirements, Vault-only provenance, and bounded-view limits.
+
+
 Current [dependency security assessment](dependency-security-assessment-2026-09-08.md)
 records fresh advisory counts, actual runtime/build paths and feature/deployment
 reassessment gates. No dependency upgrade or blanket security clearance is implied.

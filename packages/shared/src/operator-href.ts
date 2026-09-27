@@ -34,9 +34,14 @@ export function sanitizeTelHref(value?: string | null): string | null {
 
 export function sanitizeMailtoHref(value?: string | null): string | null {
   const trimmed = value?.trim() ?? "";
-  if (!trimmed || trimmed.includes("\n") || trimmed.includes("\r")) return null;
+  if (!trimmed || /[\u0000-\u001f\u007f]/.test(trimmed)) return null;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return null;
-  return `mailto:${trimmed}`;
+  try {
+    // Keep the address as recipient data, never mailto headers or a fragment.
+    return `mailto:${encodeURIComponent(trimmed).replace("%40", "@")}`;
+  } catch {
+    return null;
+  }
 }
 
 export const safeHttpUrl = z
