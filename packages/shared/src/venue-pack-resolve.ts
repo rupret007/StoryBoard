@@ -65,6 +65,7 @@ export type VenuePackOutreachContext = {
   webApplicationFirst: boolean;
 };
 
+/** Static catalog context; CRM booking must use resolveVenueBookingOutreachContext. */
 export function resolveVenuePackOutreachContext(
   venue: { name: string; notes?: string | null },
   bookingContact?: { email?: string | null; phone?: string | null; notes?: string | null } | null
@@ -78,6 +79,31 @@ export function resolveVenuePackOutreachContext(
   const phone = bookingContact?.phone?.trim() || pack?.phone || null;
   const webApplicationFirst = pack ? DFW_WEB_APPLICATION_VENUE_SLUGS.has(pack.slug) : false;
   return { pack, applyUrl, bookingEmail, phone, webApplicationFirst };
+}
+
+/** Resolve recorded outreach only from the selected venue and its artist-owned contact. */
+export function resolveVenueBookingOutreachContext(
+  venue: { id: string; artistId: string; notes?: string | null },
+  bookingContact?: {
+    venueId: string | null;
+    artistId: string;
+    email?: string | null;
+    phone?: string | null;
+    notes?: string | null;
+  } | null
+): Omit<VenuePackOutreachContext, "pack"> & { slug: string | null } {
+  const contact = bookingContact?.venueId === venue.id && bookingContact.artistId === venue.artistId
+    ? bookingContact
+    : null;
+  // The marker describes the recorded outreach channel; it never supplies catalog contact data.
+  const slug = parseDfwVenuePackSlugFromNotes(venue.notes);
+  return {
+    slug,
+    applyUrl: extractApplyUrlFromNotes(venue.notes) ?? extractApplyUrlFromNotes(contact?.notes),
+    bookingEmail: contact?.email?.trim() || null,
+    phone: contact?.phone?.trim() || null,
+    webApplicationFirst: slug !== null && DFW_WEB_APPLICATION_VENUE_SLUGS.has(slug)
+  };
 }
 
 export function venueApplicationTaskTitle(applyUrl: string): string {

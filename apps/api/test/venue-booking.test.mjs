@@ -72,13 +72,13 @@ function serviceFixture({ venue = birdiesVenue, contacts = [birdiesContact] } = 
       },
       contact: {
         findFirst: async ({ where }) =>
-          where.artistId === "artist-a" && where.venueId === state.venue.id
-            ? state.contacts[0]
-            : null,
+          state.contacts.find(
+            (contact) => contact.artistId === where.artistId && contact.venueId === where.venueId
+          ) ?? null,
         findMany: async ({ where }) =>
-          where.artistId === "artist-a" && where.venueId === state.venue.id
-            ? state.contacts
-            : []
+          state.contacts.filter(
+            (contact) => contact.artistId === where.artistId && contact.venueId === where.venueId
+          )
       },
       bookingProspect: {
         findFirst: async ({ where }) =>
@@ -142,6 +142,102 @@ test("getPackDetail surfaces booking email, apply URL, and web-application flag"
   assert.equal(detail.pack.bookingEmail, "hiring@birdiessocialclub.com");
   assert.match(detail.pack.applyUrl ?? "", /music-submission/);
   assert.equal(detail.pack.webApplicationFirst, true);
+});
+
+for (const name of [birdiesVenue.name, "Birdies Social Club annex"]) {
+  test(`a distinct venue named ${name} cannot inherit catalog outreach`, async () => {
+    const venue = { ...birdiesVenue, id: "venue-other", name, notes: null };
+    const { service, state } = serviceFixture({ venue });
+    const detail = await service.getPackDetail(venue.artistId, venue.id);
+    assert.deepEqual(detail.contacts, []);
+    assert.equal(detail.pack.slug, null);
+    assert.equal(detail.pack.bookingEmail, null);
+    assert.equal(detail.pack.phone, null);
+    assert.equal(detail.pack.applyUrl, null);
+    assert.equal(detail.pack.webApplicationFirst, false);
+    await assert.rejects(
+      service.createProspectFromVenue(venue.artistId, venue.id, {}),
+      (error) => error.getStatus() === 400
+    );
+    assert.equal(state.prospects.length, 0);
+    assert.equal(state.tasks.length, 0);
+  });
+}
+
+for (const notesSource of ["venue", "contact"]) {
+  test(`same-slug venues use their own ${notesSource} application URL and linked contact`, async () => {
+    const applyUrl = "https://other-venue.example.test/apply";
+    const marker = "seed:dfw-venue-pack:birdies-social-club";
+    const venue = {
+      ...birdiesVenue,
+      id: "venue-other",
+      notes: notesSource === "venue" ? `${marker} Apply URL: ${applyUrl}` : marker
+    };
+    const contact = {
+      ...birdiesContact,
+      id: "contact-other",
+      venueId: venue.id,
+      email: "buyer@other-venue.example.test",
+      phone: "555-0100",
+      notes: notesSource === "contact" ? `${marker} Apply URL: ${applyUrl}` : null
+    };
+    const { service, state } = serviceFixture({ venue, contacts: [birdiesContact, contact] });
+    const detail = await service.getPackDetail(venue.artistId, venue.id);
+    assert.deepEqual(detail.contacts, [contact]);
+    assert.equal(detail.pack.bookingEmail, contact.email);
+    assert.equal(detail.pack.phone, contact.phone);
+    assert.equal(detail.pack.applyUrl, applyUrl);
+    const result = await service.createProspectFromVenue(venue.artistId, venue.id, {});
+    assert.equal(result.prospect.venueId, venue.id);
+    assert.equal(result.prospect.contactId, contact.id);
+    assert.equal(result.prospect.notes, `Venue pack apply URL: ${applyUrl}`);
+    assert.equal(state.tasks[0].title, `Submit application at ${applyUrl}`);
+  });
+}
+
+for (const foreignContact of [
+  birdiesContact,
+  { ...birdiesContact, venueId: null },
+  { ...birdiesContact, artistId: "artist-b", venueId: "venue-other" }
+]) {
+  test(`a pack-shaped contact for ${foreignContact.artistId}/${foreignContact.venueId} cannot supply another venue`, async () => {
+    const venue = {
+      ...birdiesVenue,
+      id: "venue-other",
+      notes: "seed:dfw-venue-pack:birdies-social-club"
+    };
+    const { service, state } = serviceFixture({ venue, contacts: [foreignContact] });
+    const detail = await service.getPackDetail(venue.artistId, venue.id);
+    assert.deepEqual(detail.contacts, []);
+    assert.equal(detail.pack.bookingEmail, null);
+    assert.equal(detail.pack.applyUrl, null);
+    await assert.rejects(
+      service.createProspectFromVenue(venue.artistId, venue.id, {}),
+      (error) => error.getStatus() === 400
+    );
+    assert.equal(state.prospects.length, 0);
+    assert.equal(state.tasks.length, 0);
+  });
+}
+
+test("seeded venue without a contact exposes only its recorded application URL", async () => {
+  const { service } = serviceFixture({ contacts: [] });
+  const detail = await service.getPackDetail("artist-a", "venue-bsc");
+  assert.equal(detail.pack.bookingEmail, null);
+  assert.equal(detail.pack.applyUrl, "https://www.birdiessocialclub.com/music-submission");
+  const result = await service.createProspectFromVenue("artist-a", "venue-bsc", {});
+  assert.equal(result.contactLinked, false);
+  assert.equal(result.prospect.status, "discovered");
+});
+
+test("venue pack reads and prospect writes reject another artist's venue ID", async () => {
+  const { service, state } = serviceFixture();
+  await assert.rejects(service.getPackDetail("artist-b", "venue-bsc"),
+    (error) => error.getStatus() === 404);
+  await assert.rejects(service.createProspectFromVenue("artist-b", "venue-bsc", {}),
+    (error) => error.getStatus() === 404);
+  assert.equal(state.prospects.length, 0);
+  assert.equal(state.tasks.length, 0);
 });
 
 test("createProspectFromVenue links contact and creates application task for web-form venues", async () => {

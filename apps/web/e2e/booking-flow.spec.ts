@@ -136,6 +136,58 @@ async function ensureQualifiedProspect(page: Page, artistId: string) {
   });
 }
 
+test("/venues keeps same-name and same-slug outreach bound to the selected venue ID", async ({ page }, testInfo) => {
+  await signInForBrowserTest(page);
+  const artistId = await activeArtistId(page);
+  const name = "Birdie's Social Club";
+  const city = `E2E venue ID ${Date.now().toString(36)}`;
+  const marker = "seed:dfw-venue-pack:birdies-social-club";
+  const applyUrl = "https://other-venue.example.test/apply";
+  const venue = await artistApi<{ id: string }>(page, artistId, "/venues", "POST", { name, city });
+  const contact = await artistApi<{ id: string }>(page, artistId, "/contacts", "POST", {
+    fullName: `${name} booking`,
+    contactKind: "venue_staff",
+    email: "buyer@other-venue.example.test",
+    notes: `${marker} Apply URL: ${applyUrl}`
+  });
+  await page.goto("/venues");
+  await page.getByLabel("Find venue").fill(name);
+  const duplicateRow = page.getByRole("row").filter({ has: page.locator(`input[value="${city}"]`) });
+  await duplicateRow.getByRole("button", { name: `View ${name} pack` }).click();
+  await expect(page.getByText("No contact email on file", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open application" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create prospect", exact: true })).toBeDisabled();
+
+  const seededRow = page.getByRole("row").filter({ has: page.locator('input[value="Fort Worth"]') });
+  await seededRow.getByRole("button", { name: `View ${name} pack` }).click();
+  await expect(page.getByText("hiring@birdiessocialclub.com", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open application" }))
+    .toHaveAttribute("href", "https://www.birdiessocialclub.com/music-submission");
+
+  await artistApi(page, artistId, `/venues/${venue.id}`, "PATCH", { notes: marker });
+  await artistApi(page, artistId, `/contacts/${contact.id}`, "PATCH", { venueId: venue.id });
+  await page.reload();
+  await duplicateRow.getByRole("button", { name: `View ${name} pack` }).click();
+  await expect(page.getByText("buyer@other-venue.example.test", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open application" })).toHaveAttribute("href", applyUrl);
+  const saved = page.waitForResponse((response) =>
+    response.request().method() === "POST" && response.url().endsWith(`/venues/${venue.id}/prospects`)
+  );
+  await page.getByRole("button", { name: "Create prospect", exact: true }).click();
+  const response = await saved;
+  expect(response.ok(), await response.text()).toBe(true);
+  expect(await response.json()).toMatchObject({
+    contactLinked: true,
+    prospect: { venueId: venue.id, contactId: contact.id, notes: `Venue pack apply URL: ${applyUrl}` },
+    applicationTask: { title: `Submit application at ${applyUrl}` }
+  });
+  await expect(page.getByRole("status").filter({ hasText: "Prospect created" }))
+    .toContainText("Travis owns the send");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("link", { name: "Open application" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("venues-selected-id-mobile.png"), fullPage: true });
+});
+
 test("mobile navigation closes and unlocks scrolling at the desktop breakpoint", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signInForBrowserTest(page);

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   isSafeHttpUrl,
-  resolveVenuePackOutreachContext,
+  resolveVenueBookingOutreachContext,
   venueApplicationTaskTitle
 } from "@storyboard/shared";
 import {
@@ -50,12 +50,12 @@ export class VenueBookingService {
     });
     const bookingContact =
       contacts.find((c) => c.contactKind === "venue_staff") ?? contacts[0] ?? null;
-    const outreach = resolveVenuePackOutreachContext(venue, bookingContact);
+    const outreach = resolveVenueBookingOutreachContext(venue, bookingContact);
     return {
       venue,
       contacts,
       pack: {
-        slug: outreach.pack?.slug ?? null,
+        slug: outreach.slug,
         bookingEmail: outreach.bookingEmail,
         phone: outreach.phone,
         applyUrl: outreach.applyUrl,
@@ -119,7 +119,7 @@ export class VenueBookingService {
   ) {
     const venue = await this.loadVenue(artistId, venueId);
     const bookingContact = await this.loadBookingContact(artistId, venueId);
-    const outreach = resolveVenuePackOutreachContext(venue, bookingContact);
+    const outreach = resolveVenueBookingOutreachContext(venue, bookingContact);
     const safeApplyUrl =
       outreach.applyUrl && isSafeHttpUrl(outreach.applyUrl) ? outreach.applyUrl : null;
 

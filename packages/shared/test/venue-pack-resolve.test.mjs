@@ -12,6 +12,7 @@ const load = async (file) => {
 const {
   lookupDfwVenuePackByVenueName,
   parseDfwVenuePackSlugFromNotes,
+  resolveVenueBookingOutreachContext,
   resolveVenuePackOutreachContext,
   venueApplicationTaskTitle
 } = await load("venue-pack-resolve.js");
@@ -39,3 +40,24 @@ test("resolveVenuePackOutreachContext prefers contact email and flags web-applic
   assert.match(ctx.applyUrl ?? "", /music-submission/);
   assert.equal(venueApplicationTaskTitle(ctx.applyUrl ?? ""), `Submit application at ${ctx.applyUrl}`);
 });
+
+for (const contact of [
+  { venueId: "venue-other", artistId: "artist-a" },
+  { venueId: null, artistId: "artist-a" },
+  { venueId: "venue-selected", artistId: "artist-other" }
+]) {
+  test(`recorded outreach rejects contact identity ${contact.artistId}/${contact.venueId}`, () => {
+    const ctx = resolveVenueBookingOutreachContext(
+      { id: "venue-selected", artistId: "artist-a", notes: null },
+      {
+        ...contact,
+        email: "other@example.test",
+        phone: "555-0100",
+        notes: "seed:dfw-venue-pack:birdies-social-club Apply URL: https://other.example.test/apply"
+      }
+    );
+    assert.deepEqual(ctx, {
+      slug: null, applyUrl: null, bookingEmail: null, phone: null, webApplicationFirst: false
+    });
+  });
+}
