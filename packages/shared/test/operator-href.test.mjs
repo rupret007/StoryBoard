@@ -23,3 +23,21 @@ test("tel and mailto hrefs reject control characters and empty values", () => {
   assert.equal(shared.sanitizeMailtoHref("buyer@example.test"), "mailto:buyer@example.test");
   assert.equal(shared.sanitizeMailtoHref("buyer@example.test\nBcc:other@example.test"), null);
 });
+
+test("mailto hrefs keep URL delimiters inside the recorded address", () => {
+  for (const address of [
+    "buyer@example.test?subject=unexpected",
+    "buyer@example.test?bcc=other%40example.test",
+    "buyer#booking@example.test",
+    "buyer%0D%0ABcc%3Aother@example.test",
+    "buyer+booking@example.test"
+  ]) {
+    const href = shared.sanitizeMailtoHref(address);
+    assert.ok(href);
+    const url = new URL(href);
+    assert.equal(url.search, "");
+    assert.equal(url.hash, "");
+    assert.equal(decodeURIComponent(url.pathname), address);
+  }
+  assert.equal(shared.sanitizeMailtoHref("  buyer@example.test  "), "mailto:buyer@example.test");
+});
