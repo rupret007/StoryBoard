@@ -6,13 +6,14 @@ import type { Contact, Venue } from "@/lib/types";
 export default async function ContactsPage() {
   let contacts: Contact[] = [];
   let venues: Venue[] = [];
+  let loadError = "";
   try {
     [contacts, venues] = await Promise.all([
       serverApiFetch<Contact[]>("/contacts", { cache: "no-store" }),
       serverApiFetch<Venue[]>("/venues", { cache: "no-store" })
     ]);
   } catch {
-    // leave empty
+    loadError = "Contacts could not be loaded. Reload to see your rolodex.";
   }
 
   return (
@@ -21,7 +22,7 @@ export default async function ContactsPage() {
         title="Contacts"
         description="Promoters, venue staff, and partners — optionally linked to venues."
       />
-      <ContactsClient initialContacts={contacts} venues={venues} />
+      <ContactsClient initialContacts={contacts} venues={venues} loadError={loadError} />
     </div>
   );
 }

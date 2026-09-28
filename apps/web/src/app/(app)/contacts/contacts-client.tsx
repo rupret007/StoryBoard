@@ -11,10 +11,12 @@ const KINDS = ["general", "promoter", "venue_staff"] as const;
 
 export function ContactsClient({
   initialContacts,
-  venues
+  venues,
+  loadError
 }: {
   initialContacts: Contact[];
   venues: Venue[];
+  loadError?: string;
 }) {
   const router = useRouter();
   const [fullName, setFullName] = useState("");
@@ -23,10 +25,12 @@ export function ContactsClient({
   const [email, setEmail] = useState("");
   const [venueId, setVenueId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function createContact(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
+    setError(null);
     try {
       await apiFetch("/contacts", {
         method: "POST",
@@ -41,6 +45,8 @@ export function ContactsClient({
       setEmail("");
       setVenueId("");
       router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create the contact");
     } finally {
       setBusy(false);
     }
@@ -48,6 +54,17 @@ export function ContactsClient({
 
   return (
     <div className="space-y-8">
+      {loadError ? (
+        <div role="alert" className="text-sm text-amber-200">
+          {loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload contacts</button>
+        </div>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-sm text-rose-300">
+          {error}
+        </p>
+      ) : null}
+
       <SurfaceCard>
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
           Add contact
@@ -117,7 +134,7 @@ export function ContactsClient({
         </form>
       </SurfaceCard>
 
-      {initialContacts.length === 0 ? (
+      {loadError ? null : initialContacts.length === 0 ? (
         <EmptyState
           title="No contacts"
           description="Build your promoter and venue rolodex — linked venues help command-driven outreach."

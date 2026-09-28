@@ -244,8 +244,11 @@ export function ProspectsClient({
           <div className="md:col-span-4"><button className="sb-btn-primary" disabled={busy === "search"} type="submit"><Search className="h-4 w-4" />Find signals</button></div>
         </form>
         {signals ? (
-          <div className="mt-5 space-y-3">
+          <div className="mt-5 space-y-3" data-testid="market-search-results">
             {signals.mode === "manual" ? <p className="rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">{signals.reason}</p> : null}
+            {signals.mode === "ticketmaster" && signals.signals.length === 0 ? (
+              <p className="text-sm text-[var(--text-muted)]">No signals found for this search. Try a different city, region, or keyword.</p>
+            ) : null}
             {signals.signals.map((signal) => (
               <div key={signal.sourceRef} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-3">
                 <div><p className="font-medium text-[var(--text-primary)]">{signal.name}</p><p className="text-xs text-[var(--text-muted)]">{signal.kind.replace("_", " ")} · {[signal.city, signal.region, signal.country].filter(Boolean).join(", ")}</p></div>
