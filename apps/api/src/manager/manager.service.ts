@@ -1,3 +1,4 @@
+import { bookingPackRecordsForArtist } from "./manager-booking-desk";
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
@@ -1136,7 +1137,7 @@ export class ManagerService {
       this.prisma.client.managerGoal.findMany({ where: { artistId, status: { in: [ManagerGoalStatus.draft, ManagerGoalStatus.active] } }, take: 20 }),
       this.prisma.client.managerInitiative.findMany({ where: { artistId, status: { in: [ManagerInitiativeStatus.proposed, ManagerInitiativeStatus.active, ManagerInitiativeStatus.blocked] } }, take: 30 }),
       this.prisma.client.task.findMany({ where: { artistId, OR: [{ status: { not: "done" } }, { initiativeId: { not: null } }] }, include: { bandMember: { select: { id: true, name: true } }, prerequisites: { select: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } } }, dependents: { select: { task: { select: { id: true, title: true, status: true, dueAt: true } } } } }, orderBy: { dueAt: "asc" }, take: 100 }),
-      this.prisma.client.bookingOpportunity.findMany({ where: { artistId, stage: { not: "closed" } }, orderBy: { updatedAt: "desc" }, take: 30 }),
+      this.prisma.client.bookingOpportunity.findMany({ where: { artistId, stage: { not: "closed" } }, include: { venue: { select: { id: true, artistId: true, name: true, city: true } }, event: { select: { artistId: true, venueId: true, status: true, setlist: { select: { id: true, artistId: true, name: true, status: true, items: { orderBy: { sortOrder: "asc" }, select: { itemType: true, song: { select: { id: true, artistId: true, title: true, active: true, sourceKey: true } } } } } } } } }, orderBy: { updatedAt: "desc" }, take: 30 }),
       this.prisma.client.bandEvent.findMany({ where: { artistId, status: { in: ["draft", "hold", "confirmed"] } }, include: { participants: true, tasks: true, schedule: { orderBy: { sortOrder: "asc" } }, setlist: { include: { items: { select: { id: true, itemType: true, label: true, song: { select: { id: true, title: true, durationSeconds: true } } } } } }, deals: { include: { agreements: { select: { id: true, status: true } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } } } }, invoices: { select: { id: true, totalMinor: true, paidMinor: true, status: true } }, approvals: { where: { artistId, sourceKey: { startsWith: `${EVENT_LOGISTICS_POLICY_VERSION}:` } }, select: { id: true, eventId: true, sourceKey: true, actionType: true, status: true, executionAttemptedAt: true, payload: true, createdAt: true, updatedAt: true, reconciliations: { select: { outcome: true, createdAt: true } } } } }, orderBy: { startsAt: "asc" }, take: 30 }),
       this.prisma.client.artistProject.findMany({ where: { artistId, status: { in: ["draft", "active", "paused"] } }, include: { tasks: true, expenses: true, events: { select: { id: true } } }, orderBy: { dueAt: "asc" }, take: 30 }),
       this.prisma.client.dealOffer.findMany({ where: { artistId, status: { in: ["draft", "proposed", "negotiating", "accepted"] } }, orderBy: { updatedAt: "desc" }, take: 30 }),
@@ -1147,7 +1148,7 @@ export class ManagerService {
       this.prisma.client.managerMemoryFact.findMany({ where: { artistId, archivedAt: null }, select: { id: true, key: true, value: true, sourceType: true, sourceId: true, confidence: true, sensitivity: true, confirmedAt: true, updatedAt: true } }),
       this.prisma.client.approvalRequest.findMany({ where: { artistId, status: { in: ["proposed", "pending", "approved", "failed"] } }, select: { id: true, title: true, status: true, actionType: true, executionAttemptedAt: true, updatedAt: true, reconciliations: { select: { outcome: true, createdAt: true } } }, orderBy: { updatedAt: "asc" }, take: 30 }),
       this.prisma.client.bookingReply.findMany({ where: { artistId, processingStatus: "unread" }, select: { id: true, subject: true, fromName: true, fromEmail: true, processingStatus: true, receivedAt: true }, orderBy: { receivedAt: "desc" }, take: 20 }),
-      this.prisma.client.bookingCampaignRecipient.findMany({ where: { campaign: { artistId }, status: { in: ["drafted", "sent"] } }, select: { id: true, status: true, followUpDueAt: true, followUpTaskId: true }, orderBy: { followUpDueAt: "asc" }, take: 30 }),
+      this.prisma.client.bookingCampaignRecipient.findMany({ where: { campaign: { artistId }, status: { in: ["drafted", "sent"] }, NOT: { followUpTask: { is: { artistId, status: "done" } } } }, select: { id: true, opportunityId: true, status: true, followUpDueAt: true, followUpTaskId: true }, orderBy: { followUpDueAt: "asc" }, take: 30 }),
       this.prisma.client.bookingProspect.findMany({ where: { artistId, status: "qualified" }, select: { id: true, name: true, status: true, kind: true, city: true, updatedAt: true }, orderBy: { updatedAt: "asc" }, take: 30 }),
       this.prisma.client.settlement.findMany({ where: { artistId, status: "draft" }, select: { id: true, status: true, currency: true, grossMinor: true, expenseMinor: true, netMinor: true, updatedAt: true, event: { select: { title: true } } }, orderBy: { updatedAt: "asc" }, take: 20 }),
       this.outcomeReview(artistId, 90),
@@ -1178,7 +1179,10 @@ export class ManagerService {
       goalMeasurements,
       initiatives,
       tasks,
-      opportunities,
+      opportunities: opportunities.map(({ venue, event, ...opportunity }) => ({
+        ...opportunity,
+        packRecords: bookingPackRecordsForArtist(artistId, { ...opportunity, venue, event })
+      })),
       events: eventsWithSignals,
       projects: projectsWithSignals,
       deals,
@@ -1232,7 +1236,7 @@ export class ManagerService {
       goalMeasurements: facts.goalMeasurements,
       initiatives: facts.initiatives,
       tasks: facts.tasks.map((row) => ({ id: row.id, title: row.title, status: row.status, ownerLabel: row.ownerLabel, bandMemberId: row.bandMemberId, dueAt: row.dueAt, updatedAt: row.updatedAt, blockedReason: row.blockedReason, waitingOn: row.waitingOn, deferralCount: row.deferralCount, lastDeferredAt: row.lastDeferredAt, opportunityId: row.opportunityId, eventId: row.eventId, projectId: row.projectId, initiativeId: row.initiativeId, prerequisites: row.prerequisites, dependents: row.dependents })),
-      opportunities: facts.opportunities.map((row) => ({ id: row.id, title: row.title, stage: row.stage, targetDate: row.targetDate, venueId: row.venueId })),
+      opportunities: facts.opportunities.map((row) => ({ id: row.id, title: row.title, stage: row.stage, targetDate: row.targetDate, venueId: row.venueId, packRecords: row.packRecords })),
       events: facts.events.map((row) => ({ id: row.id, type: row.type, status: row.status, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, timezone: row.timezone, venueId: row.venueId, guaranteeMinor: row.guaranteeMinor, depositMinor: row.depositMinor, currency: row.currency, calendarEventId: row.calendarEventId, driveFolderUrl: row.driveFolderUrl, logisticsAssessment: row.logisticsAssessment, readiness: row.readiness, dayOf: row.dayOf, participants: row.participants.map((participant) => ({ id: participant.id, bandMemberId: participant.bandMemberId, response: participant.response })) })),
       projects: facts.projects.map((row) => ({ id: row.id, type: row.type, status: row.status, name: row.name, startsAt: row.startsAt, dueAt: row.dueAt, budgetMinor: row.budgetMinor, currency: row.currency, successMetrics: row.successMetrics, readiness: row.readiness })),
       deals: facts.deals.map((row) => ({ id: row.id, eventId: row.eventId, opportunityId: row.opportunityId, status: row.status, title: row.title, offerAmountMinor: row.offerAmountMinor, currency: row.currency, depositMinor: row.depositMinor, depositDueAt: row.depositDueAt, balanceDueAt: row.balanceDueAt, performanceDate: row.performanceDate, expiresAt: row.expiresAt })),
@@ -2717,6 +2721,7 @@ export class ManagerService {
       ...facts.initiatives.map((x) => x.id),
       ...facts.tasks.map((x) => x.id),
       ...facts.opportunities.map((x) => x.id),
+      ...facts.opportunities.flatMap((x) => [x.packRecords?.venue?.id, x.packRecords?.setlist?.id, ...(x.packRecords?.setlist?.items.flatMap((item) => item.song ? [item.song.id] : []) ?? [])].filter((id): id is string => Boolean(id))),
       ...facts.events.map((x) => x.id),
       ...facts.events.flatMap((x) => (x.approvals ?? []).map((approval) => approval.id)),
       ...facts.events.flatMap((x) => x.participants.map((participant) => participant.id)),

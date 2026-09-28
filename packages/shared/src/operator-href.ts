@@ -36,7 +36,13 @@ export function sanitizeMailtoHref(value?: string | null): string | null {
   const trimmed = value?.trim() ?? "";
   if (!trimmed || trimmed.includes("\n") || trimmed.includes("\r")) return null;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return null;
-  return `mailto:${trimmed}`;
+  // Keep address punctuation from becoming mailto headers or a URL fragment.
+  // Encode literal percent signs too, so encoded input cannot introduce headers.
+  try {
+    return `mailto:${encodeURIComponent(trimmed).replace(/%40/g, "@")}`;
+  } catch {
+    return null;
+  }
 }
 
 export const safeHttpUrl = z
