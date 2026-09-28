@@ -23,3 +23,24 @@ test("tel and mailto hrefs reject control characters and empty values", () => {
   assert.equal(shared.sanitizeMailtoHref("buyer@example.test"), "mailto:buyer@example.test");
   assert.equal(shared.sanitizeMailtoHref("buyer@example.test\nBcc:other@example.test"), null);
 });
+
+test("mailto hrefs keep address punctuation out of headers and fragments", () => {
+  for (const address of [
+    "buyer?subject=Injected@example.test",
+    "buyer#fragment@example.test",
+    "buyer&body=Injected@example.test",
+    "buyer%0D%0ABcc%3Aother@example.test",
+    "buyer+booking@example.test"
+  ]) {
+    const href = shared.sanitizeMailtoHref(`  ${address}  `);
+    const url = new URL(href);
+    assert.equal(url.protocol, "mailto:");
+    assert.equal(url.search, "");
+    assert.equal(url.hash, "");
+    assert.equal(decodeURIComponent(url.pathname), address);
+  }
+});
+
+test("mailto hrefs reject malformed Unicode without throwing", () => {
+  assert.equal(shared.sanitizeMailtoHref("buyer\uD800@example.test"), null);
+});
