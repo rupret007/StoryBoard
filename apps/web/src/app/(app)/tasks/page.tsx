@@ -7,6 +7,7 @@ export default async function TasksPage() {
   let tasks: Task[] = [];
   let opportunities: BookingOpportunity[] = [];
   let members: BandMember[] = [];
+  let loadError = "";
   try {
     [tasks, opportunities, members] = await Promise.all([
       serverApiFetch<Task[]>("/tasks", { cache: "no-store" }),
@@ -16,7 +17,7 @@ export default async function TasksPage() {
       serverApiFetch<BandMember[]>("/manager/members", { cache: "no-store" })
     ]);
   } catch {
-    // empty
+    loadError = "Tasks could not be loaded. Reload to see your commitments.";
   }
 
   return (
@@ -25,7 +26,7 @@ export default async function TasksPage() {
         title="Tasks"
         description="Own, schedule, unblock, and close the band's commitments without silently losing the reason work slipped."
       />
-      <TasksClient initialTasks={tasks} opportunities={opportunities} members={members} />
+      <TasksClient initialTasks={tasks} opportunities={opportunities} members={members} loadError={loadError} />
     </div>
   );
 }
