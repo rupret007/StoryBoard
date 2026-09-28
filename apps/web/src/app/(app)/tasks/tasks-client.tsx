@@ -13,11 +13,13 @@ const STATUSES = ["todo", "in_progress", "blocked", "done"] as const;
 export function TasksClient({
   initialTasks,
   opportunities,
-  members
+  members,
+  loadError
 }: {
   initialTasks: Task[];
   opportunities: BookingOpportunity[];
   members: BandMember[];
+  loadError?: string;
 }) {
   const router = useRouter();
   const now = useMemo(() => new Date(), []);
@@ -75,6 +77,12 @@ export function TasksClient({
 
   return (
     <div className="space-y-8">
+      {loadError ? (
+        <div role="alert" className="text-sm text-amber-200">
+          {loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload tasks</button>
+        </div>
+      ) : null}
+
       <SurfaceCard>
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
           New follow-up
@@ -135,7 +143,7 @@ export function TasksClient({
         </form>
       </SurfaceCard>
 
-      {initialTasks.length === 0 ? (
+      {loadError ? null : initialTasks.length === 0 ? (
         <EmptyState
           title="No tasks"
           description="Create follow-ups so dashboard and summaries can surface what needs attention."

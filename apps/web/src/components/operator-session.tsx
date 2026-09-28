@@ -15,12 +15,15 @@ export function OperatorSession({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function logout() {
     setBusy(true);
     try {
       await apiFetch("/auth/logout", { method: "POST" });
     } finally {
+      // Always leave the session view, even if the API call failed: staying
+      // signed in to a stale page is worse than a redundant redirect.
       setBusy(false);
       router.refresh();
       window.location.href = "/";
@@ -32,12 +35,15 @@ export function OperatorSession({
       return;
     }
     setBusy(true);
+    setError(null);
     try {
       await apiFetch("/auth/session/artist", {
         method: "POST",
         json: { artistId }
       });
       router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not switch bands");
     } finally {
       setBusy(false);
     }
@@ -64,6 +70,11 @@ export function OperatorSession({
             ))}
           </select>
         </label>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-xs text-rose-300">
+          {error}
+        </p>
       ) : null}
       <button
         type="button"
