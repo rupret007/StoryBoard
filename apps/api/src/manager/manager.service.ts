@@ -1,5 +1,7 @@
+import { managerEvidenceLinks, readManagerEvidenceLinks } from "./manager-pilot-desk";
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { rethrowMemberAccountConflict, validateMemberAccountLink } from "./member-account-link";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCall, ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
@@ -262,11 +264,27 @@ export class ManagerService {
 
   members(artistId: string) { return this.prisma.client.bandMember.findMany({ where: { artistId }, orderBy: [{ active: "desc" }, { name: "asc" }] }); }
   async createMember(artistId: string, input: BandMemberCreateInput, actorLabel: string, actorOperatorId: string) {
-    if (input.linkedOperatorId) { const membership = await this.prisma.client.artistMembership.findUnique({ where: { operatorId_artistId: { operatorId: input.linkedOperatorId, artistId } } }); if (!membership) throw new NotFoundException("Operator membership not found"); }
-    const row = await this.prisma.client.bandMember.create({ data: { artistId, ...clean(input) } as Prisma.BandMemberUncheckedCreateInput });
-    await this.audit.log({ artistId, aggregateType: "BandMember", aggregateId: row.id, action: "manager.member_created", actorLabel, actorOperatorId, metadata: { name: row.name } }); return row;
+    try {
+      return await this.prisma.client.$transaction(async (tx) => {
+        await validateMemberAccountLink(tx, artistId, actorOperatorId, input.linkedOperatorId);
+        const row = await tx.bandMember.create({ data: { artistId, ...clean(input) } as Prisma.BandMemberUncheckedCreateInput });
+        await this.audit.log({ artistId, aggregateType: "BandMember", aggregateId: row.id, action: "manager.member_created", actorLabel, actorOperatorId, metadata: { name: row.name, ...(input.linkedOperatorId !== undefined ? { linkedOperatorId: input.linkedOperatorId } : {}) } }, tx);
+        return row;
+      });
+    } catch (error) { rethrowMemberAccountConflict(error); }
   }
-  async patchMember(artistId: string, id: string, input: OptionalFields<BandMemberCreateInput>, actorLabel: string, actorOperatorId: string) { await this.owned("bandMember", artistId, id); if (input.linkedOperatorId) { const m = await this.prisma.client.artistMembership.findUnique({ where: { operatorId_artistId: { operatorId: input.linkedOperatorId, artistId } } }); if (!m) throw new NotFoundException("Operator membership not found"); } const row = await this.prisma.client.bandMember.update({ where: { id }, data: clean(input) }); await this.audit.log({ artistId, aggregateType: "BandMember", aggregateId: id, action: "manager.member_updated", actorLabel, actorOperatorId, metadata: { fields: Object.keys(input) } }); return row; }
+  async patchMember(artistId: string, id: string, input: OptionalFields<BandMemberCreateInput>, actorLabel: string, actorOperatorId: string) {
+    try {
+      return await this.prisma.client.$transaction(async (tx) => {
+        const existing = await tx.bandMember.findFirst({ where: { id, artistId } });
+        if (!existing) throw new NotFoundException("Band member not found");
+        await validateMemberAccountLink(tx, artistId, actorOperatorId, input.linkedOperatorId, id);
+        const row = await tx.bandMember.update({ where: { id }, data: clean(input) });
+        await this.audit.log({ artistId, aggregateType: "BandMember", aggregateId: id, action: "manager.member_updated", actorLabel, actorOperatorId, metadata: { fields: Object.keys(input), ...(input.linkedOperatorId !== undefined ? { previousLinkedOperatorId: existing.linkedOperatorId, linkedOperatorId: input.linkedOperatorId } : {}) } }, tx);
+        return row;
+      });
+    } catch (error) { rethrowMemberAccountConflict(error); }
+  }
   memberCheckIns(artistId: string) { return this.prisma.client.bandMemberCheckIn.findMany({ where: { artistId }, include: { bandMember: { select: { id: true, name: true, active: true } } }, orderBy: { createdAt: "desc" }, take: 200 }); }
   async recordMemberCheckIn(artistId: string, bandMemberId: string, input: BandMemberCheckInCreateInput, actorLabel: string, actorOperatorId: string) {
     const member = await this.prisma.client.bandMember.findFirst({ where: { id: bandMemberId, artistId, active: true }, select: { id: true, name: true } });
@@ -1097,6 +1115,7 @@ export class ManagerService {
   }
 
   async completeIntake(artistId: string, input: { profile: ManagerProfileInput; members: BandMemberCreateInput[] }, actorLabel: string, actorOperatorId: string) {
+    for (const member of input.members) await validateMemberAccountLink(this.prisma.client, artistId, actorOperatorId, member.linkedOperatorId);
     await this.putProfile(artistId, input.profile, actorLabel, actorOperatorId, true);
     for (const member of input.members) await this.createMember(artistId, member, actorLabel, actorOperatorId);
     await this.ensurePlan(artistId, actorLabel, actorOperatorId);
@@ -1132,7 +1151,7 @@ export class ManagerService {
     ] = await Promise.all([
       this.prisma.client.artist.findUniqueOrThrow({ where: { id: artistId }, select: { id: true, name: true } }),
       this.profile(artistId),
-      this.prisma.client.bandMember.findMany({ where: { artistId, active: true }, select: { id: true, name: true, roles: true, instruments: true, checkIns: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, note: true, effectiveUntil: true, createdAt: true } } } }),
+      this.prisma.client.bandMember.findMany({ where: { artistId, active: true }, select: { id: true, name: true, linkedOperatorId: true, roles: true, instruments: true, checkIns: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, note: true, effectiveUntil: true, createdAt: true } } } }),
       this.prisma.client.managerGoal.findMany({ where: { artistId, status: { in: [ManagerGoalStatus.draft, ManagerGoalStatus.active] } }, take: 20 }),
       this.prisma.client.managerInitiative.findMany({ where: { artistId, status: { in: [ManagerInitiativeStatus.proposed, ManagerInitiativeStatus.active, ManagerInitiativeStatus.blocked] } }, take: 30 }),
       this.prisma.client.task.findMany({ where: { artistId, OR: [{ status: { not: "done" } }, { initiativeId: { not: null } }] }, include: { bandMember: { select: { id: true, name: true } }, prerequisites: { select: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } } }, dependents: { select: { task: { select: { id: true, title: true, status: true, dueAt: true } } } } }, orderBy: { dueAt: "asc" }, take: 100 }),
@@ -1147,7 +1166,7 @@ export class ManagerService {
       this.prisma.client.managerMemoryFact.findMany({ where: { artistId, archivedAt: null }, select: { id: true, key: true, value: true, sourceType: true, sourceId: true, confidence: true, sensitivity: true, confirmedAt: true, updatedAt: true } }),
       this.prisma.client.approvalRequest.findMany({ where: { artistId, status: { in: ["proposed", "pending", "approved", "failed"] } }, select: { id: true, title: true, status: true, actionType: true, executionAttemptedAt: true, updatedAt: true, reconciliations: { select: { outcome: true, createdAt: true } } }, orderBy: { updatedAt: "asc" }, take: 30 }),
       this.prisma.client.bookingReply.findMany({ where: { artistId, processingStatus: "unread" }, select: { id: true, subject: true, fromName: true, fromEmail: true, processingStatus: true, receivedAt: true }, orderBy: { receivedAt: "desc" }, take: 20 }),
-      this.prisma.client.bookingCampaignRecipient.findMany({ where: { campaign: { artistId }, status: { in: ["drafted", "sent"] } }, select: { id: true, status: true, followUpDueAt: true, followUpTaskId: true }, orderBy: { followUpDueAt: "asc" }, take: 30 }),
+      this.prisma.client.bookingCampaignRecipient.findMany({ where: { campaign: { artistId }, status: { in: ["drafted", "sent"] }, NOT: { followUpTask: { is: { artistId, status: "done" } } } }, select: { id: true, opportunityId: true, status: true, followUpDueAt: true, followUpTaskId: true }, orderBy: { followUpDueAt: "asc" }, take: 30 }),
       this.prisma.client.bookingProspect.findMany({ where: { artistId, status: "qualified" }, select: { id: true, name: true, status: true, kind: true, city: true, updatedAt: true }, orderBy: { updatedAt: "asc" }, take: 30 }),
       this.prisma.client.settlement.findMany({ where: { artistId, status: "draft" }, select: { id: true, status: true, currency: true, grossMinor: true, expenseMinor: true, netMinor: true, updatedAt: true, event: { select: { title: true } } }, orderBy: { updatedAt: "asc" }, take: 20 }),
       this.outcomeReview(artistId, 90),
@@ -2297,7 +2316,7 @@ export class ManagerService {
       })
     ]);
     rawHistory.reverse();
-    const sharedFacts = this.sharedFacts(facts);
+    const sharedFacts = { ...this.sharedFacts(facts), currentMemberId: facts.members.find((member) => member.linkedOperatorId === actorOperatorId)?.id ?? null };
     const providerReasoningFacts = fullProviderContextEnabled ? facts : sharedFacts;
     const history = projectManagerConversationMessages(rawHistory, managerConversationReasoningVisibility(fullProviderContextEnabled));
     // Never infer the initiating turn from recency. Another request can append
@@ -2440,6 +2459,7 @@ export class ManagerService {
       };
     }
     responseQuality = evaluateManagerResponseQuality(content, facts.profile?.decisionStyle ?? "guided");
+    const evidenceLinks = managerEvidenceLinks(sharedFacts, citations);
     const run = await this.prisma.client.managerRun.create({
       data: {
         artistId,
@@ -2448,7 +2468,7 @@ export class ManagerService {
         model,
         promptVersion: PROMPT_VERSION,
         inputFacts: safeFacts,
-        output: { answer: content, citations },
+        output: { answer: content, citations, evidenceLinks },
         trace: {
           factsRead: [...this.knownIds(providerReasoningFacts)],
           conversationMessageIds: history.map((message) => message.id),
@@ -2539,7 +2559,7 @@ export class ManagerService {
     await this.audit.log({ artistId, aggregateType: "ManagerConversation", aggregateId: conversation.id, action: "manager.chat_completed", actorLabel, actorOperatorId, metadata: { citationCount: citations.length, mode, promptVersion: PROMPT_VERSION, historyCount: history.length, recommendationId: recommendationRecord?.id ?? null, feedbackTargetMessageId: naturalFeedback.targetMessageId, naturalFeedbackApplied: Boolean(appliedFeedback), contextGapCode: contextCapture.gap?.code ?? null, contextCaptureProposed: contextCapture.status === "ready", taskCaptureStatus: taskCapture.status, taskCaptureProposed: taskCapture.status === "ready", taskSourceMessageId: taskCapture.action?.sourceMessageId ?? null, taskUpdateStatus: taskUpdate.status, taskUpdateProposed: taskUpdate.status === "ready", taskUpdateSourceMessageId: taskUpdate.action?.sourceMessageId ?? null, taskUpdateTaskId: taskUpdate.taskId, taskAssignmentStatus: taskAssignment.status, taskAssignmentProposed: taskAssignment.status === "ready", taskAssignmentSourceMessageId: taskAssignment.action?.sourceMessageId ?? null, taskAssignmentTaskId: taskAssignment.taskId, taskAssignmentMemberId: taskAssignment.memberId, projectCaptureStatus: projectCapture.status, projectCaptureProposed: projectCapture.status === "ready", projectSourceMessageId: projectCapture.action?.sourceMessageId ?? null, projectType: projectCapture.action?.projectType ?? null, eventAvailabilityStatus: eventAvailability.status, eventAvailabilityProposed: eventAvailability.status === "ready", eventAvailabilitySourceMessageId: eventAvailability.action?.sourceMessageId ?? null, eventAvailabilityEventId: eventAvailability.eventId, eventAvailabilityMemberId: eventAvailability.memberId, eventCaptureStatus: eventCapture.status, eventCaptureProposed: eventCapture.status === "ready", eventSourceMessageId: eventCapture.action?.sourceMessageId ?? null, eventType: eventCapture.action?.eventType ?? null, eventStatus: eventCapture.action?.status ?? null, writeClaimStatus: writeClaim.status, writeClaimKind: writeClaim.kind, writeClaimRefused: writeClaimRoute, tool: providerAttempted ? "read_manager_snapshot" : null, providerOutputUsed: mode === "openai" } });
     return {
       conversationId: conversation.id,
-      message: { ...message, feedback: null, canSubmitFeedback: true },
+      message: { ...message, evidenceLinks, feedback: null, canSubmitFeedback: true },
       recommendation: recommendationRecord,
       feedbackApplied: appliedFeedback ? {
         messageId: naturalFeedback.targetMessageId,
@@ -2585,7 +2605,7 @@ export class ManagerService {
         where: { conversationId: id },
         include: {
           feedback: { where: { operatorId }, take: 1 },
-          managerRun: { select: { trace: true, recommendations: { select: managerFollowThroughRecommendationSelect(artistId) } } }
+          managerRun: { select: { trace: true, output: true, recommendations: { select: managerFollowThroughRecommendationSelect(artistId) } } }
         },
         orderBy: { createdAt: "desc" },
         take: 50
@@ -2604,6 +2624,7 @@ export class ManagerService {
         void messageVisibility;
         return {
           ...message,
+          evidenceLinks: readManagerEvidenceLinks(managerRun?.output, message.citations),
           proposedActions: hydrateManagerMessageActions(message.proposedActions, managerRun?.recommendations ?? [], visibility === "owner" ? "owner" : "normal"),
           canSubmitFeedback: feedbackAllowedIds.has(message.id),
           feedback: feedbackAllowedIds.has(message.id) ? message.feedback[0] ?? null : null

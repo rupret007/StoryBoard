@@ -8,6 +8,15 @@ This document orients an autonomous coding agent so work continues without losin
 - **Public repo:** [https://github.com/rupret007/StoryBoard](https://github.com/rupret007/StoryBoard)
 - **Stack:** pnpm monorepo — `apps/web` (Next.js 16), `apps/api` (NestJS 11 + Fastify), `packages/shared`, `packages/ui`; PostgreSQL 16 + Redis 7; Prisma 7; BullMQ.
 
+## Rad Dad + Stalemate pilot candidate
+
+Current pilot scope, proof, and missing activation inputs are tracked in
+[`pilot-evidence.md`](pilot-evidence.md) and [`band-pilot.md`](band-pilot.md).
+Both bands are explicitly in scope; historical parked-catalog defaults do not
+prohibit a Stalemate workspace. Feed import scope still requires separate review.
+A green engineering gate is not real Google login, delivery, deployment, or
+field validation. Preserve that distinction when continuing.
+
 ## Delivery state (what already exists)
 
 Current [dependency security assessment](dependency-security-assessment-2026-09-08.md)

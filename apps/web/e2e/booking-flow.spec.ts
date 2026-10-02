@@ -1960,6 +1960,69 @@ test("booking viewer has no mutation controls and stage API refuses writes", asy
   }
 });
 
+test("a market search with zero signals says so instead of looking unchanged", async ({ page }) => {
+  await signInForBrowserTest(page);
+  await page.goto("/prospects");
+  await page.route(`${browserTestApiUrl}/booking-prospects/discover?**`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ mode: "ticketmaster", signals: [] })
+    })
+  );
+  // "Search one market" renders before "Add a manual lead" in the DOM, and
+  // both forms have a City field, so scope to the first (search) occurrence.
+  await page.getByLabel("City", { exact: true }).first().fill("A City With No Shows");
+  await page.getByRole("button", { name: "Find signals" }).click();
+  const results = page.getByTestId("market-search-results");
+  await expect(results).toBeVisible();
+  await expect(results).toContainText(/no signals found/i);
+  await page.unroute(`${browserTestApiUrl}/booking-prospects/discover?**`);
+});
+
+test("Tasks and Contacts report a load failure instead of a fake-empty workspace", async ({ page }) => {
+  await signInForBrowserTest(page);
+
+  // Inject each server loader's unavailable result into the real RSC boundary,
+  // the same technique used for the Operations workspace above. This only
+  // works on a client-side (rsc:1) transition, so navigate via the sidebar
+  // link rather than page.goto (a hard reload serves escaped flight data
+  // inline in the HTML document, not the bare flight body this matches).
+  async function expectLoadErrorRendersInstead(
+    linkName: string,
+    path: string,
+    initialDataMarker: string,
+    emptyStateText: string | RegExp
+  ) {
+    let injected = false;
+    await page.route(`**${path}?*`, async (route) => {
+      const headers = route.request().headers();
+      if (headers.rsc !== "1" || headers["next-router-prefetch"] === "1" || headers["next-router-segment-prefetch"]) {
+        return route.continue();
+      }
+      const response = await route.fetch();
+      const body = await response.text();
+      if (injected || !body.includes(initialDataMarker)) {
+        return route.fulfill({ response, body });
+      }
+      injected = true;
+      await route.fulfill({
+        response,
+        body: body.replace('"loadError":""', '"loadError":"Fixture: this workspace could not be loaded."')
+      });
+    });
+    await page.getByRole("link", { name: linkName, exact: true }).click();
+    await expect(page.getByText(/fixture: this workspace could not be loaded/i)).toBeVisible();
+    await expect(page.getByText(emptyStateText)).toHaveCount(0);
+    await page.unroute(`**${path}?*`);
+    expect(injected, `expected to inject a loadError fixture into ${path}`).toBe(true);
+  }
+
+  await expectLoadErrorRendersInstead("Tasks", "/tasks", '"initialTasks":', "No tasks");
+  await page.goto("/"); // return to a neutral page so the next link click is a fresh transition
+  await expectLoadErrorRendersInstead("Contacts", "/contacts", '"initialContacts":', "No contacts");
+});
+
 for (const timezoneId of ["UTC", "Asia/Tokyo"]) {
   test.describe(`recorded show time on a ${timezoneId} device`, () => {
     test.use({ timezoneId, viewport: { width: timezoneId === "UTC" ? 390 : 320, height: 844 } });

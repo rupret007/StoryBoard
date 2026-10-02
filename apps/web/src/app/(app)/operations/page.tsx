@@ -48,11 +48,13 @@ export default async function OperationsPage({
   let bookingsAvailable = false;
   let accessState: OperationsAccessState = "unavailable";
   let isOwner = false;
+  let currentOperatorId: string | null = null;
 
   // Resolve one band before loading its editors. A later band switch must not
   // pair one band's running order with another band's write context.
   const [meResult] = await Promise.allSettled([
     serverApiFetch<{
+      operator: { id: string };
       currentArtistId: string | null;
       memberships: { artistId: string; role: string }[];
     }>("/auth/me", { cache: "no-store" })
@@ -60,6 +62,7 @@ export default async function OperationsPage({
   let artistId: string | null = null;
   if (meResult.status === "fulfilled") {
     const me = meResult.value;
+    currentOperatorId = me.operator.id;
     artistId = me.currentArtistId && me.memberships.some((membership) => membership.artistId === me.currentArtistId)
       ? me.currentArtistId
       : me.memberships[0]?.artistId ?? null;
@@ -162,6 +165,7 @@ export default async function OperationsPage({
       />
       <OperationsClient
         artistId={artistId}
+        currentOperatorId={currentOperatorId}
         initialTab={parseOpsWorkspaceTab(params.tab)}
         focusEventId={params.event?.trim() || null}
         focusField={parseOpsWorkspaceFocus(params.focus)}

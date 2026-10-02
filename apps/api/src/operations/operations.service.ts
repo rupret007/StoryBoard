@@ -330,7 +330,21 @@ export class OperationsService {
     return { id, deleted: true };
   }
   async eventFromOpportunity(artistId: string, opportunityId: string, actorLabel: string, actorOperatorId: string) { const opportunity = await this.prisma.client.bookingOpportunity.findFirst({ where: { id: opportunityId, artistId }, include: { venue: true } }); if (!opportunity) throw new NotFoundException("Booking opportunity not found"); const existing = await this.prisma.client.bandEvent.findUnique({ where: { opportunityId } }); const row = await this.prisma.client.bandEvent.upsert({ where: { opportunityId }, create: { artistId, opportunityId, venueId: opportunity.venueId, type: "gig", status: "confirmed", title: opportunity.title, startsAt: opportunity.targetDate, locationName: opportunity.venue?.name ?? null }, update: {} }); if (!existing) await this.auditWrite(artistId, "BandEvent", row.id, "event.created_from_opportunity", actorLabel, actorOperatorId, { opportunityId }); return this.event(artistId, row.id); }
-  async participant(artistId: string, eventId: string, input: ParticipantInput, actorLabel: string, actorOperatorId: string) { await Promise.all([this.assertArtistRecord("event", artistId, eventId), this.assertArtistRecord("member", artistId, input.bandMemberId)]); const row = await this.prisma.client.eventParticipant.upsert({ where: { eventId_bandMemberId: { eventId, bandMemberId: input.bandMemberId } }, create: { eventId, bandMemberId: input.bandMemberId, response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt: input.response === "unknown" ? null : new Date() }, update: { response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt: input.response === "unknown" ? null : new Date() } }); await this.auditWrite(artistId, "EventParticipant", row.id, "event.availability_recorded", actorLabel, actorOperatorId, { eventId, response: row.response }); return row; }
+  async participant(artistId: string, eventId: string, input: ParticipantInput, actorLabel: string, actorOperatorId: string, forSelf = false) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const event = await tx.bandEvent.findFirst({ where: { id: eventId, artistId }, select: { id: true } });
+      const member = await tx.bandMember.findFirst({ where: { id: input.bandMemberId, artistId, ...(forSelf ? { linkedOperatorId: actorOperatorId, active: true } : {}) }, select: { id: true, linkedOperatorId: true } });
+      if (!event || !member) throw new NotFoundException("Event or band member not found");
+      const respondedAt = input.response === "unknown" ? null : new Date();
+      const row = await tx.eventParticipant.upsert({
+        where: { eventId_bandMemberId: { eventId, bandMemberId: input.bandMemberId } },
+        create: { eventId, bandMemberId: input.bandMemberId, response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt },
+        update: { response: input.response, ...(input.assignment !== undefined ? { assignment: input.assignment } : {}), ...(input.notes !== undefined ? { notes: input.notes } : {}), respondedAt }
+      });
+      await this.audit.log({ artistId, aggregateType: "EventParticipant", aggregateId: row.id, action: "event.availability_recorded", actorLabel, actorOperatorId, metadata: { eventId, bandMemberId: member.id, response: row.response, recordedForSelf: member.linkedOperatorId === actorOperatorId } }, tx);
+      return row;
+    });
+  }
   async generateAdvance(artistId: string, eventId: string, actorLabel: string, actorOperatorId: string) {
     const event = await this.event(artistId, eventId);
     if (!event.startsAt) throw new BadRequestException("Event start time is required before generating an advance");

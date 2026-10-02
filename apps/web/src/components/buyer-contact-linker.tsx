@@ -2,20 +2,23 @@
 
 import { Plus, UserRoundPlus } from "lucide-react";
 import { useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { scopedApiFetch } from "@/lib/api";
 import type { BookingProspect, Contact } from "@/lib/types";
 
 type AttachResponse = { prospect: BookingProspect; created: boolean };
 
 export function BuyerContactLinker({
+  artistId,
   prospectId,
   contacts,
   onLinked
 }: {
+  artistId: string | null;
   prospectId: string;
   contacts: Contact[];
   onLinked: (contact: Contact) => void | Promise<void>;
 }) {
+  const apiFetch = scopedApiFetch(artistId);
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"existing" | "new">(
     contacts.length ? "existing" : "new"
@@ -66,6 +69,7 @@ export function BuyerContactLinker({
       <button
         type="button"
         className="sb-btn-secondary py-2 text-xs"
+        disabled={!artistId}
         onClick={() => setOpen(true)}
       >
         <UserRoundPlus className="h-4 w-4" />
@@ -122,7 +126,7 @@ export function BuyerContactLinker({
       <p className="mt-2 text-xs text-[var(--text-muted)]">An email makes a campaign recipient ready for review.</p>
       {error ? <p role="alert" className="mt-2 text-xs text-rose-200">{error}</p> : null}
       <div className="mt-3 flex gap-2">
-        <button className="sb-btn-primary py-2 text-xs" disabled={busy || (mode === "existing" && !contactId)} type="submit"><Plus className="h-4 w-4" />Save buyer</button>
+        <button className="sb-btn-primary py-2 text-xs" disabled={!artistId || busy || (mode === "existing" && !contactId)} type="submit"><Plus className="h-4 w-4" />Save buyer</button>
         <button className="sb-btn-ghost py-2 text-xs" type="button" onClick={() => setOpen(false)}>Cancel</button>
       </div>
     </form>

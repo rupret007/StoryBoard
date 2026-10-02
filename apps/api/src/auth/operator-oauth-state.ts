@@ -22,3 +22,18 @@ export function operatorOAuthStateMatches(
     return false;
   }
 }
+
+/** Only our opaque invitation tokens may accompany sign-in, never a redirect URL. */
+export function operatorInviteToken(value: unknown): string | null {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
+}
+
+export function readOperatorOAuthContext(value: string): { state: string; invite: string | null } {
+  try {
+    const context: unknown = JSON.parse(value);
+    if (context && typeof context === "object" && "state" in context && typeof context.state === "string") {
+      return { state: context.state, invite: operatorInviteToken("invite" in context ? context.invite : null) };
+    }
+  } catch { /* Existing sign-ins store only the nonce. */ }
+  return { state: value, invite: null };
+}

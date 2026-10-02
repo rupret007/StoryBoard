@@ -19,7 +19,8 @@ import type { RequestOperator } from "./request-operator";
 import { SessionAuthGuard } from "./session-auth.guard";
 import {
   createOperatorOAuthState,
-  operatorOAuthStateMatches
+  operatorOAuthStateMatches,
+  operatorInviteToken
 } from "./operator-oauth-state";
 
 @Controller("auth")
@@ -32,9 +33,9 @@ export class AuthController {
   ) {}
 
   @Get("operator/google/start")
-  startGoogle(@Res({ passthrough: false }) reply: FastifyReply) {
+  startGoogle(@Res({ passthrough: false }) reply: FastifyReply, @Query("invite") invite?: string) {
     const state = createOperatorOAuthState();
-    this.auth.applyOperatorOAuthStateCookie(reply, state);
+    this.auth.applyOperatorOAuthStateCookie(reply, state, invite);
     const url = this.auth.buildGoogleOperatorAuthUrl(state);
     return reply.code(302).redirect(url);
   }
@@ -54,23 +55,28 @@ export class AuthController {
     if (!operatorOAuthStateMatches(expectedState, state)) {
       return fail("invalid_state");
     }
+    const invite = this.auth.readOperatorOAuthInviteFromRequest(req);
+    const destination = invite ? `${webUrl}/onboarding?invite=${encodeURIComponent(invite)}` : `${webUrl}/?signedIn=1`;
+    const loginFailure = (reason: string) => invite
+      ? reply.code(302).redirect(`${destination}&authError=${encodeURIComponent(reason)}`)
+      : fail(reason);
     this.auth.clearOperatorOAuthStateCookie(reply);
     if (oauthError) {
-      return fail(oauthError);
+      return loginFailure("google_sign_in_cancelled");
     }
     if (!code?.trim()) {
-      return fail("missing_code");
+      return loginFailure("missing_code");
     }
     try {
       await this.auth.completeGoogleOperatorLogin(code, reply);
     } catch {
-      return fail("operator_login_failed");
+      return loginFailure("operator_login_failed");
     }
-    return reply.code(302).redirect(`${webUrl}/?signedIn=1`);
+    return reply.code(302).redirect(destination);
   }
 
   @Get("dev/login")
-  async devLogin(@Res({ passthrough: false }) reply: FastifyReply) {
+  async devLogin(@Res({ passthrough: false }) reply: FastifyReply, @Query("invite") inviteToken?: string) {
     const webUrl = this.config.getOrThrow<string>("WEB_URL");
     try {
       await this.auth.devBypassLogin(reply);
@@ -79,7 +85,8 @@ export class AuthController {
         `${webUrl}/?authError=${encodeURIComponent("dev_login_unavailable")}`
       );
     }
-    return reply.code(302).redirect(`${webUrl}/?signedIn=1`);
+    const invite = operatorInviteToken(inviteToken);
+    return reply.code(302).redirect(invite ? `${webUrl}/onboarding?invite=${encodeURIComponent(invite)}` : `${webUrl}/?signedIn=1`);
   }
 
   @Post("logout")
