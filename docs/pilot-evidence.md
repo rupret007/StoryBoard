@@ -1,6 +1,7 @@
 # Pilot evidence — Rad Dad and Stalemate
 
 Status: **engineering candidate; not activated or field-validated**.
+Current review and subsequent CI receipts: [draft PR #54](https://github.com/rupret007/StoryBoard/pull/54).
 Goal began 2026-10-01. Jeff selected both bands and confirmed no hosting target
 or approved local Vault path. Jeff supplied his owner identity privately; other
 member accounts, event dates, commitments and provider credentials are pending.
@@ -61,9 +62,9 @@ or tests are green.
 | Recovery safety tests | 11 passed (private paths, explicit target, checksum/empty-target guards) |
 | Compose app+production+pilot template | `config --quiet` passed with validation-only placeholder configuration; no startup |
 | Caddy TLS proxy configuration | Validation command run in disposable container; no listeners or certificate issuance |
-| Combined gate | Passed: typecheck, lint, 334 API tests, 106 shared tests, 11 recovery tests, production builds, Manager 119/119 (safety 100%). Later web typecheck/lint and final-source production rebuild passed. Final concurrency/invite hardening awaits the next API and hosted gate. |
+| Combined gate | Passed: typecheck, lint, 334 API tests, 106 shared tests, 11 recovery tests, production builds, Manager 119/119 (safety 100%). After concurrency/invite hardening, API build/typecheck, 346 tests and lint passed; final web typecheck/lint and production rebuild also passed. Exact-commit hosted gate is recorded in PR #54. |
 | PostgreSQL integration | 8/8 passed, including two-workspace isolation and atomic audit rollback |
-| Phone-browser journeys | 40/43 passed in the combined run, including phone invite, member tasks/availability, undated project lifecycle/interrupted saves, and stale-tab Manager scope. Two contact/booking selector corrections subsequently passed. Final extra-scope rerun pending after a concurrent workspace-creation conflict surfaced. |
+| Phone-browser journeys | 40/43 passed before the final fixture corrections. After access hardening and those corrections, all 8 pilot journeys passed together against the rebuilt API: phone invitations, member tasks/availability, interrupted saves/project lifecycle, and stale-tab isolation across Manager and booking forms. The full 43-case hosted result is recorded in PR #54. |
 | Worker execution, dedupe, restart proof | Passed using real existing worker/recurring scan: one brief+notice, queued job resumed after API/PG restart, unchanged row IDs, authenticated notification HTTP200; no provider attempt |
 | Real Google login on two phones | Not run: client/domain/accounts absent |
 | Approved Vault imports | Not run: local source and each band's selection absent |
@@ -97,6 +98,12 @@ contact and booking-profile/campaign isolation, and exposed PostgreSQL's
 adapter-level serialization conflict during simultaneous workspace creation.
 The candidate handles known aborted transactions with bounded retries; unknown
 failures must not be retried as though their writes were known to have rolled back.
+A later focused invocation omitted the harness's web dev-login flag, so its
+two sign-in cases could not find the local-only login link. The normal harness
+supplies that flag. The inbox scope fixture also tried to enable AI while the
+deployment correctly disables it; the test instead verifies disabling an
+existing synthetic setting without enabling any provider. These are recorded
+as test setup failures, not real Google or provider acceptance.
 
 ## Practical limits
 

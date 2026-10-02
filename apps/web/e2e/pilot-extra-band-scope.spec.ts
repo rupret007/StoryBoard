@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { createRequire } from "node:module";
 
 const api = (process.env.E2E_API_URL ?? "http://127.0.0.1:4000").replace(/\/$/, "");
 const web = (process.env.E2E_WEB_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
@@ -17,6 +18,19 @@ test("older venue, sprint, inbox and advisor tabs keep writes in their original 
   }
   const bandA = await createWorkspace(`E2E extra scope A ${suffix}`);
   const bandB = await createWorkspace(`E2E extra scope B ${suffix}`);
+  // Exercise consent withdrawal with providers still disabled. Both synthetic
+  // bands start opted in, so changing the wrong band cannot satisfy the checks.
+  const requireFixture = createRequire(__filename);
+  const { requireTestDatabaseUrl } = requireFixture("../../../scripts/test-database.mjs");
+  const { Client } = requireFixture("pg");
+  const db = new Client({ connectionString: requireTestDatabaseUrl() });
+  await db.connect();
+  try {
+    await db.query(
+      'INSERT INTO "ArtistBookingReplySettings" (id, "artistId", "aiAnalysisEnabled", "updatedAt") VALUES ($1,$2,true,NOW()),($3,$4,true,NOW())',
+      [`scope-settings-${bandA}`, bandA, `scope-settings-${bandB}`, bandB]
+    );
+  } finally { await db.end(); }
   const selected = await page.request.post(`${api}/auth/session/artist`, {
     headers: { origin: web }, data: { artistId: bandA }
   });
@@ -53,7 +67,7 @@ test("older venue, sprint, inbox and advisor tabs keep writes in their original 
     await page.getByLabel("City", { exact: true }).fill("Austin");
     await sprintTab.getByLabel("Sprint name", { exact: true }).fill(sprintName);
     await sprintTab.getByLabel("City", { exact: true }).fill("Austin");
-    await expect(inboxTab.getByLabel("Allow AI analysis of a selected reply")).not.toBeChecked();
+    await expect(inboxTab.getByLabel("Allow AI analysis of a selected reply")).toBeChecked();
     await expect(advisorTab.getByRole("button", { name: "Generate booking brief", exact: true })).toBeEnabled();
     for (const tab of [page, sprintTab, inboxTab, advisorTab]) {
       await expect(tab.getByRole("combobox", { name: "Band", exact: true })).toHaveValue(bandA);
@@ -72,11 +86,11 @@ test("older venue, sprint, inbox and advisor tabs keep writes in their original 
     const sprint = await expectPinnedWrite(sprintTab, "/market-sprints", "POST", () =>
       sprintTab.getByRole("button", { name: "Create sprint", exact: true }).click());
     // This controlled checkbox changes only after the API confirms the save.
-    // click + response + checked assertion matches that behavior; check() assumes
-    // an immediate DOM change and closes the tab while the save is in flight.
+    // Withdraw consent, then verify the response and rendered state; uncheck()
+    // assumes an immediate DOM change before this controlled save completes.
     await expectPinnedWrite(inboxTab, "/booking-replies/settings", "PATCH", () =>
       inboxTab.getByLabel("Allow AI analysis of a selected reply").click());
-    await expect(inboxTab.getByLabel("Allow AI analysis of a selected reply")).toBeChecked();
+    await expect(inboxTab.getByLabel("Allow AI analysis of a selected reply")).not.toBeChecked();
     const run = await expectPinnedWrite(advisorTab, "/booking-advisor/generate", "POST", () =>
       advisorTab.getByRole("button", { name: "Generate booking brief", exact: true }).click());
 
@@ -94,8 +108,8 @@ test("older venue, sprint, inbox and advisor tabs keep writes in their original 
     expect(venuesB).toHaveLength(0);
     expect(sprintsA.map((row: { id: string }) => row.id)).toContain(sprint.id);
     expect(sprintsB).toHaveLength(0);
-    expect(settingsA.aiAnalysisEnabled).toBe(true);
-    expect(settingsB.aiAnalysisEnabled).toBe(false);
+    expect(settingsA.aiAnalysisEnabled).toBe(false);
+    expect(settingsB.aiAnalysisEnabled).toBe(true);
     expect(latestA.id).toBe(run.id);
     expect(latestB).toBeNull();
   } finally {
