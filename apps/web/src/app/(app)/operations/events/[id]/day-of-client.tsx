@@ -71,7 +71,7 @@ const productionLinks: { label: string; key: "stagePlotUrl" | "inputListUrl" | "
   { label: "Drive folder", key: "driveFolderUrl" }
 ];
 
-export function DayOfClient({ initialData, accessState }: { initialData: EventDayOfResponse; accessState: "manage" | "read_only" | "unavailable" }) {
+export function DayOfClient({ artistId, initialData, accessState }: { artistId: string; initialData: EventDayOfResponse; accessState: "manage" | "read_only" | "unavailable" }) {
   const [data, setData] = useState(initialData);
   useEffect(() => { setData(initialData); }, [initialData]);
   const { event, activeMembers, readiness, dayOf, liveRun } = data;
@@ -86,7 +86,7 @@ export function DayOfClient({ initialData, accessState }: { initialData: EventDa
     }
     setBusy(key); setError("");
     try {
-      const result = await apiFetch<unknown>(path, { method, ...(json === undefined ? {} : { json }) });
+      const result = await apiFetch<unknown>(path, { method, artistId, ...(json === undefined ? {} : { json }) });
       if (isDayOfResponse(result)) setData(result);
       router.refresh();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "The update failed"); }

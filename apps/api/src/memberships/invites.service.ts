@@ -227,7 +227,9 @@ export class InvitesService {
           artistId: invite.artistId,
           role: invite.role
         },
-        update: { role: invite.role }
+        // An invitation grants initial access. Existing roles must be changed
+        // through Team's guarded role-change path, including last-owner checks.
+        update: {}
       });
 
       await tx.artistMembershipInvite.update({
@@ -251,7 +253,8 @@ export class InvitesService {
       actorOperatorId: operatorId,
       metadata: {
         email: invite.email,
-        role: invite.role
+        role: result.role,
+        invitedRole: invite.role
       }
     });
 
@@ -269,7 +272,7 @@ export class InvitesService {
       await this.queue.enqueueMembershipInviteAccepted({
         artistId: invite.artistId,
         inviteeEmail: invite.email,
-        role: invite.role
+        role: result.role
       });
     } catch {
       /* best-effort */

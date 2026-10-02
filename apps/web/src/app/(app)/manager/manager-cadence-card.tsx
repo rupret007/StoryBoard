@@ -23,11 +23,13 @@ function hourLabel(hour: number) {
 }
 
 export function ManagerCadenceCard({
+  artistId,
   initialSettings,
   initialProviderContextPolicy,
   cadence,
   isOwner
 }: {
+  artistId: string | null;
   initialSettings: ManagerSettings;
   initialProviderContextPolicy: ManagerProviderContextPolicy | null;
   cadence: "daily" | "weekly";
@@ -54,8 +56,10 @@ export function ManagerCadenceCard({
     setMessage("");
     setError("");
     try {
+      if (!artistId) throw new Error("Band access could not be verified. Refresh before continuing.");
       const updated = await apiFetch<ManagerSettings>("/manager/settings", {
         method: "PUT",
+        artistId,
         json: {
           aiEnabled: settings.aiEnabled,
           fullContextEnabled: settings.aiEnabled && settings.fullContextEnabled,

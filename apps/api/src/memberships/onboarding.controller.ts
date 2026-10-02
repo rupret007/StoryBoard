@@ -17,6 +17,22 @@ import { OnboardingService } from "./onboarding.service";
 export class OnboardingController {
   constructor(private readonly onboarding: OnboardingService) {}
 
+  @Post("additional-artist")
+  async createAdditionalArtist(
+    @Body() body: { name?: string; sourceArtistId?: string },
+    @CurrentOperator() operator: RequestOperator,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ) {
+    if (typeof body?.name !== "string" || !body.name.trim() ||
+        typeof body.sourceArtistId !== "string" || !body.sourceArtistId.trim()) {
+      throw new BadRequestException("Band name and current band are required");
+    }
+    return this.onboarding.createAdditionalArtist({
+      operatorId: operator.id, actorLabel: operator.email, name: body.name.trim(),
+      sourceArtistId: body.sourceArtistId.trim(), reply
+    });
+  }
+
   @Post("artist")
   async createArtist(
     @Body() body: { name?: string; slug?: string },

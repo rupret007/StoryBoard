@@ -132,11 +132,12 @@ function ApprovalAttentionSummary({ approvalAttention, onNavigate }: { approvalA
 }
 
 export function AppSidebar({ approvalAttention, operatorEmail, memberships, currentArtistId, showTeamLink }: SidebarProps) {
+  const bandName = memberships.find((band) => band.artistId === currentArtistId)?.artistName ?? memberships[0]?.artistName ?? "Choose a band";
   return (
     <aside className="sticky top-0 hidden h-screen w-[260px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface-1)] lg:flex">
       <div className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-6">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-muted)] text-[var(--accent)]"><Sparkles className="h-5 w-5" aria-hidden /></div>
-        <div className="min-w-0"><p className="truncate text-sm font-semibold tracking-tight text-[var(--text-primary)]">StoryBoard</p><p className="truncate text-xs text-[var(--text-muted)]">Manager OS</p></div>
+        <div className="min-w-0"><p className="truncate text-sm font-semibold tracking-tight text-[var(--text-primary)]">StoryBoard</p><p className="truncate text-xs text-[var(--text-muted)]" title={bandName}>{bandName}</p></div>
       </div>
       <div className="flex-1 overflow-y-auto p-3"><NavigationLinks approvalAttention={approvalAttention} {...(showTeamLink ? { showTeamLink: true } : {})} /></div>
       {operatorEmail ? <OperatorSession email={operatorEmail} memberships={memberships} currentArtistId={currentArtistId} /> : null}
@@ -146,6 +147,7 @@ export function AppSidebar({ approvalAttention, operatorEmail, memberships, curr
 }
 
 export function MobileAppNav({ approvalAttention, operatorEmail, memberships, currentArtistId, showTeamLink }: SidebarProps) {
+  const bandName = memberships.find((band) => band.artistId === currentArtistId)?.artistName ?? memberships[0]?.artistName ?? "Choose a band";
   const [open, setOpen] = useState(false);
   const dialogId = useId();
   const dialogTitleId = useId();
@@ -215,8 +217,8 @@ export function MobileAppNav({ approvalAttention, operatorEmail, memberships, cu
   return (
     <>
       <header className="sticky top-0 z-20 -mx-4 mb-5 flex min-h-16 items-center justify-between border-b border-[var(--border)] bg-[var(--canvas)]/95 px-4 backdrop-blur lg:hidden">
-        <div><p className="text-sm font-semibold text-[var(--text-primary)]">StoryBoard</p><p className="text-xs text-[var(--text-muted)]">Manager OS</p></div>
-        <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1 pr-3"><p className="text-sm font-semibold text-[var(--text-primary)]">StoryBoard</p><p className="truncate text-xs text-[var(--text-muted)]" title={bandName}>{bandName}</p></div>
+        <div className="flex shrink-0 items-center gap-2">
           <Link href="/approvals" aria-label={mobileLabel} title={mobileLabel} className={`inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded-lg border px-2 text-xs font-semibold ${approvalAttention?.attentionTotal === 0 ? "border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]" : attentionTone(approvalAttention)}`}>
             <ShieldCheck className="h-4 w-4" aria-hidden />
             {approvalAttention?.attentionTotal ?? "?"}

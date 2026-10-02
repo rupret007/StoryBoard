@@ -8,6 +8,20 @@ import {
 
 export { ApiHttpError };
 
+/** Resolve once before loading a workspace so its reads, role and later browser
+ * writes all use the same band. Missing access is an error, never a default ID. */
+export async function serverBandAccess() {
+  const me = await serverApiFetch<{
+    currentArtistId: string | null;
+    memberships: { artistId: string; role: string }[];
+  }>("/auth/me", { cache: "no-store" });
+  const membership = me.memberships.find((row) => row.artistId === me.currentArtistId) ?? me.memberships[0];
+  if (!membership) throw new Error("Your band could not be verified. Reload this page before trying again.");
+  const canManage = membership.role === "owner" || membership.role === "member";
+  const accessState: "manage" | "read_only" | "unavailable" = canManage ? "manage" : membership.role === "viewer" ? "read_only" : "unavailable";
+  return { artistId: membership.artistId, role: membership.role, canManage, isOwner: membership.role === "owner", accessState };
+}
+
 /**
  * Forward the browser cookie jar to the StoryBoard API during RSC fetches
  * so session auth works on the server.

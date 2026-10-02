@@ -81,6 +81,7 @@ export default async function AppLayout({
 
   return (
     <AppShell
+      key={activeArtistId}
       approvalAttention={approvalAttention}
       artistId={activeArtistId}
       {...(me.operator.email ? { operatorEmail: me.operator.email } : {})}

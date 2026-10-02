@@ -19,14 +19,14 @@ export function OperatorSession({
 
   async function logout() {
     setBusy(true);
+    setError(null);
     try {
       await apiFetch("/auth/logout", { method: "POST" });
-    } finally {
-      // Always leave the session view, even if the API call failed: staying
-      // signed in to a stale page is worse than a redundant redirect.
-      setBusy(false);
-      router.refresh();
       window.location.href = "/";
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Sign-out could not be confirmed. Try again.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -56,7 +56,7 @@ export function OperatorSession({
       </p>
       {memberships.length > 1 ? (
         <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-          Artist
+          Band
           <select
             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
             value={currentArtistId ?? memberships[0]?.artistId ?? ""}

@@ -13,7 +13,7 @@
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm test:recovery && pnpm -r --if-present test",
     "test:integration": "pnpm --filter @storyboard/api test:integration",
     "test:e2e": "node scripts/run-e2e.mjs",
     "infra:up": "docker compose up -d postgres redis",
@@ -31,7 +31,11 @@
     "dev:web": "pnpm --filter @storyboard/web dev",
     "dev:api": "pnpm --filter @storyboard/api dev",
     "preflight": "node scripts/preflight.mjs",
-    "prepare": "pnpm --filter @storyboard/shared build"
+    "prepare": "pnpm --filter @storyboard/shared build",
+    "db:backup": "node scripts/backup-database.mjs",
+    "db:restore:drill": "node scripts/restore-database.mjs",
+    "test:recovery": "node --test scripts/test/database-recovery.test.mjs",
+    "test:pilot-worker": "node scripts/check-pilot-worker.mjs"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"
@@ -44,7 +48,10 @@
       "msgpackr-extract",
       "prisma",
       "sharp"
-    ]
+    ],
+    "overrides": {
+      "@nestjs/platform-fastify@11.2.7>fastify": "5.12.5"
+    }
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",

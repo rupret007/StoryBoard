@@ -50,6 +50,7 @@ export default async function TeamPage() {
   )?.role;
   const isOwner = currentRole === "owner";
 
+  let loadError = false;
   let members: MemberRow[] = [];
   let invites: InviteRow[] = [];
 
@@ -60,6 +61,7 @@ export default async function TeamPage() {
         { cache: "no-store", artistId: activeArtistId }
       );
     } catch (e) {
+      loadError = true;
       if (!(e instanceof ApiHttpError)) {
         throw e;
       }
@@ -70,6 +72,7 @@ export default async function TeamPage() {
         { cache: "no-store", artistId: activeArtistId }
       );
     } catch (e) {
+      loadError = true;
       if (!(e instanceof ApiHttpError)) {
         throw e;
       }
@@ -78,8 +81,10 @@ export default async function TeamPage() {
 
   return (
     <TeamClient
+      key={activeArtistId}
       artistId={activeArtistId}
       isOwner={isOwner}
+      loadError={loadError}
       initialMembers={members}
       initialInvites={invites}
       currentOperatorId={me.operator.id}
