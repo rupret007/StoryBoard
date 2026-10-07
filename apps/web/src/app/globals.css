@@ -50,7 +50,7 @@ a {
 }
 
 .sb-input {
-  @apply w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors;
+  @apply min-h-11 w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors;
   border-color: var(--border-strong);
   background: var(--surface-0);
   color: var(--text-primary);
@@ -64,7 +64,7 @@ a {
 }
 
 .sb-select {
-  @apply w-full appearance-none rounded-lg border px-3 py-2.5 pr-9 text-sm outline-none transition-colors;
+  @apply min-h-11 w-full appearance-none rounded-lg border px-3 py-2.5 pr-9 text-sm outline-none transition-colors;
   border-color: var(--border-strong);
   background: var(--surface-0);
   color: var(--text-primary);
@@ -83,7 +83,7 @@ a {
 }
 
 .sb-btn-primary {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-45;
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:pointer-events-none disabled:opacity-45;
   background: var(--accent);
   color: #042f2e;
 }
@@ -92,7 +92,7 @@ a {
 }
 
 .sb-btn-secondary {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-45;
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-45;
   border-color: var(--border-strong);
   background: var(--surface-2);
   color: var(--text-primary);

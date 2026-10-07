@@ -9,7 +9,7 @@ import type { Task } from "@/lib/types";
 export function MyTasks({ artistId, tasks, canManage, onSaved }: { artistId: string; tasks: Task[]; canManage: boolean; onSaved: () => void }) {
   const open = tasks.filter((task) => task.status !== "done");
   return <section className="space-y-3" aria-label="My tasks">
-    {!open.length ? <p className="text-sm text-[var(--text-muted)]">No open tasks are assigned to you. All band tasks remains available.</p> : null}
+    {!open.length ? <p className="text-sm text-[var(--text-muted)]">No open tasks are assigned to you. All band tasks remain available.</p> : null}
     {open.map((task) => <MyTask key={task.id} artistId={artistId} task={task} canManage={canManage} onSaved={onSaved} />)}
   </section>;
 }

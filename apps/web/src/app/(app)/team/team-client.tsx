@@ -209,7 +209,7 @@ export function TeamClient({
           <p>No email has been sent. Share this link with {inviteResult.email}.</p>
           <input aria-label="Invitation link" readOnly value={inviteResult.url} onFocus={(e) => e.target.select()}
             className="w-full rounded bg-[var(--surface-0)] p-2 text-xs" />
-          <button type="button" className="underline" onClick={() => {
+          <button type="button" className="min-h-11 underline" onClick={() => {
             void navigator.clipboard.writeText(inviteResult.url).then(() => setCopied(true)).catch(() => setError("Select the invitation link and copy it manually."));
           }}>{copied ? "Link copied" : "Copy invitation link"}</button>
           <p className="text-xs">Expires {new Date(inviteResult.expires).toLocaleDateString()}. Keep this link until your bandmate joins.</p>
@@ -231,7 +231,9 @@ export function TeamClient({
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)]"
+              autoCapitalize="none"
+              autoCorrect="off"
+              className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)]"
               placeholder="colleague@example.com"
             />
           </label>
@@ -240,7 +242,7 @@ export function TeamClient({
             <select
               value={inviteRole}
               onChange={(e) => setInviteRole(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] sm:w-40"
+              className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] sm:w-40"
             >
               {ROLES.map((r) => (
                 <option key={r} value={r}>
@@ -252,7 +254,7 @@ export function TeamClient({
           <button
             type="submit"
             disabled={busy}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#05080d] disabled:opacity-50"
+            className="min-h-11 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#05080d] disabled:opacity-50"
           >
             Invite
           </button>
@@ -289,8 +291,9 @@ export function TeamClient({
                 <button
                   type="button"
                   disabled={busy}
+                  aria-label={`Revoke invitation for ${inv.email}`}
                   onClick={() => void revokeInvite(inv.id)}
-                  className="text-xs font-medium text-amber-200 hover:underline disabled:opacity-50"
+                  className="min-h-11 px-2 text-xs font-medium text-amber-200 hover:underline disabled:opacity-50"
                 >
                   Revoke
                 </button>
@@ -336,12 +339,13 @@ export function TeamClient({
                         <span className="capitalize">{m.role}</span>
                       ) : (
                         <select
+                          aria-label={`Role for ${m.operator.email}`}
                           value={m.role}
                           disabled={busy}
                           onChange={(e) =>
                             void changeRole(m.operatorId, e.target.value)
                           }
-                          className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1 text-xs capitalize text-[var(--text-primary)]"
+                          className="min-h-11 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1 text-xs capitalize text-[var(--text-primary)]"
                         >
                           {ROLES.map((r) => (
                             <option key={r} value={r}>
@@ -356,8 +360,9 @@ export function TeamClient({
                         <button
                           type="button"
                           disabled={busy}
+                          aria-label={`Remove ${m.operator.email}`}
                           onClick={() => void removeMember(m.operatorId)}
-                          className="text-xs font-medium text-amber-200 hover:underline disabled:opacity-50"
+                          className="min-h-11 px-2 text-xs font-medium text-amber-200 hover:underline disabled:opacity-50"
                         >
                           Remove
                         </button>

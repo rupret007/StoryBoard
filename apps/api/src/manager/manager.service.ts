@@ -1,7 +1,7 @@
 import { managerEvidenceLinks, readManagerEvidenceLinks } from "./manager-pilot-desk";
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { rethrowMemberAccountConflict, validateMemberAccountLink } from "./member-account-link";
+import { assertDistinctAccountLinks, rethrowMemberAccountConflict, validateMemberAccountLink } from "./member-account-link";
 import OpenAI from "openai";
 import type { ResponseFunctionToolCall, ResponseInputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
@@ -1115,6 +1115,7 @@ export class ManagerService {
   }
 
   async completeIntake(artistId: string, input: { profile: ManagerProfileInput; members: BandMemberCreateInput[] }, actorLabel: string, actorOperatorId: string) {
+    assertDistinctAccountLinks(input.members);
     for (const member of input.members) await validateMemberAccountLink(this.prisma.client, artistId, actorOperatorId, member.linkedOperatorId);
     await this.putProfile(artistId, input.profile, actorLabel, actorOperatorId, true);
     for (const member of input.members) await this.createMember(artistId, member, actorLabel, actorOperatorId);

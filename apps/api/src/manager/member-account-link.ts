@@ -16,6 +16,17 @@ export async function validateMemberAccountLink(client: AccountLinkClient, artis
   if (linked && linked.id !== memberId) throw new ConflictException("That account is already linked to a performer in this band. Unlink it there first.");
 }
 
+/** One intake batch cannot assign the same account to two performers; rows do not exist yet, so the database cannot catch it first. */
+export function assertDistinctAccountLinks(members: { linkedOperatorId?: string | null | undefined }[]) {
+  const linked = new Set<string>();
+  for (const member of members) {
+    const operatorId = member.linkedOperatorId;
+    if (!operatorId) continue;
+    if (linked.has(operatorId)) throw new ConflictException("That account is linked to more than one performer. Link each account to one performer.");
+    linked.add(operatorId);
+  }
+}
+
 export function rethrowMemberAccountConflict(error: unknown): never {
   if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
     throw new ConflictException("That account was linked elsewhere. Reload the lineup before trying again.");

@@ -52,7 +52,7 @@ export function InviteClient({ email }: { email: string }) {
       <p className="mt-2 text-sm text-[var(--text-secondary)]">
         Signed in as {email}. Choose Join band to accept the invitation for this email.
       </p>
-      <button type="button" disabled={busy} className="mt-3 text-sm underline" onClick={() => void changeAccount()}>Use another account</button>
+      <button type="button" disabled={busy} className="mt-3 min-h-11 text-sm underline" onClick={() => void changeAccount()}>Use another account</button>
       <form
         onSubmit={(e) => void onSubmit(e)}
         className="mt-8 space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-6"
@@ -63,18 +63,21 @@ export function InviteClient({ email }: { email: string }) {
             required
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 font-mono text-xs text-[var(--text-primary)]"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 font-mono text-xs text-[var(--text-primary)]"
           />
         </label>
         <button
           type="submit"
           disabled={busy}
-          className="w-full rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[#05080d] disabled:opacity-50"
+          className="min-h-11 w-full rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[#05080d] disabled:opacity-50"
         >
           {busy ? "Joining…" : "Join band"}
         </button>
         {error ? (
-          <p className="text-sm text-amber-200/90">{error}</p>
+          <p role="alert" className="text-sm text-amber-200/90">{error}</p>
         ) : null}
       </form>
       <p className="mt-8 text-center text-sm text-[var(--text-muted)]">

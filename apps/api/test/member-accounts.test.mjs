@@ -78,3 +78,19 @@ test("availability preserves assignment and notes and attributes self versus coo
   await assert.rejects(() => f.operations.participant("band-a", "event-a", { bandMemberId: "performer-a", response: "unavailable" }, "player@test", "player"), /audit failed/);
   assert.equal(f.state().participant.response, "tentative");
 });
+
+test("intake rejects one account linked to two performers before writing any performer or profile", async () => {
+  const f = fixture();
+  const writes = [];
+  f.manager.putProfile = async () => { writes.push("profile"); };
+  f.manager.createMember = async (_artistId, input) => { writes.push(input.name); };
+  const members = [
+    { name: "Player one", linkedOperatorId: "player" },
+    { name: "Player two", linkedOperatorId: "player" }
+  ];
+  await assert.rejects(
+    () => f.manager.completeIntake("band-a", { profile: { communicationCadence: "daily" }, members }, "owner@example.test", "owner"),
+    (error) => error.getStatus() === 409
+  );
+  assert.deepEqual(writes, []);
+});

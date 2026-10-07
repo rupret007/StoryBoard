@@ -15,14 +15,14 @@ export function SignInGate({ showDevLogin, inviteToken, authError }: { showDevLo
         {authError ? <p role="alert" className="mt-4 text-sm text-amber-200">Sign-in did not finish. Try again with the email on your invitation.</p> : null}
         <a
           href={`${api}/auth/operator/google/start${inviteQuery}`}
-          className="mt-6 inline-flex w-full items-center justify-center rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[#05080d] hover:opacity-95"
+          className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-semibold text-[#05080d] hover:opacity-95"
         >
           Continue with Google
         </a>
         {showDevLogin ? (
           <a
             href={`${api}/auth/dev/login${inviteQuery}`}
-            className="mt-3 inline-flex w-full items-center justify-center rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+            className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
           >
             Dev login (local only)
           </a>
