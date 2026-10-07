@@ -55,6 +55,15 @@ export class ApiHttpError extends Error {
   }
 }
 
+/** Keep requests tied to the workspace rendered in this tab, even if another
+ * tab changes the shared session cookie. API membership checks still apply. */
+export function scopedApiFetch(artistId: string | null) {
+  return async function fetchForBand<T>(path: string, init?: ApiFetchInit): Promise<T> {
+    if (!artistId) throw new Error("Your band could not be verified. Reload this page before trying again.");
+    return apiFetch<T>(path, { ...init, artistId });
+  };
+}
+
 export async function apiFetch<T>(
   path: string,
   init?: ApiFetchInit

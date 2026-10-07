@@ -170,8 +170,12 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
   diagnostic, including `ApprovalReconciliation → ApprovalRequest`
 - `scripts/prepare-test-database.mjs` / `scripts/reset-test-database.mjs` —
   explicit disposable-database migration and reset; never fall back to the app DB
+- `scripts/backup-database.mjs` / `scripts/restore-database.mjs` — private
+  backup and empty-target restore drill (`pnpm db:backup`, `pnpm db:restore:drill`)
+- `scripts/test/database-recovery.test.mjs` — recovery fencing (`pnpm test:recovery`, also part of `pnpm test`)
+- `scripts/check-pilot-worker.mjs` — live-stack worker proof (`pnpm test:pilot-worker`; needs a running API)
 - `scripts/run-e2e.mjs` — orchestrates the mock-provider browser environment
-- `scripts/run-manager-evals.mjs` — versioned offline Manager safety/usefulness gate
+- `scripts/run-manager-evals.mjs` — versioned offline Manager safety/usefulness gate (`manager_evals_v45`)
 - `scripts/import-catalog.mjs` — local Vault/Show Night catalog import (`pnpm catalog:import`; dry-run by default; never fetches a remote file)
 
 ## Tests

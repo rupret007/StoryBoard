@@ -4,7 +4,7 @@ import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { Compass, ExternalLink, Plus, Save, Search, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { scopedApiFetch } from "@/lib/api";
 import { BuyerContactLinker } from "@/components/buyer-contact-linker";
 import type { BookingMarketSprint, BookingProfileResponse, BookingProspect, Contact } from "@/lib/types";
 
@@ -27,17 +27,25 @@ function messageFrom(error: unknown) {
 }
 
 export function ProspectsClient({
+  artistId,
+  accessState,
+  loadError,
   initialProfile,
   initialProspects,
   contacts,
   sprints
 }: {
+  artistId: string | null;
+  accessState: "manage" | "read_only" | "unavailable";
+  loadError: string | null;
   initialProfile: BookingProfileResponse;
   initialProspects: BookingProspect[];
   contacts: Contact[];
   sprints: BookingMarketSprint[];
 }) {
   const router = useRouter();
+  const canManage = Boolean(artistId) && accessState === "manage" && !loadError;
+  const apiFetch = scopedApiFetch(canManage ? artistId : null);
   const profile = initialProfile.profile;
   const [profileForm, setProfileForm] = useState({
     homeCity: profile?.homeCity ?? "",
@@ -140,8 +148,10 @@ export function ProspectsClient({
             : current
         );
       }
+      return true;
     } catch (caught) {
       setError(messageFrom(caught));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -149,7 +159,7 @@ export function ProspectsClient({
 
   async function createManual(event: React.FormEvent) {
     event.preventDefault();
-    await saveProspect(
+    const saved = await saveProspect(
       {
         kind: manual.kind,
         name: manual.name,
@@ -163,7 +173,7 @@ export function ProspectsClient({
       },
       "manual"
     );
-    setManual((current) => ({ ...current, name: "", websiteUrl: "", capacity: "", notes: "" }));
+    if (saved) setManual((current) => ({ ...current, name: "", websiteUrl: "", capacity: "", notes: "" }));
   }
 
   async function updateStatus(id: string, status: (typeof statuses)[number]) {
@@ -201,12 +211,14 @@ export function ProspectsClient({
 
   return (
     <div className="space-y-6">
+      {loadError ? <div role="alert" className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"><p>{loadError}</p><button type="button" className="sb-btn-secondary mt-2" onClick={() => router.refresh()}>Retry loading</button></div> : !canManage ? <p className="text-sm text-[var(--text-muted)]">{accessState === "read_only" ? "You have read-only access. An owner or member can update the booking profile and leads." : "Changes are unavailable until your band permissions can be verified."}</p> : null}
       {error ? (
         <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
           {error}
         </p>
       ) : null}
 
+      <fieldset disabled={!canManage} className="min-w-0 space-y-6">
       <SurfaceCard>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -244,8 +256,11 @@ export function ProspectsClient({
           <div className="md:col-span-4"><button className="sb-btn-primary" disabled={busy === "search"} type="submit"><Search className="h-4 w-4" />Find signals</button></div>
         </form>
         {signals ? (
-          <div className="mt-5 space-y-3">
+          <div className="mt-5 space-y-3" data-testid="market-search-results">
             {signals.mode === "manual" ? <p className="rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">{signals.reason}</p> : null}
+            {signals.mode === "ticketmaster" && signals.signals.length === 0 ? (
+              <p className="text-sm text-[var(--text-muted)]">No signals found for this search. Try a different city, region, or keyword.</p>
+            ) : null}
             {signals.signals.map((signal) => (
               <div key={signal.sourceRef} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-3">
                 <div><p className="font-medium text-[var(--text-primary)]">{signal.name}</p><p className="text-xs text-[var(--text-muted)]">{signal.kind.replace("_", " ")} · {[signal.city, signal.region, signal.country].filter(Boolean).join(", ")}</p></div>
@@ -260,7 +275,7 @@ export function ProspectsClient({
         <SurfaceCard>
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Prospects</h2>
           <p className="mt-1 text-xs text-[var(--text-muted)]">Qualify a lead before conversion. Venue conversion creates a physical venue; festivals, private events, and corporate buyers stay venue-less.</p>
-          {initialProspects.length === 0 ? <div className="mt-5"><EmptyState title="No prospects yet" description="Search a market or add a manual lead — private and corporate buyers are manual-first." icon={<Sparkles className="h-6 w-6" />} /></div> : <div className="mt-4 space-y-3">{initialProspects.map((prospect) => <ProspectRow key={prospect.id} prospect={prospect} contacts={contacts} busy={busy} onStatus={updateStatus} onConvert={convert} onLinked={() => router.refresh()} />)}</div>}
+          {!loadError && initialProspects.length === 0 ? <div className="mt-5"><EmptyState title="No prospects yet" description="Search a market or add a manual lead — private and corporate buyers are manual-first." icon={<Sparkles className="h-6 w-6" />} /></div> : <div className="mt-4 space-y-3">{initialProspects.map((prospect) => <ProspectRow key={prospect.id} artistId={canManage ? artistId : null} prospect={prospect} contacts={contacts} busy={busy} onStatus={updateStatus} onConvert={convert} onLinked={() => router.refresh()} />)}</div>}
         </SurfaceCard>
 
         <div className="space-y-6">
@@ -280,12 +295,13 @@ export function ProspectsClient({
           </SurfaceCard>
         </div>
       </div>
+      </fieldset>
     </div>
   );
 }
 
-function ProspectRow({ prospect, contacts, busy, onStatus, onConvert, onLinked }: { prospect: BookingProspect; contacts: Contact[]; busy: string | null; onStatus: (id: string, status: (typeof statuses)[number]) => Promise<void>; onConvert: (id: string) => Promise<void>; onLinked: () => void }) {
-  return <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><p className="font-medium text-[var(--text-primary)]">{prospect.name}</p><Badge variant={prospect.status === "qualified" ? "success" : prospect.status === "disqualified" ? "neutral" : prospect.status === "converted" ? "violet" : "accent"}>{prospect.status}</Badge></div><p className="mt-1 text-xs text-[var(--text-muted)]">{prospect.kind.replace("_", " ")} · {[prospect.city, prospect.region, prospect.country].filter(Boolean).join(", ")}{prospect.capacity ? ` · ${prospect.capacity.toLocaleString()} cap` : ""}</p>{prospect.notes ? <p className="mt-2 text-sm text-[var(--text-secondary)]">{prospect.notes}</p> : null}</div>{prospect.websiteUrl ? <a className="text-xs text-[var(--accent)] hover:underline" href={prospect.websiteUrl} target="_blank" rel="noreferrer">Research <ExternalLink className="ml-1 inline h-3 w-3" /></a> : null}</div><div className="mt-3 flex flex-wrap items-center gap-2"><select aria-label={`Status for ${prospect.name}`} className="sb-select py-2 text-xs" value={prospect.status === "converted" ? "converted" : prospect.status} disabled={prospect.status === "converted" || busy === `status-${prospect.id}`} onChange={(event) => void onStatus(prospect.id, event.target.value as (typeof statuses)[number])}>{prospect.status === "converted" ? <option value="converted">converted</option> : statuses.map((status) => <option key={status} value={status}>{status}</option>)}</select>{prospect.status !== "converted" ? <BuyerContactLinker prospectId={prospect.id} contacts={contacts} onLinked={onLinked} /> : null}{prospect.contact ? <span className="text-xs text-[var(--text-muted)]">Buyer: {prospect.contact.fullName}{prospect.contact.email ? ` · ${prospect.contact.email}` : " · no email"}</span> : null}{prospect.status === "qualified" ? <button type="button" className="sb-btn-primary py-2 text-xs" disabled={busy === `convert-${prospect.id}`} onClick={() => void onConvert(prospect.id)}>Convert to booking</button> : null}{prospect.opportunity ? <a className="sb-btn-secondary py-2 text-xs" href="/booking">Open pipeline</a> : null}</div></div>;
+function ProspectRow({ artistId, prospect, contacts, busy, onStatus, onConvert, onLinked }: { artistId: string | null; prospect: BookingProspect; contacts: Contact[]; busy: string | null; onStatus: (id: string, status: (typeof statuses)[number]) => Promise<void>; onConvert: (id: string) => Promise<void>; onLinked: () => void }) {
+  return <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><p className="font-medium text-[var(--text-primary)]">{prospect.name}</p><Badge variant={prospect.status === "qualified" ? "success" : prospect.status === "disqualified" ? "neutral" : prospect.status === "converted" ? "violet" : "accent"}>{prospect.status}</Badge></div><p className="mt-1 text-xs text-[var(--text-muted)]">{prospect.kind.replace("_", " ")} · {[prospect.city, prospect.region, prospect.country].filter(Boolean).join(", ")}{prospect.capacity ? ` · ${prospect.capacity.toLocaleString()} cap` : ""}</p>{prospect.notes ? <p className="mt-2 text-sm text-[var(--text-secondary)]">{prospect.notes}</p> : null}</div>{prospect.websiteUrl ? <a className="text-xs text-[var(--accent)] hover:underline" href={prospect.websiteUrl} target="_blank" rel="noreferrer">Research <ExternalLink className="ml-1 inline h-3 w-3" /></a> : null}</div><div className="mt-3 flex flex-wrap items-center gap-2"><select aria-label={`Status for ${prospect.name}`} className="sb-select py-2 text-xs" value={prospect.status === "converted" ? "converted" : prospect.status} disabled={prospect.status === "converted" || busy === `status-${prospect.id}`} onChange={(event) => void onStatus(prospect.id, event.target.value as (typeof statuses)[number])}>{prospect.status === "converted" ? <option value="converted">converted</option> : statuses.map((status) => <option key={status} value={status}>{status}</option>)}</select>{prospect.status !== "converted" ? <BuyerContactLinker artistId={artistId} prospectId={prospect.id} contacts={contacts} onLinked={onLinked} /> : null}{prospect.contact ? <span className="text-xs text-[var(--text-muted)]">Buyer: {prospect.contact.fullName}{prospect.contact.email ? ` · ${prospect.contact.email}` : " · no email"}</span> : null}{prospect.status === "qualified" ? <button type="button" className="sb-btn-primary py-2 text-xs" disabled={busy === `convert-${prospect.id}`} onClick={() => void onConvert(prospect.id)}>Convert to booking</button> : null}{prospect.opportunity ? <a className="sb-btn-secondary py-2 text-xs" href="/booking">Open pipeline</a> : null}</div></div>;
 }
 
 function FormInput({ label, value, onChange, type = "text", required = false }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }) {

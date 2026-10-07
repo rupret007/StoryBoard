@@ -5,12 +5,13 @@ import type { AuditEvent } from "@/lib/types";
 
 export default async function ActivityPage() {
   let events: AuditEvent[] = [];
+  let loadError = "";
   try {
     events = await serverApiFetch<AuditEvent[]>("/audit-events?take=80", {
       cache: "no-store"
     });
   } catch {
-    events = [];
+    loadError = "Activity could not be loaded. Reload to see the audit log.";
   }
 
   return (
@@ -20,7 +21,11 @@ export default async function ActivityPage() {
         description="Immutable-style audit log — approvals, CRM edits, and commands land here."
       />
 
-      {events.length === 0 ? (
+      {loadError ? (
+        <p role="alert" className="text-sm text-amber-200">
+          {loadError}
+        </p>
+      ) : events.length === 0 ? (
         <EmptyState
           title="No events yet"
           description="As you use StoryBoard, important actions will appear in this timeline."

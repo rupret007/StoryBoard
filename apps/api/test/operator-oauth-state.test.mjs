@@ -117,6 +117,7 @@ test("operator callback exchanges a code only once for a matching state", async 
     buildGoogleOperatorAuthUrl: (state) => `https://google.test/?state=${state}`,
     applyOperatorOAuthStateCookie: () => undefined,
     readOperatorOAuthStateFromRequest: () => storedState,
+    readOperatorOAuthInviteFromRequest: () => null,
     clearOperatorOAuthStateCookie: () => {
       cleared += 1;
       storedState = null;
@@ -188,4 +189,36 @@ test("operator callback exchanges a code only once for a matching state", async 
   );
   assert.equal(completed, 1);
   assert.equal(cleared, 1);
+});
+
+test("invitation survives signed OAuth context without reaching Google or accepting redirect URLs", async () => {
+  const invite = "A".repeat(43);
+  for (const bad of ["https://evil.example", "//evil.example", "../onboarding", "A".repeat(44), [invite]]) {
+    assert.equal(stateMod.operatorInviteToken(bad), null);
+  }
+  const auth = new authServiceMod.AuthService(config({ NODE_ENV: "production", GOOGLE_CLIENT_ID: "client", GOOGLE_OPERATOR_REDIRECT_URI: "https://api.example.test/auth/operator/google/callback" }), { client: {} });
+  const cookieReply = replyCapture();
+  auth.applyOperatorOAuthStateCookie(cookieReply, "nonce", invite);
+  const stored = cookieReply.setCookies[0][1];
+  const req = { cookies: { [stateMod.OPERATOR_OAUTH_STATE_COOKIE]: "signed-context" }, unsignCookie: () => ({ valid: true, value: stored }) };
+  assert.equal(auth.readOperatorOAuthStateFromRequest(req), "nonce");
+  assert.equal(auth.readOperatorOAuthInviteFromRequest(req), invite);
+  assert.equal(auth.readOperatorOAuthInviteFromRequest({ ...req, unsignCookie: () => ({ valid: false, value: stored }) }), null);
+  const google = auth.buildGoogleOperatorAuthUrl("nonce");
+  assert.equal(google.includes(invite), false);
+  let cleared = false;
+  let completed = false;
+  const controller = new controllerMod.AuthController({
+    readOperatorOAuthStateFromRequest: () => "nonce",
+    readOperatorOAuthInviteFromRequest: () => invite,
+    clearOperatorOAuthStateCookie: () => { cleared = true; },
+    completeGoogleOperatorLogin: async () => { assert.equal(cleared, true); completed = true; }
+  }, config({ WEB_URL: "https://web.example.test" }), {}, {});
+  const reply = replyCapture();
+  await controller.googleCallback("code", "nonce", undefined, req, reply);
+  assert.equal(completed, true);
+  assert.equal(reply.redirects[0], `https://web.example.test/onboarding?invite=${invite}`);
+  const cancelled = replyCapture();
+  await controller.googleCallback(undefined, "nonce", "access_denied", req, cancelled);
+  assert.equal(cancelled.redirects[0], `https://web.example.test/onboarding?invite=${invite}&authError=google_sign_in_cancelled`);
 });

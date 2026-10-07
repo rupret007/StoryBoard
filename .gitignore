@@ -20,3 +20,8 @@ postgres-data
 redis-data
 prisma/dev.db
 apps/api/src/generated/
+
+# Private production configuration and database archives
+.env.production
+*.dump
+*.backup

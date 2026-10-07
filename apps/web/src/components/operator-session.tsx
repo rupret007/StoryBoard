@@ -15,15 +15,18 @@ export function OperatorSession({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function logout() {
     setBusy(true);
+    setError(null);
     try {
       await apiFetch("/auth/logout", { method: "POST" });
+      window.location.href = "/";
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Sign-out could not be confirmed. Try again.");
     } finally {
       setBusy(false);
-      router.refresh();
-      window.location.href = "/";
     }
   }
 
@@ -32,12 +35,15 @@ export function OperatorSession({
       return;
     }
     setBusy(true);
+    setError(null);
     try {
       await apiFetch("/auth/session/artist", {
         method: "POST",
         json: { artistId }
       });
       router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not switch bands");
     } finally {
       setBusy(false);
     }
@@ -50,7 +56,7 @@ export function OperatorSession({
       </p>
       {memberships.length > 1 ? (
         <label className="block text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-          Artist
+          Band
           <select
             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1.5 text-xs text-[var(--text-primary)]"
             value={currentArtistId ?? memberships[0]?.artistId ?? ""}
@@ -64,6 +70,11 @@ export function OperatorSession({
             ))}
           </select>
         </label>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-xs text-rose-300">
+          {error}
+        </p>
       ) : null}
       <button
         type="button"

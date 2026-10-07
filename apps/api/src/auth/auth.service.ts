@@ -18,7 +18,9 @@ import {
 } from "./session-cookie";
 import {
   OPERATOR_OAUTH_STATE_COOKIE,
-  OPERATOR_OAUTH_STATE_TTL_SECONDS
+  OPERATOR_OAUTH_STATE_TTL_SECONDS,
+  operatorInviteToken,
+  readOperatorOAuthContext
 } from "./operator-oauth-state";
 
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -73,10 +75,11 @@ export class AuthService {
     });
   }
 
-  applyOperatorOAuthStateCookie(reply: FastifyReply, state: string) {
+  applyOperatorOAuthStateCookie(reply: FastifyReply, state: string, inviteToken?: string) {
     const secure = this.config.get<string>("NODE_ENV") === "production";
     const domain = this.config.get<string>("COOKIE_DOMAIN")?.trim();
-    reply.setCookie(OPERATOR_OAUTH_STATE_COOKIE, state, {
+    const invite = operatorInviteToken(inviteToken);
+    reply.setCookie(OPERATOR_OAUTH_STATE_COOKIE, invite ? JSON.stringify({ state, invite }) : state, {
       path: "/auth/operator/google/callback",
       httpOnly: true,
       sameSite: "lax",
@@ -93,7 +96,14 @@ export class AuthService {
       return null;
     }
     const unsigned = req.unsignCookie(raw);
-    return unsigned.valid ? unsigned.value : null;
+    return unsigned.valid && unsigned.value ? readOperatorOAuthContext(unsigned.value).state : null;
+  }
+
+  readOperatorOAuthInviteFromRequest(req: FastifyRequest): string | null {
+    const raw = req.cookies?.[OPERATOR_OAUTH_STATE_COOKIE];
+    if (!raw) return null;
+    const unsigned = req.unsignCookie(raw);
+    return unsigned.valid && unsigned.value ? readOperatorOAuthContext(unsigned.value).invite : null;
   }
 
   clearOperatorOAuthStateCookie(reply: FastifyReply) {
