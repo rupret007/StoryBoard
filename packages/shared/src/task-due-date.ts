@@ -20,6 +20,34 @@ function utcDayNumber(value: Date): number {
   return Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate());
 }
 
+function parseDueAt(dueAt: string | Date | null | undefined): Date | null {
+  if (!dueAt) return null;
+  const parsed = dueAt instanceof Date ? dueAt : new Date(dueAt);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * True when the recorded due calendar day is before today's UTC calendar day.
+ * A task due later today is never overdue. Instant comparison is not used.
+ */
+export function isTaskOverdueByUtcDay(
+  dueAt: string | Date | null | undefined,
+  now: Date = new Date()
+): boolean {
+  const parsed = parseDueAt(dueAt);
+  if (!parsed) return false;
+  return utcDayNumber(parsed) < utcDayNumber(now);
+}
+
+/**
+ * Prisma/query cutoff: `dueAt <` this instant means a past UTC calendar day.
+ * When `graceDays` &gt; 0, the due day must be before (today minus that many UTC days).
+ */
+export function taskOverdueUtcCutoff(now: Date = new Date(), graceDays?: number | null): Date {
+  const grace = graceDays != null && graceDays > 0 ? Math.floor(graceDays) : 0;
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - grace, 0, 0, 0, 0));
+}
+
 /**
  * Plain-language description of a task's recorded due date. A due date is a
  * calendar day, not an instant — the editor is a plain date input — so
