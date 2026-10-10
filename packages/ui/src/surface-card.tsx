@@ -13,15 +13,18 @@ export function SurfaceCard({
   children,
   className = "",
   padding = "md",
-  elevated = false
+  elevated = false,
+  id
 }: {
   children: ReactNode;
   className?: string;
   padding?: Padding;
   elevated?: boolean;
+  id?: string;
 }) {
   return (
     <div
+      {...(id ? { id } : {})}
       className={[
         "rounded-[var(--radius-xl)] border",
         elevated

@@ -29,10 +29,7 @@ test.describe("phone member controls at 375px", () => {
   test("invitation acceptance announces a rejected token and keeps token entry usable on a phone", async ({ page }) => {
     await page.goto(`${api}/auth/dev/login?invite=${unissuedToken}`);
     await expect(page).toHaveURL(new RegExp(`/onboarding\\?invite=${unissuedToken}`));
-    const token = page.getByLabel("Token", { exact: true });
-    await expect(token).toHaveValue(unissuedToken);
-    await expect(token).toHaveAttribute("autocapitalize", "off");
-    await expectTapTarget(token);
+    await expect(page.getByLabel("Token", { exact: true })).toHaveCount(0);
     const join = page.getByRole("button", { name: "Join band", exact: true });
     await expectTapTarget(join);
     const rejected = page.waitForResponse((r) => r.url().endsWith("/memberships/invites/accept") && r.request().method() === "POST");
@@ -45,7 +42,7 @@ test.describe("phone member controls at 375px", () => {
   test("team invite controls meet the phone tap-target size without horizontal page scroll", async ({ page }) => {
     await page.goto(`${api}/auth/dev/login`);
     await page.goto("/team");
-    await expect(page.getByRole("heading", { name: "Team", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Invite a bandmate" }).first()).toBeVisible();
     await expectTapTarget(page.getByLabel("Email", { exact: true }));
     await expectTapTarget(page.getByRole("combobox", { name: "Role", exact: true }));
     await expectTapTarget(page.getByRole("button", { name: "Invite", exact: true }));

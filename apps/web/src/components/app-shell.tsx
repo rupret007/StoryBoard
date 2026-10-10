@@ -39,7 +39,7 @@ export function AppShell({
         {...(showTeamLink ? { showTeamLink: true } : {})}
       />
       <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-        <main id="main" className="relative flex-1 px-4 py-5 sm:px-6 sm:py-8 md:px-10 lg:px-12">
+        <main id="main" className="relative flex-1 px-4 py-5 pb-48 sm:px-6 sm:py-8 sm:pb-56 md:px-10 lg:px-12 lg:pb-80">
           <div className="mx-auto max-w-6xl"><MobileAppNav approvalAttention={approvalAttention} {...(operatorEmail ? { operatorEmail } : {})} memberships={memberships ?? []} currentArtistId={currentArtistId ?? null} {...(showTeamLink ? { showTeamLink: true } : {})} />{children}</div>
         </main>
         <div data-testid="workspace-command-panel" className="z-30 border-t border-[var(--border)] bg-[var(--canvas)]/90 px-6 py-4 backdrop-blur-lg md:px-10 lg:sticky lg:bottom-0 lg:px-12">

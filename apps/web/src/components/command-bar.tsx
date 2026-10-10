@@ -9,6 +9,7 @@ import {
   Sparkles,
   Terminal
 } from "lucide-react";
+import { COMMAND_HELPER_COPY } from "@storyboard/shared";
 import { apiFetch } from "@/lib/api";
 
 export function CommandBar({ artistId }: { artistId?: string }) {
@@ -98,17 +99,7 @@ export function CommandBar({ artistId }: { artistId?: string }) {
         </button>
       </form>
       <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">
-        Natural language maps to intents. Use a JSON{" "}
-        <code className="rounded bg-[var(--surface-0)] px-1 py-0.5 text-[var(--text-secondary)]">
-          intent
-        </code>{" "}
-        on{" "}
-        <code className="rounded bg-[var(--surface-0)] px-1 py-0.5 text-[var(--text-secondary)]">
-          POST /commands/execute
-        </code>{" "}
-        for stable routing. Risky flows create{" "}
-        <span className="font-medium text-[var(--secondary)]">approval</span>{" "}
-        rows — nothing sends silently.
+        {COMMAND_HELPER_COPY}
       </p>
 
       {result !== null ? (
