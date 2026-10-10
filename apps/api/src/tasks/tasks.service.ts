@@ -1,3 +1,4 @@
+import { taskOverdueUtcCutoff } from "@storyboard/shared";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "../generated/prisma/client";
 import { ManagerRecommendationOutcome, TaskStatus } from "../generated/prisma/enums";
@@ -30,13 +31,10 @@ export class TasksService {
   /**
    * Tasks past their due date, excluding done.
    * When `graceDays` &gt; 0, `dueAt` must be before (now minus that many UTC calendar days).
-   * Null or 0 grace matches “any past-due” (`dueAt` &lt; now).
+   * Null or 0 grace matches a past UTC calendar day (`dueAt` &lt; start of today UTC).
    */
-  overdueByDueDate(artistId: string, graceDays?: number | null) {
-    const cutoff = new Date();
-    if (graceDays != null && graceDays > 0) {
-      cutoff.setUTCDate(cutoff.getUTCDate() - graceDays);
-    }
+  overdueByDueDate(artistId: string, graceDays?: number | null, now = new Date()) {
+    const cutoff = taskOverdueUtcCutoff(now, graceDays);
     return this.prisma.client.task.findMany({
       where: {
         artistId,

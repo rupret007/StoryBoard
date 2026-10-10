@@ -1,4 +1,4 @@
-import { summarizeSetlist } from "@storyboard/shared";
+import { isTaskOverdueByUtcDay, summarizeSetlist } from "@storyboard/shared";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -131,7 +131,7 @@ export function deterministicShowReadiness(event: ShowReadinessInput, activeMemb
 
   const advanceTasks = event.tasks.filter((task) => task.ownerLabel === "Show advance" || /confirm|readiness/i.test(task.title));
   const completedAdvance = advanceTasks.filter((task) => task.status === "done");
-  const overdueAdvance = advanceTasks.filter((task) => task.status !== "done" && task.dueAt && task.dueAt < now);
+  const overdueAdvance = advanceTasks.filter((task) => task.status !== "done" && isTaskOverdueByUtcDay(task.dueAt, now));
   const advanceScore = advanceTasks.length ? Math.round((completedAdvance.length / advanceTasks.length) * 15) : 0;
   if (!advanceTasks.length) addGap({ code: "advance_missing", category: "advance", title: "Advance not generated", detail: "No show-advance checklist is linked to this event.", nextAction: "Generate the advance checklist, then assign and review each deadline.", evidenceIds: [event.id] });
   if (overdueAdvance.length) addGap({ code: "advance_overdue", category: "advance", severity: "high", title: "Advance work overdue", detail: `${overdueAdvance.length} show-advance task${overdueAdvance.length === 1 ? " is" : "s are"} overdue.`, nextAction: "Finish, reschedule, or mark the blocker on every overdue advance item.", evidenceIds: unique([event.id, ...overdueAdvance.map((task) => task.id)]) });

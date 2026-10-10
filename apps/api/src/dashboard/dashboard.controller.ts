@@ -1,3 +1,4 @@
+import { isTaskOverdueByUtcDay } from "@storyboard/shared";
 import { Controller, Get, Headers, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { CurrentOperator } from "../auth/current-operator.decorator";
@@ -44,8 +45,7 @@ export class DashboardController {
     const overdue = tasks.filter(
       (t: Task) =>
         t.status !== TaskStatus.done &&
-        t.dueAt &&
-        new Date(t.dueAt) < now
+        isTaskOverdueByUtcDay(t.dueAt, now)
     ).length;
     return {
       artistId,
