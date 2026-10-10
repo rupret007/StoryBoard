@@ -80,7 +80,7 @@ export function OperatorSession({
         type="button"
         disabled={busy}
         onClick={() => void logout()}
-        className="text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent)] disabled:opacity-50"
+        className="inline-flex min-h-11 items-center text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--accent)] disabled:opacity-50"
       >
         Sign out
       </button>
