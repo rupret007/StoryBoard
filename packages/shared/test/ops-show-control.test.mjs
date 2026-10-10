@@ -175,8 +175,8 @@ test("booking posture never auto-pitches and ignores confirmed or closed rows as
   });
   assert.equal(emptyOpen.booking.availability, "empty");
   assert.equal(emptyOpen.booking.openCount, 0);
-  assert.match(emptyOpen.booking.nextAction, /Travis books/i);
-  assert.match(emptyOpen.booking.nextAction, /will not pitch/i);
+  assert.match(emptyOpen.booking.nextAction, /will not send a pitch/i);
+  assert.match(emptyOpen.booking.nextAction, /a person still books/i);
 
   const holdWins = project({
     events: [gig()],
@@ -194,7 +194,7 @@ test("booking posture never auto-pitches and ignores confirmed or closed rows as
   const unavailable = project({ bookingsAvailable: false, bookings: [{ id: "hidden", title: "Hidden", stage: "hold" }] });
   assert.equal(unavailable.booking.availability, "unavailable");
   assert.equal(unavailable.booking.opportunityId, null);
-  assert.match(unavailable.booking.nextAction, /will not invent Travis's next step or auto-pitch/i);
+  assert.match(unavailable.booking.nextAction, /will not send a pitch/i);
 });
 
 test("one next action is navigation-only and prefers live day-of over buried editors", () => {

@@ -4,6 +4,7 @@ import { Badge, SurfaceCard } from "@storyboard/ui";
 import {
   catalogSourceLabel,
   formatRecordedShowTime,
+  NO_AUTO_PITCH_COPY,
   projectOpsShowControl,
   showControlActionContextLabel,
   type OpsShowControl,
@@ -112,7 +113,7 @@ export function OperationsShowControl({
           One clear next move
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[var(--text-secondary)]">
-          StoryBoard puts one recorded action first, then shows the facts behind it. Travis books and owns connections; StoryBoard will not pitch, post, or invent a schedule.
+          {NO_AUTO_PITCH_COPY}.
         </p>
       </header>
 
@@ -142,7 +143,7 @@ export function OperationsShowControl({
               </p>
             ) : null}
           </div>
-          {next ? (
+          {next && next.code !== "record_gig" ? (
             workspaceTarget ? (
               <button
                 type="button"
@@ -165,6 +166,21 @@ export function OperationsShowControl({
                 <ArrowRight className="h-4 w-4" />
               </a>
             )
+          ) : canManage && (!next || next.code === "record_gig") ? (
+            <button
+              type="button"
+              data-testid="ops-show-control-primary"
+              className="sb-btn-primary w-full shrink-0 justify-center sm:w-auto"
+              onClick={() => {
+                onOpenWorkspace("events");
+                window.requestAnimationFrame(() => {
+                  document.getElementById("ops-add-event")?.scrollIntoView({ block: "start" });
+                });
+              }}
+            >
+              Add an event
+              <ArrowRight className="h-4 w-4" />
+            </button>
           ) : null}
         </div>
       </div>
@@ -298,7 +314,7 @@ export function OperationsShowControl({
             <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Booking</p>
             <Ticket className="h-4 w-4 text-[var(--accent)]" aria-hidden />
           </div>
-          <div className="mt-3"><Badge>Travis books</Badge></div>
+          <div className="mt-3"><Badge>{NO_AUTO_PITCH_COPY}</Badge></div>
           {control.booking.availability === "unavailable" ? (
             <>
               <h3 className="mt-3 text-lg font-semibold">Booking posture unavailable</h3>

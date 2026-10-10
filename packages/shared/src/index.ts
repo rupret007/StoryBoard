@@ -23,3 +23,4 @@ export * from "./booking-target";
 export * from "./task-due-date";
 export * from "./recorded-show-time";
 export * from "./app-nav";
+export * from "./operator-copy";

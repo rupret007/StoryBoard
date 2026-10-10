@@ -1,4 +1,4 @@
-import { parseOpsWorkspaceFocus, parseOpsWorkspaceTab } from "@storyboard/shared";
+import { NO_AUTO_PITCH_COPY, parseOpsWorkspaceFocus, parseOpsWorkspaceTab } from "@storyboard/shared";
 import { PageHeader } from "@storyboard/ui";
 import { serverApiFetch } from "@/lib/api-server";
 import type {
@@ -161,7 +161,7 @@ export default async function OperationsPage({
     <div className="space-y-8">
       <PageHeader
         title="Band operations"
-        description="Show control names the live or next recorded gig, its assigned set, booking posture, and one safe next action before the editors. Travis still books. StoryBoard does not auto-pitch."
+        description={NO_AUTO_PITCH_COPY}
       />
       <OperationsClient
         artistId={artistId}
