@@ -17,6 +17,7 @@ export * from "./ops-show-control";
 export * from "./ops-live-run";
 export * from "./operator-href";
 export * from "./operator-api-error";
+export * from "./app-auth-load";
 export * from "./zoned-date-time";
 export * from "./booking-stage-review";
 export * from "./booking-target";
