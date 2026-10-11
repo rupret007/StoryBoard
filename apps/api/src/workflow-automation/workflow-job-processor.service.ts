@@ -1,3 +1,4 @@
+import { taskOverdueUtcCutoff } from "@storyboard/shared";
 import { Injectable, Logger } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
 import { ConfigService } from "@nestjs/config";
@@ -504,7 +505,7 @@ export class WorkflowJobProcessorService {
       by: ["artistId"],
       where: {
         status: { not: TaskStatus.done },
-        dueAt: { lt: new Date() }
+        dueAt: { lt: taskOverdueUtcCutoff(new Date()) }
       }
     });
     const dayStart = startOfUtcDay(new Date());

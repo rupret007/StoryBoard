@@ -22,5 +22,6 @@ export * from "./zoned-date-time";
 export * from "./booking-stage-review";
 export * from "./booking-target";
 export * from "./task-due-date";
+export * from "./settlement-splits";
 export * from "./recorded-show-time";
 export * from "./app-nav";

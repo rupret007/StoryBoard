@@ -1,3 +1,4 @@
+import { isTaskOverdueByUtcDay } from "@storyboard/shared";
 import type { ShowReadiness } from "./event-readiness";
 
 export type DayOfTimelineItem = {
@@ -91,7 +92,7 @@ export function deterministicEventDayOf(event: EventDayOfInput, readiness: ShowR
   }));
   const nextCheckpoint = timeline.find((item) => item.state === "next") ?? null;
   const openTasks = event.tasks.filter((task) => task.status !== "done");
-  const overdueTasks = openTasks.filter((task) => task.dueAt && task.dueAt < now);
+  const overdueTasks = openTasks.filter((task) => isTaskOverdueByUtcDay(task.dueAt, now));
   const responseByMember = new Map(event.participants.map((participant) => [participant.bandMemberId, participant.response]));
   const unavailableCount = activeMembers.filter((member) => responseByMember.get(member.id) === "unavailable").length;
   const unresolvedAvailabilityCount = activeMembers.filter((member) => !responseByMember.has(member.id) || ["unknown", "tentative"].includes(responseByMember.get(member.id) ?? "unknown")).length;
