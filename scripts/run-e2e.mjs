@@ -78,6 +78,7 @@ const browserWebUrl = canonicalizeUrl(webUrl);
 const browserApiUrl = canonicalizeUrl(apiUrl);
 const env = {
   ...process.env,
+  TZ: process.env.TZ || "UTC",
   // The harness builds the production artifacts before Playwright starts its
   // separately configured API (development) and web (production) servers.
   // Do not inherit a developer shell's nonstandard NODE_ENV into Next build.
