@@ -25,3 +25,4 @@ export * from "./task-due-date";
 export * from "./settlement-splits";
 export * from "./recorded-show-time";
 export * from "./app-nav";
+export * from "./operator-copy";

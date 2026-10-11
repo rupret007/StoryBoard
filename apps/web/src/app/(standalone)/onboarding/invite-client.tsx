@@ -1,5 +1,6 @@
 "use client";
 
+import { parseInviteInput } from "@storyboard/shared";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -8,7 +9,8 @@ import { apiFetch } from "@/lib/api";
 export function InviteClient({ email }: { email: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialToken = searchParams.get("invite")?.trim() ?? "";
+  const initialToken = parseInviteInput(searchParams.get("invite") ?? "");
+  const hasInviteInUrl = searchParams.has("invite");
   const [token, setToken] = useState(initialToken);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -20,7 +22,7 @@ export function InviteClient({ email }: { email: string }) {
     try {
       await apiFetch("/memberships/invites/accept", {
         method: "POST",
-        json: { token: token.trim() }
+        json: { token: parseInviteInput(token) }
       });
       router.push("/dashboard");
       router.refresh();
@@ -57,18 +59,22 @@ export function InviteClient({ email }: { email: string }) {
         onSubmit={(e) => void onSubmit(e)}
         className="mt-8 space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-6"
       >
-        <label className="block text-sm text-[var(--text-secondary)]">
-          Token
-          <input
-            required
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 font-mono text-xs text-[var(--text-primary)]"
-          />
-        </label>
+        {hasInviteInUrl ? (
+          <input type="hidden" name="invite" value={token} />
+        ) : (
+          <label className="block text-sm text-[var(--text-secondary)]">
+            Token
+            <input
+              required
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 font-mono text-xs text-[var(--text-primary)]"
+            />
+          </label>
+        )}
         <button
           type="submit"
           disabled={busy}

@@ -1,5 +1,6 @@
 "use client";
 
+import { parseInviteInput } from "@storyboard/shared";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -37,7 +38,7 @@ export function OnboardingGate({ showDevHint }: { showDevHint: boolean }) {
     try {
       await apiFetch("/memberships/invites/accept", {
         method: "POST",
-        json: { token: token.trim() }
+        json: { token: parseInviteInput(token) }
       });
       router.refresh();
     } catch (err) {
@@ -100,7 +101,7 @@ export function OnboardingGate({ showDevHint }: { showDevHint: boolean }) {
               value={token}
               onChange={(e) => setToken(e.target.value)}
               className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 font-mono text-xs text-[var(--text-primary)]"
-              placeholder="Paste the token from your invite link"
+              placeholder="Paste an invite link or token"
               autoComplete="off"
             />
           </label>

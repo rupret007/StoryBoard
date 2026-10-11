@@ -1,6 +1,6 @@
 "use client";
 
-import { bookingStageNextAction, bookingStages, describeBookingTarget } from "@storyboard/shared";
+import { bookingStageNextAction, bookingStages, describeBookingTarget, NO_AUTO_PITCH_COPY } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -107,8 +107,7 @@ export function BookingClient({
               New opportunity
             </h2>
             <p className="text-xs text-[var(--text-muted)]">
-              Travis books. StoryBoard tracks the pipeline and will not pitch,
-              post, or send on its own.
+              {NO_AUTO_PITCH_COPY}.
             </p>
           </div>
         </div>
@@ -147,7 +146,7 @@ export function BookingClient({
             className="sb-btn-primary shrink-0"
           >
             <Plus className="h-4 w-4" />
-            Create
+            Create opportunity
           </button>
         </form>
       </SurfaceCard> : null}
@@ -162,7 +161,7 @@ export function BookingClient({
         {loadError ? null : opportunities.length === 0 ? (
           <EmptyState
             title="No opportunities yet"
-            description={canManage ? "Create your first deal above. Cards group by stage so you can scan momentum like a CRM board." : "An owner or member can record the first opportunity. Travis books; this board tracks recorded deals."}
+            description={canManage ? "Create your first deal above. Cards group by stage so you can scan momentum like a CRM board." : `An owner or member can record the first opportunity. ${NO_AUTO_PITCH_COPY}.`}
             icon={<Kanban className="h-6 w-6" />}
           />
         ) : (

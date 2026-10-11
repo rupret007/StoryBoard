@@ -1266,8 +1266,7 @@ test("confirmed event logistics move through approvals before provider execution
   const primaryAction = showControl.getByTestId("ops-show-control-action");
   const recordedPosture = showControl.getByTestId("ops-show-control-posture");
   await expect(showControl).toBeVisible();
-  await expect(showControl).toContainText(/Travis books/i);
-  await expect(showControl).toContainText(/will not pitch/i);
+  await expect(showControl).toContainText(/StoryBoard will not send a pitch; a person still books/i);
   await expect(primaryAction).toBeVisible();
   await expect(primaryAction.getByTestId("ops-show-control-primary")).toHaveCount(1);
   await expect(recordedPosture.locator("a, button")).toHaveCount(0);

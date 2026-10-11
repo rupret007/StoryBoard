@@ -1,5 +1,6 @@
 "use client";
 
+import { TEAM_INVITE_HEADING, TEAM_ROLE_HINTS } from "@storyboard/shared";
 import { EmptyState } from "@storyboard/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -188,7 +189,7 @@ export function TeamClient({
     <div className="space-y-10">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
-          Team
+          {TEAM_INVITE_HEADING}
         </h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
           Manage access to this band. Invitations need to be shared or sent manually.
@@ -218,7 +219,7 @@ export function TeamClient({
 
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-6">
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-          Invite operator
+          {TEAM_INVITE_HEADING}
         </h2>
         <form
           onSubmit={(e) => void onInvite(e)}
@@ -246,7 +247,7 @@ export function TeamClient({
             >
               {ROLES.map((r) => (
                 <option key={r} value={r}>
-                  {r}
+                  {TEAM_ROLE_HINTS[r].label}
                 </option>
               ))}
             </select>
@@ -259,6 +260,14 @@ export function TeamClient({
             Invite
           </button>
         </form>
+        <ul className="mt-4 space-y-1 text-xs text-[var(--text-muted)]">
+          {ROLES.map((role) => (
+            <li key={role}>
+              <span className="font-semibold text-[var(--text-secondary)]">{TEAM_ROLE_HINTS[role].label}.</span>{" "}
+              {TEAM_ROLE_HINTS[role].hint}
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section>

@@ -1,3 +1,4 @@
+import { NO_AUTO_PITCH_COPY } from "@storyboard/shared";
 import { PageHeader } from "@storyboard/ui";
 import { BookingClient } from "./booking-client";
 import { serverApiFetch } from "@/lib/api-server";
@@ -42,7 +43,7 @@ export default async function BookingPage() {
     <div className="space-y-8">
       <PageHeader
         title="Booking pipeline"
-        description="Stage opportunities from target to close. Travis books; each card names the next recorded action. StoryBoard will not pitch."
+        description={`Stage opportunities from target to close. ${NO_AUTO_PITCH_COPY}.`}
       />
       <BookingClient
         key={artistId ?? "unavailable"}
