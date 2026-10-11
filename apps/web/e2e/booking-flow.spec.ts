@@ -142,8 +142,19 @@ test("mobile navigation closes and unlocks scrolling at the desktop breakpoint",
   await expect(page.getByTestId("workspace-command-panel")).toHaveCSS("position", "static");
 
   await page.getByRole("button", { name: "Open navigation" }).click();
-  await expect(page.getByRole("dialog", { name: "Navigation" })).toBeVisible();
+  const drawer = page.getByRole("dialog", { name: "Navigation" });
+  await expect(drawer).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+  await expect(page.getByRole("link", { name: "Skip to content" })).toHaveAttribute("href", "#main");
+  await expect(page.locator("main#main")).toHaveCount(1);
+  await expect(page.getByTestId("approval-count-badge").first()).toHaveText(/^(Approvals|\d+)$/);
+  await expect(drawer.getByTestId("mobile-nav-root-rows").locator(":scope > a, :scope > button")).toHaveCount(8);
+  await drawer.getByRole("button", { name: "Booking", exact: true }).click();
+  await expect(drawer.getByRole("link", { name: "Find shows" })).toBeVisible();
+  await expect(drawer.getByRole("link", { name: "Booking inbox" })).toBeVisible();
+  await drawer.getByRole("button", { name: "Back to main navigation" }).click();
+  await expect(drawer.getByTestId("mobile-nav-root-rows")).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Sign out", exact: true })).toHaveClass(/min-h-11/);
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(page.getByRole("dialog", { name: "Navigation" })).toHaveCount(0);
