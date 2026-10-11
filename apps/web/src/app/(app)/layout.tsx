@@ -1,8 +1,10 @@
+import { ApiUnreachableCard } from "@/components/api-unreachable-card";
 import { AppShell } from "@/components/app-shell";
 import { OnboardingGate } from "@/components/onboarding-gate";
 import { SignInGate } from "@/components/sign-in-gate";
-import { ApiHttpError, serverApiFetch } from "@/lib/api-server";
+import { serverApiFetch } from "@/lib/api-server";
 import type { ApprovalLifecycleCounts, DashboardStats } from "@/lib/types";
+import { classifyAppAuthLoadError } from "@storyboard/shared";
 import type { ReactNode } from "react";
 
 type AuthMeResponse = {
@@ -29,10 +31,10 @@ export default async function AppLayout({
       cache: "no-store"
     });
   } catch (e) {
-    if (e instanceof ApiHttpError && e.status === 401) {
+    if (classifyAppAuthLoadError(e) === "sign_in") {
       needsSignIn = true;
     } else {
-      throw e;
+      return <ApiUnreachableCard />;
     }
   }
 
