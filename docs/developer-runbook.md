@@ -18,7 +18,7 @@ cd StoryBoard
 pnpm install
 ```
 
-This creates `pnpm-lock.yaml`, links workspace packages, and runs **`prepare`**, which builds `@storyboard/shared` into `dist/` (required for `@storyboard/shared` imports in the API and web).
+This uses the committed `pnpm-lock.yaml`, links workspace packages, and runs **`prepare`**, which builds `@storyboard/shared` into `dist/` (required for `@storyboard/shared` imports in the API and web).
 
 ## 3. Environment file
 
