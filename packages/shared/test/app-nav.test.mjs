@@ -39,36 +39,55 @@ function cssToken(css, name) {
 test("S03 missing approval counts are a word or number, never a mystery mark", () => {
   assert.equal(shared.approvalCountBadgeText(null), "Approvals");
   assert.equal(shared.approvalCountBadgeText(undefined), "Approvals");
+  assert.equal(shared.approvalCountBadgeText({}), "Approvals");
   assert.equal(shared.approvalCountBadgeText({ attentionTotal: Number.NaN }), "Approvals");
+  assert.equal(shared.approvalCountBadgeText({ attentionTotal: Number.POSITIVE_INFINITY }), "Approvals");
   assert.equal(shared.approvalCountBadgeText({ attentionTotal: 0 }), "0");
   assert.equal(shared.approvalCountBadgeText({ attentionTotal: 3 }), "3");
-  assert.notEqual(shared.approvalCountBadgeText(null), "?");
-  assert.notEqual(shared.approvalCountBadgeText({ attentionTotal: 0 }), "?");
-  assert.match(shared.approvalCountBadgeText(null), /^(Approvals|\d+)$/);
-  assert.match(shared.approvalCountBadgeText({ attentionTotal: 12 }), /^(Approvals|\d+)$/);
+  for (const counts of [null, undefined, {}, { attentionTotal: Number.NaN }, { attentionTotal: 0 }, { attentionTotal: 12 }]) {
+    const text = shared.approvalCountBadgeText(counts);
+    assert.notEqual(text, "?");
+    assert.match(text, /^(Approvals|\d+)$/);
+  }
 });
 
 test("S03 phone drawer first screen is eight rows or fewer after booking is clustered", () => {
   const root = shared.mobileNavRootRows();
   assert.ok(root.length <= shared.APP_NAV_MOBILE_ROOT_MAX_ROWS);
   assert.equal(root.length, 8);
+  assert.deepEqual(
+    root.map((item) => item.label),
+    ["Dashboard", "Manager", "Band operations", "Venues", "Contacts", "Booking", "Tasks", "More"]
+  );
   assert.ok(root.some((item) => item.kind === "cluster" && item.id === "booking" && item.label === "Booking"));
+  assert.ok(root.some((item) => item.kind === "link" && item.href === "/venues"));
+  assert.ok(root.some((item) => item.kind === "link" && item.href === "/contacts"));
+  assert.ok(!root.some((item) => item.kind === "link" && item.href === "/approvals"));
+
   const booking = shared.mobileNavClusterRows("booking");
   assert.deepEqual(
     booking.map((item) => item.href),
-    [
-      "/venues",
-      "/contacts",
-      "/booking",
-      "/prospects",
-      "/market-sprints",
-      "/booking-campaigns",
-      "/booking-inbox"
-    ]
+    ["/booking", ...shared.APP_NAV_BOOKING_TOOL_HREFS]
   );
-  assert.ok(!root.some((item) => item.kind === "link" && item.href === "/prospects"));
+  assert.deepEqual(
+    booking.map((item) => item.label),
+    ["Booking pipeline", "Find shows", "Market sprints", "Pitch campaigns", "Booking inbox"]
+  );
+  for (const href of shared.APP_NAV_BOOKING_TOOL_HREFS) {
+    assert.ok(!root.some((item) => item.kind === "link" && item.href === href), `${href} must not be a root row`);
+    assert.ok(booking.some((item) => item.href === href), `${href} must live under Booking`);
+  }
   assert.equal(shared.mobileNavClusterActive("booking", "/booking-campaigns"), true);
+  assert.equal(shared.mobileNavClusterActive("booking", "/venues"), false);
   assert.equal(shared.mobileNavClusterActive("booking", "/tasks"), false);
+
+  const more = shared.mobileNavClusterRows("more", true);
+  assert.deepEqual(
+    more.map((item) => item.href),
+    ["/approvals", "/summary", "/notifications", "/activity", "/team"]
+  );
+  assert.equal(shared.mobileNavClusterActive("more", "/approvals", true), true);
+  assert.equal(shared.mobileNavClusterRows("more", false).some((item) => item.href === "/team"), false);
 });
 
 test("S04 muted text at 14px or smaller meets 4.5:1 on app surfaces", () => {

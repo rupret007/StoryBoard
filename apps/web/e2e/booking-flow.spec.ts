@@ -148,8 +148,13 @@ test("mobile navigation closes and unlocks scrolling at the desktop breakpoint",
   await expect(page.getByRole("link", { name: "Skip to content" })).toHaveAttribute("href", "#main");
   await expect(page.locator("main#main")).toHaveCount(1);
   await expect(page.getByTestId("approval-count-badge").first()).toHaveText(/^(Approvals|\d+)$/);
-  await expect(drawer.getByTestId("mobile-nav-root-rows").locator(":scope > a, :scope > button")).toHaveCount(8);
+  await expect(page.getByTestId("approval-count-badge").first()).not.toHaveText("?");
+  const rootRows = drawer.getByTestId("mobile-nav-root-rows");
+  await expect(rootRows.locator(":scope > a, :scope > button")).toHaveCount(8);
+  await expect(rootRows.getByRole("link", { name: "Venues" })).toBeVisible();
+  await expect(rootRows.getByRole("link", { name: "Find shows" })).toHaveCount(0);
   await drawer.getByRole("button", { name: "Booking", exact: true }).click();
+  await expect(drawer.getByRole("link", { name: "Booking pipeline" })).toBeVisible();
   await expect(drawer.getByRole("link", { name: "Find shows" })).toBeVisible();
   await expect(drawer.getByRole("link", { name: "Booking inbox" })).toBeVisible();
   await drawer.getByRole("button", { name: "Back to main navigation" }).click();
