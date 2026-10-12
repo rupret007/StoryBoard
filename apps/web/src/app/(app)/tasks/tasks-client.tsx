@@ -61,11 +61,13 @@ export function TasksClient({
   const [dueAt, setDueAt] = useState("");
   const [bandMemberId, setBandMemberId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [createError, setCreateError] = useState("");
 
   async function createTask(e: React.FormEvent) {
     e.preventDefault();
     if (!artistId || !canManage) return;
     setBusy(true);
+    setCreateError("");
     try {
       await apiFetch("/tasks", {
         method: "POST",
@@ -82,6 +84,8 @@ export function TasksClient({
       setDueAt("");
       setBandMemberId("");
       router.refresh();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Could not create the task");
     } finally {
       setBusy(false);
     }
@@ -159,6 +163,7 @@ export function TasksClient({
             </button>
           </div>
         </form>
+        {createError ? <p role="alert" className="mt-3 text-sm text-red-200">{createError}</p> : null}
       </SurfaceCard>
 
       {loadError ? null : initialTasks.length === 0 ? (
