@@ -27,7 +27,7 @@ export function AppShell({
     <div className="flex min-h-screen">
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-[var(--accent)] focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#042f2e]"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:inline-flex focus:min-h-11 focus:items-center focus:rounded-lg focus:bg-[var(--accent)] focus:px-4 focus:text-sm focus:font-semibold focus:text-[#042f2e]"
       >
         Skip to content
       </a>
