@@ -67,6 +67,7 @@ export function CommandBar({ artistId }: { artistId?: string }) {
       </div>
       <form
         className="flex flex-col gap-3 md:flex-row md:items-stretch"
+        aria-busy={loading}
         onSubmit={(e) => void run(e)}
       >
         <label className="sr-only" htmlFor="sb-command">
@@ -103,7 +104,12 @@ export function CommandBar({ artistId }: { artistId?: string }) {
       </p>
 
       {result !== null ? (
-        <div className="mt-4 space-y-2">
+        <div
+          className="mt-4 space-y-2"
+          aria-live="polite"
+          aria-atomic="true"
+          role={hasError ? "alert" : "status"}
+        >
           <div className="flex flex-wrap items-center gap-2">
             {hasError ? (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-red-300">
