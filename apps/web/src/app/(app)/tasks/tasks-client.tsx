@@ -17,6 +17,7 @@ export function TasksClient({
   opportunities,
   members,
   loadError,
+  contextError,
   artistId,
   currentOperatorId,
   canManage
@@ -25,6 +26,7 @@ export function TasksClient({
   opportunities: BookingOpportunity[];
   members: BandMember[];
   loadError?: string;
+  contextError?: string;
   artistId: string | null;
   currentOperatorId: string | null;
   canManage: boolean;
@@ -92,6 +94,11 @@ export function TasksClient({
       {loadError ? (
         <div role="alert" className="text-sm text-amber-200">
           {loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload tasks</button>
+        </div>
+      ) : null}
+      {!loadError && contextError ? (
+        <div role="alert" className="text-sm text-amber-200">
+          {contextError} <button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}>Reload context</button>
         </div>
       ) : null}
 
