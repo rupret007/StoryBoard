@@ -3,6 +3,7 @@
 import {
   afterShowWriteAllowed,
   catalogSourceLabel,
+  parseCurrencyToMinor,
   dateTimeLocalToIso,
   describeTaskDueDate,
   instantToDateTimeLocal,
@@ -196,11 +197,12 @@ function LiveWrapPanel({ data, busy, onMutate, onError }: { data: EventDayOfResp
       onError("Attendance must be a whole number. StoryBoard will not invent a count.");
       return;
     }
-    const revenueValue = grossRevenue.trim() === "" ? null : Math.round(Number(grossRevenue) * 100);
-    if (revenueValue != null && (!Number.isFinite(revenueValue) || revenueValue < 0)) {
-      onError("Gross revenue must be a non-negative amount. StoryBoard will not invent a result.");
+    const revenue = parseCurrencyToMinor(grossRevenue);
+    if (!revenue.ok) {
+      onError(revenue.message);
       return;
     }
+    const revenueValue = revenue.amountMinor;
     await onMutate("live-wrap", `/events/${event.id}/after-show`, {
       expectedUpdatedAt: event.updatedAt,
       attendance: attendanceValue,
