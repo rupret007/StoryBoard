@@ -236,7 +236,7 @@ function NavigationLinks({
 function ApprovalAttentionSummary({ approvalAttention, onNavigate }: { approvalAttention: ApprovalLifecycleCounts | null; onNavigate?: () => void }) {
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3 py-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Approvals</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Approvals</p>
       {!approvalAttention ? (
         <p className="mt-1 text-sm font-semibold text-slate-300">Status unavailable</p>
       ) : approvalAttention.attentionTotal === 0 ? (

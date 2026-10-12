@@ -71,9 +71,10 @@ test("S03 phone drawer first screen is eight rows or fewer after booking is clus
   assert.equal(shared.mobileNavClusterActive("booking", "/tasks"), false);
 });
 
-test("S04 muted text at 14px or smaller meets 4.5:1 on app surfaces", () => {
+test("S07 muted text at 14px or smaller meets 4.5:1 on app surfaces", () => {
   const css = readFileSync(join(repoRoot, "apps/web/src/app/globals.css"), "utf8");
   const muted = cssToken(css, "--text-muted");
+  assert.notEqual(muted.toLowerCase(), "#64748b", "legacy muted #64748b is ~4.1:1 on canvas");
   for (const surface of ["--canvas", "--surface-0", "--surface-subtle", "--surface-1", "--surface-2", "--surface-3"]) {
     const background = cssToken(css, surface);
     assert.ok(
@@ -83,19 +84,23 @@ test("S04 muted text at 14px or smaller meets 4.5:1 on app surfaces", () => {
   }
 });
 
-test("S04 skip link, sign-out tap target, and approval dt size stay pinned", () => {
+test("S07 skip link, sign-out tap target, and approval dt size stay pinned", () => {
   const shell = readFileSync(join(repoRoot, "apps/web/src/components/app-shell.tsx"), "utf8");
-  assert.match(shell, /Skip to content/);
+  assert.match(shell, /<div className="flex min-h-screen">\s*<a[\s\S]*?Skip to content[\s\S]*?<AppSidebar/);
   assert.match(shell, /href="#main"/);
-  assert.match(shell, /id="main"/);
+  assert.match(shell, /<main id="main"/);
+  assert.match(shell, /focus:min-h-11/);
 
   const session = readFileSync(join(repoRoot, "apps/web/src/components/operator-session.tsx"), "utf8");
-  assert.match(session, /Sign out/);
-  assert.match(session, /min-h-11/);
+  assert.match(session, /min-h-11[\s\S]{0,240}Sign out/);
 
   const sidebar = readFileSync(join(repoRoot, "apps/web/src/components/app-sidebar.tsx"), "utf8");
   assert.match(sidebar, /<dt className="text-\[11px\]/);
   assert.doesNotMatch(sidebar, /<dt className="text-\[9px\]/);
+  assert.match(
+    sidebar,
+    /text-\[11px\] font-semibold uppercase tracking-wider text-\[var\(--text-muted\)\]">Approvals</
+  );
   assert.doesNotMatch(sidebar, /\?\? ["']\?["']/);
   assert.match(sidebar, /approvalCountBadgeText/);
 
