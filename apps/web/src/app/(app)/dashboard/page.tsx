@@ -21,6 +21,7 @@ export default async function DashboardPage() {
   let tasks: Task[] = [];
   let summary: WeeklySummary | null = null;
   let insights: DashboardInsights | null = null;
+  let insightsLoadError = false;
   let error: string | null = null;
   try {
     [stats, tasks, summary, insights] = await Promise.all([
@@ -29,7 +30,10 @@ export default async function DashboardPage() {
       serverApiFetch<WeeklySummary>("/weekly-summary", { cache: "no-store" }),
       serverApiFetch<DashboardInsights>("/dashboard/insights", {
         cache: "no-store"
-      }).catch(() => null)
+      }).catch(() => {
+        insightsLoadError = true;
+        return null;
+      })
     ]);
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not reach the API.";
@@ -163,7 +167,13 @@ export default async function DashboardPage() {
         </SurfaceCard>
       ) : null}
 
-      {insights ? (
+      {insightsLoadError ? (
+        <SurfaceCard elevated className="border-amber-500/20 bg-amber-950/20">
+          <p role="alert" className="text-sm text-amber-100">
+            Booking health and priority actions could not be loaded. Refresh to try again; a missing score is not a healthy pipeline.
+          </p>
+        </SurfaceCard>
+      ) : insights ? (
         <section className="grid gap-6 lg:grid-cols-2">
           <SurfaceCard elevated>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
