@@ -27,7 +27,8 @@ export function BookingClient({
   opportunityRisks = {},
   artistId,
   accessState,
-  loadError
+  loadError,
+  insightsLoadError = false
 }: {
   initialOpportunities: BookingOpportunity[];
   venues: Venue[];
@@ -35,6 +36,7 @@ export function BookingClient({
   accessState: "manage" | "read_only" | "unavailable";
   loadError: string;
   opportunityRisks?: Record<string, "low" | "med" | "high">;
+  insightsLoadError?: boolean;
 }) {
   const router = useRouter();
   const [opportunities, setOpportunities] = useState(initialOpportunities);
@@ -95,6 +97,7 @@ export function BookingClient({
       {notice ? <p role="status" className="text-sm text-emerald-200">{notice}</p> : null}
       {accessState !== "manage" ? <p role="status" className="text-sm text-[var(--text-muted)]">{accessState === "read_only" ? "You have read-only access. An owner or member can record booking changes." : "Booking access could not be verified. Reload before making changes."}</p> : null}
       {loadError ? <div role="alert" className="text-sm text-amber-200">{loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload pipeline</button></div> : null}
+      {!loadError && insightsLoadError ? <p role="alert" className="text-sm text-amber-200">Opportunity risk badges could not be loaded. Missing badges are not the same as low risk. <button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}>Reload risks</button></p> : null}
       {error ? (
         <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
           {error}
