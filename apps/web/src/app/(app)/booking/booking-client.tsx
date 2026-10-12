@@ -199,7 +199,7 @@ export function BookingClient({
                   </Badge>
                 </div>
                 <div className="min-h-[120px] space-y-2 rounded-[var(--radius-xl)] border border-dashed border-[var(--border)] bg-[var(--surface-0)]/50 p-2">
-                  {byStage[stage].length === 0 ? <p className="p-2 text-sm text-[var(--text-muted)] sm:hidden">No opportunities in {stage}. Choose another stage to see this band's recorded deals.</p> : null}
+                  {byStage[stage].length === 0 ? <p className="p-2 text-sm text-[var(--text-muted)]">No opportunities in {stage}.<span className="sm:hidden"> Choose another stage to see this band's recorded deals.</span></p> : null}
                   {(byStage[stage] ?? []).map((o) => (
                     <OppCard
                       key={o.id}
