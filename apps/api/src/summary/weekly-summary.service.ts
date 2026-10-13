@@ -1,3 +1,4 @@
+import { isTaskOverdueByUtcDay } from "@storyboard/shared";
 import { Injectable } from "@nestjs/common";
 import {
   APPROVAL_LIFECYCLE_POLICY_VERSION,
@@ -16,7 +17,7 @@ import { projectAuditEventsForRead } from "../audit-events/audit-event-projectio
 export class WeeklySummaryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async build(artistId: string) {
+  async build(artistId: string, now = new Date()) {
     const [opportunities, tasks, approvals, audit, commands] = await Promise.all([
       this.prisma.client.bookingOpportunity.findMany({ where: { artistId } }),
       this.prisma.client.task.findMany({
@@ -53,12 +54,10 @@ export class WeeklySummaryService {
       {} as Record<string, number>
     );
 
-    const now = new Date();
     const overdueTasks = tasks.filter(
       (t: Task) =>
         t.status !== TaskStatus.done &&
-        t.dueAt &&
-        new Date(t.dueAt) < now
+        isTaskOverdueByUtcDay(t.dueAt, now)
     );
 
     const staleFollowUps = tasks.filter((t: Task) => {

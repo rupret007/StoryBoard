@@ -31,7 +31,7 @@ test("S09 a past UTC calendar day is still overdue", () => {
   assert.deepEqual(shared.taskOverdueUtcCutoff(now, 1), new Date("2026-09-14T00:00:00.000Z"));
 });
 
-test("S09 day-of, readiness, project readiness, insights, team-load, and escalation use the UTC helper", () => {
+test("S09 day-of, readiness, project readiness, insights, team-load, weekly briefing, and escalation use the UTC helper", () => {
   const dayOf = source("apps/api/src/operations/event-day-of.ts");
   assert.match(dayOf, /isTaskOverdueByUtcDay\(task\.dueAt, now\)/);
   assert.doesNotMatch(dayOf, /dueAt < now/);
@@ -47,6 +47,10 @@ test("S09 day-of, readiness, project readiness, insights, team-load, and escalat
 
   const tasks = source("apps/api/src/tasks/tasks.service.ts");
   assert.match(tasks, /taskOverdueUtcCutoff\(now, graceDays\)/);
+
+  const weeklySummary = source("apps/api/src/summary/weekly-summary.service.ts");
+  assert.match(weeklySummary, /isTaskOverdueByUtcDay\(t\.dueAt, now\)/);
+  assert.doesNotMatch(weeklySummary, /new Date\(t\.dueAt\) < now/);
 
   const insights = source("apps/api/src/operational-intelligence/operational-intelligence.service.ts");
   assert.match(insights, /overdueByDueDate/);
