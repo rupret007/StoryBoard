@@ -4,6 +4,7 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  PayloadTooLargeException,
   Post,
   Req,
   ServiceUnavailableException
@@ -14,7 +15,10 @@ import {
   isStripeWebhookInFlightError,
   StripeWebhookIdempotencyService
 } from "./stripe-webhook-idempotency.service";
-import { readStripeRawBody } from "./stripe-webhook-raw-body";
+import {
+  isStripeWebhookPayloadTooLargeError,
+  readStripeRawBody
+} from "./stripe-webhook-raw-body";
 import {
   parseStripeEvent,
   verifyStripeWebhookSignature
@@ -40,7 +44,15 @@ export class StripeWebhookController {
       throw new ServiceUnavailableException("Stripe webhook secret is not configured");
     }
 
-    const payload = readStripeRawBody(req);
+    let payload: string | null;
+    try {
+      payload = readStripeRawBody(req);
+    } catch (error) {
+      if (isStripeWebhookPayloadTooLargeError(error)) {
+        throw new PayloadTooLargeException("Stripe webhook payload exceeds size limit");
+      }
+      throw error;
+    }
     const verified = verifyStripeWebhookSignature({
       payload,
       signatureHeader: signature,
@@ -62,7 +74,7 @@ export class StripeWebhookController {
     try {
       const outcome = await this.idempotency.runOnce(
         event.id,
-        () => this.stripe.process(event),
+        (tx) => this.stripe.process(event, tx),
         event.type
       );
       return { ok: true, duplicate: outcome.duplicate };

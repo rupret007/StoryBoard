@@ -110,7 +110,7 @@ On **`Artist`**:
 - `Artist.telegramUrgentEnabled`, `telegramChatId`, `telegramNotifyCategories` — phase 5A (owner-configured Telegram routing).
 - `TelegramUrgentDedupe` — `artistId`, `dedupeKey`, `status` (`attempted` | `sent`), `sentAt` (set when `sent`), `lastError` (phase 5A).
 - `TelegramRegistrationToken` — short-lived hashed tokens for inbound **`/start`** binding (phase 5B).
-- `StripeWebhookEvent` — unique Stripe `evt_` claims (`processing` lease, `appliedAt` after the handler, then `completed`) after `Stripe-Signature` verification. Applied rows cannot be reclaimed. Complete and expire updates require the current `leaseOwner`. In-flight unfinished deliveries return 503.
+- `StripeWebhookEvent` — unique Stripe `evt_` claims after `Stripe-Signature` verification. Claim, handler, `appliedAt`, and `completed` commit together in a serializable row-locked transaction; `appliedAt` requires the current `leaseOwner` before the handler runs. Applied rows cannot be reclaimed. An expired lease cannot overlap a handler that still holds the row lock. In-flight unfinished deliveries return 503. Raw-body capture is size-capped.
 - `WorkflowNotification` — `recipientOperatorId`, `artistId`, `kind`, `title`,
   `body`, `readAt`, `metadata`.
 - `WorkflowNotificationKind` includes `digest_daily`, `digest_weekly`.

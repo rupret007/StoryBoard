@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import type { Prisma } from "../generated/prisma/client";
 import type { StripeWebhookEvent } from "./stripe-webhook-signature";
 
 export type StripeWebhookAck = {
@@ -8,14 +9,16 @@ export type StripeWebhookAck = {
 };
 
 type StripeEventProcessor = (
-  event: StripeWebhookEvent
+  event: StripeWebhookEvent,
+  tx?: Prisma.TransactionClient
 ) => Promise<StripeWebhookAck> | StripeWebhookAck;
 
 /**
  * Inbound Stripe event intake. Signature verification and the event-id
- * claim happen in the webhook controller before this runs. This does not
- * apply invoice payments or call Stripe — StoryBoard still records money
- * through the existing manual payment path.
+ * claim happen in the webhook controller before this runs. Processors that
+ * persist durable work must use the same transaction the claim committed
+ * `appliedAt` on. This does not apply invoice payments or call Stripe —
+ * StoryBoard still records money through the existing manual payment path.
  */
 @Injectable()
 export class StripeWebhookService {
@@ -27,8 +30,11 @@ export class StripeWebhookService {
     this.processor = processor;
   }
 
-  async process(event: StripeWebhookEvent): Promise<StripeWebhookAck> {
-    return this.processor(event);
+  async process(
+    event: StripeWebhookEvent,
+    tx?: Prisma.TransactionClient
+  ): Promise<StripeWebhookAck> {
+    return this.processor(event, tx);
   }
 
   private acknowledge(event: StripeWebhookEvent): StripeWebhookAck {

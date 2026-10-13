@@ -1,5 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import type { Prisma } from "../generated/prisma/client";
 import { StripeWebhookEventStatus } from "../generated/prisma/enums";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -26,6 +27,8 @@ export function isStripeWebhookInFlightError(
   );
 }
 
+export type StripeWebhookWork<T> = (tx: Prisma.TransactionClient) => Promise<T>;
+
 export type StripeWebhookRunResult<T> =
   | { duplicate: false; result: T }
   | { duplicate: true };
@@ -35,6 +38,14 @@ type ClaimOutcome =
   | { outcome: "duplicate" }
   | { outcome: "in_flight" };
 
+type LockedEventRow = {
+  id: string;
+  status: StripeWebhookEventStatus;
+  leaseOwner: string;
+  leaseExpiresAt: Date;
+  appliedAt: Date | null;
+};
+
 @Injectable()
 export class StripeWebhookIdempotencyService {
   private readonly log = new Logger(StripeWebhookIdempotencyService.name);
@@ -43,49 +54,59 @@ export class StripeWebhookIdempotencyService {
 
   /**
    * Claim a Stripe event id after signature verification.
+   * Claim, handler work, `appliedAt`, and `completed` commit in one
+   * serializable transaction that holds the row lock for the handler.
    * Completed rows and rows with `appliedAt` are durable duplicates.
    * An unexpired processing lease with no apply is in-flight (retry).
-   * An expired unapplied processing lease can be reclaimed.
+   * An expired unapplied processing lease can be reclaimed only when the
+   * previous owner is no longer holding the row lock.
    */
   async runOnce<T>(
     eventId: string,
-    work: () => Promise<T>,
+    work: StripeWebhookWork<T>,
     eventType?: string | null
   ): Promise<StripeWebhookRunResult<T>> {
-    const claimed = await this.claim(eventId, eventType);
-    if (claimed.outcome === "in_flight") {
-      throw new StripeWebhookInFlightError(eventId);
-    }
-    if (claimed.outcome === "duplicate") {
-      return { duplicate: true };
-    }
-
-    const { leaseOwner } = claimed;
-    let sideEffectFinished = false;
     try {
-      const result = await work();
-      sideEffectFinished = true;
-      await this.markApplied(eventId, leaseOwner);
-      await this.markCompleted(eventId, leaseOwner);
-      return { duplicate: false, result };
+      return await this.prisma.client.$transaction(
+        async (tx) => {
+          const claimed = await this.claim(tx, eventId, eventType);
+          if (claimed.outcome === "in_flight") {
+            throw new StripeWebhookInFlightError(eventId);
+          }
+          if (claimed.outcome === "duplicate") {
+            await this.promoteApplied(tx, eventId);
+            return { duplicate: true };
+          }
+
+          const { leaseOwner } = claimed;
+          await this.markApplied(tx, eventId, leaseOwner);
+          const result = await work(tx);
+          await this.markCompleted(tx, eventId, leaseOwner);
+          return { duplicate: false, result };
+        },
+        { isolationLevel: "Serializable" }
+      );
     } catch (error) {
-      if (!sideEffectFinished) {
-        await this.expireLease(eventId, leaseOwner, error);
-      } else {
-        this.log.warn(
-          `stripe webhook ${eventId} side effect succeeded but the completed mark failed; leaving the applied claim in place`
-        );
+      if (isStripeWebhookInFlightError(error)) {
+        throw error;
+      }
+      if (isTransactionConflict(error) || isLockNotAvailable(error)) {
+        throw new StripeWebhookInFlightError(eventId);
       }
       throw error;
     }
   }
 
-  private async claim(eventId: string, eventType?: string | null): Promise<ClaimOutcome> {
+  private async claim(
+    tx: Prisma.TransactionClient,
+    eventId: string,
+    eventType?: string | null
+  ): Promise<ClaimOutcome> {
     const now = new Date();
     const leaseOwner = randomUUID();
     const leaseExpiresAt = new Date(now.getTime() + STRIPE_WEBHOOK_CLAIM_LEASE_MS);
     try {
-      await this.prisma.client.stripeWebhookEvent.create({
+      await tx.stripeWebhookEvent.create({
         data: {
           eventId,
           status: StripeWebhookEventStatus.processing,
@@ -97,12 +118,29 @@ export class StripeWebhookIdempotencyService {
       });
       return { outcome: "claimed", leaseOwner };
     } catch (error) {
+      if (isLockNotAvailable(error)) {
+        return { outcome: "in_flight" };
+      }
       if (!isUniqueConstraintError(error)) {
         throw error;
       }
     }
 
-    const reclaimed = await this.prisma.client.stripeWebhookEvent.updateMany({
+    const locked = await this.lockEventRow(tx, eventId);
+    if (locked === "busy") {
+      return { outcome: "in_flight" };
+    }
+    if (!locked) {
+      throw new Error("stripe webhook claim disappeared after unique conflict");
+    }
+    if (locked.status === StripeWebhookEventStatus.completed || locked.appliedAt) {
+      return { outcome: "duplicate" };
+    }
+    if (locked.leaseExpiresAt > now) {
+      return { outcome: "in_flight" };
+    }
+
+    const reclaimed = await tx.stripeWebhookEvent.updateMany({
       where: {
         eventId,
         status: StripeWebhookEventStatus.processing,
@@ -119,22 +157,43 @@ export class StripeWebhookIdempotencyService {
     if (reclaimed.count === 1) {
       return { outcome: "claimed", leaseOwner };
     }
-
-    const existing = await this.prisma.client.stripeWebhookEvent.findUnique({
-      where: { eventId }
-    });
-    if (!existing) {
-      throw new Error("stripe webhook claim disappeared after unique conflict");
-    }
-    if (existing.status === StripeWebhookEventStatus.completed || existing.appliedAt) {
-      await this.promoteApplied(eventId);
-      return { outcome: "duplicate" };
-    }
     return { outcome: "in_flight" };
   }
 
-  private async markApplied(eventId: string, leaseOwner: string): Promise<void> {
-    const updated = await this.prisma.client.stripeWebhookEvent.updateMany({
+  private async lockEventRow(
+    tx: Prisma.TransactionClient,
+    eventId: string
+  ): Promise<LockedEventRow | "busy" | null> {
+    try {
+      const rows = await tx.$queryRaw<LockedEventRow[]>`
+        SELECT "id", "status", "leaseOwner", "leaseExpiresAt", "appliedAt"
+        FROM "StripeWebhookEvent"
+        WHERE "eventId" = ${eventId}
+        FOR UPDATE NOWAIT
+      `;
+      const row = rows[0];
+      if (!row) {
+        return null;
+      }
+      return {
+        ...row,
+        leaseExpiresAt: new Date(row.leaseExpiresAt),
+        appliedAt: row.appliedAt ? new Date(row.appliedAt) : null
+      };
+    } catch (error) {
+      if (isLockNotAvailable(error)) {
+        return "busy";
+      }
+      throw error;
+    }
+  }
+
+  private async markApplied(
+    tx: Prisma.TransactionClient,
+    eventId: string,
+    leaseOwner: string
+  ): Promise<void> {
+    const updated = await tx.stripeWebhookEvent.updateMany({
       where: {
         eventId,
         leaseOwner,
@@ -151,12 +210,17 @@ export class StripeWebhookIdempotencyService {
     }
   }
 
-  private async markCompleted(eventId: string, leaseOwner: string): Promise<void> {
-    const updated = await this.prisma.client.stripeWebhookEvent.updateMany({
+  private async markCompleted(
+    tx: Prisma.TransactionClient,
+    eventId: string,
+    leaseOwner: string
+  ): Promise<void> {
+    const updated = await tx.stripeWebhookEvent.updateMany({
       where: {
         eventId,
         leaseOwner,
-        status: StripeWebhookEventStatus.processing
+        status: StripeWebhookEventStatus.processing,
+        appliedAt: { not: null }
       },
       data: {
         status: StripeWebhookEventStatus.completed,
@@ -169,9 +233,9 @@ export class StripeWebhookIdempotencyService {
     }
   }
 
-  private async promoteApplied(eventId: string): Promise<void> {
+  private async promoteApplied(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
     try {
-      await this.prisma.client.stripeWebhookEvent.updateMany({
+      await tx.stripeWebhookEvent.updateMany({
         where: {
           eventId,
           status: StripeWebhookEventStatus.processing,
@@ -190,37 +254,33 @@ export class StripeWebhookIdempotencyService {
       );
     }
   }
-
-  private async expireLease(
-    eventId: string,
-    leaseOwner: string,
-    error: unknown
-  ): Promise<void> {
-    const message = error instanceof Error ? error.message : String(error);
-    try {
-      await this.prisma.client.stripeWebhookEvent.updateMany({
-        where: {
-          eventId,
-          leaseOwner,
-          status: StripeWebhookEventStatus.processing,
-          appliedAt: null
-        },
-        data: {
-          leaseExpiresAt: new Date(0),
-          lastError: message.slice(0, 500)
-        }
-      });
-    } catch (expireError) {
-      const detail = expireError instanceof Error ? expireError.message : String(expireError);
-      this.log.warn(
-        `stripe webhook lease expire failed after handler error (${message.slice(0, 200)}): ${detail}`
-      );
-    }
-  }
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
   return Boolean(
     error && typeof error === "object" && "code" in error && error.code === "P2002"
   );
+}
+
+function isTransactionConflict(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && "code" in error && error.code === "P2034"
+  );
+}
+
+function isLockNotAvailable(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const code = "code" in error ? String(error.code) : "";
+  if (code === "55P03") {
+    return true;
+  }
+  const meta =
+    "meta" in error && error.meta && typeof error.meta === "object" ? error.meta : null;
+  if (meta && "code" in meta && String(meta.code) === "55P03") {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /lock_not_available|could not obtain lock/i.test(message);
 }
