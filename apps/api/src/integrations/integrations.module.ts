@@ -6,6 +6,9 @@ import { buildAdapterRegistry } from "./build-registry";
 import { SecretBox } from "./crypto/secret-box";
 import { IntegrationsGoogleLinkController } from "./google-oauth.controller";
 import { IntegrationsStatusController } from "./integrations-status.controller";
+import { StripeWebhookController } from "./stripe-webhook.controller";
+import { StripeWebhookService } from "./stripe-webhook.service";
+import { WebhookIdempotencyService } from "./webhook-idempotency.service";
 
 /** @deprecated Prefer thinking of this as the adapter registry; name kept for stable wiring */
 export const MOCK_ADAPTERS = "MOCK_ADAPTERS";
@@ -15,9 +18,12 @@ export const MOCK_ADAPTERS = "MOCK_ADAPTERS";
   imports: [ConfigModule, AuthModule],
   controllers: [
     IntegrationsStatusController,
-    IntegrationsGoogleLinkController
+    IntegrationsGoogleLinkController,
+    StripeWebhookController
   ],
   providers: [
+    WebhookIdempotencyService,
+    StripeWebhookService,
     {
       provide: SecretBox,
       inject: [ConfigService],
@@ -52,6 +58,12 @@ export const MOCK_ADAPTERS = "MOCK_ADAPTERS";
         })
     }
   ],
-  exports: [MOCK_ADAPTERS, AdapterRegistryResolver, SecretBox]
+  exports: [
+    MOCK_ADAPTERS,
+    AdapterRegistryResolver,
+    SecretBox,
+    WebhookIdempotencyService,
+    StripeWebhookService
+  ]
 })
 export class IntegrationsModule {}

@@ -23,7 +23,8 @@ export class CsrfOriginGuard implements CanActivate {
       path.startsWith("/auth/operator/google/callback") ||
       path.startsWith("/auth/google/callback") ||
       path.startsWith("/auth/dev/login") ||
-      path.startsWith("/integrations/telegram/webhook")
+      path.startsWith("/integrations/telegram/webhook") ||
+      path.startsWith("/integrations/stripe/webhook")
     ) {
       return true;
     }

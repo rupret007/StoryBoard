@@ -59,8 +59,8 @@ On **`Artist`**:
 
 | Job name | Payload | Trigger |
 | -------- | ------- | ------- |
-| `invite.send` | `inviteId`, `artistId`, `acceptUrl`, `inviteeEmail`, `artistName`, `role` | After **owner** creates an invite (HTTP path already owner-only). Job id `invite:<inviteId>`. |
-| `approval.notify` | `artistId`, `approvalId`, `event` (`created` \| `approved` \| `rejected` \| `executed` \| `failed`) | After approval create / approve / reject / execution success or failure. |
+| `invite.send` | `inviteId`, `artistId`, `acceptUrl`, `inviteeEmail`, `artistName`, `role` | After **owner** creates an invite (HTTP path already owner-only). Job id `invite__<inviteId>` (colon-free so BullMQ accepts it; same invite id remains a duplicate). |
+| `approval.notify` | `artistId`, `approvalId`, `event` (`created` \| `approved` \| `rejected` \| `executed` \| `failed`) | After approval create / approve / reject / execution success or failure. Job id `approval__<approvalId>__<event>__<occurredAtMs>` (colon-free; unique per event occurrence). |
 | `membership.invite_accepted` | `artistId`, `inviteeEmail`, `role` | After successful invite accept. |
 | `integration.connection_changed` | `artistId`, `provider` | After Google integration OAuth callback persists connection. |
 | `task.check-overdue` | `{}` | **Repeatable** (default every 6h when worker enabled). Scans artists with overdue tasks; honors **per-artist** `workflowOverdueGraceDays`. |
@@ -82,7 +82,7 @@ On **`Artist`**:
 ## Phase 5B — Telegram inbound registration
 
 - **Owner-only:** `POST /workflow/telegram/registration-token` creates a **single-use**, **time-bounded** registration token (stored hashed as **`TelegramRegistrationToken`**). Prior unconsumed tokens for the artist are cleared.
-- **Webhook:** `POST /integrations/telegram/webhook` (no session cookie; optional **`TELEGRAM_WEBHOOK_SECRET`**) processes Telegram **`Update`** JSON and only binds chat id when **`/start <payload>`** matches a valid token. Audits: **`telegram.registration.token_created`**, **`telegram.registration.bound`**, **`telegram.registration.failed`**.
+- **Webhook:** `POST /integrations/telegram/webhook` (no session cookie; optional **`TELEGRAM_WEBHOOK_SECRET`**) claims Telegram **`update_id`** first (`InboundWebhookClaim`), then processes **`Update`** JSON and only binds chat id when **`/start <payload>`** matches a valid token. A duplicate delivery of the same `update_id` returns **200** without a second handler run. Audits: **`telegram.registration.token_created`**, **`telegram.registration.bound`**, **`telegram.registration.failed`**.
 - **UI:** Notifications page — **Generate Telegram link**, copy, open; manual **Target chat id** remains as fallback.
 - **Details:** `docs/telegram-alerts.md`.
 
@@ -110,6 +110,7 @@ On **`Artist`**:
 - `Artist.telegramUrgentEnabled`, `telegramChatId`, `telegramNotifyCategories` — phase 5A (owner-configured Telegram routing).
 - `TelegramUrgentDedupe` — `artistId`, `dedupeKey`, `sentAt`, `lastError` (phase 5A).
 - `TelegramRegistrationToken` — short-lived hashed tokens for inbound **`/start`** binding (phase 5B).
+- `InboundWebhookClaim` — unique `(provider, eventId)` claim-first rows for Telegram `update_id` and Stripe `evt_` deliveries (`attempted` then `processed`; failed handlers delete the claim so the provider can retry).
 - `WorkflowNotification` — `recipientOperatorId`, `artistId`, `kind`, `title`,
   `body`, `readAt`, `metadata`.
 - `WorkflowNotificationKind` includes `digest_daily`, `digest_weekly`.

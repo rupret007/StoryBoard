@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { AuditModule } from "../audit/audit.module";
+import { IntegrationsModule } from "../integrations/integrations.module";
 import { OperationalIntelligenceModule } from "../operational-intelligence/operational-intelligence.module";
 import { TasksModule } from "../tasks/tasks.module";
 import { MembershipNotifyTargetsService } from "./membership-notify-targets.service";
@@ -15,7 +16,7 @@ import { TelegramWebhookController } from "./telegram-webhook.controller";
 import { WorkflowTelegramService } from "./workflow-telegram.service";
 
 @Module({
-  imports: [AuditModule, TasksModule, AuthModule, OperationalIntelligenceModule],
+  imports: [AuditModule, TasksModule, AuthModule, IntegrationsModule, OperationalIntelligenceModule],
   controllers: [
     WorkflowNotificationsController,
     WorkflowSettingsController,

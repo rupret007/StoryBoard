@@ -86,7 +86,7 @@ test("development still allows mutating requests without Origin", () => {
   );
 });
 
-test("OAuth and Telegram webhook callbacks stay CSRF-exempt", () => {
+test("OAuth and provider webhook callbacks stay CSRF-exempt", () => {
   const guard = new csrfMod.CsrfOriginGuard(
     config({
       NODE_ENV: "production",
@@ -98,6 +98,16 @@ test("OAuth and Telegram webhook callbacks stay CSRF-exempt", () => {
       httpContext({
         method: "POST",
         url: "/integrations/telegram/webhook",
+        headers: {}
+      })
+    ),
+    true
+  );
+  assert.equal(
+    guard.canActivate(
+      httpContext({
+        method: "POST",
+        url: "/integrations/stripe/webhook",
         headers: {}
       })
     ),

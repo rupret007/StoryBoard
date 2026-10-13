@@ -8,6 +8,12 @@ import { ConfigService } from "@nestjs/config";
 import { Queue, Worker } from "bullmq";
 import Redis from "ioredis";
 import { WorkflowJobProcessorService } from "../workflow-automation/workflow-job-processor.service";
+import {
+  approvalNotifyJobId,
+  inviteSendJobId,
+  STORYBOARD_JOB_IDS,
+  type ApprovalNotifyEvent
+} from "./storyboard-job-ids";
 
 export const STORYBOARD_ENRICHMENT_QUEUE = "storyboard-enrichment";
 
@@ -52,20 +58,20 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
           {},
           {
             repeat: { every: repeatMs },
-            jobId: "repeat-task-check-overdue"
+            jobId: STORYBOARD_JOB_IDS.taskCheckOverdue
           }
         )
         .catch((e) =>
           this.log.warn(`schedule task.check-overdue failed: ${String(e)}`)
         );
-      if (this.config.get<boolean>("GMAIL_REPLY_SYNC_ENABLED")) void this.queue.add("booking-replies.sync", {}, { repeat: { every: replySyncMs }, jobId: "repeat-booking-replies-sync" }).catch((e) => this.log.warn(`schedule booking-replies.sync failed: ${String(e)}`));
+      if (this.config.get<boolean>("GMAIL_REPLY_SYNC_ENABLED")) void this.queue.add("booking-replies.sync", {}, { repeat: { every: replySyncMs }, jobId: STORYBOARD_JOB_IDS.bookingRepliesSync }).catch((e) => this.log.warn(`schedule booking-replies.sync failed: ${String(e)}`));
       void this.queue
         .add(
           "followup.check-stale",
           {},
           {
             repeat: { every: repeatMs },
-            jobId: "repeat-followup-check-stale"
+            jobId: STORYBOARD_JOB_IDS.followupCheckStale
           }
         )
         .catch((e) =>
@@ -77,7 +83,7 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
           {},
           {
             repeat: { every: repeatMs },
-            jobId: "repeat-urgent-telegram-scan"
+            jobId: STORYBOARD_JOB_IDS.urgentTelegramScan
           }
         )
         .catch((e) =>
@@ -89,7 +95,7 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
           {},
           {
             repeat: { every: digestDailyMs },
-            jobId: "repeat-digest-daily"
+            jobId: STORYBOARD_JOB_IDS.digestDaily
           }
         )
         .catch((e) =>
@@ -101,7 +107,7 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
           {},
           {
             repeat: { every: digestWeeklyMs },
-            jobId: "repeat-digest-weekly"
+            jobId: STORYBOARD_JOB_IDS.digestWeekly
           }
         )
         .catch((e) =>
@@ -113,7 +119,7 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
           {},
           {
             repeat: { every: managerScheduleScanMs },
-            jobId: "repeat-manager-schedule-scan"
+            jobId: STORYBOARD_JOB_IDS.managerScheduleScan
           }
         )
         .catch((e) =>
@@ -159,21 +165,31 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
     await this.queue.add(
       "invite.send",
       { ...input },
-      { jobId: `invite:${input.inviteId}` }
+      { jobId: inviteSendJobId(input.inviteId) }
     );
   }
 
   async enqueueApprovalNotify(input: {
     artistId: string;
     approvalId: string;
-    event: "created" | "approved" | "rejected" | "executed" | "failed";
+    event: ApprovalNotifyEvent;
+    occurredAtMs?: number;
   }) {
     if (!this.queue) {
       return;
     }
-    await this.queue.add("approval.notify", input, {
-      jobId: `approval:${input.approvalId}:${input.event}:${Date.now()}`
-    });
+    const occurredAtMs = input.occurredAtMs ?? Date.now();
+    await this.queue.add(
+      "approval.notify",
+      {
+        artistId: input.artistId,
+        approvalId: input.approvalId,
+        event: input.event
+      },
+      {
+        jobId: approvalNotifyJobId(input.approvalId, input.event, occurredAtMs)
+      }
+    );
   }
 
   async enqueueMembershipInviteAccepted(input: {

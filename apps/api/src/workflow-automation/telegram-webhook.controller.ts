@@ -9,13 +9,16 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { FastifyRequest } from "fastify";
+import { telegramUpdateId } from "../integrations/inbound-webhook-ids";
+import { WebhookIdempotencyService } from "../integrations/webhook-idempotency.service";
 import { TelegramRegistrationService } from "./telegram-registration.service";
 
 @Controller("integrations/telegram")
 export class TelegramWebhookController {
   constructor(
     private readonly config: ConfigService,
-    private readonly registration: TelegramRegistrationService
+    private readonly registration: TelegramRegistrationService,
+    private readonly idempotency: WebhookIdempotencyService
   ) {}
 
   @Post("webhook")
@@ -32,7 +35,14 @@ export class TelegramWebhookController {
     }
 
     const body = req.body;
-    await this.registration.handleWebhookUpdate(body);
-    return { ok: true };
+    const eventId = telegramUpdateId(body);
+    if (!eventId) {
+      return { ok: true };
+    }
+
+    const outcome = await this.idempotency.runOnce("telegram", eventId, () =>
+      this.registration.handleWebhookUpdate(body)
+    );
+    return { ok: true, duplicate: outcome.duplicate };
   }
 }

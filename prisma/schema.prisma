@@ -172,6 +172,11 @@ enum WorkflowNotificationKind {
   invoice_overdue
 }
 
+enum InboundWebhookClaimStatus {
+  attempted
+  processed
+}
+
 enum BandMode {
   original
   cover_event
@@ -911,6 +916,24 @@ model TelegramUrgentDedupe {
 
   @@unique([artistId, dedupeKey])
   @@index([artistId])
+}
+
+/// Claim-first inbound webhook deliveries (Telegram update_id, Stripe event id).
+/// The unique row is inserted as `attempted` before handler work so concurrent
+/// retries share at most one process attempt. `processed` is set only after
+/// the handler finishes. A failed handler deletes the claim so the provider
+/// can retry. Not artist-scoped: provider event ids are already unique.
+model InboundWebhookClaim {
+  id          String                    @id @default(cuid())
+  provider    String
+  eventId     String
+  status      InboundWebhookClaimStatus @default(attempted)
+  processedAt DateTime?
+  lastError   String?
+  createdAt   DateTime                  @default(now())
+
+  @@unique([provider, eventId])
+  @@index([provider])
 }
 
 model ArtistMembershipInvite {

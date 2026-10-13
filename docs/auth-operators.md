@@ -66,11 +66,15 @@ All artist-scoped HTTP routes require a valid session and membership **except**:
 - `GET /auth/operator/google/start`, `GET /auth/operator/google/callback` (state-bound), `GET /auth/dev/login`
 - `GET /auth/google/callback` (integration OAuth return)
 - `POST /integrations/telegram/webhook` (optionally authenticated by
-  `X-Telegram-Bot-Api-Secret-Token`; accepts `/start` registration only)
+  `X-Telegram-Bot-Api-Secret-Token`; accepts `/start` registration only;
+  claim-first on `update_id`)
+- `POST /integrations/stripe/webhook` (optionally authenticated by
+  `X-Stripe-Webhook-Secret`; claim-first on Stripe `evt_` id; does not
+  apply invoice payments)
 
 ## CSRF posture (minimal)
 
-- Global **`CsrfOriginGuard`**: for **`POST` / `PUT` / `PATCH` / `DELETE`**, **`Origin` or `Referer`** must match **`WEB_URL`** in production (plus **`http://localhost:3000`** in development). OAuth callbacks and the Telegram webhook listed above are excluded; the webhook uses its optional provider secret instead.
+- Global **`CsrfOriginGuard`**: for **`POST` / `PUT` / `PATCH` / `DELETE`**, **`Origin` or `Referer`** must match **`WEB_URL`** in production (plus **`http://localhost:3000`** in development). OAuth callbacks and the Telegram/Stripe webhooks listed above are excluded; those webhooks use their optional provider secrets instead.
 - **Deferred**: double-submit CSRF tokens, rotating sessions on every mutation, `__Host-` cookie prefixes for single-host deploys, per-route exclusions for machine clients.
 
 ## Audit actor identity

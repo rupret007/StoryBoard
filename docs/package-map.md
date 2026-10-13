@@ -127,7 +127,8 @@ The NestJS orchestration backend. Current responsibilities:
   finalized settlement expenses fail closed). Booking apply-terms uses
   `booking_terms_apply_v1` so null analysis cannot wipe recorded fees.
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
-- Global **`CsrfOriginGuard`** (OAuth + Telegram webhook paths excluded for POST)
+- **Inbound webhooks:** claim-first `InboundWebhookClaim` on Telegram `update_id` and Stripe `evt_` id (`webhook-idempotency.service.ts`, `POST /integrations/stripe/webhook`). Stripe intake acknowledges events and does not apply invoice payments.
+- Global **`CsrfOriginGuard`** (OAuth + Telegram/Stripe webhook paths excluded for POST)
 
 Further responsibilities remain product-driven (more adapters, richer tests, etc.).
 
