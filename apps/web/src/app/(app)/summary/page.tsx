@@ -7,6 +7,7 @@ import type {
   Task,
   WeeklySummary
 } from "@/lib/types";
+import { describeTaskDueDate } from "@storyboard/shared";
 import Link from "next/link";
 
 export default async function SummaryPage() {
@@ -144,12 +145,23 @@ export default async function SummaryPage() {
             Overdue (due date)
           </h2>
           <ul className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]">
-            {summary.overdueTasks.map((t: Task) => (
-              <li key={t.id} className="flex items-center gap-2">
-                <Badge variant="danger">due</Badge>
-                {t.title}
-              </li>
-            ))}
+            {summary.overdueTasks.map((t: Task) => {
+              const due = describeTaskDueDate(t.dueAt);
+              return (
+                <li key={t.id} className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Badge variant="danger">due</Badge>
+                    <span className="min-w-0">{t.title}</span>
+                  </span>
+                  <span
+                    className="shrink-0 tabular-nums text-[var(--text-muted)]"
+                    data-testid={`summary-overdue-due-${t.id}`}
+                  >
+                    {due ? `${due.label} (overdue)` : "—"}
+                  </span>
+                </li>
+              );
+            })}
             {summary.overdueTasks.length === 0 ? (
               <li className="text-[var(--text-muted)]">None</li>
             ) : null}
