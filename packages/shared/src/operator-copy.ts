@@ -4,6 +4,9 @@ export const COMMAND_HELPER_COPY =
 export const NO_AUTO_PITCH_COPY =
   "StoryBoard will not send a pitch; a person still books";
 
+export const BOOKING_TERMS_APPLIED_COPY =
+  `Reviewed terms were saved on the linked opportunity. Null analysis fields did not erase recorded fees. Next: confirm this booking when you are ready. ${NO_AUTO_PITCH_COPY}.`;
+
 export const TEAM_INVITE_HEADING = "Invite a bandmate";
 
 export const TEAM_ROLE_HINTS = {

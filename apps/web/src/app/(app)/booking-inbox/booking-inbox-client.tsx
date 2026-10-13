@@ -1,6 +1,6 @@
 "use client";
 
-import { bookingReplyNextAction, describeTaskDueDate } from "@storyboard/shared";
+import { BOOKING_TERMS_APPLIED_COPY, bookingReplyNextAction, describeTaskDueDate } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { CalendarClock, CheckCircle2, MailSearch, RefreshCw, Sparkles } from "lucide-react";
 import { useState } from "react";
@@ -76,7 +76,7 @@ export function BookingInboxClient({
       await reload();
       let message = "Reply updated.";
       if (path === "apply-terms") {
-        message = "Reviewed terms were saved on the linked opportunity. Null analysis fields did not erase recorded fees. Next: confirm this booking when Travis is ready.";
+        message = BOOKING_TERMS_APPLIED_COPY;
       } else if (path === "prepare-approval") {
         message = "Reply draft is waiting in Approvals.";
       } else if (path === "prepare-confirmation") {

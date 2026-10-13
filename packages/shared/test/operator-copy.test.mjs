@@ -107,11 +107,26 @@ test("S08 booking next-action and stage review name no individual", () => {
   assert.match(nextAction, /When you are ready/);
   assert.doesNotMatch(nextAction, /When Travis is ready|Travis books|Travis still books|when he is ready/);
 
+  const review = source("packages/shared/src/booking-stage-review.ts");
+  assert.match(review, /export function bookingStageReviewCopy/);
+  assert.match(review, /NO_AUTO_PITCH_COPY/);
+  assert.match(review, /after the booker has confirmed/);
+  assert.match(review, /When you are ready, closing ends this opportunity's pipeline history/);
+  assert.match(review, /When you are ready, this records the stage only/);
+  assert.doesNotMatch(review, /Travis/);
+
+  assert.ok(shared.BOOKING_TERMS_APPLIED_COPY.includes(shared.NO_AUTO_PITCH_COPY));
+  assert.match(shared.BOOKING_TERMS_APPLIED_COPY, /when you are ready/i);
+  assert.doesNotMatch(shared.BOOKING_TERMS_APPLIED_COPY, /Travis/);
+
   const editor = source("apps/web/src/app/(app)/booking/booking-stage-editor.tsx");
-  assert.match(editor, /NO_AUTO_PITCH_COPY/);
-  assert.match(editor, /after the booker has confirmed/);
-  assert.match(editor, /When you are ready/);
+  assert.match(editor, /bookingStageReviewCopy/);
   assert.doesNotMatch(editor, /Travis/);
+  assert.doesNotMatch(editor, /NO_AUTO_PITCH_COPY/);
+
+  const inbox = source("apps/web/src/app/(app)/booking-inbox/booking-inbox-client.tsx");
+  assert.match(inbox, /BOOKING_TERMS_APPLIED_COPY/);
+  assert.doesNotMatch(inbox, /Travis/);
 
   const showControl = source("apps/web/src/app/(app)/operations/operations-show-control.tsx");
   assert.match(showControl, /No recorded action right now/);

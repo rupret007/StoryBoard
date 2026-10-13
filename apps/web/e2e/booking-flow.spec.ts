@@ -1859,6 +1859,8 @@ test("booking stage review explains confirmation and writes only after reviewed 
   await choice.selectOption("closed");
   await editor.getByRole("button", { name: "Review stage change", exact: true }).click();
   await expect(editor).toContainText("does not cancel an existing gig");
+  await expect(editor.getByTestId("booking-stage-review-copy")).toContainText("When you are ready");
+  await expect(editor.getByTestId("booking-stage-review-copy")).toContainText("StoryBoard will not send a pitch; a person still books");
   await editor.getByRole("button", { name: "Save reviewed stage" }).click();
   await expect(page.getByText("E2E Travis booked this room: recorded as closed.", { exact: true })).toBeVisible();
   expect((await artistApi<{ status: string }>(page, artistId, `/events/${gig!.id}`)).status).toBe("confirmed");
