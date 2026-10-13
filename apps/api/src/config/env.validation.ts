@@ -83,6 +83,14 @@ const envSchema = z
     TELEGRAM_WEBHOOK_SECRET: z
       .string()
       .optional()
+      .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
+    STRIPE_SECRET_KEY: z
+      .string()
+      .optional()
+      .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
+    STRIPE_WEBHOOK_SECRET: z
+      .string()
+      .optional()
       .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined))
   })
   .superRefine((data, ctx) => {
@@ -118,6 +126,14 @@ const envSchema = z
           message:
             "TELEGRAM_WEBHOOK_SECRET is required in production when TELEGRAM_BOT_TOKEN is set",
           path: ["TELEGRAM_WEBHOOK_SECRET"]
+        });
+      }
+      if (data.STRIPE_SECRET_KEY && !data.STRIPE_WEBHOOK_SECRET) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "STRIPE_WEBHOOK_SECRET is required in production when STRIPE_SECRET_KEY is set",
+          path: ["STRIPE_WEBHOOK_SECRET"]
         });
       }
     }
