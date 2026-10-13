@@ -24,6 +24,7 @@ export * from "./booking-target";
 export * from "./booking-follow-up";
 export * from "./task-due-date";
 export * from "./settlement-splits";
+export * from "./money";
 export * from "./count";
 export * from "./recorded-show-time";
 export * from "./app-nav";
