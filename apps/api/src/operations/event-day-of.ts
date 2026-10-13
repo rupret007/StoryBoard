@@ -30,6 +30,9 @@ export type EventDayOfView = {
   openInvoiceBalanceMinor: number;
   depositRemainingMinor: number;
   currency: string;
+  currencyReviewInvoiceCount: number;
+  currencyReviewCurrencies: string[];
+  currencyReviewMessage: string | null;
   evidenceIds: string[];
 };
 
@@ -49,9 +52,29 @@ export type EventDayOfInput = {
   participants: { id: string; bandMemberId: string; response: string }[];
   tasks: { id: string; title: string; status: string; dueAt: Date | null }[];
   schedule: { id: string; title: string; startsAt: Date; endsAt: Date | null; location: string | null; notes: string | null }[];
-  deals: { id: string; status: string; offerAmountMinor?: number | null; depositMinor?: number | null; invoices?: { id: string; totalMinor: number; paidMinor: number }[] }[];
-  invoices: { id: string; totalMinor: number; paidMinor: number }[];
+  deals: { id: string; status: string; currency?: string; offerAmountMinor?: number | null; depositMinor?: number | null; invoices?: DayOfInvoice[] }[];
+  invoices: DayOfInvoice[];
 };
+
+type DayOfInvoice = { id: string; totalMinor: number; paidMinor: number; status?: string; currency?: string };
+
+function recordedCurrency(value: string | undefined | null): string | null {
+  const recorded = value?.trim();
+  return recorded ? recorded.toUpperCase() : null;
+}
+
+function matchesEventCurrency(value: string | undefined | null, eventCurrency: string): boolean {
+  const recorded = recordedCurrency(value);
+  return recorded === null || recorded === recordedCurrency(eventCurrency);
+}
+
+function describeCurrencyReview(count: number, currencies: string[], eventCurrency: string): string | null {
+  if (count <= 0) return null;
+  const listed = currencies.join(", ");
+  const noun = count === 1 ? "invoice" : "invoices";
+  const verb = count === 1 ? "It is" : "They are";
+  return `${count} ${noun} in ${listed} need${count === 1 ? "s" : ""} review. ${verb} not included in these ${eventCurrency} totals; StoryBoard did not convert ${count === 1 ? "it" : "them"}.`;
+}
 
 function unique(values: string[]) { return [...new Set(values)]; }
 function fixedTimeline(event: EventDayOfInput) {
@@ -96,12 +119,20 @@ export function deterministicEventDayOf(event: EventDayOfInput, readiness: ShowR
   const responseByMember = new Map(event.participants.map((participant) => [participant.bandMemberId, participant.response]));
   const unavailableCount = activeMembers.filter((member) => responseByMember.get(member.id) === "unavailable").length;
   const unresolvedAvailabilityCount = activeMembers.filter((member) => !responseByMember.has(member.id) || ["unknown", "tentative"].includes(responseByMember.get(member.id) ?? "unknown")).length;
-  const acceptedDeal = event.deals.find((deal) => ["accepted", "completed"].includes(deal.status));
+  const eventCurrency = recordedCurrency(event.currency) ?? event.currency;
+  const matchingDeals = event.deals.filter((deal) => matchesEventCurrency(deal.currency, eventCurrency));
+  const acceptedDeal = matchingDeals.find((deal) => ["accepted", "completed"].includes(deal.status));
   const expectedFeeMinor = acceptedDeal?.offerAmountMinor ?? event.guaranteeMinor ?? null;
-  const expectedDepositMinor = Math.max(event.depositMinor ?? 0, ...event.deals.map((deal) => deal.depositMinor ?? 0), 0);
+  const expectedDepositMinor = Math.max(event.depositMinor ?? 0, ...matchingDeals.map((deal) => deal.depositMinor ?? 0), 0);
   const invoices = [...event.invoices, ...event.deals.flatMap((deal) => deal.invoices ?? [])].filter((invoice, index, rows) => rows.findIndex((candidate) => candidate.id === invoice.id) === index);
-  const recordedPaidMinor = invoices.reduce((sum, invoice) => sum + invoice.paidMinor, 0);
-  const openInvoiceBalanceMinor = invoices.reduce((sum, invoice) => sum + Math.max(0, invoice.totalMinor - invoice.paidMinor), 0);
+  const payableInvoices = invoices.filter((invoice) => invoice.status !== "voided");
+  const compatibleInvoices = payableInvoices.filter((invoice) => matchesEventCurrency(invoice.currency, eventCurrency));
+  const foreignInvoices = payableInvoices.filter((invoice) => !matchesEventCurrency(invoice.currency, eventCurrency));
+  const currencyReviewCurrencies = unique(foreignInvoices.map((invoice) => recordedCurrency(invoice.currency)).filter((value): value is string => Boolean(value))).sort();
+  const currencyReviewInvoiceCount = foreignInvoices.length;
+  const currencyReviewMessage = describeCurrencyReview(currencyReviewInvoiceCount, currencyReviewCurrencies, eventCurrency);
+  const recordedPaidMinor = compatibleInvoices.reduce((sum, invoice) => sum + invoice.paidMinor, 0);
+  const openInvoiceBalanceMinor = compatibleInvoices.reduce((sum, invoice) => sum + Math.max(0, invoice.totalMinor - invoice.paidMinor), 0);
   const depositRemainingMinor = Math.max(0, expectedDepositMinor - recordedPaidMinor);
   const nextAction = mode === "closed"
     ? event.status === "cancelled" ? "Record the cancellation outcome and any buyer, payment, or rescheduling follow-up." : "Record the settlement, attendance, notes, and relationship follow-up."
@@ -138,6 +169,9 @@ export function deterministicEventDayOf(event: EventDayOfInput, readiness: ShowR
     openInvoiceBalanceMinor,
     depositRemainingMinor,
     currency: event.currency,
+    currencyReviewInvoiceCount,
+    currencyReviewCurrencies,
+    currencyReviewMessage,
     evidenceIds: unique([event.id, ...readiness.evidenceIds, ...openTasks.map((task) => task.id), ...invoices.map((invoice) => invoice.id), ...event.schedule.map((item) => item.id)])
   };
 }

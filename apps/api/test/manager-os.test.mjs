@@ -4158,6 +4158,8 @@ test("day-of intelligence identifies the next checkpoint, work pressure, and rec
   assert.equal(view.expectedFeeMinor, 100000);
   assert.equal(view.depositRemainingMinor, 0);
   assert.equal(view.openInvoiceBalanceMinor, 75000);
+  assert.equal(view.currencyReviewInvoiceCount, 0);
+  assert.equal(view.currencyReviewMessage, null);
   assert.match(view.nextAction, /Confirm parking/);
   assert.ok(view.evidenceIds.includes("invoice-a"));
   event.status = "cancelled";
@@ -4166,6 +4168,36 @@ test("day-of intelligence identifies the next checkpoint, work pressure, and rec
   assert.equal(closed.nextCheckpoint, null);
   assert.ok(closed.timeline.every((item) => item.state !== "next"));
   assert.match(closed.nextAction, /cancellation outcome/i);
+});
+
+test("day-of money excludes voided invoices and foreign-currency payments from event-currency totals", () => {
+  const readiness = { eventId: "event-day", title: "Show", startsAt: "2026-07-12T21:00:00.000Z", daysUntil: 0, score: 80, status: "attention", confidence: 1, confidenceLabel: "high", observedAt: now.toISOString(), headline: "Open.", nextAction: null, categories: [], gaps: [], evidenceIds: ["event-day"] };
+  const sharedInvoice = { id: "invoice-shared", totalMinor: 100000, paidMinor: 25000, status: "partially_paid", currency: "USD" };
+  const mixed = {
+    id: "event-day", status: "confirmed", startsAt: new Date("2026-07-12T21:00:00.000Z"), endsAt: null,
+    loadInAt: new Date("2026-07-12T17:00:00.000Z"), soundcheckAt: null, doorsAt: null, setAt: null, curfewAt: null,
+    guaranteeMinor: 100000, depositMinor: 10000, currency: "USD",
+    participants: [], tasks: [], schedule: [],
+    deals: [{ id: "deal-a", status: "accepted", currency: "USD", offerAmountMinor: 100000, depositMinor: 10000, invoices: [sharedInvoice] }],
+    invoices: [
+      sharedInvoice,
+      { id: "voided-usd", totalMinor: 10000, paidMinor: 0, status: "voided", currency: "USD" },
+      { id: "paid-eur", totalMinor: 10000, paidMinor: 10000, status: "paid", currency: "EUR" }
+    ]
+  };
+  const view = eventDayOf.deterministicEventDayOf(mixed, readiness, [], now);
+  assert.equal(view.recordedPaidMinor, 25000);
+  assert.equal(view.openInvoiceBalanceMinor, 75000);
+  assert.equal(view.depositRemainingMinor, 0);
+  assert.equal(view.currencyReviewInvoiceCount, 1);
+  assert.deepEqual(view.currencyReviewCurrencies, ["EUR"]);
+  assert.match(view.currencyReviewMessage, /did not convert/i);
+  const voidedOnly = eventDayOf.deterministicEventDayOf({ ...mixed, deals: [], invoices: [{ id: "voided-usd", totalMinor: 10000, paidMinor: 0, status: "voided", currency: "USD" }] }, readiness, [], now);
+  assert.equal(voidedOnly.openInvoiceBalanceMinor, 0);
+  assert.equal(voidedOnly.depositRemainingMinor, 10000);
+  const foreignPaid = eventDayOf.deterministicEventDayOf({ ...mixed, deals: [], invoices: [{ id: "paid-eur", totalMinor: 10000, paidMinor: 10000, status: "paid", currency: "EUR" }] }, readiness, [], now);
+  assert.equal(foreignPaid.recordedPaidMinor, 0);
+  assert.equal(foreignPaid.depositRemainingMinor, 10000);
 });
 
 test("day-of does not invent a live window when the recorded end is missing", () => {
