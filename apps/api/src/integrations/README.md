@@ -27,6 +27,11 @@ Round 2 deliberately ships manual/mock payment and signature handling. The
 generated agreement and settlement PDFs are immutable StoryBoard snapshots.
 Automatic binary upload/attachment is not yet implemented: delivery prepares a
 Gmail draft that references the snapshot, and a human attaches the reviewed
-file. Add Drive binary upload, Gmail attachment, Stripe, or e-signature only as
-new adapter methods with credential, webhook, cost, compliance, idempotency,
-and real-provider acceptance coverage.
+file. Add Drive binary upload, Gmail attachment, Stripe payment application, or
+e-signature only as new adapter methods with credential, webhook, cost,
+compliance, idempotency, and real-provider acceptance coverage.
+
+`POST /integrations/stripe/webhook` is signed intake only: it verifies
+`Stripe-Signature` before any durable `StripeWebhookEvent` claim, uses a
+processing lease so abandoned deliveries can retry, and does not apply invoice
+payments.

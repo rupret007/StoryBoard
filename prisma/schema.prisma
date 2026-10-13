@@ -172,6 +172,11 @@ enum WorkflowNotificationKind {
   invoice_overdue
 }
 
+enum StripeWebhookEventStatus {
+  processing
+  completed
+}
+
 enum BandMode {
   original
   cover_event
@@ -911,6 +916,23 @@ model TelegramUrgentDedupe {
 
   @@unique([artistId, dedupeKey])
   @@index([artistId])
+}
+
+/// Stripe `evt_` deliveries claimed after signature verification.
+/// `processing` rows hold a short lease so a crash before complete can be
+/// retried; `completed` is set only after the handler finishes. A successful
+/// side effect that fails to mark completed must not release this row.
+model StripeWebhookEvent {
+  id             String                   @id @default(cuid())
+  eventId        String                   @unique
+  status         StripeWebhookEventStatus @default(processing)
+  leaseExpiresAt DateTime
+  eventType      String?
+  lastError      String?
+  createdAt      DateTime                 @default(now())
+  completedAt    DateTime?
+
+  @@index([status, leaseExpiresAt])
 }
 
 model ArtistMembershipInvite {
