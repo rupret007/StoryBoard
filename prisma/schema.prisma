@@ -172,6 +172,11 @@ enum WorkflowNotificationKind {
   invoice_overdue
 }
 
+enum TelegramUrgentDedupeStatus {
+  attempted
+  sent
+}
+
 enum BandMode {
   original
   cover_event
@@ -902,12 +907,13 @@ model TelegramRegistrationToken {
 }
 
 model TelegramUrgentDedupe {
-  id        String   @id @default(cuid())
+  id        String                      @id @default(cuid())
   artistId  String
   dedupeKey String
-  sentAt    DateTime @default(now())
+  status    TelegramUrgentDedupeStatus  @default(attempted)
+  sentAt    DateTime?
   lastError String?
-  artist    Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  artist    Artist                      @relation(fields: [artistId], references: [id], onDelete: Cascade)
 
   @@unique([artistId, dedupeKey])
   @@index([artistId])
