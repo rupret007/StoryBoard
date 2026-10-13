@@ -13,6 +13,18 @@ test("booking choices preserve the hold negotiation loop and terminal stages", (
   assert.deepEqual(nextBookingStages("__proto__"), []);
 });
 
+test("closed-stage review shows NO_AUTO_PITCH_COPY and the person-shaped phrase", () => {
+  const closed = bookingStageReviewCopy("closed");
+  assert.equal(
+    closed,
+    `When you are ready, closing ends this opportunity's pipeline history. It does not cancel an existing gig or send a message. ${NO_AUTO_PITCH_COPY}.`
+  );
+  assert.match(closed, /When you are ready/);
+  assert.ok(closed.includes(NO_AUTO_PITCH_COPY), `closed review missing NO_AUTO_PITCH_COPY: ${JSON.stringify(closed)}`);
+  assert.doesNotMatch(closed, /Travis/i);
+  assert.doesNotMatch(closed, /\.\./);
+});
+
 test("every booking-stage review line renders shared no-auto-pitch copy and names no individual", () => {
   const confirmed = bookingStageReviewCopy("confirmed");
   assert.match(confirmed, /after the booker has confirmed/);
