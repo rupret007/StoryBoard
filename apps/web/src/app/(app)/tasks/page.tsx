@@ -8,6 +8,7 @@ export default async function TasksPage() {
   let opportunities: BookingOpportunity[] = [];
   let members: BandMember[] = [];
   let loadError = "";
+  let contextError = "";
   let artistId: string | null = null;
   let currentOperatorId: string | null = null;
   let canManage = false;
@@ -18,15 +19,26 @@ export default async function TasksPage() {
     currentOperatorId = me.operator.id;
     const role = me.memberships.find((membership) => membership.artistId === artistId)?.role;
     canManage = role === "owner" || role === "member";
-    [tasks, opportunities, members] = await Promise.all([
+  } catch {
+    loadError = "Tasks could not be loaded. Reload to see your commitments.";
+  }
+  if (artistId) {
+    const [taskRows, opportunityRows, memberRows] = await Promise.allSettled([
       serverApiFetch<Task[]>("/tasks", { cache: "no-store", artistId }),
       serverApiFetch<BookingOpportunity[]>("/booking-opportunities", {
         cache: "no-store", artistId
       }),
       serverApiFetch<BandMember[]>("/manager/members", { cache: "no-store", artistId })
     ]);
-  } catch {
-    loadError = "Tasks could not be loaded. Reload to see your commitments.";
+    if (taskRows.status === "fulfilled") tasks = taskRows.value;
+    else loadError = "Tasks could not be loaded. Reload to see your commitments.";
+    if (opportunityRows.status === "fulfilled") opportunities = opportunityRows.value;
+    else contextError = "Booking links could not be loaded. Recorded tasks are still shown.";
+    if (memberRows.status === "fulfilled") members = memberRows.value;
+    else {
+      const lineup = "The lineup could not be loaded. Owner assignment may be incomplete.";
+      contextError = contextError ? `${contextError} ${lineup}` : lineup;
+    }
   }
 
   return (
@@ -35,7 +47,7 @@ export default async function TasksPage() {
         title="Tasks"
         description="Own, schedule, unblock, and close the band's commitments without silently losing the reason work slipped."
       />
-      <TasksClient key={artistId ?? "unverified"} artistId={artistId} currentOperatorId={currentOperatorId} canManage={canManage && !loadError} initialTasks={tasks} opportunities={opportunities} members={members} loadError={loadError} />
+      <TasksClient key={artistId ?? "unverified"} artistId={artistId} currentOperatorId={currentOperatorId} canManage={canManage && !loadError} initialTasks={tasks} opportunities={opportunities} members={members} loadError={loadError} contextError={contextError} />
     </div>
   );
 }

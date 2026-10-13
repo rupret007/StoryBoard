@@ -30,6 +30,9 @@ export function ProspectsClient({
   artistId,
   accessState,
   loadError,
+  contextError,
+  profileAvailable,
+  prospectsAvailable,
   initialProfile,
   initialProspects,
   contacts,
@@ -38,6 +41,9 @@ export function ProspectsClient({
   artistId: string | null;
   accessState: "manage" | "read_only" | "unavailable";
   loadError: string | null;
+  contextError: string;
+  profileAvailable: boolean;
+  prospectsAvailable: boolean;
   initialProfile: BookingProfileResponse;
   initialProspects: BookingProspect[];
   contacts: Contact[];
@@ -45,6 +51,7 @@ export function ProspectsClient({
 }) {
   const router = useRouter();
   const canManage = Boolean(artistId) && accessState === "manage" && !loadError;
+  const canEditProfile = canManage && profileAvailable;
   const apiFetch = scopedApiFetch(canManage ? artistId : null);
   const profile = initialProfile.profile;
   const [profileForm, setProfileForm] = useState({
@@ -81,6 +88,7 @@ export function ProspectsClient({
 
   async function saveProfile(event: React.FormEvent) {
     event.preventDefault();
+    if (!canEditProfile) return;
     setBusy("profile");
     setError(null);
     try {
@@ -211,7 +219,7 @@ export function ProspectsClient({
 
   return (
     <div className="space-y-6">
-      {loadError ? <div role="alert" className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"><p>{loadError}</p><button type="button" className="sb-btn-secondary mt-2" onClick={() => router.refresh()}>Retry loading</button></div> : !canManage ? <p className="text-sm text-[var(--text-muted)]">{accessState === "read_only" ? "You have read-only access. An owner or member can update the booking profile and leads." : "Changes are unavailable until your band permissions can be verified."}</p> : null}
+      {loadError ? <div role="alert" className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"><p>{loadError}</p><button type="button" className="sb-btn-secondary mt-2" onClick={() => router.refresh()}>Retry loading</button></div> : contextError ? <div role="alert" className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"><p>{contextError}</p><button type="button" className="sb-btn-secondary mt-2" onClick={() => router.refresh()}>Reload context</button></div> : !canManage ? <p className="text-sm text-[var(--text-muted)]">{accessState === "read_only" ? "You have read-only access. An owner or member can update the booking profile and leads." : "Changes are unavailable until your band permissions can be verified."}</p> : null}
       {error ? (
         <p role="alert" className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
           {error}
@@ -227,8 +235,8 @@ export function ProspectsClient({
               Save a draft any time. Complete market, genres, capacity, and pitch before converting a lead or starting a campaign.
             </p>
           </div>
-          <Badge variant={initialProfile.ready ? "success" : "warning"}>
-            {initialProfile.ready ? "Ready to book" : `Missing: ${initialProfile.missing.join(", ")}`}
+          <Badge variant={profileAvailable && initialProfile.ready ? "success" : "warning"}>
+            {profileAvailable ? (initialProfile.ready ? "Ready to book" : `Missing: ${initialProfile.missing.join(", ")}`) : "Profile unavailable"}
           </Badge>
         </div>
         <form className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={(event) => void saveProfile(event)}>
@@ -241,7 +249,7 @@ export function ProspectsClient({
           <label className="block md:col-span-2"><span className="sb-label">Short booking pitch</span><textarea className="sb-input mt-1.5 min-h-20" value={profileForm.bookingPitch} onChange={(event) => setProfileForm({ ...profileForm, bookingPitch: event.target.value })} placeholder="A concise, human pitch: sound, draw, recent proof, and why this room or buyer fits." /></label>
           <FormInput label="Press kit URL (optional)" type="url" value={profileForm.pressKitUrl} onChange={(pressKitUrl) => setProfileForm({ ...profileForm, pressKitUrl })} />
           <FormInput label="Live video URL (optional)" type="url" value={profileForm.liveVideoUrl} onChange={(liveVideoUrl) => setProfileForm({ ...profileForm, liveVideoUrl })} />
-          <div className="md:col-span-2"><button className="sb-btn-secondary" disabled={busy === "profile"} type="submit"><Save className="h-4 w-4" />Save profile</button></div>
+          <div className="md:col-span-2"><button className="sb-btn-secondary" disabled={!canEditProfile || busy === "profile"} type="submit"><Save className="h-4 w-4" />Save profile</button></div>
         </form>
       </SurfaceCard>
 
@@ -275,7 +283,7 @@ export function ProspectsClient({
         <SurfaceCard>
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Prospects</h2>
           <p className="mt-1 text-xs text-[var(--text-muted)]">Qualify a lead before conversion. Venue conversion creates a physical venue; festivals, private events, and corporate buyers stay venue-less.</p>
-          {!loadError && initialProspects.length === 0 ? <div className="mt-5"><EmptyState title="No prospects yet" description="Search a market or add a manual lead — private and corporate buyers are manual-first." icon={<Sparkles className="h-6 w-6" />} /></div> : <div className="mt-4 space-y-3">{initialProspects.map((prospect) => <ProspectRow key={prospect.id} artistId={canManage ? artistId : null} prospect={prospect} contacts={contacts} busy={busy} onStatus={updateStatus} onConvert={convert} onLinked={() => router.refresh()} />)}</div>}
+          {!loadError && !prospectsAvailable ? <p role="alert" className="mt-5 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">Prospects could not be loaded. An unavailable list does not mean this band has no leads.</p> : !loadError && initialProspects.length === 0 ? <div className="mt-5"><EmptyState title="No prospects yet" description="Search a market or add a manual lead — private and corporate buyers are manual-first." icon={<Sparkles className="h-6 w-6" />} /></div> : <div className="mt-4 space-y-3">{initialProspects.map((prospect) => <ProspectRow key={prospect.id} artistId={canManage ? artistId : null} prospect={prospect} contacts={contacts} busy={busy} onStatus={updateStatus} onConvert={convert} onLinked={() => router.refresh()} />)}</div>}
         </SurfaceCard>
 
         <div className="space-y-6">
