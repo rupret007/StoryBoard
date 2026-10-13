@@ -41,7 +41,22 @@ export function readStripeRawBody(req: FastifyRequest): string | null {
 
 type StripeWebhookPayloadStream = AsyncIterable<unknown> & {
   destroy?: (error?: Error) => void;
+  pause?: () => void;
+  socket?: { writable?: boolean } | null;
 };
+
+/**
+ * Stop consuming inbound bytes without tearing down an HTTP socket.
+ * `IncomingMessage.destroy()` closes the connection before Fastify can flush 413;
+ * mock streams have no socket, so they still get `destroy()`.
+ */
+function stopStripeWebhookPayload(payload: StripeWebhookPayloadStream): void {
+  if (payload.socket && typeof payload.pause === "function") {
+    payload.pause();
+    return;
+  }
+  payload.destroy?.();
+}
 
 export async function bufferStripeWebhookRawBody(
   payload: StripeWebhookPayloadStream,
@@ -50,7 +65,7 @@ export async function bufferStripeWebhookRawBody(
   const maxBytes = options.maxBytes ?? STRIPE_WEBHOOK_MAX_RAW_BODY_BYTES;
   const declared = options.declaredLength;
   if (typeof declared === "number" && Number.isFinite(declared) && declared > maxBytes) {
-    payload.destroy?.();
+    stopStripeWebhookPayload(payload);
     throw new StripeWebhookPayloadTooLargeError();
   }
 
@@ -67,7 +82,7 @@ export async function bufferStripeWebhookRawBody(
     chunks.push(buffer);
   }
   if (overLimit) {
-    payload.destroy?.();
+    stopStripeWebhookPayload(payload);
     throw new StripeWebhookPayloadTooLargeError();
   }
   return Buffer.concat(chunks, size);
@@ -75,17 +90,25 @@ export async function bufferStripeWebhookRawBody(
 
 /** Capture the exact posted bytes for Stripe-Signature verification. */
 export function attachStripeWebhookRawBody(fastify: FastifyInstance): void {
-  fastify.addHook("preParsing", async (request, _reply, payload) => {
+  fastify.addHook("preParsing", async (request, reply, payload) => {
     const path = String(request.url ?? "").split("?")[0] ?? "";
     if (!path.startsWith(STRIPE_WEBHOOK_PATH)) {
       return payload;
     }
     const declared = Number(request.headers["content-length"]);
-    const buffer = await bufferStripeWebhookRawBody(
-      payload,
-      Number.isFinite(declared) ? { declaredLength: declared } : {}
-    );
-    (request as StripeWebhookRequest).rawBody = buffer.toString("utf8");
-    return Readable.from(buffer);
+    try {
+      const buffer = await bufferStripeWebhookRawBody(
+        payload,
+        Number.isFinite(declared) ? { declaredLength: declared } : {}
+      );
+      (request as StripeWebhookRequest).rawBody = buffer.toString("utf8");
+      return Readable.from(buffer);
+    } catch (error) {
+      if (isStripeWebhookPayloadTooLargeError(error)) {
+        // Same as Fastify's own bodyLimit path: write 413, then close leftover inbound bytes.
+        reply.header("connection", "close");
+      }
+      throw error;
+    }
   });
 }

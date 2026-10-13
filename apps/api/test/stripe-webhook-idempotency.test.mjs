@@ -5,6 +5,8 @@ import { createHmac } from "node:crypto";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+const http = require("node:http");
+const Fastify = require("fastify");
 const {
   StripeWebhookIdempotencyService,
   STRIPE_WEBHOOK_CLAIM_LEASE_MS
@@ -835,4 +837,107 @@ test("unauthenticated webhook rejects an oversize raw body with HTTP 413 and doe
   );
   assert.equal(processorCalls, 0);
   assert.equal(store.rows.size, 0);
+});
+
+function postWebhookSocket(port, { body, headers, trickleAfterBytes } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: rawBody.STRIPE_WEBHOOK_PATH,
+        method: "POST",
+        headers
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          resolve({
+            statusCode: res.statusCode,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString("utf8")
+          });
+        });
+      }
+    );
+    req.setTimeout(5000, () => {
+      req.destroy(new Error("Stripe webhook socket request timed out"));
+    });
+    req.on("error", reject);
+    if (typeof trickleAfterBytes === "number") {
+      req.write(body.subarray(0, trickleAfterBytes));
+      setTimeout(() => {
+        req.end(body.subarray(trickleAfterBytes));
+      }, 25);
+      return;
+    }
+    req.end(body);
+  });
+}
+
+async function withLiveWebhookServer(run) {
+  const app = Fastify({ logger: false });
+  rawBody.attachStripeWebhookRawBody(app);
+  app.post(rawBody.STRIPE_WEBHOOK_PATH, async () => ({ ok: true }));
+  await app.listen({ host: "127.0.0.1", port: 0 });
+  try {
+    await run(app.server.address().port);
+  } finally {
+    await app.close();
+  }
+}
+
+test("oversized Stripe webhook over a real socket returns HTTP 413", async () => {
+  const oversize = Buffer.alloc(rawBody.STRIPE_WEBHOOK_MAX_RAW_BODY_BYTES + 1, 0x78);
+  await withLiveWebhookServer(async (port) => {
+    const declared = await postWebhookSocket(port, {
+      body: oversize,
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(oversize.length)
+      }
+    });
+    assert.equal(declared.statusCode, 413);
+    assert.match(declared.body, /Stripe webhook payload exceeds size limit/);
+    assert.equal(declared.headers.connection, "close");
+
+    const trickled = await postWebhookSocket(port, {
+      body: oversize,
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(oversize.length)
+      },
+      trickleAfterBytes: 16 * 1024
+    });
+    assert.equal(trickled.statusCode, 413);
+    assert.match(trickled.body, /Stripe webhook payload exceeds size limit/);
+    assert.equal(trickled.headers.connection, "close");
+
+    const chunked = await postWebhookSocket(port, {
+      body: oversize,
+      headers: {
+        "content-type": "application/json",
+        "transfer-encoding": "chunked"
+      }
+    });
+    assert.equal(chunked.statusCode, 413);
+    assert.match(chunked.body, /Stripe webhook payload exceeds size limit/);
+    assert.equal(chunked.headers.connection, "close");
+  });
+});
+
+test("in-limit Stripe webhook over a real socket is delivered to the handler", async () => {
+  const body = Buffer.from('{"id":"evt_socket_ok"}');
+  await withLiveWebhookServer(async (port) => {
+    const response = await postWebhookSocket(port, {
+      body,
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(body.length)
+      }
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body, JSON.stringify({ ok: true }));
+  });
 });
