@@ -17,7 +17,12 @@ function fixture(existingRole, invitedRole) {
   const client = {
     artistMembershipInvite: {
       findUnique: async () => invite,
-      update: async ({ data }) => Object.assign(invite, data)
+      updateMany: async ({ where, data }) => {
+        if (where.id !== invite.id || where.status !== invite.status ||
+            (where.expiresAt?.gt && invite.expiresAt <= where.expiresAt.gt)) return { count: 0 };
+        Object.assign(invite, data);
+        return { count: 1 };
+      }
     },
     artistMembership: {
       upsert: async ({ where, create, update }) => {
