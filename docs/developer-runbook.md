@@ -994,7 +994,12 @@ duplicate create fails closed. Finalized settlements freeze included expenses
 and the PDF snapshot; later event expense creates and patches fail closed.
 Agreement
 templates include a not-legal-advice disclaimer and must be activated by an
-owner. Current Gmail delivery prepares a reviewed draft referencing the
+owner. PDFs have a one-page limit of 58 rows after wrapping at 92 characters,
+including the title, blank rows, and disclaimer. Oversized content returns a
+400 validation error before any agreement/snapshot write or success audit;
+shorten the title or reviewed text, or remove extra blank lines, while keeping
+all required terms and disclaimers. Pagination is not supported.
+Current Gmail delivery prepares a reviewed draft referencing the
 StoryBoard PDF snapshot; attach the PDF manually until binary Drive/Gmail
 adapters are implemented and provider-tested.
 
