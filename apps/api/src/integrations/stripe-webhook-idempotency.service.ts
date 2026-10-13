@@ -105,25 +105,14 @@ export class StripeWebhookIdempotencyService {
     const now = new Date();
     const leaseOwner = randomUUID();
     const leaseExpiresAt = new Date(now.getTime() + STRIPE_WEBHOOK_CLAIM_LEASE_MS);
-    try {
-      await tx.stripeWebhookEvent.create({
-        data: {
-          eventId,
-          status: StripeWebhookEventStatus.processing,
-          leaseOwner,
-          leaseExpiresAt,
-          eventType: eventType ?? null,
-          lastError: null
-        }
-      });
+    const inserted = await this.insertClaimIfAbsent(tx, {
+      eventId,
+      leaseOwner,
+      leaseExpiresAt,
+      eventType: eventType ?? null
+    });
+    if (inserted) {
       return { outcome: "claimed", leaseOwner };
-    } catch (error) {
-      if (isLockNotAvailable(error)) {
-        return { outcome: "in_flight" };
-      }
-      if (!isUniqueConstraintError(error)) {
-        throw error;
-      }
     }
 
     const locked = await this.lockEventRow(tx, eventId);
@@ -158,6 +147,47 @@ export class StripeWebhookIdempotencyService {
       return { outcome: "claimed", leaseOwner };
     }
     return { outcome: "in_flight" };
+  }
+
+  /**
+   * `INSERT ... ON CONFLICT DO NOTHING` does not abort the PostgreSQL
+   * transaction. Catching Prisma P2002 from `create()` would leave the
+   * transaction in 25P02, so duplicate acknowledgement and expired-claim
+   * recovery could not lock or inspect the existing row.
+   */
+  private async insertClaimIfAbsent(
+    tx: Prisma.TransactionClient,
+    input: {
+      eventId: string;
+      leaseOwner: string;
+      leaseExpiresAt: Date;
+      eventType: string | null;
+    }
+  ): Promise<boolean> {
+    const inserted = await tx.$queryRaw<Array<{ leaseOwner: string }>>`
+      INSERT INTO "StripeWebhookEvent" (
+        "id",
+        "eventId",
+        "status",
+        "leaseOwner",
+        "leaseExpiresAt",
+        "eventType",
+        "lastError",
+        "createdAt"
+      ) VALUES (
+        gen_random_uuid()::text,
+        ${input.eventId},
+        'processing'::"StripeWebhookEventStatus",
+        ${input.leaseOwner},
+        ${input.leaseExpiresAt},
+        ${input.eventType ?? null},
+        NULL,
+        NOW()
+      )
+      ON CONFLICT ("eventId") DO NOTHING
+      RETURNING "leaseOwner"
+    `;
+    return inserted.length === 1;
   }
 
   private async lockEventRow(
@@ -254,12 +284,6 @@ export class StripeWebhookIdempotencyService {
       );
     }
   }
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return Boolean(
-    error && typeof error === "object" && "code" in error && error.code === "P2002"
-  );
 }
 
 function isTransactionConflict(error: unknown): boolean {

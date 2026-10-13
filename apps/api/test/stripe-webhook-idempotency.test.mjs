@@ -137,6 +137,17 @@ function claimStore({
       const snapshotEffects = effects.map((effect) => ({ ...effect }));
       const held = [];
       let mutated = false;
+      let aborted = false;
+      const assertLive = () => {
+        if (aborted) {
+          throw Object.assign(
+            new Error(
+              "current transaction is aborted, commands ignored until end of transaction block"
+            ),
+            { code: "25P02" }
+          );
+        }
+      };
       const acquireLock = (eventId) => {
         if (held.includes(eventId)) {
           return;
@@ -147,16 +158,47 @@ function claimStore({
         locks.add(eventId);
         held.push(eventId);
       };
+      const insertClaim = async (eventId, leaseOwner, leaseExpiresAt, eventType) => {
+        acquireLock(eventId);
+        if (rows.has(eventId)) {
+          events.push("claim");
+          return [];
+        }
+        const created = await stripeWebhookEvent.create({
+          data: {
+            eventId,
+            leaseOwner,
+            leaseExpiresAt,
+            eventType,
+            status: "processing",
+            lastError: null
+          }
+        });
+        mutated = true;
+        return [{ leaseOwner: created.leaseOwner }];
+      };
       const tx = {
         stripeWebhookEvent: {
           create: async (args) => {
+            assertLive();
             acquireLock(args.data.eventId);
-            const created = await stripeWebhookEvent.create(args);
-            mutated = true;
-            return created;
+            try {
+              const created = await stripeWebhookEvent.create(args);
+              mutated = true;
+              return created;
+            } catch (error) {
+              if (error && typeof error === "object" && error.code === "P2002") {
+                aborted = true;
+              }
+              throw error;
+            }
           },
-          findUnique: stripeWebhookEvent.findUnique,
+          findUnique: async (args) => {
+            assertLive();
+            return stripeWebhookEvent.findUnique(args);
+          },
           updateMany: async (args) => {
+            assertLive();
             const updated = await stripeWebhookEvent.updateMany(args);
             if (updated.count > 0) {
               mutated = true;
@@ -164,14 +206,32 @@ function claimStore({
             return updated;
           }
         },
-        $queryRaw: async (_query, eventId) => {
+        $queryRaw: async (query, ...values) => {
+          assertLive();
+          const sql = Array.isArray(query) ? query.join("?") : String(query);
+          if (/INSERT/i.test(sql)) {
+            const [eventId, leaseOwner, leaseExpiresAt, eventType] = values;
+            return insertClaim(eventId, leaseOwner, leaseExpiresAt, eventType);
+          }
+          const eventId = values[0];
           acquireLock(eventId);
-          held.push(eventId);
           const row = rows.get(eventId);
           return row ? [{ ...row }] : [];
         },
+        $executeRaw: async (query, ...values) => {
+          assertLive();
+          const sql = Array.isArray(query) ? query.join("?") : String(query);
+          if (/StripeWebhookTestEffect/i.test(sql)) {
+            const effect = { eventId: values[0] };
+            effects.push(effect);
+            mutated = true;
+            return 1;
+          }
+          return 0;
+        },
         handlerEffect: {
           create: async ({ data }) => {
+            assertLive();
             const effect = { eventId: data.eventId };
             effects.push(effect);
             mutated = true;
