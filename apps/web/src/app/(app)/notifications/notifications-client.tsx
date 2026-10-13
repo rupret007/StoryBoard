@@ -225,11 +225,24 @@ export function NotificationsClient({
     });
   };
 
-  if (loading || !prefs || !escalation || !telegram) {
+  if (loading) {
     return (
-      <div className="flex items-center gap-2 text-[var(--text-muted)]">
+      <div className="flex items-center gap-2 text-[var(--text-muted)]" role="status">
         <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
         Loading notification settings…
+      </div>
+    );
+  }
+
+  if (!prefs || !escalation || !telegram) {
+    return (
+      <div className="space-y-4">
+        <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+          {error ?? "Notification settings could not be loaded. Reload to try again."}
+        </p>
+        <button type="button" className="sb-btn-secondary" onClick={() => void load()}>
+          Reload settings
+        </button>
       </div>
     );
   }

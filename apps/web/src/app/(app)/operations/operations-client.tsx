@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
-import { afterShowWriteAllowed, CATALOG_NON_VAULT_EMPTY_SETLIST_HINT, CATALOG_NON_VAULT_LIBRARY_INTRO, calendarDateToNoonUtcIso, catalogSourceLabel, catalogWorkspaceUsesVaultFraming, dateTimeLocalToIso, describeSongCatalogStatus, describeTaskDueDate, equalActiveMemberSplits, eventReadinessNextAction, formatRecordedShowTime, instantToDateTimeLocal, invoicePaymentNextAction, isValidIanaTimeZone, type OpsWorkspaceFocus, type OpsWorkspaceTab, sanitizeOperatorHref, settlementWorkspaceNextAction } from "@storyboard/shared";
+import { afterShowWriteAllowed, CATALOG_NON_VAULT_EMPTY_SETLIST_HINT, CATALOG_NON_VAULT_LIBRARY_INTRO, calendarDateToNoonUtcIso, catalogSourceLabel, catalogWorkspaceUsesVaultFraming, dateTimeLocalToIso, describeSongCatalogStatus, describeTaskDueDate, equalActiveMemberSplits, eventReadinessNextAction, formatRecordedShowTime, instantToDateTimeLocal, invoicePaymentNextAction, isValidIanaTimeZone, type OpsWorkspaceFocus, type OpsWorkspaceTab, parseCount, sanitizeOperatorHref, settlementWorkspaceNextAction } from "@storyboard/shared";
 import { MyAvailability } from "./my-availability";
 import { CatalogImportForm } from "./catalog-import-form";
 import { OperationsShowControl } from "./operations-show-control";
@@ -229,6 +229,7 @@ function EventAfterShowEditor({ event, expectedUpdatedAt, onReceipt, busy, creat
   const [grossRevenue, setGrossRevenue] = useState(dollars(event.grossRevenueMinor));
   const [postShowNotes, setPostShowNotes] = useState(event.postShowNotes ?? "");
   const [relationshipOutcome, setRelationshipOutcome] = useState(event.relationshipOutcome ?? "");
+  const [wrapError, setWrapError] = useState("");
   useEffect(() => {
     setAttendance(event.attendance?.toString() ?? "");
     setGrossRevenue(dollars(event.grossRevenueMinor));
@@ -241,9 +242,12 @@ function EventAfterShowEditor({ event, expectedUpdatedAt, onReceipt, busy, creat
     <form className="mt-4 space-y-3" onSubmit={(submit) => {
       submit.preventDefault();
       if (!expectedUpdatedAt || !write.allowed) return;
+      const parsedAttendance = parseCount(attendance);
+      if (!parsedAttendance.ok) { setWrapError(parsedAttendance.message); return; }
+      setWrapError("");
       void create(`/events/${event.id}/after-show`, {
         expectedUpdatedAt,
-        attendance: attendance === "" ? null : Number(attendance),
+        attendance: parsedAttendance.value,
         grossRevenueMinor: grossRevenue === "" ? null : Math.round(Number(grossRevenue) * 100),
         postShowNotes: postShowNotes.trim() || null,
         relationshipOutcome: relationshipOutcome.trim() || null
@@ -255,6 +259,7 @@ function EventAfterShowEditor({ event, expectedUpdatedAt, onReceipt, busy, creat
       <div className="grid gap-3 sm:grid-cols-2"><label><span className="sb-label">Attendance</span><input aria-label={`Attendance for ${event.title}`} className="sb-input mt-1.5" type="number" min="0" step="1" value={attendance} onChange={(change) => setAttendance(change.target.value)} /></label><label><span className="sb-label">Gross revenue ({event.currency})</span><input aria-label={`Gross revenue for ${event.title}`} className="sb-input mt-1.5" type="number" min="0" step="0.01" value={grossRevenue} onChange={(change) => setGrossRevenue(change.target.value)} /></label></div>
       <label className="block"><span className="sb-label">What happened and what should change?</span><textarea aria-label={`Post-show notes for ${event.title}`} className="sb-input mt-1.5 min-h-24" maxLength={5000} value={postShowNotes} onChange={(change) => setPostShowNotes(change.target.value)} placeholder="Draw, audience response, production issues, merch, promotion, and lessons for next time" /></label>
       <label className="block"><span className="sb-label">Buyer / venue relationship outcome</span><textarea aria-label={`Relationship outcome for ${event.title}`} className="sb-input mt-1.5 min-h-20" maxLength={1000} value={relationshipOutcome} onChange={(change) => setRelationshipOutcome(change.target.value)} placeholder="Invited back, requested follow-up, neutral, or relationship issue" /></label>
+      {wrapError ? <p role="alert" className="text-sm text-red-200">{wrapError} After-show facts were not saved.</p> : null}
       {!expectedUpdatedAt ? <p role="alert" className="text-sm text-amber-200">Refresh before saving. StoryBoard could not verify which after-show version you opened.</p> : null}
       <button type="submit" className="sb-btn-primary" disabled={busy || !expectedUpdatedAt || !write.allowed}>Save after-show facts</button>
     </form>
