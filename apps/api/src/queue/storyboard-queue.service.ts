@@ -8,6 +8,11 @@ import { ConfigService } from "@nestjs/config";
 import { Queue, Worker } from "bullmq";
 import Redis from "ioredis";
 import { WorkflowJobProcessorService } from "../workflow-automation/workflow-job-processor.service";
+import {
+  approvalNotifyJobId,
+  inviteSendJobId,
+  type ApprovalNotifyEvent
+} from "./storyboard-job-ids";
 
 export const STORYBOARD_ENRICHMENT_QUEUE = "storyboard-enrichment";
 
@@ -159,21 +164,35 @@ export class StoryboardQueueService implements OnModuleInit, OnModuleDestroy {
     await this.queue.add(
       "invite.send",
       { ...input },
-      { jobId: `invite:${input.inviteId}` }
+      { jobId: inviteSendJobId(input.inviteId) }
     );
   }
 
   async enqueueApprovalNotify(input: {
     artistId: string;
     approvalId: string;
-    event: "created" | "approved" | "rejected" | "executed" | "failed";
+    event: ApprovalNotifyEvent;
+    occurredAtMs?: number;
   }) {
     if (!this.queue) {
       return;
     }
-    await this.queue.add("approval.notify", input, {
-      jobId: `approval:${input.approvalId}:${input.event}:${Date.now()}`
-    });
+    const occurredAtMs = input.occurredAtMs ?? Date.now();
+    await this.queue.add(
+      "approval.notify",
+      {
+        artistId: input.artistId,
+        approvalId: input.approvalId,
+        event: input.event
+      },
+      {
+        jobId: approvalNotifyJobId(
+          input.approvalId,
+          input.event,
+          occurredAtMs
+        )
+      }
+    );
   }
 
   async enqueueMembershipInviteAccepted(input: {
