@@ -507,14 +507,15 @@ export class WorkflowJobProcessorService {
 
   private async taskCheckOverdue(job: Job) {
     void job;
+    const now = new Date();
+    const utcDayStart = taskOverdueUtcCutoff(now);
     const groups = await this.prisma.client.task.groupBy({
       by: ["artistId"],
       where: {
         status: { not: TaskStatus.done },
-        dueAt: { lt: taskOverdueUtcCutoff(new Date()) }
+        dueAt: { lt: utcDayStart }
       }
     });
-    const dayStart = startOfUtcDay(new Date());
     let notified = 0;
     const digestKind = WorkflowNotificationKind.task_overdue_digest;
     for (const g of groups) {
@@ -524,7 +525,8 @@ export class WorkflowJobProcessorService {
       });
       const overdue = await this.tasks.overdueByDueDate(
         g.artistId,
-        artist?.workflowOverdueGraceDays ?? null
+        artist?.workflowOverdueGraceDays ?? null,
+        now
       );
       if (overdue.length === 0) {
         continue;
@@ -555,7 +557,7 @@ export class WorkflowJobProcessorService {
           g.artistId,
           r.operatorId,
           digestKind,
-          dayStart
+          utcDayStart
         );
         if (already) {
           continue;
@@ -722,7 +724,8 @@ export class WorkflowJobProcessorService {
         artist.workflowStaleFollowupDays ?? globalStale;
       const overdue = await this.tasks.overdueByDueDate(
         artist.id,
-        artist.workflowOverdueGraceDays ?? null
+        artist.workflowOverdueGraceDays ?? null,
+        now
       );
       const stale = await this.tasks.followUpsOlderThan(artist.id, staleDays);
 

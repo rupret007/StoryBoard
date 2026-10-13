@@ -31,6 +31,38 @@ test("S09 a past UTC calendar day is still overdue", () => {
   assert.deepEqual(shared.taskOverdueUtcCutoff(now, 1), new Date("2026-09-14T00:00:00.000Z"));
 });
 
+const s15Now = new Date("2026-10-11T18:00:00.000Z");
+
+test("S15 cutoff is start of the current UTC day, not the clock instant or tomorrow", () => {
+  const cutoff = shared.taskOverdueUtcCutoff(s15Now);
+  assert.deepEqual(cutoff, new Date("2026-10-11T00:00:00.000Z"));
+  assert.notDeepEqual(cutoff, s15Now);
+  assert.notDeepEqual(cutoff, new Date("2026-10-12T00:00:00.000Z"));
+  assert.equal(new Date("2026-10-11T00:00:00.000Z") < s15Now, true);
+});
+
+test("S15 due today at midnight or noon is never overdue; yesterday is; tomorrow is not", () => {
+  assert.equal(shared.isTaskOverdueByUtcDay("2026-10-11T00:00:00.000Z", s15Now), false);
+  assert.equal(shared.isTaskOverdueByUtcDay("2026-10-11T12:00:00.000Z", s15Now), false);
+  assert.equal(shared.describeTaskDueDate("2026-10-11T00:00:00.000Z", s15Now)?.timing, "today");
+  assert.equal(shared.describeTaskDueDate("2026-10-11T12:00:00.000Z", s15Now)?.timing, "today");
+  assert.equal(shared.isTaskOverdueByUtcDay("2026-10-10T00:00:00.000Z", s15Now), true);
+  assert.equal(shared.isTaskOverdueByUtcDay("2026-10-10T12:00:00.000Z", s15Now), true);
+  assert.equal(shared.isTaskOverdueByUtcDay("2026-10-12T00:00:00.000Z", s15Now), false);
+  assert.equal(shared.isTaskOverdueByUtcDay("2026-10-12T12:00:00.000Z", s15Now), false);
+  assert.equal(shared.isTaskOverdueByUtcDay(null, s15Now), false);
+});
+
+test("S15 grace days subtract whole UTC calendar days from today's start", () => {
+  assert.deepEqual(shared.taskOverdueUtcCutoff(s15Now, 0), new Date("2026-10-11T00:00:00.000Z"));
+  assert.deepEqual(shared.taskOverdueUtcCutoff(s15Now, null), new Date("2026-10-11T00:00:00.000Z"));
+  assert.deepEqual(shared.taskOverdueUtcCutoff(s15Now, 1), new Date("2026-10-10T00:00:00.000Z"));
+  assert.deepEqual(shared.taskOverdueUtcCutoff(s15Now, 2), new Date("2026-10-09T00:00:00.000Z"));
+  const yesterdayNoon = new Date("2026-10-10T12:00:00.000Z");
+  assert.equal(yesterdayNoon < shared.taskOverdueUtcCutoff(s15Now, 0), true);
+  assert.equal(yesterdayNoon < shared.taskOverdueUtcCutoff(s15Now, 1), false);
+});
+
 test("S09 day-of, readiness, project readiness, insights, team-load, weekly briefing, and escalation use the UTC helper", () => {
   const dayOf = source("apps/api/src/operations/event-day-of.ts");
   assert.match(dayOf, /isTaskOverdueByUtcDay\(task\.dueAt, now\)/);
@@ -57,5 +89,7 @@ test("S09 day-of, readiness, project readiness, insights, team-load, weekly brie
 
   const escalation = source("apps/api/src/workflow-automation/workflow-job-processor.service.ts");
   assert.match(escalation, /overdueByDueDate/);
-  assert.match(escalation, /taskOverdueUtcCutoff/);
+  assert.match(escalation, /taskOverdueUtcCutoff\(now\)/);
+  assert.match(escalation, /dueAt: \{ lt: utcDayStart \}/);
+  assert.match(escalation, /overdueByDueDate\(\s*g\.artistId,\s*artist\?\.workflowOverdueGraceDays \?\? null,\s*now\s*\)/);
 });

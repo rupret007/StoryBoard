@@ -4144,7 +4144,11 @@ test("day-of intelligence identifies the next checkpoint, work pressure, and rec
     doorsAt: new Date("2026-07-12T20:00:00.000Z"), setAt: new Date("2026-07-12T21:00:00.000Z"), curfewAt: new Date("2026-07-12T23:00:00.000Z"),
     guaranteeMinor: 100000, depositMinor: 25000, currency: "USD",
     participants: [{ id: "participant-a", bandMemberId: "member-a", response: "available" }],
-    tasks: [{ id: "task-a", title: "Confirm parking", status: "todo", dueAt: new Date("2026-07-11T12:00:00.000Z") }],
+    tasks: [
+      { id: "task-a", title: "Confirm parking", status: "todo", dueAt: new Date("2026-07-11T12:00:00.000Z") },
+      { id: "task-today", title: "Advance later today", status: "todo", dueAt: new Date("2026-07-12T00:00:00.000Z") },
+      { id: "task-done", title: "Finished yesterday", status: "done", dueAt: new Date("2026-07-11T00:00:00.000Z") }
+    ],
     schedule: [],
     deals: [{ id: "deal-a", status: "accepted", offerAmountMinor: 100000, depositMinor: 25000, invoices: [{ id: "invoice-a", totalMinor: 100000, paidMinor: 25000, status: "partially_paid", currency: "USD" }] }],
     invoices: []
@@ -4154,7 +4158,9 @@ test("day-of intelligence identifies the next checkpoint, work pressure, and rec
   assert.equal(view.mode, "pre_show");
   assert.equal(view.nextCheckpoint.label, "Load-in");
   assert.equal(view.nextCheckpoint.minutesUntil, 300);
+  assert.equal(view.openTaskCount, 2);
   assert.equal(view.overdueTaskCount, 1);
+  assert.doesNotMatch(view.nextAction, /Advance later today/);
   assert.equal(view.expectedFeeMinor, 100000);
   assert.equal(view.depositRemainingMinor, 0);
   assert.equal(view.openInvoiceBalanceMinor, 75000);
