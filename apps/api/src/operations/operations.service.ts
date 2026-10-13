@@ -643,6 +643,15 @@ export class OperationsService {
             data: { paidMinor, status: paidMinor === invoice.totalMinor ? InvoiceStatus.paid : InvoiceStatus.partially_paid }
           });
           if (updated.count !== 1) throw new ConflictException("Invoice changed while payment was being recorded");
+          await this.audit.log({
+            artistId,
+            aggregateType: "PaymentRecord",
+            aggregateId: payment.id,
+            action: "invoice.payment_recorded",
+            actorLabel,
+            actorOperatorId,
+            metadata: { invoiceId, amountMinor: input.amountMinor, idempotencyKey: input.idempotencyKey }
+          }, tx);
           return { payment, created: true };
         }, { isolationLevel: "Serializable" });
       } catch (error) {
@@ -653,7 +662,6 @@ export class OperationsService {
       }
     }
     if (!result) throw new ConflictException("Invoice changed while payment was being recorded; try again");
-    if (result.created) await this.auditWrite(artistId, "PaymentRecord", result.payment.id, "invoice.payment_recorded", actorLabel, actorOperatorId, { invoiceId, amountMinor: input.amountMinor, idempotencyKey: input.idempotencyKey });
     return result.payment;
   }
 
