@@ -8,6 +8,7 @@ import { AuditService } from "../audit/audit.service";
 import { telegramSendMessageMock } from "../integrations/adapters/telegram/mock-telegram.adapter";
 import { telegramSendMessage } from "../integrations/adapters/telegram/real-telegram.adapter";
 import type { TelegramSendMessageResult } from "../integrations/adapters/telegram/telegram.types";
+import { TelegramUrgentDedupeStatus } from "../generated/prisma/enums";
 import { PrismaService } from "../prisma/prisma.service";
 import type { TelegramNotifyCategoryKey } from "./urgent-channel.constants";
 
@@ -20,15 +21,31 @@ export type TelegramUrgentSendResult =
     }
   | { ok: false; error: string };
 
+export type TelegramUrgentSendAdapters = {
+  sendReal: typeof telegramSendMessage;
+  sendMock: typeof telegramSendMessageMock;
+};
+
+const defaultSendAdapters: TelegramUrgentSendAdapters = {
+  sendReal: telegramSendMessage,
+  sendMock: telegramSendMessageMock
+};
+
 @Injectable()
 export class WorkflowTelegramService {
   private readonly log = new Logger(WorkflowTelegramService.name);
+  private sendAdapters: TelegramUrgentSendAdapters = defaultSendAdapters;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly config: ConfigService
   ) {}
+
+  /** Test seam: replace outbound adapters without a live Telegram call. */
+  useSendAdapters(adapters: TelegramUrgentSendAdapters): void {
+    this.sendAdapters = adapters;
+  }
 
   private botToken(): string | undefined {
     const t = this.config.get<string>("TELEGRAM_BOT_TOKEN")?.trim();
@@ -124,12 +141,8 @@ export class WorkflowTelegramService {
       };
     }
 
-    const existing = await this.prisma.client.telegramUrgentDedupe.findUnique({
-      where: {
-        artistId_dedupeKey: { artistId: input.artistId, dedupeKey: input.dedupeKey }
-      }
-    });
-    if (existing) {
+    const claimed = await this.claimDedupe(input.artistId, input.dedupeKey);
+    if (!claimed) {
       await this.audit.log({
         artistId: input.artistId,
         aggregateType: input.aggregateType ?? "Artist",
@@ -158,17 +171,18 @@ export class WorkflowTelegramService {
     let sendResult: TelegramSendMessageResult;
     try {
       if (token) {
-        sendResult = await telegramSendMessage({
+        sendResult = await this.sendAdapters.sendReal({
           botToken: token,
           chatId,
           text: fullText
         });
       } else {
-        sendResult = telegramSendMessageMock({ chatId, text: fullText });
+        sendResult = await this.sendAdapters.sendMock({ chatId, text: fullText });
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.log.warn(`telegram send failed: ${message}`);
+      await this.markAttemptError(input.artistId, input.dedupeKey, message);
       await this.audit.log({
         artistId: input.artistId,
         aggregateType: input.aggregateType ?? "Artist",
@@ -185,13 +199,29 @@ export class WorkflowTelegramService {
       return { ok: false, error: message };
     }
 
-    await this.prisma.client.telegramUrgentDedupe.create({
-      data: {
+    try {
+      await this.markDedupeSent(input.artistId, input.dedupeKey);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.log.warn(`telegram dedupe persist-sent failed: ${message}`);
+      await this.markAttemptError(input.artistId, input.dedupeKey, message);
+      await this.audit.log({
         artistId: input.artistId,
-        dedupeKey: input.dedupeKey,
-        lastError: null
-      }
-    });
+        aggregateType: input.aggregateType ?? "Artist",
+        aggregateId: input.aggregateId ?? artist.id,
+        action: "telegram.urgent.failed",
+        actorLabel: "automation",
+        metadata: {
+          category: input.category,
+          dedupeKey: input.dedupeKey,
+          error: message.slice(0, 500),
+          persist: "sent_status",
+          ...input.metadata
+        }
+      });
+      return { ok: false, error: message };
+    }
+
     await this.audit.log({
       artistId: input.artistId,
       aggregateType: input.aggregateType ?? "Artist",
@@ -232,6 +262,61 @@ export class WorkflowTelegramService {
       metadata: { event: "failed", actionType: input.actionType }
     });
   }
+
+  private async claimDedupe(artistId: string, dedupeKey: string): Promise<boolean> {
+    try {
+      await this.prisma.client.telegramUrgentDedupe.create({
+        data: {
+          artistId,
+          dedupeKey,
+          status: TelegramUrgentDedupeStatus.attempted,
+          sentAt: null,
+          lastError: null
+        }
+      });
+      return true;
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private async markDedupeSent(artistId: string, dedupeKey: string): Promise<void> {
+    await this.prisma.client.telegramUrgentDedupe.update({
+      where: { artistId_dedupeKey: { artistId, dedupeKey } },
+      data: {
+        status: TelegramUrgentDedupeStatus.sent,
+        sentAt: new Date(),
+        lastError: null
+      }
+    });
+  }
+
+  private async markAttemptError(
+    artistId: string,
+    dedupeKey: string,
+    message: string
+  ): Promise<void> {
+    try {
+      await this.prisma.client.telegramUrgentDedupe.update({
+        where: { artistId_dedupeKey: { artistId, dedupeKey } },
+        data: {
+          lastError: message.slice(0, 500)
+        }
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.log.warn(`telegram dedupe lastError persist failed: ${detail}`);
+    }
+  }
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && "code" in error && error.code === "P2002"
+  );
 }
 
 function categoryAllows(

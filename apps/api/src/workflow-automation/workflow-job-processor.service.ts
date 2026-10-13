@@ -176,9 +176,15 @@ export class WorkflowJobProcessorService {
       });
       return { ok: true, skipped: true };
     }
-    if (invite.expiresAt.getTime() < Date.now()) {
-      await this.prisma.client.artistMembershipInvite.update({
-        where: { id: inviteId },
+    const checkedAt = new Date();
+    if (invite.expiresAt <= checkedAt) {
+      await this.prisma.client.artistMembershipInvite.updateMany({
+        where: {
+          id: inviteId,
+          artistId,
+          status: MembershipInviteStatus.pending,
+          expiresAt: { lte: checkedAt }
+        },
         data: { status: MembershipInviteStatus.expired }
       });
       await this.audit.log({
