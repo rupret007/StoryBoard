@@ -6,6 +6,9 @@ import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import type { TaskCreateInput, TaskPatchInput } from "./task.schema";
 
+/** Bounded scan used before inserting a TaskDependency. Hitting this cap means the graph may be truncated, so the mutation fails closed. */
+export const TASK_DEPENDENCY_CYCLE_SCAN_LIMIT = 1000;
+
 @Injectable()
 export class TasksService {
   constructor(
@@ -110,7 +113,14 @@ export class TasksService {
         include: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } }
       });
       if (existing) return { row: existing, created: false };
-      const edges = await tx.taskDependency.findMany({ where: { artistId }, select: { taskId: true, prerequisiteTaskId: true }, take: 1000 });
+      const edges = await tx.taskDependency.findMany({
+        where: { artistId },
+        select: { taskId: true, prerequisiteTaskId: true },
+        take: TASK_DEPENDENCY_CYCLE_SCAN_LIMIT
+      });
+      if (edges.length >= TASK_DEPENDENCY_CYCLE_SCAN_LIMIT) {
+        throw new BadRequestException("This workspace has too many task prerequisites to check for a cycle. Remove some before adding another.");
+      }
       if (this.dependencyWouldCycle(taskId, prerequisiteTaskId, edges)) throw new BadRequestException("That prerequisite would create a task cycle");
       const row = await tx.taskDependency.create({
         data: { artistId, taskId, prerequisiteTaskId },

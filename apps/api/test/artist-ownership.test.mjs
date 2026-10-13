@@ -318,6 +318,70 @@ test("task prerequisites are tenant-safe, idempotent, acyclic, ordered, and comp
   assert.equal(events.length, 2);
 });
 
+test("task prerequisite cycle check fails closed when the bounded edge scan hits its row limit", async () => {
+  const { audit, events } = auditSpy();
+  const limit = tasksMod.TASK_DEPENDENCY_CYCLE_SCAN_LIMIT;
+  assert.equal(limit, 1000);
+  const chainEdges = limit + 1;
+  const rows = new Map();
+  for (let index = 0; index <= chainEdges; index += 1) {
+    rows.set(`task-${index}`, {
+      id: `task-${index}`,
+      artistId: "artist-a",
+      title: `Task ${index}`,
+      status: "todo",
+      dueAt: null,
+      updatedAt: new Date("2026-07-01T00:00:00.000Z")
+    });
+  }
+  const edges = [];
+  for (let index = 1; index <= chainEdges; index += 1) {
+    edges.push({
+      id: `dependency-${index}`,
+      artistId: "artist-a",
+      taskId: `task-${index}`,
+      prerequisiteTaskId: `task-${index - 1}`
+    });
+  }
+  const client = {
+    task: {
+      findFirst: async ({ where }) => {
+        const row = rows.get(where.id);
+        return row?.artistId === where.artistId ? row : null;
+      }
+    },
+    taskDependency: {
+      findUnique: async () => null,
+      findMany: async ({ where, take }) => {
+        const matches = edges
+          .filter((edge) => edge.artistId === where.artistId)
+          .map((edge) => ({ taskId: edge.taskId, prerequisiteTaskId: edge.prerequisiteTaskId }));
+        return typeof take === "number" ? matches.slice(0, take) : matches;
+      },
+      create: async ({ data }) => {
+        const edge = { id: `dependency-${edges.length + 1}`, ...data };
+        edges.push(edge);
+        return { ...edge, prerequisiteTask: { ...rows.get(edge.prerequisiteTaskId) } };
+      }
+    }
+  };
+  client.$transaction = async (fn) => fn(client);
+  const service = new tasksMod.TasksService({ client }, audit);
+  const existingCount = edges.length;
+
+  await assert.rejects(
+    () => service.addPrerequisite("artist-a", "task-0", `task-${chainEdges}`, "member@test", "operator-a"),
+    (error) => {
+      assert.equal(error?.getStatus?.(), 400);
+      assert.match(error?.message, /too many task prerequisites to check for a cycle/i);
+      assert.equal(/create a task cycle/.test(error?.message ?? ""), false);
+      return true;
+    }
+  );
+  assert.equal(edges.length, existingCount);
+  assert.equal(events.length, 0);
+});
+
 test("booking and task request schemas reject malformed values and unknown fields", () => {
   assert.equal(
     bookingSchemaMod.bookingOpportunityCreateSchema.safeParse({
