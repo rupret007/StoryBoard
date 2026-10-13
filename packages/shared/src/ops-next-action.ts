@@ -1,3 +1,5 @@
+import { NO_AUTO_PITCH_COPY } from "./operator-copy";
+
 export const OPS_NEXT_ACTION_POLICY_VERSION = "ops_next_action_v1" as const;
 
 export type OpsWorkspaceTab = "events" | "music" | "projects" | "deals";
@@ -167,7 +169,7 @@ export function bookingStageNextAction(stage: string): OpsNextAction {
       return {
         policyVersion: OPS_NEXT_ACTION_POLICY_VERSION,
         code: "outreach",
-        nextAction: "When Travis is ready, add this room to a pitch campaign. StoryBoard will not auto-pitch.",
+        nextAction: `When you are ready, add this room to a pitch campaign. ${NO_AUTO_PITCH_COPY}.`,
         href: "/booking-campaigns"
       };
     case "conversation":
@@ -181,14 +183,14 @@ export function bookingStageNextAction(stage: string): OpsNextAction {
       return {
         policyVersion: OPS_NEXT_ACTION_POLICY_VERSION,
         code: "offer",
-        nextAction: "Review terms in Booking inbox, then apply them. Travis still books.",
+        nextAction: `Review terms in Booking inbox, then apply them when you are ready. ${NO_AUTO_PITCH_COPY}.`,
         href: "/booking-inbox"
       };
     case "hold":
       return {
         policyVersion: OPS_NEXT_ACTION_POLICY_VERSION,
         code: "hold",
-        nextAction: "Confirm the date when Travis is ready. Confirming creates a gig.",
+        nextAction: `Confirm the date when you are ready. Confirming creates a gig. ${NO_AUTO_PITCH_COPY}.`,
         href: "/booking"
       };
     case "confirmed":
@@ -209,7 +211,7 @@ export function bookingStageNextAction(stage: string): OpsNextAction {
       return {
         policyVersion: OPS_NEXT_ACTION_POLICY_VERSION,
         code: "target",
-        nextAction: "Travis books. Record outreach when he is ready; StoryBoard will not pitch.",
+        nextAction: `Record outreach when you are ready. ${NO_AUTO_PITCH_COPY}.`,
         href: "/booking"
       };
   }
@@ -234,7 +236,7 @@ export function bookingReplyNextAction(reply: {
     return {
       policyVersion: OPS_NEXT_ACTION_POLICY_VERSION,
       code: "confirm_booking",
-      nextAction: "Terms are saved. Confirm this booking to create a reviewable approval. Travis still books; StoryBoard will not pitch.",
+      nextAction: `Terms are saved. Confirm this booking to create a reviewable approval when you are ready. ${NO_AUTO_PITCH_COPY}.`,
       href: "/approvals"
     };
   }

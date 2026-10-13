@@ -7,18 +7,30 @@ import { fileURLToPath } from "node:url";
 const dir = dirname(fileURLToPath(import.meta.url));
 const shared = await import(pathToFileURL(join(dir, "../dist/index.js")).href);
 
-test("ops next action never auto-pitches Travis and names the existing workspace", () => {
+function assertPersonShapedNoAutoPitch(text) {
+  assert.match(text, /when you are ready/i);
+  assert.ok(text.includes(shared.NO_AUTO_PITCH_COPY), `missing no-auto-pitch copy in ${JSON.stringify(text)}`);
+  assert.doesNotMatch(text, /Travis/i);
+}
+
+test("ops next action uses person-shaped verbs and never names Travis", () => {
   const target = shared.bookingStageNextAction("target");
   assert.equal(target.policyVersion, "ops_next_action_v1");
-  assert.match(target.nextAction, /Travis books/i);
-  assert.match(target.nextAction, /will not pitch/i);
+  assertPersonShapedNoAutoPitch(target.nextAction);
+  assert.match(target.nextAction, /Record outreach/);
   assert.equal(target.href, "/booking");
 
   const outreach = shared.bookingStageNextAction("outreach");
-  assert.match(outreach.nextAction, /will not auto-pitch/i);
+  assertPersonShapedNoAutoPitch(outreach.nextAction);
+  assert.match(outreach.nextAction, /pitch campaign/);
   assert.equal(outreach.href, "/booking-campaigns");
 
+  const offer = shared.bookingStageNextAction("offer");
+  assertPersonShapedNoAutoPitch(offer.nextAction);
+  assert.match(offer.nextAction, /apply them/);
+
   const hold = shared.bookingStageNextAction("hold");
+  assertPersonShapedNoAutoPitch(hold.nextAction);
   assert.match(hold.nextAction, /Confirming creates a gig/);
 });
 
@@ -113,5 +125,6 @@ test("booking reply next action keeps apply-then-confirm order without pitching"
   });
   assert.equal(confirm.code, "confirm_booking");
   assert.equal(confirm.href, "/approvals");
-  assert.match(confirm.nextAction, /will not pitch/);
+  assertPersonShapedNoAutoPitch(confirm.nextAction);
+  assert.match(confirm.nextAction, /reviewable approval/);
 });

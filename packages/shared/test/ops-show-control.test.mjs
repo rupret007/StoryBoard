@@ -188,7 +188,9 @@ test("booking posture never auto-pitches and ignores confirmed or closed rows as
   assert.equal(holdWins.booking.stage, "hold");
   assert.equal(holdWins.booking.title, "Room on hold");
   assert.match(holdWins.booking.nextAction, /Confirming creates a gig/);
-  assert.match(holdWins.booking.nextAction, /Travis is ready|Confirm the date/i);
+  assert.match(holdWins.booking.nextAction, /when you are ready/i);
+  assert.ok(holdWins.booking.nextAction.includes(shared.NO_AUTO_PITCH_COPY));
+  assert.doesNotMatch(holdWins.booking.nextAction, /Travis/i);
   assert.equal(holdWins.booking.href, "/booking");
 
   const unavailable = project({ bookingsAvailable: false, bookings: [{ id: "hidden", title: "Hidden", stage: "hold" }] });
@@ -378,7 +380,9 @@ test("every projected action stays navigate-only and never invents outreach", ()
   });
 
   assert.equal(control.nextAction?.kind, "navigate");
-  assert.match(JSON.stringify(control), /Travis|will not pitch|will not auto-pitch|will not invent/i);
+  assert.ok(control.booking.nextAction.includes(shared.NO_AUTO_PITCH_COPY));
+  assert.match(control.booking.nextAction, /when you are ready/i);
+  assert.doesNotMatch(JSON.stringify(control), /Travis/i);
   assert.doesNotMatch(JSON.stringify(control), /auto-pitch now|send outreach|post to/i);
 });
 

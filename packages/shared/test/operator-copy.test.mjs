@@ -100,3 +100,24 @@ test("S07 no-auto-pitch copy, Add an event path, and Create opportunity stay pin
   const events = source("apps/web/src/app/(app)/operations/operations-client.tsx");
   assert.match(events, /id="ops-add-event"/);
 });
+
+test("S08 booking next-action and stage review name no individual", () => {
+  const nextAction = source("packages/shared/src/ops-next-action.ts");
+  assert.match(nextAction, /NO_AUTO_PITCH_COPY/);
+  assert.match(nextAction, /When you are ready/);
+  assert.doesNotMatch(nextAction, /When Travis is ready|Travis books|Travis still books|when he is ready/);
+
+  const editor = source("apps/web/src/app/(app)/booking/booking-stage-editor.tsx");
+  assert.match(editor, /NO_AUTO_PITCH_COPY/);
+  assert.match(editor, /after the booker has confirmed/);
+  assert.match(editor, /When you are ready/);
+  assert.doesNotMatch(editor, /Travis/);
+
+  const showControl = source("apps/web/src/app/(app)/operations/operations-show-control.tsx");
+  assert.match(showControl, /No recorded action right now/);
+  assert.match(
+    showControl,
+    /Review the recorded posture below\. StoryBoard will not invent work to fill an empty queue\./
+  );
+  assert.match(showControl, /Add an event/);
+});

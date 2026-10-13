@@ -1,6 +1,6 @@
 "use client";
 
-import { nextBookingStages } from "@storyboard/shared";
+import { nextBookingStages, NO_AUTO_PITCH_COPY } from "@storyboard/shared";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -101,7 +101,7 @@ export function BookingStageEditor({ opportunity, artistId, canManage, onSaved }
       <h4 className="text-sm font-semibold">Review stage change</h4>
       <p className="text-sm">{review.opportunity.stage} → {review.stage}</p>
       <BookingReviewFacts opportunity={review.opportunity} />
-      {review.stage === "confirmed" ? <p className="text-xs text-amber-200">Record confirmed only after Travis has booked it. This creates a linked internal gig if one is missing, using the recorded title, venue, and target date. Existing gig details stay as saved. Fees and conditions remain booking notes; this does not create a contract, payment, Calendar hold, or message.</p> : review.stage === "closed" ? <p className="text-xs text-amber-200">Closing ends this opportunity's pipeline history. It does not cancel an existing gig or send a message.</p> : <p className="text-xs text-[var(--text-muted)]">This records the stage only. Travis books; no pitch or message is sent.</p>}
+      {review.stage === "confirmed" ? <p className="text-xs text-amber-200">Record confirmed only after the booker has confirmed. This creates a linked internal gig if one is missing, using the recorded title, venue, and target date. Existing gig details stay as saved. Fees and conditions remain booking notes; this does not create a contract, payment, Calendar hold, or message. {NO_AUTO_PITCH_COPY}.</p> : review.stage === "closed" ? <p className="text-xs text-amber-200">Closing ends this opportunity's pipeline history. It does not cancel an existing gig or send a message.</p> : <p className="text-xs text-[var(--text-muted)]">When you are ready, this records the stage only. {NO_AUTO_PITCH_COPY}.</p>}
       {stale || mustReview ? <p role="status" className="text-xs text-amber-200">Review the latest saved details before another save. Your selected stage remains {stage}.</p> : null}
       <button type="button" className="sb-btn-primary w-full text-xs" disabled={busy || stale || mustReview || needsReload}
         onClick={() => void save()}>{busy ? "Working…" : "Save reviewed stage"}</button>

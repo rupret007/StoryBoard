@@ -1837,7 +1837,8 @@ test("booking stage review explains confirmation and writes only after reviewed 
   const review = editor.getByRole("region", { name: "Review stage for E2E Travis booked this room" });
   await expect(review).toContainText("hold → confirmed");
   await expect(review).toContainText("Not recorded — the new gig will need a start time");
-  await expect(review).toContainText("only after Travis has booked it");
+  await expect(review).toContainText("only after the booker has confirmed");
+  await expect(review).toContainText("StoryBoard will not send a pitch; a person still books");
   expect(writes).toBe(0);
   await editor.scrollIntoViewIfNeeded();
   await page.screenshot({ path: "test-results/booking-stage-mobile-review.png", fullPage: true });
