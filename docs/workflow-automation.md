@@ -59,8 +59,8 @@ On **`Artist`**:
 
 | Job name | Payload | Trigger |
 | -------- | ------- | ------- |
-| `invite.send` | `inviteId`, `artistId`, `acceptUrl`, `inviteeEmail`, `artistName`, `role` | After **owner** creates an invite (HTTP path already owner-only). Job id `invite:<inviteId>`. |
-| `approval.notify` | `artistId`, `approvalId`, `event` (`created` \| `approved` \| `rejected` \| `executed` \| `failed`) | After approval create / approve / reject / execution success or failure. |
+| `invite.send` | `inviteId`, `artistId`, `acceptUrl`, `inviteeEmail`, `artistName`, `role` | After **owner** creates an invite (HTTP path already owner-only). Job id `invite__<inviteId>` (colon-free injective encoding so BullMQ accepts it; same invite id remains a duplicate; `:`, `_`, and `%` inside a part are percent-encoded). |
+| `approval.notify` | `artistId`, `approvalId`, `event` (`created` \| `approved` \| `rejected` \| `executed` \| `failed`) | After approval create / approve / reject / execution success or failure. Job id `approval__<approvalId>__<event>__<occurredAtMs>` (same injective encoding; unique per event occurrence). |
 | `membership.invite_accepted` | `artistId`, `inviteeEmail`, `role` | After successful invite accept. |
 | `integration.connection_changed` | `artistId`, `provider` | After Google integration OAuth callback persists connection. |
 | `task.check-overdue` | `{}` | **Repeatable** (default every 6h when worker enabled). Scans artists with overdue tasks; honors **per-artist** `workflowOverdueGraceDays`. |
