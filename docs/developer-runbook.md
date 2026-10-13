@@ -1447,6 +1447,15 @@ by append-only no-effect reconciliation, reload persistence, attention clearing,
 and a separately prepared replacement approval. It never retries the original
 request or falls back to `DATABASE_URL`.
 
+Both the root runner and direct Playwright server startup use
+`scripts/e2e-environment.mjs`. It explicitly empties Google, Telegram, and
+discovery credentials and disables OpenAI, reply sync, advisor automation, and
+the queue worker, overriding inherited shell values and preventing `.env`
+fallback. `pnpm test:e2e-env` checks this boundary using synthetic credentials;
+these checks do not validate live providers. Direct Playwright still requires
+prepared test data and current builds; use the root runner for database guards
+and setup.
+
 ```bash
 pnpm --filter @storyboard/web exec playwright install chromium
 STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/storyboard_test?schema=public' \
