@@ -4146,7 +4146,7 @@ test("day-of intelligence identifies the next checkpoint, work pressure, and rec
     participants: [{ id: "participant-a", bandMemberId: "member-a", response: "available" }],
     tasks: [{ id: "task-a", title: "Confirm parking", status: "todo", dueAt: new Date("2026-07-11T12:00:00.000Z") }],
     schedule: [],
-    deals: [{ id: "deal-a", status: "accepted", offerAmountMinor: 100000, depositMinor: 25000, invoices: [{ id: "invoice-a", totalMinor: 100000, paidMinor: 25000 }] }],
+    deals: [{ id: "deal-a", status: "accepted", offerAmountMinor: 100000, depositMinor: 25000, invoices: [{ id: "invoice-a", totalMinor: 100000, paidMinor: 25000, status: "partially_paid", currency: "USD" }] }],
     invoices: []
   };
   const readiness = { eventId: event.id, title: "Show", startsAt: event.startsAt.toISOString(), daysUntil: 0, score: 80, status: "attention", confidence: 1, confidenceLabel: "high", observedAt: now.toISOString(), headline: "One gap remains.", nextAction: null, categories: [], gaps: [], evidenceIds: [event.id] };
@@ -4198,6 +4198,30 @@ test("day-of money excludes voided invoices and foreign-currency payments from e
   const foreignPaid = eventDayOf.deterministicEventDayOf({ ...mixed, deals: [], invoices: [{ id: "paid-eur", totalMinor: 10000, paidMinor: 10000, status: "paid", currency: "EUR" }] }, readiness, [], now);
   assert.equal(foreignPaid.recordedPaidMinor, 0);
   assert.equal(foreignPaid.depositRemainingMinor, 10000);
+});
+
+test("Manager day-of copy does not treat a EUR payment as satisfying a USD deposit", () => {
+  const managerInvoice = { id: "paid-eur", totalMinor: 10000, paidMinor: 10000, status: "paid", currency: "EUR" };
+  const event = {
+    id: "event-day", status: "confirmed", startsAt: new Date("2026-07-12T21:00:00.000Z"), endsAt: null,
+    loadInAt: new Date("2026-07-12T17:00:00.000Z"), soundcheckAt: null, doorsAt: null, setAt: null, curfewAt: null,
+    guaranteeMinor: 100000, depositMinor: 10000, currency: "USD",
+    participants: [], tasks: [], schedule: [],
+    deals: [{ id: "deal-a", status: "accepted", currency: "USD", offerAmountMinor: 100000, depositMinor: 10000, invoices: [managerInvoice] }],
+    invoices: [managerInvoice]
+  };
+  const readiness = { eventId: event.id, title: "Show", startsAt: event.startsAt.toISOString(), daysUntil: 0, score: 80, status: "attention", confidence: 1, confidenceLabel: "high", observedAt: now.toISOString(), headline: "Open.", nextAction: null, categories: [], gaps: [], evidenceIds: [event.id] };
+  const dayOf = eventDayOf.deterministicEventDayOf(event, readiness, [], now);
+  assert.equal(dayOf.recordedPaidMinor, 0);
+  assert.equal(dayOf.depositRemainingMinor, 10000);
+  const facts = managerFacts({
+    events: [{ id: event.id, title: "Tonight", type: "gig", status: "confirmed", startsAt: event.startsAt, timezone: "UTC", participants: [], readiness, dayOf }]
+  });
+  const snapshot = intelligence.deterministicManagerChat(facts, "Give me a manager desk snapshot", now);
+  assert.match(snapshot.answer, /Deposit remaining USD 100\.00/);
+  const schedule = intelligence.deterministicManagerChat(facts, "When is load-in?", now);
+  assert.match(schedule.answer, /Deposit remaining: USD 100\.00/);
+  assert.match(schedule.answer, /Verify payment before doors/);
 });
 
 test("day-of does not invent a live window when the recorded end is missing", () => {

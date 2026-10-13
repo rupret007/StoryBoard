@@ -56,7 +56,7 @@ export type EventDayOfInput = {
   invoices: DayOfInvoice[];
 };
 
-type DayOfInvoice = { id: string; totalMinor: number; paidMinor: number; status?: string; currency?: string };
+type DayOfInvoice = { id: string; totalMinor: number; paidMinor: number; status: string; currency: string };
 
 function recordedCurrency(value: string | undefined | null): string | null {
   const recorded = value?.trim();

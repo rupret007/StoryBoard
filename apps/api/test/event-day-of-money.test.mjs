@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -136,4 +137,40 @@ test("day-of money lists each foreign currency once and skips voided foreign inv
   assert.deepEqual(result.currencyReviewCurrencies, ["EUR", "GBP"]);
   assert.match(result.currencyReviewMessage, /2 invoices in EUR, GBP need review/i);
   assert.doesNotMatch(result.currencyReviewMessage, /convert them into EUR/i);
+});
+
+function managerFactsInvoice(overrides = {}) {
+  return { id: "paid-eur", totalMinor: 10000, paidMinor: 10000, status: "paid", currency: "EUR", ...overrides };
+}
+
+test("Manager facts invoice shape cannot satisfy a USD deposit with a EUR payment", () => {
+  const invoice = managerFactsInvoice();
+  const result = view({
+    invoices: [invoice],
+    deals: [{ id: "deal-a", status: "accepted", currency: "USD", offerAmountMinor: 100000, depositMinor: 10000, invoices: [invoice] }]
+  });
+  assert.equal(result.recordedPaidMinor, 0);
+  assert.equal(result.openInvoiceBalanceMinor, 0);
+  assert.equal(result.depositRemainingMinor, 10000);
+  assert.equal(result.currencyReviewInvoiceCount, 1);
+  assert.deepEqual(result.currencyReviewCurrencies, ["EUR"]);
+  assert.match(result.currencyReviewMessage, /did not convert/i);
+});
+
+test("Manager facts() selects invoice currency on event and deal invoices used for day-of totals", () => {
+  const source = readFileSync(join(dir, "..", "src", "manager", "manager.service.ts"), "utf8");
+  const factsStart = source.indexOf("private async facts(");
+  const factsEnd = source.indexOf("private sharedFacts(");
+  assert.ok(factsStart >= 0 && factsEnd > factsStart, "Manager facts() must be present");
+  const facts = source.slice(factsStart, factsEnd);
+  const selects = [...facts.matchAll(/invoices:\s*\{\s*select:\s*\{([^}]+)\}/g)].map((match) => match[1]);
+  assert.equal(selects.length, 2, "facts() must select event invoices and deal invoices");
+  for (const select of selects) {
+    assert.match(select, /\bid:\s*true\b/);
+    assert.match(select, /\btotalMinor:\s*true\b/);
+    assert.match(select, /\bpaidMinor:\s*true\b/);
+    assert.match(select, /\bstatus:\s*true\b/);
+    assert.match(select, /\bcurrency:\s*true\b/);
+  }
+  assert.match(facts, /deterministicEventDayOf\(event,/);
 });
