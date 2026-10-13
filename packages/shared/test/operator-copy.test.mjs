@@ -100,3 +100,39 @@ test("S07 no-auto-pitch copy, Add an event path, and Create opportunity stay pin
   const events = source("apps/web/src/app/(app)/operations/operations-client.tsx");
   assert.match(events, /id="ops-add-event"/);
 });
+
+test("S08 booking next-action and stage review name no individual", () => {
+  const nextAction = source("packages/shared/src/ops-next-action.ts");
+  assert.match(nextAction, /NO_AUTO_PITCH_COPY/);
+  assert.match(nextAction, /When you are ready/);
+  assert.doesNotMatch(nextAction, /When Travis is ready|Travis books|Travis still books|when he is ready/);
+
+  const review = source("packages/shared/src/booking-stage-review.ts");
+  assert.match(review, /export function bookingStageReviewCopy/);
+  assert.match(review, /NO_AUTO_PITCH_COPY/);
+  assert.match(review, /after the booker has confirmed/);
+  assert.match(review, /When you are ready, closing ends this opportunity's pipeline history/);
+  assert.match(review, /When you are ready, this records the stage only/);
+  assert.doesNotMatch(review, /Travis/);
+
+  assert.ok(shared.BOOKING_TERMS_APPLIED_COPY.includes(shared.NO_AUTO_PITCH_COPY));
+  assert.match(shared.BOOKING_TERMS_APPLIED_COPY, /when you are ready/i);
+  assert.doesNotMatch(shared.BOOKING_TERMS_APPLIED_COPY, /Travis/);
+
+  const editor = source("apps/web/src/app/(app)/booking/booking-stage-editor.tsx");
+  assert.match(editor, /bookingStageReviewCopy/);
+  assert.doesNotMatch(editor, /Travis/);
+  assert.doesNotMatch(editor, /NO_AUTO_PITCH_COPY/);
+
+  const inbox = source("apps/web/src/app/(app)/booking-inbox/booking-inbox-client.tsx");
+  assert.match(inbox, /BOOKING_TERMS_APPLIED_COPY/);
+  assert.doesNotMatch(inbox, /Travis/);
+
+  const showControl = source("apps/web/src/app/(app)/operations/operations-show-control.tsx");
+  assert.match(showControl, /No recorded action right now/);
+  assert.match(
+    showControl,
+    /Review the recorded posture below\. StoryBoard will not invent work to fill an empty queue\./
+  );
+  assert.match(showControl, /Add an event/);
+});
