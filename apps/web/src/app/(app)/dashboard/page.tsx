@@ -21,35 +21,47 @@ export default async function DashboardPage() {
   let tasks: Task[] = [];
   let summary: WeeklySummary | null = null;
   let insights: DashboardInsights | null = null;
+  let statsLoadError = false;
+  let tasksLoadError = false;
+  let summaryLoadError = false;
   let insightsLoadError = false;
   let error: string | null = null;
   try {
-    [stats, tasks, summary, insights] = await Promise.all([
-      serverApiFetch<DashboardStats>("/dashboard/stats", { cache: "no-store" }),
-      serverApiFetch<Task[]>("/tasks", { cache: "no-store" }),
-      serverApiFetch<WeeklySummary>("/weekly-summary", { cache: "no-store" }),
-      serverApiFetch<DashboardInsights>("/dashboard/insights", {
-        cache: "no-store"
-      }).catch(() => {
-        insightsLoadError = true;
-        return null;
-      })
-    ]);
+    const [statsResult, tasksResult, summaryResult, insightsResult] =
+      await Promise.allSettled([
+        serverApiFetch<DashboardStats>("/dashboard/stats", { cache: "no-store" }),
+        serverApiFetch<Task[]>("/tasks", { cache: "no-store" }),
+        serverApiFetch<WeeklySummary>("/weekly-summary", { cache: "no-store" }),
+        serverApiFetch<DashboardInsights>("/dashboard/insights", {
+          cache: "no-store"
+        })
+      ]);
+    if (statsResult.status === "fulfilled") stats = statsResult.value;
+    else statsLoadError = true;
+    if (tasksResult.status === "fulfilled") tasks = tasksResult.value;
+    else tasksLoadError = true;
+    if (summaryResult.status === "fulfilled") summary = summaryResult.value;
+    else summaryLoadError = true;
+    if (insightsResult.status === "fulfilled") insights = insightsResult.value;
+    else insightsLoadError = true;
   } catch (e) {
     error = e instanceof Error ? e.message : "Could not reach the API.";
   }
 
-  const now = new Date();
-  const overdueList =
-    stats && !error
-      ? tasks.filter((t) => {
-          if (t.status === "done" || !t.dueAt) return false;
-          const due = describeTaskDueDate(t.dueAt, now);
-          return due?.timing === "past";
-        })
-      : [];
+  const commandCenterUnavailable =
+    Boolean(error) ||
+    (statsLoadError && tasksLoadError && summaryLoadError && insightsLoadError);
 
-  if (error) {
+  const now = new Date();
+  const overdueList = tasksLoadError
+    ? []
+    : tasks.filter((t) => {
+        if (t.status === "done" || !t.dueAt) return false;
+        const due = describeTaskDueDate(t.dueAt, now);
+        return due?.timing === "past";
+      });
+
+  if (commandCenterUnavailable) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -61,7 +73,9 @@ export default async function DashboardPage() {
             <CircleAlert className="h-5 w-5 shrink-0 text-amber-400" />
             <div>
               <p className="font-semibold text-amber-100">API unavailable</p>
-              <p className="mt-1 text-sm text-amber-200/85">{error}</p>
+              <p role="alert" className="mt-1 text-sm text-amber-200/85">
+                {error ?? "Could not reach the API."}
+              </p>
               <p className="mt-3 text-sm text-[var(--text-secondary)]">
                 Start the API with{" "}
                 <code className="rounded-md bg-[var(--surface-0)] px-1.5 py-0.5 text-xs">
@@ -80,21 +94,27 @@ export default async function DashboardPage() {
     );
   }
 
-  const s = stats!;
-  const approvalAttention = s.approvalAttention;
-  const statCards = [
-    { label: "Venues", value: s.venues, href: "/venues" },
-    { label: "Contacts", value: s.contacts, href: "/contacts" },
-    { label: "Opportunities", value: s.bookingOpportunities, href: "/booking" },
-    { label: "Active pipeline", value: s.activeOpportunities, href: "/booking" },
-    { label: "Tasks", value: s.tasks, href: "/tasks" },
-    { label: "Overdue", value: s.overdueTasks, href: "/tasks" },
-    { label: "Approval decisions", value: approvalAttention.pendingDecision, href: "/approvals#pending-decisions" },
-    { label: "Ready to execute", value: approvalAttention.readyToExecute, href: "/approvals#ready-to-execute" },
-    { label: "Execution in progress", value: approvalAttention.executionInProgress, href: "/approvals#execution-in-progress" },
-    { label: "Needs reconciliation", value: approvalAttention.needsReconciliation, href: "/approvals#needs-reconciliation" }
-  ];
-  const isNewWorkspace = s.venues === 0 && s.contacts === 0 && s.bookingOpportunities === 0;
+  const approvalAttention = stats?.approvalAttention;
+  const statCards = stats && approvalAttention
+    ? [
+        { label: "Venues", value: stats.venues, href: "/venues" },
+        { label: "Contacts", value: stats.contacts, href: "/contacts" },
+        { label: "Opportunities", value: stats.bookingOpportunities, href: "/booking" },
+        { label: "Active pipeline", value: stats.activeOpportunities, href: "/booking" },
+        { label: "Tasks", value: stats.tasks, href: "/tasks" },
+        { label: "Overdue", value: stats.overdueTasks, href: "/tasks" },
+        { label: "Approval decisions", value: approvalAttention.pendingDecision, href: "/approvals#pending-decisions" },
+        { label: "Ready to execute", value: approvalAttention.readyToExecute, href: "/approvals#ready-to-execute" },
+        { label: "Execution in progress", value: approvalAttention.executionInProgress, href: "/approvals#execution-in-progress" },
+        { label: "Needs reconciliation", value: approvalAttention.needsReconciliation, href: "/approvals#needs-reconciliation" }
+      ]
+    : [];
+  const isNewWorkspace = Boolean(
+    stats &&
+      stats.venues === 0 &&
+      stats.contacts === 0 &&
+      stats.bookingOpportunities === 0
+  );
 
   return (
     <div className="space-y-10">
@@ -112,26 +132,34 @@ export default async function DashboardPage() {
         }
       />
 
-      <section>
-        <div className="mb-4 flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-[var(--accent)]" />
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-            At a glance
-          </h2>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {statCards.map((card) => (
-            <MetricStat
-              key={card.label}
-              label={card.label}
-              value={card.value}
-              href={card.href}
-            />
-          ))}
-        </div>
-      </section>
+      {statsLoadError ? (
+        <SurfaceCard elevated className="border-amber-500/20 bg-amber-950/20">
+          <p role="alert" className="text-sm text-amber-100">
+            Command-center counts could not be loaded. Refresh to try again; missing counts are not a quiet band.
+          </p>
+        </SurfaceCard>
+      ) : (
+        <section>
+          <div className="mb-4 flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-[var(--accent)]" />
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+              At a glance
+            </h2>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {statCards.map((card) => (
+              <MetricStat
+                key={card.label}
+                label={card.label}
+                value={card.value}
+                href={card.href}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
-      {approvalAttention.needsReconciliation > 0 ? (
+      {approvalAttention && approvalAttention.needsReconciliation > 0 ? (
         <SurfaceCard elevated className="border-red-500/30 bg-red-500/5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex gap-3">
@@ -285,7 +313,11 @@ export default async function DashboardPage() {
               <ArrowRight className="h-3 w-3" />
             </Link>
           </div>
-          {summary && summary.recommendations.length > 0 ? (
+          {summaryLoadError ? (
+            <p role="alert" className="text-sm text-amber-100">
+              Manager briefing could not be loaded. Refresh to try again; a missing briefing is not a quiet week.
+            </p>
+          ) : summary && summary.recommendations.length > 0 ? (
             <ul className="space-y-3 text-sm text-[var(--text-secondary)]">
               {summary.recommendations.slice(0, 4).map((r, i) => (
                 <li
@@ -349,8 +381,11 @@ export default async function DashboardPage() {
                 Approval center
               </Link>
               <span className="text-[var(--text-muted)]">
-                {" "}
-                — {approvalAttention.pendingDecision} decide · {approvalAttention.readyToExecute} execute · {approvalAttention.needsReconciliation} reconcile
+                {approvalAttention
+                  ? ` — ${approvalAttention.pendingDecision} decide · ${approvalAttention.readyToExecute} execute · ${approvalAttention.needsReconciliation} reconcile`
+                  : statsLoadError
+                    ? " — approval counts unavailable"
+                    : ""}
               </span>
             </li>
             <li>
@@ -369,7 +404,13 @@ export default async function DashboardPage() {
         </SurfaceCard>
       </div>
 
-      {overdueList.length > 0 ? (
+      {tasksLoadError ? (
+        <SurfaceCard elevated className="border-amber-500/20 bg-amber-950/20">
+          <p role="alert" className="text-sm text-amber-100">
+            Overdue task details could not be loaded. Refresh to try again; a missing list is not a clear desk.
+          </p>
+        </SurfaceCard>
+      ) : overdueList.length > 0 ? (
         <SurfaceCard className="border-amber-500/25 bg-amber-950/10">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-amber-100">
             <CircleAlert className="h-4 w-4" />
