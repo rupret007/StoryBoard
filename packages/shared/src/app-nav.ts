@@ -1,7 +1,7 @@
 export const APP_NAV_POLICY_VERSION = "app_nav_v1" as const;
 
 export type ApprovalCountBadgeSource = {
-  attentionTotal: number;
+  attentionTotal?: number;
 } | null | undefined;
 
 /**
@@ -38,10 +38,16 @@ export const APP_NAV_LINKS = [
   { href: "/activity", label: "Activity" }
 ] as const satisfies readonly AppNavLink[];
 
+/** The four booking-related tools nested under the phone "Booking" entry. */
+export const APP_NAV_BOOKING_TOOL_HREFS = [
+  "/prospects",
+  "/market-sprints",
+  "/booking-campaigns",
+  "/booking-inbox"
+] as const;
+
 export const APP_NAV_BOOKING_CLUSTER = [
-  { href: "/venues", label: "Venues" },
-  { href: "/contacts", label: "Contacts" },
-  { href: "/booking", label: "Booking" },
+  { href: "/booking", label: "Booking pipeline" },
   { href: "/prospects", label: "Find shows" },
   { href: "/market-sprints", label: "Market sprints" },
   { href: "/booking-campaigns", label: "Pitch campaigns" },
@@ -49,6 +55,8 @@ export const APP_NAV_BOOKING_CLUSTER = [
 ] as const satisfies readonly AppNavLink[];
 
 export const APP_NAV_MORE_CLUSTER = [
+  { href: "/approvals", label: "Approvals" },
+  { href: "/summary", label: "Weekly summary" },
   { href: "/notifications", label: "Notifications" },
   { href: "/activity", label: "Activity" }
 ] as const satisfies readonly AppNavLink[];
@@ -63,10 +71,10 @@ export const APP_NAV_MOBILE_ROOT = [
   { kind: "link", href: "/dashboard", label: "Dashboard" },
   { kind: "link", href: "/manager", label: "Manager" },
   { kind: "link", href: "/operations", label: "Band operations" },
+  { kind: "link", href: "/venues", label: "Venues" },
+  { kind: "link", href: "/contacts", label: "Contacts" },
   { kind: "cluster", id: "booking", label: "Booking" },
   { kind: "link", href: "/tasks", label: "Tasks" },
-  { kind: "link", href: "/approvals", label: "Approvals" },
-  { kind: "link", href: "/summary", label: "Weekly summary" },
   { kind: "cluster", id: "more", label: "More" }
 ] as const satisfies readonly MobileNavRootItem[];
 
