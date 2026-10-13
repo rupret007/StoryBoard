@@ -17,6 +17,7 @@ export function TasksClient({
   opportunities,
   members,
   loadError,
+  contextError,
   artistId,
   currentOperatorId,
   canManage
@@ -25,6 +26,7 @@ export function TasksClient({
   opportunities: BookingOpportunity[];
   members: BandMember[];
   loadError?: string;
+  contextError?: string;
   artistId: string | null;
   currentOperatorId: string | null;
   canManage: boolean;
@@ -61,11 +63,13 @@ export function TasksClient({
   const [dueAt, setDueAt] = useState("");
   const [bandMemberId, setBandMemberId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [createError, setCreateError] = useState("");
 
   async function createTask(e: React.FormEvent) {
     e.preventDefault();
     if (!artistId || !canManage) return;
     setBusy(true);
+    setCreateError("");
     try {
       await apiFetch("/tasks", {
         method: "POST",
@@ -82,6 +86,8 @@ export function TasksClient({
       setDueAt("");
       setBandMemberId("");
       router.refresh();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Could not create the task");
     } finally {
       setBusy(false);
     }
@@ -92,6 +98,11 @@ export function TasksClient({
       {loadError ? (
         <div role="alert" className="text-sm text-amber-200">
           {loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload tasks</button>
+        </div>
+      ) : null}
+      {!loadError && contextError ? (
+        <div role="alert" className="text-sm text-amber-200">
+          {contextError} <button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}>Reload context</button>
         </div>
       ) : null}
 
@@ -159,6 +170,7 @@ export function TasksClient({
             </button>
           </div>
         </form>
+        {createError ? <p role="alert" className="mt-3 text-sm text-red-200">{createError}</p> : null}
       </SurfaceCard>
 
       {loadError ? null : initialTasks.length === 0 ? (

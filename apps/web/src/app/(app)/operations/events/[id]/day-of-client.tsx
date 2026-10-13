@@ -3,6 +3,7 @@
 import {
   afterShowWriteAllowed,
   catalogSourceLabel,
+  parseCount,
   dateTimeLocalToIso,
   describeTaskDueDate,
   instantToDateTimeLocal,
@@ -191,11 +192,12 @@ function LiveWrapPanel({ data, busy, onMutate, onError }: { data: EventDayOfResp
       onError(write.reason);
       return;
     }
-    const attendanceValue = attendance.trim() === "" ? null : Number(attendance);
-    if (attendanceValue != null && (!Number.isInteger(attendanceValue) || attendanceValue < 0)) {
-      onError("Attendance must be a whole number. StoryBoard will not invent a count.");
+    const parsedAttendance = parseCount(attendance);
+    if (!parsedAttendance.ok) {
+      onError(parsedAttendance.message);
       return;
     }
+    const attendanceValue = parsedAttendance.value;
     const revenueValue = grossRevenue.trim() === "" ? null : Math.round(Number(grossRevenue) * 100);
     if (revenueValue != null && (!Number.isFinite(revenueValue) || revenueValue < 0)) {
       onError("Gross revenue must be a non-negative amount. StoryBoard will not invent a result.");

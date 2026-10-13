@@ -15,11 +15,14 @@ export default async function ProspectsPage() {
   let artistId: string | null = null;
   let accessState: "manage" | "read_only" | "unavailable" = "unavailable";
   let loadError: string | null = null;
+  let contextError = "";
+  let profileAvailable = false;
+  let prospectsAvailable = false;
   try {
     const access = await serverBandAccess();
     artistId = access.artistId;
     accessState = access.accessState;
-    [profile, prospects, contacts, sprints] = await Promise.all([
+    const [profileRows, prospectRows, contactRows, sprintRows] = await Promise.allSettled([
       serverApiFetch<BookingProfileResponse>("/booking-profile", {
         cache: "no-store", artistId
       }),
@@ -31,6 +34,34 @@ export default async function ProspectsPage() {
       }),
       serverApiFetch<BookingMarketSprint[]>("/market-sprints", { cache: "no-store", artistId })
     ]);
+    if (profileRows.status === "fulfilled") {
+      profile = profileRows.value;
+      profileAvailable = true;
+    }
+    if (prospectRows.status === "fulfilled") {
+      prospects = prospectRows.value;
+      prospectsAvailable = true;
+    }
+    if (contactRows.status === "fulfilled") contacts = contactRows.value;
+    if (sprintRows.status === "fulfilled") sprints = sprintRows.value;
+    if (!profileAvailable && !prospectsAvailable) {
+      loadError = "Booking research could not be loaded. Changes are disabled until you retry.";
+    } else {
+      const parts: string[] = [];
+      if (!profileAvailable) {
+        parts.push("The booking profile could not be loaded. A missing badge is not proof this band has no profile.");
+      }
+      if (!prospectsAvailable) {
+        parts.push("Prospects could not be loaded. An unavailable list does not mean this band has no leads.");
+      }
+      if (contactRows.status === "rejected") {
+        parts.push("Contacts could not be loaded. Recorded prospects are still shown; buyer links may be incomplete.");
+      }
+      if (sprintRows.status === "rejected") {
+        parts.push("Market sprints could not be loaded. Recorded prospects are still shown.");
+      }
+      contextError = parts.join(" ");
+    }
   } catch {
     loadError = artistId
       ? "Booking research could not be loaded. Changes are disabled until you retry."
@@ -48,6 +79,9 @@ export default async function ProspectsPage() {
         artistId={artistId}
         accessState={accessState}
         loadError={loadError}
+        contextError={contextError}
+        profileAvailable={profileAvailable}
+        prospectsAvailable={prospectsAvailable}
         initialProfile={profile}
         initialProspects={prospects}
         contacts={contacts}

@@ -13,12 +13,14 @@ export function ContactsClient({
   initialContacts,
   venues,
   loadError,
+  contextError,
   artistId,
   canManage
 }: {
   initialContacts: Contact[];
   venues: Venue[];
   loadError?: string;
+  contextError?: string;
   artistId: string | null;
   canManage: boolean;
 }) {
@@ -63,6 +65,11 @@ export function ContactsClient({
       {loadError ? (
         <div role="alert" className="text-sm text-amber-200">
           {loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload contacts</button>
+        </div>
+      ) : null}
+      {!loadError && contextError ? (
+        <div role="alert" className="text-sm text-amber-200">
+          {contextError} <button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}>Reload venues</button>
         </div>
       ) : null}
       {error ? (

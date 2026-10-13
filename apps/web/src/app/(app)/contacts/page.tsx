@@ -7,6 +7,7 @@ export default async function ContactsPage() {
   let contacts: Contact[] = [];
   let venues: Venue[] = [];
   let loadError = "";
+  let contextError = "";
   let artistId: string | null = null;
   let canManage = false;
   try {
@@ -15,12 +16,18 @@ export default async function ContactsPage() {
     if (!artistId) throw new Error("Band access could not be verified");
     const role = me.memberships.find((membership) => membership.artistId === artistId)?.role;
     canManage = role === "owner" || role === "member";
-    [contacts, venues] = await Promise.all([
+  } catch {
+    loadError = "Contacts could not be loaded. Reload to see your rolodex.";
+  }
+  if (artistId) {
+    const [contactRows, venueRows] = await Promise.allSettled([
       serverApiFetch<Contact[]>("/contacts", { cache: "no-store", artistId }),
       serverApiFetch<Venue[]>("/venues", { cache: "no-store", artistId })
     ]);
-  } catch {
-    loadError = "Contacts could not be loaded. Reload to see your rolodex.";
+    if (contactRows.status === "fulfilled") contacts = contactRows.value;
+    else loadError = "Contacts could not be loaded. Reload to see your rolodex.";
+    if (venueRows.status === "fulfilled") venues = venueRows.value;
+    else contextError = "Venues could not be loaded. Recorded contacts are still shown; venue links may be incomplete.";
   }
 
   return (
@@ -29,7 +36,7 @@ export default async function ContactsPage() {
         title="Contacts"
         description="Promoters, venue staff, and partners — optionally linked to venues."
       />
-      <ContactsClient key={artistId ?? "unverified"} artistId={artistId} canManage={canManage && !loadError} initialContacts={contacts} venues={venues} loadError={loadError} />
+      <ContactsClient key={artistId ?? "unverified"} artistId={artistId} canManage={canManage && !loadError} initialContacts={contacts} venues={venues} loadError={loadError} contextError={contextError} />
     </div>
   );
 }
