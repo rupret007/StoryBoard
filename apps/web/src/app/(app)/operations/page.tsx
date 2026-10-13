@@ -46,6 +46,7 @@ export default async function OperationsPage({
   let songsAvailable = false;
   let setlistsAvailable = false;
   let bookingsAvailable = false;
+  let projectsAvailable = false;
   let dealsAvailable = false;
   let invoicesAvailable = false;
   let accessState: OperationsAccessState = "unavailable";
@@ -122,7 +123,10 @@ export default async function OperationsPage({
     setlists = setlistRows.value;
     setlistsAvailable = true;
   }
-  if (projectRows.status === "fulfilled") projects = projectRows.value;
+  if (projectRows.status === "fulfilled") {
+    projects = projectRows.value;
+    projectsAvailable = true;
+  }
   if (dealRows.status === "fulfilled") {
     deals = dealRows.value;
     dealsAvailable = true;
@@ -182,6 +186,7 @@ export default async function OperationsPage({
         setlistsAvailable={setlistsAvailable}
         songsAvailable={songsAvailable}
         bookingsAvailable={bookingsAvailable}
+        projectsAvailable={projectsAvailable}
         dealsAvailable={dealsAvailable}
         invoicesAvailable={invoicesAvailable}
         initialEvents={events}
