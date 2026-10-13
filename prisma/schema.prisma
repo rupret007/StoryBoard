@@ -920,16 +920,19 @@ model TelegramUrgentDedupe {
 
 /// Stripe `evt_` deliveries claimed after signature verification.
 /// `processing` rows hold a short lease so a crash before complete can be
-/// retried; `completed` is set only after the handler finishes. A successful
-/// side effect that fails to mark completed must not release this row.
+/// retried; `appliedAt` is written after the handler succeeds so a later
+/// lease expiry cannot re-run the side effect. Completion and failure
+/// updates are conditional on `leaseOwner`.
 model StripeWebhookEvent {
   id             String                   @id @default(cuid())
   eventId        String                   @unique
   status         StripeWebhookEventStatus @default(processing)
+  leaseOwner     String
   leaseExpiresAt DateTime
   eventType      String?
   lastError      String?
   createdAt      DateTime                 @default(now())
+  appliedAt      DateTime?
   completedAt    DateTime?
 
   @@index([status, leaseExpiresAt])

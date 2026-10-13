@@ -110,7 +110,7 @@ On **`Artist`**:
 - `Artist.telegramUrgentEnabled`, `telegramChatId`, `telegramNotifyCategories` — phase 5A (owner-configured Telegram routing).
 - `TelegramUrgentDedupe` — `artistId`, `dedupeKey`, `sentAt`, `lastError` (phase 5A).
 - `TelegramRegistrationToken` — short-lived hashed tokens for inbound **`/start`** binding (phase 5B).
-- `StripeWebhookEvent` — unique Stripe `evt_` claims (`processing` lease, then `completed`) after `Stripe-Signature` verification. Failed complete-marks do not release the row.
+- `StripeWebhookEvent` — unique Stripe `evt_` claims (`processing` lease, `appliedAt` after the handler, then `completed`) after `Stripe-Signature` verification. Applied rows cannot be reclaimed. Complete and expire updates require the current `leaseOwner`. In-flight unfinished deliveries return 503.
 - `WorkflowNotification` — `recipientOperatorId`, `artistId`, `kind`, `title`,
   `body`, `readAt`, `metadata`.
 - `WorkflowNotificationKind` includes `digest_daily`, `digest_weekly`.

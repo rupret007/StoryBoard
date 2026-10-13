@@ -10,7 +10,10 @@ import {
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import type { FastifyRequest } from "fastify";
-import { StripeWebhookIdempotencyService } from "./stripe-webhook-idempotency.service";
+import {
+  isStripeWebhookInFlightError,
+  StripeWebhookIdempotencyService
+} from "./stripe-webhook-idempotency.service";
 import { readStripeRawBody } from "./stripe-webhook-raw-body";
 import {
   parseStripeEvent,
@@ -56,11 +59,20 @@ export class StripeWebhookController {
       throw new BadRequestException("Stripe event id required");
     }
 
-    const outcome = await this.idempotency.runOnce(
-      event.id,
-      () => this.stripe.process(event),
-      event.type
-    );
-    return { ok: true, duplicate: outcome.duplicate };
+    try {
+      const outcome = await this.idempotency.runOnce(
+        event.id,
+        () => this.stripe.process(event),
+        event.type
+      );
+      return { ok: true, duplicate: outcome.duplicate };
+    } catch (error) {
+      if (isStripeWebhookInFlightError(error)) {
+        throw new ServiceUnavailableException(
+          "Stripe webhook event is already being processed"
+        );
+      }
+      throw error;
+    }
   }
 }

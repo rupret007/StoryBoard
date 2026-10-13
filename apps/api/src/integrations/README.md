@@ -33,5 +33,6 @@ compliance, idempotency, and real-provider acceptance coverage.
 
 `POST /integrations/stripe/webhook` is signed intake only: it verifies
 `Stripe-Signature` before any durable `StripeWebhookEvent` claim, uses a
-processing lease so abandoned deliveries can retry, and does not apply invoice
-payments.
+processing lease so abandoned deliveries can retry, writes `appliedAt` before
+`completed` so a later lease expiry cannot re-run the handler, returns 503
+while a claim is in flight, and does not apply invoice payments.

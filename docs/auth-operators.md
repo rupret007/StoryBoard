@@ -69,7 +69,8 @@ All artist-scoped HTTP routes require a valid session and membership **except**:
   `X-Telegram-Bot-Api-Secret-Token`; accepts `/start` registration only)
 - `POST /integrations/stripe/webhook` (requires `STRIPE_WEBHOOK_SECRET` and a
   valid `Stripe-Signature` before any durable claim; leased `evt_`
-  idempotency; does not apply invoice payments)
+  idempotency with `appliedAt` and `leaseOwner`; in-flight unfinished
+  claims return 503; does not apply invoice payments)
 
 ## CSRF posture (minimal)
 

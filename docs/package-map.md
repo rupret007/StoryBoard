@@ -127,7 +127,7 @@ The NestJS orchestration backend. Current responsibilities:
   finalized settlement expenses fail closed). Booking apply-terms uses
   `booking_terms_apply_v1` so null analysis cannot wipe recorded fees.
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
-- **Stripe inbound webhook:** `POST /integrations/stripe/webhook` verifies `Stripe-Signature` with `STRIPE_WEBHOOK_SECRET` (fail closed if unset), then claims the `evt_` id on `StripeWebhookEvent` with a short processing lease so Stripe retries cannot run the handler twice. Abandoned processing claims expire and can be retried; a successful side effect that fails to mark completed does not release the claim. Intake only — does not apply invoice payments.
+- **Stripe inbound webhook:** `POST /integrations/stripe/webhook` verifies `Stripe-Signature` with `STRIPE_WEBHOOK_SECRET` (fail closed if unset), then claims the `evt_` id on `StripeWebhookEvent` with a short processing lease so Stripe retries cannot run the handler twice. Abandoned unapplied processing claims expire and can be retried; a successful side effect writes `appliedAt` before `completed` so lease expiry cannot re-run the handler. In-flight unfinished claims return 503 so Stripe keeps retrying. Complete and expire updates are conditional on `leaseOwner`. Intake only — does not apply invoice payments.
 - Global **`CsrfOriginGuard`** (OAuth + Telegram/Stripe webhook paths excluded for POST)
 
 Further responsibilities remain product-driven (more adapters, richer tests, etc.).
