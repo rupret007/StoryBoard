@@ -71,19 +71,24 @@ export async function bufferStripeWebhookRawBody(
 
   const chunks: Buffer[] = [];
   let size = 0;
-  let overLimit = false;
-  for await (const chunk of payload) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string | Uint8Array);
-    size += buffer.byteLength;
-    if (size > maxBytes) {
-      overLimit = true;
+  // `for await … of` + `break` calls `iterator.return()`, which destroys a
+  // Node Readable / IncomingMessage and its socket before Fastify can flush
+  // HTTP 413. Drive the iterator manually and leave it paused on oversize.
+  const iterator = payload[Symbol.asyncIterator]();
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) {
       break;
     }
+    const buffer = Buffer.isBuffer(next.value)
+      ? next.value
+      : Buffer.from(next.value as string | Uint8Array);
+    size += buffer.byteLength;
+    if (size > maxBytes) {
+      stopStripeWebhookPayload(payload);
+      throw new StripeWebhookPayloadTooLargeError();
+    }
     chunks.push(buffer);
-  }
-  if (overLimit) {
-    stopStripeWebhookPayload(payload);
-    throw new StripeWebhookPayloadTooLargeError();
   }
   return Buffer.concat(chunks, size);
 }

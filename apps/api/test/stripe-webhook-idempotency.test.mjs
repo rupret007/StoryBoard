@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const http = require("node:http");
+const { Readable } = require("node:stream");
 const Fastify = require("fastify");
 const {
   StripeWebhookIdempotencyService,
@@ -809,6 +810,99 @@ test("raw-body capture rejects a declared Content-Length over the limit without 
   assert.equal(destroyed, true);
 });
 
+function socketBackedReadable() {
+  const socket = {
+    writable: true,
+    destroyed: false,
+    destroy() {
+      this.destroyed = true;
+      this.writable = false;
+    }
+  };
+  const stream = new Readable({
+    read() {
+      this.push(Buffer.alloc(32, 0x61));
+      this.push(Buffer.alloc(32, 0x61));
+      this.push(null);
+    }
+  });
+  stream.socket = socket;
+  const originalDestroy = stream.destroy.bind(stream);
+  stream.destroy = function destroy(err) {
+    socket.destroy();
+    return originalDestroy(err);
+  };
+  return { stream, socket };
+}
+
+test("raw-body capture does not destroy a socket-backed stream before throwing 413", async () => {
+  const { stream, socket } = socketBackedReadable();
+  await assert.rejects(
+    () => rawBody.bufferStripeWebhookRawBody(stream, { maxBytes: 16 }),
+    (error) =>
+      error.statusCode === 413 && rawBody.isStripeWebhookPayloadTooLargeError(error)
+  );
+  assert.equal(socket.destroyed, false);
+  assert.equal(socket.writable, true);
+  assert.equal(stream.destroyed, false);
+});
+
+test("raw-body capture does not destroy a live IncomingMessage socket before throwing 413", async () => {
+  await new Promise((resolve, reject) => {
+    const server = http.createServer();
+    const closeServer = () => {
+      server.closeAllConnections?.();
+      server.close();
+    };
+    const timeout = setTimeout(() => {
+      closeServer();
+      reject(new Error("IncomingMessage 413 transport test timed out"));
+    }, 2000);
+    const finish = (error) => {
+      clearTimeout(timeout);
+      closeServer();
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    };
+    server.on("request", async (req, res) => {
+      try {
+        await assert.rejects(
+          () => rawBody.bufferStripeWebhookRawBody(req, { maxBytes: 16 }),
+          (error) =>
+            error.statusCode === 413 &&
+            rawBody.isStripeWebhookPayloadTooLargeError(error)
+        );
+        assert.equal(req.destroyed, false);
+        assert.equal(req.socket?.destroyed, false);
+        assert.equal(req.socket?.writable, true);
+        res.statusCode = 413;
+        res.setHeader("connection", "close");
+        res.end("too large");
+        finish();
+      } catch (error) {
+        finish(error);
+      }
+    });
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      const req = http.request({
+        host: "127.0.0.1",
+        port,
+        path: "/",
+        method: "POST",
+        headers: { "transfer-encoding": "chunked" }
+      });
+      req.on("error", () => {});
+      req.write(Buffer.alloc(32, 0x61));
+      req.write(Buffer.alloc(32, 0x61));
+    });
+    server.on("error", (error) => finish(error));
+  });
+});
+
 test("raw-body capture accepts a payload at the size limit", async () => {
   const maxBytes = 32;
   const buffer = await rawBody.bufferStripeWebhookRawBody(
@@ -839,7 +933,7 @@ test("unauthenticated webhook rejects an oversize raw body with HTTP 413 and doe
   assert.equal(store.rows.size, 0);
 });
 
-function postWebhookSocket(port, { body, headers, trickleAfterBytes } = {}) {
+function postWebhookSocket(port, { body, headers, trickleAfterBytes, end = true } = {}) {
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -870,6 +964,10 @@ function postWebhookSocket(port, { body, headers, trickleAfterBytes } = {}) {
       setTimeout(() => {
         req.end(body.subarray(trickleAfterBytes));
       }, 25);
+      return;
+    }
+    if (end === false) {
+      req.write(body);
       return;
     }
     req.end(body);
@@ -924,6 +1022,21 @@ test("oversized Stripe webhook over a real socket returns HTTP 413", async () =>
     assert.equal(chunked.statusCode, 413);
     assert.match(chunked.body, /Stripe webhook payload exceeds size limit/);
     assert.equal(chunked.headers.connection, "close");
+
+    // Leave the request open after the oversize chunk. `for await` + `break`
+    // destroys IncomingMessage (and the TCP socket) before Fastify can write
+    // 413, so the client sees ECONNRESET instead of a status line.
+    const openChunked = await postWebhookSocket(port, {
+      body: oversize,
+      headers: {
+        "content-type": "application/json",
+        "transfer-encoding": "chunked"
+      },
+      end: false
+    });
+    assert.equal(openChunked.statusCode, 413);
+    assert.match(openChunked.body, /Stripe webhook payload exceeds size limit/);
+    assert.equal(openChunked.headers.connection, "close");
   });
 });
 
