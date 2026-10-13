@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const shared = await import(pathToFileURL(join(dir, "../dist/index.js")).href);
-const { describeTaskDueDate } = shared;
+const { calendarDateToNoonUtcIso, describeTaskDueDate, utcCalendarDateInputValue } = shared;
 
 const now = new Date("2026-09-15T18:00:00.000Z");
 
@@ -61,6 +61,26 @@ test("a noon-UTC follow-up earlier than today is past with the UTC calendar labe
   const result = describeTaskDueDate("2026-09-10T12:00:00.000Z", now);
   assert.equal(result.timing, "past");
   assert.equal(result.label, "Thu, Sep 10");
+});
+
+test("a date-input calendar day persists as noon UTC, never local noon", () => {
+  assert.equal(calendarDateToNoonUtcIso("2026-09-15"), "2026-09-15T12:00:00.000Z");
+  assert.equal(calendarDateToNoonUtcIso("2026-01-01"), "2026-01-01T12:00:00.000Z");
+  assert.equal(describeTaskDueDate(calendarDateToNoonUtcIso("2026-09-15"), now)?.label, "Tue, Sep 15");
+});
+
+test("blank or invalid date-input values do not invent a due instant", () => {
+  for (const value of [null, undefined, "", "  ", "09-15-2026", "2026-9-15", "2026-02-31", "not-a-date"]) {
+    assert.equal(calendarDateToNoonUtcIso(value), null);
+  }
+});
+
+test("project date inputs read the recorded UTC calendar day, not a local-shifted day", () => {
+  assert.equal(utcCalendarDateInputValue("2026-09-15T12:00:00.000Z"), "2026-09-15");
+  assert.equal(utcCalendarDateInputValue("2026-09-15T00:00:00.000Z"), "2026-09-15");
+  assert.equal(utcCalendarDateInputValue(new Date("2026-09-15T23:30:00.000Z")), "2026-09-15");
+  assert.equal(utcCalendarDateInputValue(null), "");
+  assert.equal(utcCalendarDateInputValue("not-a-date"), "");
 });
 
 test("a midnight-UTC proposed show date keeps the UTC calendar label even when a west-of-UTC clock is already on the previous local evening", () => {
