@@ -4,18 +4,22 @@ import { EmptyState, SurfaceCard } from "@storyboard/ui";
 import { Building2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { scopedApiFetch } from "@/lib/api";
 import type { Venue } from "@/lib/types";
 
-export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
+export function VenuesClient({ artistId, canManage, initialVenues }: { artistId: string | null; canManage: boolean; initialVenues: Venue[] }) {
+  const apiFetch = scopedApiFetch(artistId);
   const router = useRouter();
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [fitScore, setFitScore] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function createVenue(e: React.FormEvent) {
     e.preventDefault();
+    if (!canManage) return;
+    setError(null);
     setBusy(true);
     try {
       await apiFetch<Venue>("/venues", {
@@ -30,6 +34,8 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
       setCity("");
       setFitScore("");
       router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create venue");
     } finally {
       setBusy(false);
     }
@@ -37,7 +43,8 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
 
   return (
     <div className="space-y-8">
-      <SurfaceCard>
+      {error ? <p role="alert" className="text-sm text-rose-200">{error}</p> : null}
+      {canManage ? <SurfaceCard>
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
           Add venue
         </h2>
@@ -82,17 +89,21 @@ export function VenuesClient({ initialVenues }: { initialVenues: Venue[] }) {
             </button>
           </div>
         </form>
-      </SurfaceCard>
+      </SurfaceCard> : null}
 
-      <VenueTable venues={initialVenues} onSaved={() => router.refresh()} />
+      <VenueTable artistId={artistId} canManage={canManage} venues={initialVenues} onSaved={() => router.refresh()} />
     </div>
   );
 }
 
 function VenueTable({
+  artistId,
+  canManage,
   venues,
   onSaved
 }: {
+  artistId: string | null;
+  canManage: boolean;
   venues: Venue[];
   onSaved: () => void;
 }) {
@@ -100,7 +111,7 @@ function VenueTable({
     return (
       <EmptyState
         title="No venues yet"
-        description="Venues anchor your CRM and booking outreach. Add one above to get started."
+        description={canManage ? "Venues anchor your CRM and booking outreach. Add one above to get started." : "An owner or member can add venues for this band."}
         icon={<Building2 className="h-6 w-6" />}
       />
     );
@@ -121,7 +132,7 @@ function VenueTable({
           </thead>
           <tbody>
             {venues.map((v) => (
-              <VenueRow key={v.id} venue={v} onSaved={onSaved} />
+              <VenueRow key={v.id} artistId={artistId} canManage={canManage} venue={v} onSaved={onSaved} />
             ))}
           </tbody>
         </table>
@@ -131,12 +142,17 @@ function VenueTable({
 }
 
 function VenueRow({
+  artistId,
+  canManage,
   venue,
   onSaved
 }: {
+  artistId: string | null;
+  canManage: boolean;
   venue: Venue;
   onSaved: () => void;
 }) {
+  const apiFetch = scopedApiFetch(artistId);
   const [name, setName] = useState(venue.name);
   const [city, setCity] = useState(venue.city);
   const [fitScore, setFitScore] = useState(
@@ -148,6 +164,7 @@ function VenueRow({
       : ""
   );
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setName(venue.name);
@@ -161,6 +178,8 @@ function VenueRow({
   }, [venue]);
 
   async function save() {
+    if (!canManage) return;
+    setError(null);
     setBusy(true);
     try {
       await apiFetch(`/venues/${venue.id}`, {
@@ -174,6 +193,8 @@ function VenueRow({
         }
       });
       onSaved();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save venue");
     } finally {
       setBusy(false);
     }
@@ -183,6 +204,7 @@ function VenueRow({
     <tr className="border-b border-[var(--border)] transition-colors hover:bg-[var(--surface-0)]/80">
       <td className="px-4 py-3">
         <input
+          disabled={!canManage}
           className="w-full rounded-md border border-transparent bg-transparent px-1 py-1 text-[var(--text-primary)] outline-none hover:border-[var(--border)] focus:border-[var(--accent)]"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -190,6 +212,7 @@ function VenueRow({
       </td>
       <td className="px-4 py-3">
         <input
+          disabled={!canManage}
           className="w-full rounded-md border border-transparent bg-transparent px-1 py-1 text-[var(--text-primary)] outline-none hover:border-[var(--border)] focus:border-[var(--accent)]"
           value={city}
           onChange={(e) => setCity(e.target.value)}
@@ -197,6 +220,7 @@ function VenueRow({
       </td>
       <td className="px-4 py-3">
         <input
+          disabled={!canManage}
           type="number"
           className="sb-input w-24 py-1.5 text-xs"
           value={fitScore}
@@ -205,6 +229,7 @@ function VenueRow({
       </td>
       <td className="px-4 py-3">
         <input
+          disabled={!canManage}
           type="number"
           className="sb-input w-24 py-1.5 text-xs"
           value={driveMin}
@@ -214,12 +239,13 @@ function VenueRow({
       <td className="px-4 py-3">
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !canManage}
           onClick={() => void save()}
           className="sb-btn-secondary py-1.5 text-xs"
         >
           Save
         </button>
+        {error ? <p role="alert" className="mt-1 text-xs text-rose-200">{error}</p> : null}
       </td>
     </tr>
   );

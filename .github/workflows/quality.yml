@@ -68,6 +68,7 @@ jobs:
         run: pnpm --filter @storyboard/web exec playwright install --with-deps chromium
       - name: Browser booking workflow
         env:
+          TZ: UTC
           STORYBOARD_TEST_DATABASE_URL: postgresql://storyboard:storyboard@localhost:5432/storyboard_test?schema=public
           REDIS_URL: redis://localhost:6379
           SESSION_SECRET: browser-test-session-secret

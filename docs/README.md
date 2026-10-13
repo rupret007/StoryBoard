@@ -9,6 +9,8 @@ detail.
 
 | I want to… | Read |
 | --- | --- |
+| Activate the Rad Dad + Stalemate pilot | [`band-pilot.md`](band-pilot.md), [`pilot-hosting-choice.md`](pilot-hosting-choice.md), [`pilot-evidence.md`](pilot-evidence.md) |
+| Back up and verify database recovery | [`backup-restore.md`](backup-restore.md) |
 | Run StoryBoard locally | [`developer-runbook.md`](developer-runbook.md) |
 | Understand the current shipped state | [`codex-handoff.md`](codex-handoff.md) |
 | See how Vault, Bob, StoryBoard, StoryLiner, and WebJam split | [`../APPS.md`](../APPS.md) |

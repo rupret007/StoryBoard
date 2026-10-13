@@ -1,3 +1,5 @@
+import { isTaskOverdueByUtcDay } from "@storyboard/shared";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const MANAGER_TEAM_LOAD_POLICY_VERSION = "manager_team_load_v2";
@@ -157,7 +159,7 @@ export function deterministicManagerTeamLoad(input: { members: ManagerTeamLoadMe
 
   const memberRows = members.map((member) => {
     const tasks = assigned.get(member.id) ?? [];
-    const overdue = tasks.filter((task) => task.dueAt && task.dueAt < now).length;
+    const overdue = tasks.filter((task) => isTaskOverdueByUtcDay(task.dueAt, now)).length;
     const blocked = tasks.filter((task) => task.status === "blocked").length;
     const dueWithinHorizon = tasks.filter((task) => task.dueAt && task.dueAt >= now && task.dueAt <= horizon).length;
     const unscheduled = tasks.filter((task) => !task.dueAt).length;

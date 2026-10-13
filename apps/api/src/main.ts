@@ -6,6 +6,7 @@ import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
 import "./auth/request-operator";
+import { attachStripeWebhookRawBody } from "./integrations/stripe-webhook-raw-body";
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -29,6 +30,8 @@ async function bootstrap() {
   await app.register(cookie, {
     secret: config.getOrThrow<string>("SESSION_SECRET")
   });
+
+  attachStripeWebhookRawBody(app.getHttpAdapter().getInstance());
 
   const port = config.getOrThrow<number>("API_PORT");
   await app.listen(port, "0.0.0.0");

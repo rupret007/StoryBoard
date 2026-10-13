@@ -1,3 +1,5 @@
+import { isTaskOverdueByUtcDay } from "@storyboard/shared";
+
 const DAY_MS = 86400000;
 export const PROJECT_PLAN_VERSION = "project_plan_v1";
 
@@ -84,7 +86,7 @@ export function deterministicProjectReadiness(project: ProjectReadinessInput, no
   const milestones = project.tasks;
   const open = milestones.filter((task) => task.status !== "done");
   const completed = milestones.filter((task) => task.status === "done");
-  const overdue = open.filter((task) => task.dueAt && task.dueAt < now);
+  const overdue = open.filter((task) => isTaskOverdueByUtcDay(task.dueAt, now));
   const blocked = open.filter((task) => task.status === "blocked");
   const unassigned = open.filter((task) => !task.ownerLabel);
   const spendMinor = project.expenses.reduce((sum, expense) => sum + expense.amountMinor, 0);

@@ -172,6 +172,16 @@ enum WorkflowNotificationKind {
   invoice_overdue
 }
 
+enum StripeWebhookEventStatus {
+  processing
+  completed
+}
+
+enum TelegramUrgentDedupeStatus {
+  attempted
+  sent
+}
+
 enum BandMode {
   original
   cover_event
@@ -902,15 +912,36 @@ model TelegramRegistrationToken {
 }
 
 model TelegramUrgentDedupe {
-  id        String   @id @default(cuid())
+  id        String                      @id @default(cuid())
   artistId  String
   dedupeKey String
-  sentAt    DateTime @default(now())
+  status    TelegramUrgentDedupeStatus  @default(attempted)
+  sentAt    DateTime?
   lastError String?
-  artist    Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  artist    Artist                      @relation(fields: [artistId], references: [id], onDelete: Cascade)
 
   @@unique([artistId, dedupeKey])
   @@index([artistId])
+}
+
+/// Stripe `evt_` deliveries claimed after signature verification.
+/// `processing` rows hold a short lease so a crash before complete can be
+/// retried; `appliedAt` is written after the handler succeeds so a later
+/// lease expiry cannot re-run the side effect. Completion and failure
+/// updates are conditional on `leaseOwner`.
+model StripeWebhookEvent {
+  id             String                   @id @default(cuid())
+  eventId        String                   @unique
+  status         StripeWebhookEventStatus @default(processing)
+  leaseOwner     String
+  leaseExpiresAt DateTime
+  eventType      String?
+  lastError      String?
+  createdAt      DateTime                 @default(now())
+  appliedAt      DateTime?
+  completedAt    DateTime?
+
+  @@index([status, leaseExpiresAt])
 }
 
 model ArtistMembershipInvite {

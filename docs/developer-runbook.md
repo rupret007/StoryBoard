@@ -18,7 +18,7 @@ cd StoryBoard
 pnpm install
 ```
 
-This creates `pnpm-lock.yaml`, links workspace packages, and runs **`prepare`**, which builds `@storyboard/shared` into `dist/` (required for `@storyboard/shared` imports in the API and web).
+This uses the committed `pnpm-lock.yaml`, links workspace packages, and runs **`prepare`**, which builds `@storyboard/shared` into `dist/` (required for `@storyboard/shared` imports in the API and web).
 
 ## 3. Environment file
 
@@ -283,7 +283,7 @@ Integration env vars are **optional**. **Google surfaces** (Gmail, Calendar, Dri
 
 `GET /integrations/status?artistId=` — requires a signed-in operator and membership; returns `providers` modes plus `googleConnection` summary. Artist context is resolved like other modules (`artistId` query, `x-artist-id`, session current artist, or first membership).
 
-**BullMQ:** Queue `storyboard-enrichment`; worker runs inside the API unless `ENABLE_QUEUE_WORKER=false`. Jobs include `venue.enrich`, `research.refresh` (stubs), phase **4A** workflow jobs, phase **4B** **`digest.generate.daily`** / **`digest.generate.weekly`**, Manager **`manager.schedule.scan`**, and phase **5A** **`urgent.telegram.scan`** (same repeat interval as overdue/stale) — see `docs/workflow-automation.md`. Optional env: **`WORKFLOW_STALE_FOLLOWUP_DAYS`** (default `7`), **`WORKFLOW_AUTOMATION_REPEAT_MS`** (overdue/stale/telegram repeat, default 6 hours), **`WORKFLOW_DIGEST_DAILY_MS`**, **`WORKFLOW_DIGEST_WEEKLY_MS`** (digest intervals; defaults 1 day and 7 days), and **`MANAGER_SCHEDULE_SCAN_MS`** (default 15 minutes, minimum one minute). **Telegram:** optional **`TELEGRAM_BOT_TOKEN`** — without it, urgent Telegram sends use the **mock** path (audited, no network). **Phase 5B:** **`TELEGRAM_BOT_USERNAME`** (deep links), **`TELEGRAM_REGISTRATION_TTL_MINUTES`**, **`TELEGRAM_WEBHOOK_SECRET`** (optional; Telegram `secret_token` must match **`X-Telegram-Bot-Api-Secret-Token`**). Public webhook: **`POST /integrations/telegram/webhook`** — configure via Bot API **`setWebhook`**. See `docs/telegram-alerts.md`.
+**BullMQ:** Queue `storyboard-enrichment`; worker runs inside the API unless `ENABLE_QUEUE_WORKER=false`. Jobs include `venue.enrich`, `research.refresh` (stubs), phase **4A** workflow jobs, phase **4B** **`digest.generate.daily`** / **`digest.generate.weekly`**, Manager **`manager.schedule.scan`**, and phase **5A** **`urgent.telegram.scan`** (same repeat interval as overdue/stale) — see `docs/workflow-automation.md`. Optional env: **`WORKFLOW_STALE_FOLLOWUP_DAYS`** (default `7`), **`WORKFLOW_AUTOMATION_REPEAT_MS`** (overdue/stale/telegram repeat, default 6 hours), **`WORKFLOW_DIGEST_DAILY_MS`**, **`WORKFLOW_DIGEST_WEEKLY_MS`** (digest intervals; defaults 1 day and 7 days), and **`MANAGER_SCHEDULE_SCAN_MS`** (default 15 minutes, minimum one minute). **Telegram:** optional **`TELEGRAM_BOT_TOKEN`** — without it, urgent Telegram sends use the **mock** path (audited, no network). **Phase 5B:** **`TELEGRAM_BOT_USERNAME`** (deep links), **`TELEGRAM_REGISTRATION_TTL_MINUTES`**, **`TELEGRAM_WEBHOOK_SECRET`** (optional; Telegram `secret_token` must match **`X-Telegram-Bot-Api-Secret-Token`**). Public webhook: **`POST /integrations/telegram/webhook`** — configure via Bot API **`setWebhook`**. See `docs/telegram-alerts.md`. **Stripe inbound:** **`POST /integrations/stripe/webhook`** verifies **`Stripe-Signature`** with **`STRIPE_WEBHOOK_SECRET`** (rejects the request if the secret is unset), then claims the Stripe **`evt_`** id with a short processing lease so a retried delivery cannot run the handler twice. A crash before apply leaves an expired-lease retry path; a successful side effect writes **`appliedAt`** before **`completed`**, so a later lease expiry cannot re-run the handler. An in-flight unfinished claim returns **503** so Stripe keeps retrying. Complete and expire updates are conditional on **`leaseOwner`**. This path does not apply invoice payments.
 
 **Workflow notifications API** (session + artist context via `x-artist-id` / session):
 
@@ -682,7 +682,7 @@ tenant-scoped snapshots covering operating goals/tasks plus current events,
 booking replies and follow-ups, prospects, approvals, deals, invoices,
 settlements, and the shared evidence-backed outcome review. CRM/provider text
 is treated as untrusted data. Prompt/policy
-version `manager_os_v33` with offline dataset `manager_evals_v44` retains the
+version `manager_os_v33` with offline dataset `manager_evals_v45` retains the
 current operator question and at most 12
 recent messages; it rejects the entire model result when any cited or
 recommendation evidence ID is unknown. Stored traces contain facts read, policy checks,
@@ -884,10 +884,11 @@ that its name contains `test`, then seeds it. Browser coverage therefore
 exercises first-time intake on every run instead of inheriting old test data.
 The runner forces its production build environment internally, so an unrelated
 shell-level `NODE_ENV` cannot invalidate Next.js prerendering.
-The 17 focused browser cases establish their own domain prerequisites and cover
-booking (including approved immediate-send execution and follow-up creation),
-Manager, operations, finance, tasks, approval-gated event logistics, and the
-day-of live-run cursor without depending on a previous case's records.
+The Playwright Chromium suite in `apps/web/e2e` establishes its own domain
+prerequisites and covers booking (including approved immediate-send execution
+and follow-up creation), Manager, operations, finance, tasks, two-band pilot
+access, approval-gated event logistics, and the day-of live-run cursor without
+depending on a previous case's records.
 Gig-title asserts on Band operations stay scoped to the event card so
 show-control and live-run cannot trip Playwright strict mode. The approval lifecycle journey also
 invalidates prepared logistics by changing the event, verifies that execution
@@ -993,7 +994,12 @@ duplicate create fails closed. Finalized settlements freeze included expenses
 and the PDF snapshot; later event expense creates and patches fail closed.
 Agreement
 templates include a not-legal-advice disclaimer and must be activated by an
-owner. Current Gmail delivery prepares a reviewed draft referencing the
+owner. PDFs have a one-page limit of 58 rows after wrapping at 92 characters,
+including the title, blank rows, and disclaimer. Oversized content returns a
+400 validation error before any agreement/snapshot write or success audit;
+shorten the title or reviewed text, or remove extra blank lines, while keeping
+all required terms and disclaimers. Pagination is not supported.
+Current Gmail delivery prepares a reviewed draft referencing the
 StoryBoard PDF snapshot; attach the PDF manually until binary Drive/Gmail
 adapters are implemented and provider-tested.
 
@@ -1401,10 +1407,10 @@ pnpm build
 pnpm manager:eval
 ```
 
-**Unit tests:** `pnpm test` runs **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The current unit package passes 25/25 shared tests and 269/269 API unit tests. The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing and relational follow-through, reload-safe receipts and capability controls, owner/member provider-context gating, durable/exact/legacy full-context turn projection including provider fallback, owner-only recommendation mutation/history/learning isolation, feedback authorization rechecks, exact-source memory visibility, rejection of archived/private memory re-acceptance with active-normal-only refresh, full-input credential rejection, legacy audit-key projection, approval lifecycle classification/caller stitching, role capabilities, mixed provider-state quarantine and reconciliation, rejected/expired receipt behavior, one-shot execution safety, transaction-bound audit rollback, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The receipt package adds strict evidence, terminal-outcome, idempotency, tenant, unchanged-Approval, no-provider-call, event-logistics, campaign-replacement, and Manager-blocking regressions. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
+**Unit tests:** `pnpm test` runs recovery guards, then **`@storyboard/shared`** (`pnpm run build` then `node --test` on `packages/shared/test/**/*.test.mjs`) and **`@storyboard/api`** (strict `tsc --noEmit`, lower-memory Nest SWC emission, then `node --test` on `apps/api/test/*.test.mjs`). The current unit package passes 11/11 recovery tests, 106/106 shared tests, and 347/347 API unit tests. The API suite covers tenant links, task prerequisite cycles/order/completion, Manager work sequencing and relational follow-through, reload-safe receipts and capability controls, owner/member provider-context gating, durable/exact/legacy full-context turn projection including provider fallback, owner-only recommendation mutation/history/learning isolation, feedback authorization rechecks, exact-source memory visibility, rejection of archived/private memory re-acceptance with active-normal-only refresh, full-input credential rejection, legacy audit-key projection, approval lifecycle classification/caller stitching, role capabilities, mixed provider-state quarantine and reconciliation, rejected/expired receipt behavior, one-shot execution safety, transaction-bound audit rollback, booking profile/template validation, Ticketmaster normalization/manual mode, provider dedupe, operator OAuth state, Telegram **start-payload**, and registration-token **hash** checks; it never needs a database. The receipt package adds strict evidence, terminal-outcome, idempotency, tenant, unchanged-Approval, no-provider-call, event-logistics, campaign-replacement, and Manager-blocking regressions. The same typecheck-plus-SWC path is used by normal API production builds so the full parallel monorepo gate does not depend on Node's default heap peak.
 
 The complete root quality gate passes, including both production builds. The
-`manager_os_v33` / `manager_evals_v44` gate passes 98/98 checks at 100% safety.
+`manager_os_v33` / `manager_evals_v45` gate passes 119/119 checks at 100% safety.
 
 **Database integration tests:** Set `STORYBOARD_TEST_DATABASE_URL` to a disposable PostgreSQL database whose name contains `test`, then run:
 
@@ -1419,8 +1425,9 @@ tenant links (including custom event schedule ownership and event-bound
 approval ownership), role enforcement, Telegram registration binding, Manager
 follow-through task/approval/reconciliation lifecycle, current memory visibility
 inside conversation JSON, durable full-context message visibility, and
-transaction-bound audit rows. The release-validated package passes 5/5
-top-level workflows after deploying all 40 forward migrations. It exercises
+transaction-bound audit rows. The integration suite deploys all 42 forward migrations against that disposable
+database. The 2026-10-07 local run on this branch passed 8/8 workflows
+(including two-workspace isolation and audit rollback). It exercises
 the real Approval workflow for artist
 isolation, owner/member writes, viewer read-only history, non-member rejection,
 exact replay, one-terminal concurrency, composite tenant ownership, unchanged
@@ -1445,6 +1452,15 @@ by append-only no-effect reconciliation, reload persistence, attention clearing,
 and a separately prepared replacement approval. It never retries the original
 request or falls back to `DATABASE_URL`.
 
+Both the root runner and direct Playwright server startup use
+`scripts/e2e-environment.mjs`. It explicitly empties Google, Telegram, and
+discovery credentials and disables OpenAI, reply sync, advisor automation, and
+the queue worker, overriding inherited shell values and preventing `.env`
+fallback. `pnpm test:e2e-env` checks this boundary using synthetic credentials;
+these checks do not validate live providers. Direct Playwright still requires
+prepared test data and current builds; use the root runner for database guards
+and setup.
+
 ```bash
 pnpm --filter @storyboard/web exec playwright install chromium
 STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/storyboard_test?schema=public' \
@@ -1453,12 +1469,12 @@ STORYBOARD_TEST_DATABASE_URL='postgresql://storyboard:storyboard@localhost:5432/
 
 On Linux CI images, use `playwright install --with-deps chromium` to install
 the operating-system packages as well. macOS needs only the command above.
-The release-validated package passes all 15 Chromium journeys. Prisma reports
-all 40 local migrations current with no schema diff, the read-only relationship
-diagnostic reports no violations (and logs non-fatal skips when optional
-tables are missing from older database snapshots), and the rebuilt Compose
-bundle passes API/web health, dependency readiness, Dev-login session, and
-authenticated-Dashboard smoke. The database and browser suites emit a non-fatal
+Hosted Quality on the pull-request or `main` tip is the authority for the
+current Chromium, integration, and Compose-smoke counts. Locally, Prisma ships
+42 forward migrations. The read-only relationship diagnostic reports no
+violations (and logs non-fatal skips when optional tables are missing from
+older database snapshots). The rebuilt Compose bundle is verified in CI
+container-smoke, not by this runbook paragraph. The database and browser suites emit a non-fatal
 `pg@8.14.1` concurrent-`client.query()` deprecation warning; remove its source
 before a future `pg@9` upgrade without weakening transaction ownership.
 

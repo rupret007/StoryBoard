@@ -1,9 +1,13 @@
+import { taskOverdueUtcCutoff } from "@storyboard/shared";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "../generated/prisma/client";
 import { ManagerRecommendationOutcome, TaskStatus } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import type { TaskCreateInput, TaskPatchInput } from "./task.schema";
+
+/** Bounded scan used before inserting a TaskDependency. Hitting this cap means the graph may be truncated, so the mutation fails closed. */
+export const TASK_DEPENDENCY_CYCLE_SCAN_LIMIT = 1000;
 
 @Injectable()
 export class TasksService {
@@ -30,13 +34,10 @@ export class TasksService {
   /**
    * Tasks past their due date, excluding done.
    * When `graceDays` &gt; 0, `dueAt` must be before (now minus that many UTC calendar days).
-   * Null or 0 grace matches “any past-due” (`dueAt` &lt; now).
+   * Null or 0 grace matches a past UTC calendar day (`dueAt` &lt; start of today UTC).
    */
-  overdueByDueDate(artistId: string, graceDays?: number | null) {
-    const cutoff = new Date();
-    if (graceDays != null && graceDays > 0) {
-      cutoff.setUTCDate(cutoff.getUTCDate() - graceDays);
-    }
+  overdueByDueDate(artistId: string, graceDays?: number | null, now = new Date()) {
+    const cutoff = taskOverdueUtcCutoff(now, graceDays);
     return this.prisma.client.task.findMany({
       where: {
         artistId,
@@ -112,7 +113,14 @@ export class TasksService {
         include: { prerequisiteTask: { select: { id: true, title: true, status: true, dueAt: true } } }
       });
       if (existing) return { row: existing, created: false };
-      const edges = await tx.taskDependency.findMany({ where: { artistId }, select: { taskId: true, prerequisiteTaskId: true }, take: 1000 });
+      const edges = await tx.taskDependency.findMany({
+        where: { artistId },
+        select: { taskId: true, prerequisiteTaskId: true },
+        take: TASK_DEPENDENCY_CYCLE_SCAN_LIMIT
+      });
+      if (edges.length >= TASK_DEPENDENCY_CYCLE_SCAN_LIMIT) {
+        throw new BadRequestException("This workspace has too many task prerequisites to check for a cycle. Remove some before adding another.");
+      }
       if (this.dependencyWouldCycle(taskId, prerequisiteTaskId, edges)) throw new BadRequestException("That prerequisite would create a task cycle");
       const row = await tx.taskDependency.create({
         data: { artistId, taskId, prerequisiteTaskId },

@@ -29,6 +29,7 @@ import { EVENT_LOGISTICS_POLICY_VERSION, type EventLogisticsAssessment, type Pre
 import { applyManagerResponseAdaptation, managerResponseAdaptationPolicy, type ManagerResponseAdaptationPolicy } from "./manager-response-quality";
 import { resolveManagerWriteClaim } from "./manager-write-claim";
 import type { ManagerFollowThrough } from "./manager-follow-through";
+import { managerPilotQuestion, recordedPilotDesk } from "./manager-pilot-desk";
 
 import { recordedBookingDesk, managerQuestionAsksForBookingPack, managerQuestionAsksForTravisDecision, type BookingPackRecords } from "./manager-booking-desk";
 
@@ -88,6 +89,7 @@ export type ManagerBrief = {
 
 export type ManagerFacts = {
   artist: { id: string; name: string };
+  currentMemberId?: string | null;
   profile: {
     intakeCompletedAt: Date | null;
     decisionStyle: string;
@@ -98,7 +100,7 @@ export type ManagerFacts = {
   goals: { id: string; title: string; workstream: ManagerWorkstream; status: string; deadline: Date | null; currentValue: number | null; targetValue: number | null; targetUnit?: string | null; targetDirection?: ManagerGoalTargetDirection; measurementKind?: string; createdAt?: Date; updatedAt?: Date }[];
   goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
-  tasks: { id: string; title: string; status: string; dueAt: Date | null; updatedAt?: Date; initiativeId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null; prerequisites?: { prerequisiteTask: { id: string; title: string; status: string; dueAt: Date | null } }[]; dependents?: { task: { id: string; title: string; status: string; dueAt: Date | null } }[] }[];
+  tasks: { id: string; title: string; status: string; dueAt: Date | null; updatedAt?: Date; initiativeId?: string | null; eventId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null; prerequisites?: { prerequisiteTask: { id: string; title: string; status: string; dueAt: Date | null } }[]; dependents?: { task: { id: string; title: string; status: string; dueAt: Date | null } }[] }[];
   opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null; packRecords?: BookingPackRecords }[];
   events: {
     id: string;
@@ -1128,7 +1130,9 @@ export function managerQuestionAsksAboutCatalog(question: string) {
 }
 
 export function managerQuestionNeedsRecordedDeskAnswer(question: string) {
-  return managerQuestionAsksForBookingPack(question) || managerQuestionAsksForTravisDecision(question) || managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
+  return Boolean(managerPilotQuestion(question)) || managerQuestionAsksAboutBandWorkspace(question)
+    || managerQuestionAsksForBookingPack(question) || managerQuestionAsksForTravisDecision(question)
+    || managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
     || managerQuestionAsksAboutCatalog(question) || managerQuestionAsksAboutPipelineStages(question)
     || /\b(invoices?|unpaid|overdue|receivables?|next[- ]due|money|paid|payment|deposit|cash)\b/i.test(question);
 }
@@ -1154,8 +1158,14 @@ export function managerQuestionAsksAboutPipelineStages(question: string) {
 
 export function managerQuestionAsksAboutFourthBand(question: string) {
   if (/\b(?:fourth|4th|another|new)(?: live)? band\b/i.test(question)) return true;
-  return /\b(stalemate|trailer swift|something dirty)\b/i.test(question)
-    && /\b(live|band|import|catalog|setlist|artist|create|add)\b/i.test(question);
+  return (/\bstalemate\b/i.test(question) && /\b(import|catalog|setlist)\b/i.test(question))
+    || (/\b(trailer swift|something dirty)\b/i.test(question) && /\b(live|band|import|catalog|setlist|artist|create|add)\b/i.test(question));
+}
+
+export function managerQuestionAsksAboutBandWorkspace(question: string) {
+  return /\bstalemate\b/i.test(question)
+    && /\b(live band|band workspace|own band|separate band|pilot band)\b/i.test(question)
+    && !/\b(import|catalog|setlist|send|post|pay|sign|email|message)\b/i.test(question);
 }
 
 export function managerQuestionAsksAboutWriterProjectAsLiveBand(question: string) {
@@ -1387,10 +1397,19 @@ function deterministicManagerChatBase(
     };
   }
 
+  if (managerQuestionAsksAboutBandWorkspace(question)) {
+    const recorded = recordedVaultCatalog(facts);
+    return {
+      answer: `Stalemate can have its own band workspace, separate from Rad Dad. The current artist is ${facts.artist.name}.${recorded.titleClause} Any Stalemate-origin song already imported through Vault's setlist_ready_default_import / default_live slice is repertoire of the current artist, not a fourth live band created by that import. A band owner can create a separate workspace from Team. That does not authorize importing Rad Dad's default slice into Stalemate: preview an approved local Vault feed for the selected band first. No workspace or catalog change was made by this answer.`,
+      citations: recorded.citations,
+      recommendation: null
+    };
+  }
+
   if (managerQuestionAsksAboutFourthBand(question)) {
     const recorded = recordedVaultCatalog(facts);
     return {
-      answer: `StoryBoard imports onto the current artist only. The live catalog is Vault's published setlist_ready_default_import / default_live slice (Rad Dad + Jeff Story + recorded Rad Dad plays). A Stalemate, hybrid, or Jeff Story row already in that slice is current-artist repertoire — not a fourth live band.${recorded.titleClause} Stalemate, Trailer Swift, and Something Dirty catalogs stay parked unless an operator opts in with --include-parked. Import a local Vault file; do not invent another artist.`,
+      answer: `StoryBoard imports onto the selected band only. Rad Dad and Stalemate can have separate band workspaces; a catalog import does not create another band. Vault's default setlist_ready_default_import / default_live slice is published for its recorded live repertoire (Rad Dad + Jeff Story + recorded Rad Dad plays). A Stalemate, hybrid, or Jeff Story song in that slice is repertoire, not a fourth live band.${recorded.titleClause} Catalogs marked parked by Vault remain excluded unless an operator explicitly approves an opt-in with --include-parked. A Stalemate workspace does not authorize importing Rad Dad's default slice into it. Review an approved local Vault file for the selected band first; do not invent songs or import without that review.`,
       citations: recorded.citations,
       recommendation: null
     };
@@ -1409,6 +1428,9 @@ function deterministicManagerChatBase(
       recommendation: recommendation?.proposedAction ? recommendation : null
     };
   }
+
+  const pilotDesk = recordedPilotDesk(facts, question, now);
+  if (pilotDesk) return pilotDesk;
 
   const coaching = subject ? null : deterministicManagerCoaching(facts, question, now);
   if (coaching) return { answer: coaching.answer, citations: coaching.citations, recommendation: null };

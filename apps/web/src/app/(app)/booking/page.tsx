@@ -1,3 +1,4 @@
+import { NO_AUTO_PITCH_COPY } from "@storyboard/shared";
 import { PageHeader } from "@storyboard/ui";
 import { BookingClient } from "./booking-client";
 import { serverApiFetch } from "@/lib/api-server";
@@ -14,6 +15,7 @@ export default async function BookingPage() {
   let artistId: string | null = null;
   let accessState: "manage" | "read_only" | "unavailable" = "unavailable";
   let loadError = "";
+  let insightsLoadError = false;
   try {
     const me = await serverApiFetch<{
       currentArtistId: string | null;
@@ -29,7 +31,10 @@ export default async function BookingPage() {
       serverApiFetch<BookingOpportunity[]>("/booking-opportunities", readOptions),
       serverApiFetch<Venue[]>("/venues", readOptions)
     ]);
-    const insights = await serverApiFetch<DashboardInsights>("/dashboard/insights", readOptions).catch(() => null);
+    const insights = await serverApiFetch<DashboardInsights>("/dashboard/insights", readOptions).catch(() => {
+      insightsLoadError = true;
+      return null;
+    });
     if (insights) {
       opportunityRisks = Object.fromEntries(insights.opportunityRisks.map((r) => [r.opportunityId, r.level]));
     }
@@ -42,7 +47,7 @@ export default async function BookingPage() {
     <div className="space-y-8">
       <PageHeader
         title="Booking pipeline"
-        description="Stage opportunities from target to close. Travis books; each card names the next recorded action. StoryBoard will not pitch."
+        description={`Stage opportunities from target to close. ${NO_AUTO_PITCH_COPY}.`}
       />
       <BookingClient
         key={artistId ?? "unavailable"}
@@ -52,6 +57,7 @@ export default async function BookingPage() {
         initialOpportunities={opportunities}
         venues={venues}
         opportunityRisks={opportunityRisks}
+        insightsLoadError={insightsLoadError}
       />
     </div>
   );

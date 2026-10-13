@@ -1,0 +1,127 @@
+# REVIEW EXAMPLE ONLY. This is deliberately not a root render.yaml.
+# Creating these resources incurs charges. Jeff must approve cost, hostnames,
+# Google credentials and the exact candidate before any Render setup/apply.
+# Replace example.com and REPLACE_WITH_APPROVED_BRANCH before use.
+# After creation also set Blueprint Settings -> Auto Sync -> No.
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+
+previews:
+  generation: off
+
+services:
+  - type: keyvalue
+    name: storyboard-pilot-queue
+    region: ohio
+    plan: 256mb
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+
+  - type: web
+    name: storyboard-pilot-api
+    runtime: docker
+    repo: https://github.com/rupret007/StoryBoard
+    branch: REPLACE_WITH_APPROVED_BRANCH
+    region: ohio
+    plan: 1c-2g
+    numInstances: 1
+    autoDeployTrigger: off
+    dockerContext: .
+    dockerfilePath: ./Dockerfile.api
+    preDeployCommand: pnpm exec prisma migrate deploy
+    healthCheckPath: /ready
+    domains:
+      - band-api.example.com
+    renderSubdomainPolicy: disabled
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "4000"
+      - key: API_PORT
+        value: "4000"
+      - key: AUTH_DEV_BYPASS
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: storyboard-pilot-database
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: storyboard-pilot-queue
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: WEB_URL
+        value: https://band.example.com
+      - key: API_URL
+        value: https://band-api.example.com
+      - key: COOKIE_DOMAIN
+        value: example.com
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OPERATOR_REDIRECT_URI
+        value: https://band-api.example.com/auth/operator/google/callback
+      - key: ENABLE_QUEUE_WORKER
+        value: "true"
+      - key: OPENAI_ENABLED
+        value: "false"
+      - key: BOOKING_ADVISOR_AUTOMATION_ENABLED
+        value: "false"
+      - key: GMAIL_REPLY_SYNC_ENABLED
+        value: "false"
+
+  - type: web
+    name: storyboard-pilot-web
+    runtime: docker
+    repo: https://github.com/rupret007/StoryBoard
+    branch: REPLACE_WITH_APPROVED_BRANCH
+    region: ohio
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: off
+    dockerContext: .
+    dockerfilePath: ./Dockerfile.web
+    # Render references host:port; the existing app expects a full internal URL.
+    # This wrapper resolves it at runtime without changing browser API links.
+    dockerCommand: >-
+      /bin/sh -c 'export INTERNAL_API_URL="http://${STORYBOARD_API_HOSTPORT:?missing internal API address}"; exec pnpm --filter @storyboard/web start'
+    healthCheckPath: /
+    domains:
+      - band.example.com
+    renderSubdomainPolicy: disabled
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=320
+      - key: AUTH_DEV_BYPASS
+        value: "false"
+      - key: WEB_URL
+        value: https://band.example.com
+      - key: API_URL
+        value: https://band-api.example.com
+      # Render supplies this to the Dockerfile's existing ARG during build.
+      - key: NEXT_PUBLIC_API_URL
+        value: https://band-api.example.com
+      - key: STORYBOARD_API_HOSTPORT
+        fromService:
+          type: web
+          name: storyboard-pilot-api
+          property: hostport
+
+databases:
+  - name: storyboard-pilot-database
+    region: ohio
+    plan: 0.5c-1g
+    postgresMajorVersion: "16"
+    databaseName: storyboard
+    user: storyboard
+    diskSizeGB: 5
+    storageAutoscalingEnabled: false
+    ipAllowList: []

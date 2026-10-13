@@ -59,8 +59,8 @@ On **`Artist`**:
 
 | Job name | Payload | Trigger |
 | -------- | ------- | ------- |
-| `invite.send` | `inviteId`, `artistId`, `acceptUrl`, `inviteeEmail`, `artistName`, `role` | After **owner** creates an invite (HTTP path already owner-only). Job id `invite:<inviteId>`. |
-| `approval.notify` | `artistId`, `approvalId`, `event` (`created` \| `approved` \| `rejected` \| `executed` \| `failed`) | After approval create / approve / reject / execution success or failure. |
+| `invite.send` | `inviteId`, `artistId`, `acceptUrl`, `inviteeEmail`, `artistName`, `role` | After **owner** creates an invite (HTTP path already owner-only). Job id `invite__<inviteId>` (colon-free injective encoding so BullMQ accepts it; same invite id remains a duplicate; `:`, `_`, and `%` inside a part are percent-encoded). |
+| `approval.notify` | `artistId`, `approvalId`, `event` (`created` \| `approved` \| `rejected` \| `executed` \| `failed`) | After approval create / approve / reject / execution success or failure. Job id `approval__<approvalId>__<event>__<occurredAtMs>` (same injective encoding; unique per event occurrence). |
 | `membership.invite_accepted` | `artistId`, `inviteeEmail`, `role` | After successful invite accept. |
 | `integration.connection_changed` | `artistId`, `provider` | After Google integration OAuth callback persists connection. |
 | `task.check-overdue` | `{}` | **Repeatable** (default every 6h when worker enabled). Scans artists with overdue tasks; honors **per-artist** `workflowOverdueGraceDays`. |
@@ -76,7 +76,7 @@ On **`Artist`**:
 - **Separate from 4B prefs:** Membership **`workflowNotifyPrefs`** still controls **in-app** and **Gmail draft** only. **Telegram** uses **`Artist.telegramUrgentEnabled`**, **`telegramChatId`**, and **`telegramNotifyCategories`** (JSON: approvals, overdueTasks, staleFollowUps). **Owners** set these via `GET` / `PATCH /workflow/telegram`.
 - **Server env:** **`TELEGRAM_BOT_TOKEN`** (optional). If unset, **`WorkflowTelegramService`** uses a **mock** adapter: no HTTP to Telegram, but **`telegram.urgent.sent`** is still audited with `mode: mock` when delivery would have occurred — safe for local dev.
 - **Triggers:** (1) **`urgent.telegram.scan`** evaluates unresolved provider outcomes, aged pending approvals, overdue clusters, and stale clusters (deterministic thresholds in `urgent-channel.constants.ts`, aligned with `GET /dashboard/insights`). A `still_unknown` receipt keeps the provider signal active; either terminal outcome removes it from later scans. Already sent Telegram messages, notification rows, dedupe rows, and audits remain historical. (2) **`approval.notify`** with `event: failed` calls **`trySendApprovalFailed`** (dedupe per approval id).
-- **Dedupe:** **`TelegramUrgentDedupe`** unique on **`(artistId, dedupeKey)`** — e.g. `approval_reconciliation:<UTC-date>`, `approval_aging:<UTC-date>`, `overdue_cluster:<UTC-date>`, `stale_cluster:<UTC-date>`, `approval_failed:<approvalId>`. Prevents repeated Telegram spam; failed API sends do **not** insert a row (retries allowed on next scan).
+- **Dedupe:** **`TelegramUrgentDedupe`** unique on **`(artistId, dedupeKey)`** — e.g. `approval_reconciliation:<UTC-date>`, `approval_aging:<UTC-date>`, `overdue_cluster:<UTC-date>`, `stale_cluster:<UTC-date>`, `approval_failed:<approvalId>`. An atomic **`attempted`** claim is persisted **before** the adapter runs so concurrent callers share at most one send attempt. A later **`sent`** update records a confirmed delivery. Failed or uncertain attempts keep the claim (`lastError`) and do **not** automatically resend; they are not presented as delivered.
 - **Docs:** `docs/telegram-alerts.md` (bot setup, chat id, owner opt-in).
 
 ## Phase 5B — Telegram inbound registration
@@ -108,8 +108,9 @@ On **`Artist`**:
 - `ArtistMembership.workflowNotifyPrefs` — optional JSON (phase 4B).
 - `Artist.workflowOverdueGraceDays`, `workflowStaleFollowupDays`, `workflowPendingApprovalDays` — optional ints (phase 4B).
 - `Artist.telegramUrgentEnabled`, `telegramChatId`, `telegramNotifyCategories` — phase 5A (owner-configured Telegram routing).
-- `TelegramUrgentDedupe` — `artistId`, `dedupeKey`, `sentAt`, `lastError` (phase 5A).
+- `TelegramUrgentDedupe` — `artistId`, `dedupeKey`, `status` (`attempted` | `sent`), `sentAt` (set when `sent`), `lastError` (phase 5A).
 - `TelegramRegistrationToken` — short-lived hashed tokens for inbound **`/start`** binding (phase 5B).
+- `StripeWebhookEvent` — unique Stripe `evt_` claims after `Stripe-Signature` verification. Claim, handler, `appliedAt`, and `completed` commit together in a serializable row-locked transaction; `appliedAt` requires the current `leaseOwner` before the handler runs. Applied rows cannot be reclaimed. An expired lease cannot overlap a handler that still holds the row lock. In-flight unfinished deliveries return 503. Raw-body capture is size-capped.
 - `WorkflowNotification` — `recipientOperatorId`, `artistId`, `kind`, `title`,
   `body`, `readAt`, `metadata`.
 - `WorkflowNotificationKind` includes `digest_daily`, `digest_weekly`.

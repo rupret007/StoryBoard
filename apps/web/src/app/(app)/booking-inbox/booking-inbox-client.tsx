@@ -1,19 +1,26 @@
 "use client";
 
-import { bookingReplyNextAction, describeTaskDueDate } from "@storyboard/shared";
+import { BOOKING_TERMS_APPLIED_COPY, bookingReplyNextAction, describeTaskDueDate } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { CalendarClock, CheckCircle2, MailSearch, RefreshCw, Sparkles } from "lucide-react";
 import { useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { scopedApiFetch } from "@/lib/api";
 import type { BookingReply, BookingReplySettings } from "@/lib/types";
 
 export function BookingInboxClient({
+  artistId,
+  canManage,
+  isOwner,
   initialReplies,
   initialSettings
 }: {
+  artistId: string | null;
+  canManage: boolean;
+  isOwner: boolean;
   initialReplies: BookingReply[];
   initialSettings: BookingReplySettings;
 }) {
+  const apiFetch = scopedApiFetch(artistId);
   const [replies, setReplies] = useState(initialReplies);
   const [settings, setSettings] = useState(initialSettings);
   const [busy, setBusy] = useState<string | null>(null);
@@ -25,6 +32,7 @@ export function BookingInboxClient({
   }
 
   async function sync() {
+    if (!canManage) return;
     setBusy("sync");
     setNotice(null);
     try {
@@ -41,6 +49,7 @@ export function BookingInboxClient({
   }
 
   async function updateSettings(patch: Partial<BookingReplySettings>) {
+    if (!isOwner) return;
     setBusy("settings");
     setNotice(null);
     try {
@@ -56,6 +65,7 @@ export function BookingInboxClient({
   }
 
   async function action(id: string, path: string, json?: unknown) {
+    if (!canManage) return;
     setBusy(`${path}-${id}`);
     setNotice(null);
     try {
@@ -66,7 +76,7 @@ export function BookingInboxClient({
       await reload();
       let message = "Reply updated.";
       if (path === "apply-terms") {
-        message = "Reviewed terms were saved on the linked opportunity. Null analysis fields did not erase recorded fees. Next: confirm this booking when Travis is ready.";
+        message = BOOKING_TERMS_APPLIED_COPY;
       } else if (path === "prepare-approval") {
         message = "Reply draft is waiting in Approvals.";
       } else if (path === "prepare-confirmation") {
@@ -105,7 +115,7 @@ export function BookingInboxClient({
           <button
             type="button"
             className="sb-btn-primary"
-            disabled={busy !== null || !settings.syncEnabled}
+            disabled={!canManage || busy !== null || !settings.syncEnabled}
             onClick={() => void sync()}
           >
             <RefreshCw className="h-4 w-4" />
@@ -117,7 +127,7 @@ export function BookingInboxClient({
             <input
               type="checkbox"
               checked={settings.syncEnabled}
-              disabled={!settings.deploymentEnabled || !settings.scopeReady || busy !== null}
+              disabled={!isOwner || !settings.deploymentEnabled || !settings.scopeReady || busy !== null}
               onChange={(event) =>
                 void updateSettings({ syncEnabled: event.target.checked })
               }
@@ -128,7 +138,7 @@ export function BookingInboxClient({
             <input
               type="checkbox"
               checked={settings.aiAnalysisEnabled}
-              disabled={busy !== null}
+              disabled={!isOwner || busy !== null}
               onChange={(event) =>
                 void updateSettings({ aiAnalysisEnabled: event.target.checked })
               }
@@ -166,6 +176,7 @@ export function BookingInboxClient({
             <ReplyCard
               key={reply.id}
               reply={reply}
+              canManage={canManage}
               busy={busy}
               aiEnabled={settings.aiAnalysisEnabled}
               onAction={action}
@@ -179,11 +190,13 @@ export function BookingInboxClient({
 
 function ReplyCard({
   reply,
+  canManage,
   busy,
   aiEnabled,
   onAction
 }: {
   reply: BookingReply;
+  canManage: boolean;
   busy: string | null;
   aiEnabled: boolean;
   onAction: (id: string, path: string, json?: unknown) => Promise<void>;
@@ -218,7 +231,7 @@ function ReplyCard({
           <button
             type="button"
             className="sb-btn-secondary"
-            disabled={busy !== null}
+            disabled={!canManage || busy !== null}
             onClick={() => void onAction(reply.id, "analyze")}
           >
             <Sparkles className="h-4 w-4" />
@@ -252,7 +265,7 @@ function ReplyCard({
         <button
           type="button"
           className="sb-btn-secondary mt-3"
-          disabled={busy !== null}
+          disabled={!canManage || busy !== null}
           onClick={() => void onAction(reply.id, "apply-terms")}
         >
           <CheckCircle2 className="h-4 w-4" />
@@ -264,7 +277,7 @@ function ReplyCard({
           <button
             type="button"
             className="sb-btn-secondary mt-3"
-            disabled={busy !== null}
+            disabled={!canManage || busy !== null}
             onClick={() => void onAction(reply.id, "prepare-confirmation")}
           >
             <CalendarClock className="h-4 w-4" />
@@ -276,12 +289,14 @@ function ReplyCard({
 
       <div className="mt-4 grid gap-2">
         <input
+          disabled={!canManage}
           aria-label="Reply subject"
           className="sb-input"
           value={subject}
           onChange={(event) => setSubject(event.target.value)}
         />
         <textarea
+          disabled={!canManage}
           aria-label="Reply body"
           className="sb-input min-h-28"
           value={body}
@@ -291,7 +306,7 @@ function ReplyCard({
         <button
           type="button"
           className="sb-btn-primary w-fit"
-          disabled={!body.trim() || busy !== null}
+          disabled={!canManage || !body.trim() || busy !== null}
           onClick={() => void onAction(reply.id, "prepare-approval", { subject, body })}
         >
           Preview & request approval
