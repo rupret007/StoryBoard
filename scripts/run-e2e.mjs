@@ -4,6 +4,7 @@ import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { requireTestDatabaseUrl } from "./test-database.mjs";
+import { buildE2eEnvironment } from "./e2e-environment.mjs";
 
 async function isPortInUse(port) {
   async function canBind(host) {
@@ -76,8 +77,9 @@ const apiUrl = await resolveTestUrl("E2E_API_URL", "http://127.0.0.1:4000");
 const canonicalizeUrl = (value) => value.replace(/\/$/, "");
 const browserWebUrl = canonicalizeUrl(webUrl);
 const browserApiUrl = canonicalizeUrl(apiUrl);
-const env = {
+const env = buildE2eEnvironment({
   ...process.env,
+  TZ: process.env.TZ || "UTC",
   // The harness builds the production artifacts before Playwright starts its
   // separately configured API (development) and web (production) servers.
   // Do not inherit a developer shell's nonstandard NODE_ENV into Next build.
@@ -91,9 +93,8 @@ const env = {
   API_URL: browserApiUrl,
   // A host-only cookie is required for the browser's 127.0.0.1 test origin.
   // The developer `.env` commonly sets COOKIE_DOMAIN=localhost instead.
-  COOKIE_DOMAIN: "",
-  ENABLE_QUEUE_WORKER: "false"
-};
+  COOKIE_DOMAIN: ""
+});
 
 execFileSync("node", ["scripts/prepare-test-database.mjs"], {
   cwd: root,

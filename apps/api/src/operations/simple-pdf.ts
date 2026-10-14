@@ -1,17 +1,28 @@
 import { createHash } from "node:crypto";
+import { BadRequestException } from "@nestjs/common";
+
+const PDF_LINE_WIDTH = 92;
+const PDF_MAX_LINES = 58;
 
 function escapePdfText(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
 }
 
-/** A deliberately small, dependency-free PDF writer for reviewed text documents. */
+/** A small, single-page PDF writer: reviewed text must fit in full or be rejected. */
 export function renderTextPdf(title: string, body: string): { bytes: Buffer; sha256: string } {
   const lines = [title, "", ...body.replaceAll("\r", "").split("\n")].flatMap((line) => {
-    if (line.length <= 92) return [line];
+    if (line.length <= PDF_LINE_WIDTH) return [line];
     const chunks: string[] = [];
-    for (let offset = 0; offset < line.length; offset += 92) chunks.push(line.slice(offset, offset + 92));
+    for (let offset = 0; offset < line.length; offset += PDF_LINE_WIDTH) chunks.push(line.slice(offset, offset + PDF_LINE_WIDTH));
     return chunks;
-  }).slice(0, 58);
+  });
+  // Count the complete title, wrapped text, blank rows, and appended disclaimer
+  // before returning bytes that callers can persist as an immutable snapshot.
+  if (lines.length > PDF_MAX_LINES) {
+    throw new BadRequestException(
+      "This document is too long for a one-page PDF. Shorten the title or reviewed text, or remove extra blank lines, then try again. Keep all required terms and disclaimers."
+    );
+  }
   const commands = ["BT", "/F1 11 Tf", "54 750 Td", ...lines.flatMap((line, index) => index === 0 ? [`(${escapePdfText(line)}) Tj`] : ["0 -12 Td", `(${escapePdfText(line)}) Tj`]), "ET"].join("\n");
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",

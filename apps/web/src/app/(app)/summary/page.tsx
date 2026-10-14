@@ -7,18 +7,23 @@ import type {
   Task,
   WeeklySummary
 } from "@/lib/types";
+import { describeTaskDueDate } from "@storyboard/shared";
 import Link from "next/link";
 
 export default async function SummaryPage() {
   let summary: WeeklySummary | null = null;
   let insights: DashboardInsights | null = null;
+  let insightsLoadError = false;
   let error: string | null = null;
   try {
     [summary, insights] = await Promise.all([
       serverApiFetch<WeeklySummary>("/weekly-summary", { cache: "no-store" }),
       serverApiFetch<DashboardInsights>("/dashboard/insights", {
         cache: "no-store"
-      }).catch(() => null)
+      }).catch(() => {
+        insightsLoadError = true;
+        return null;
+      })
     ]);
   } catch (e) {
     error = e instanceof Error ? e.message : "Failed to load summary";
@@ -42,7 +47,13 @@ export default async function SummaryPage() {
         description={`Generated ${new Date(summary.generatedAt).toLocaleString()} from live Postgres — your manager snapshot.`}
       />
 
-      {insights ? (
+      {insightsLoadError ? (
+        <SurfaceCard className="border-amber-500/20 bg-amber-950/20">
+          <p role="alert" className="text-sm text-amber-100">
+            The operational snapshot could not be loaded. Refresh to try again; a missing score is not a healthy week.
+          </p>
+        </SurfaceCard>
+      ) : insights ? (
         <SurfaceCard elevated className="border-[var(--border-strong)]">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -134,12 +145,23 @@ export default async function SummaryPage() {
             Overdue (due date)
           </h2>
           <ul className="mt-3 space-y-2 text-sm text-[var(--text-secondary)]">
-            {summary.overdueTasks.map((t: Task) => (
-              <li key={t.id} className="flex items-center gap-2">
-                <Badge variant="danger">due</Badge>
-                {t.title}
-              </li>
-            ))}
+            {summary.overdueTasks.map((t: Task) => {
+              const due = describeTaskDueDate(t.dueAt);
+              return (
+                <li key={t.id} className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Badge variant="danger">due</Badge>
+                    <span className="min-w-0">{t.title}</span>
+                  </span>
+                  <span
+                    className="shrink-0 tabular-nums text-[var(--text-muted)]"
+                    data-testid={`summary-overdue-due-${t.id}`}
+                  >
+                    {due ? `${due.label} (overdue)` : "—"}
+                  </span>
+                </li>
+              );
+            })}
             {summary.overdueTasks.length === 0 ? (
               <li className="text-[var(--text-muted)]">None</li>
             ) : null}

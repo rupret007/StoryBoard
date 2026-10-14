@@ -3,9 +3,10 @@
 Next.js operator UI for StoryBoard.
 
 The app currently provides guided onboarding, the Manager workspace, dashboard,
-CRM and booking acquisition, campaign replies, tasks, approvals, notifications,
-team administration, and band operations for events, setlists, projects, and
-deal records.
+CRM and booking acquisition, campaign replies, tasks (including linked-performer
+**My tasks**), approvals, notifications, team administration (including a second
+empty workspace), and band operations for events, setlists, projects, and
+deal records. Load failures stay distinct from empty searches.
 
 Run from the repository root after the API and infrastructure are ready:
 

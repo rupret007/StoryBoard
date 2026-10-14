@@ -1,32 +1,30 @@
 "use client";
 
-import { bookingReplyNextAction, describeTaskDueDate } from "@storyboard/shared";
+import { BOOKING_TERMS_APPLIED_COPY, bookingReplyNextAction, describeTaskDueDate } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { CalendarClock, CheckCircle2, MailSearch, RefreshCw, Sparkles } from "lucide-react";
 import { useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { scopedApiFetch } from "@/lib/api";
 import type { BookingReply, BookingReplySettings } from "@/lib/types";
 
 export function BookingInboxClient({
+  artistId,
+  canManage,
+  isOwner,
   initialReplies,
-  initialSettings,
-  accessState,
-  loadError
+  initialSettings
 }: {
+  artistId: string | null;
+  canManage: boolean;
+  isOwner: boolean;
   initialReplies: BookingReply[];
   initialSettings: BookingReplySettings;
-  accessState: "manage" | "read_only" | "unavailable";
-  loadError: string;
 }) {
+  const apiFetch = scopedApiFetch(artistId);
   const [replies, setReplies] = useState(initialReplies);
   const [settings, setSettings] = useState(initialSettings);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const canManualSync =
-    accessState === "manage" &&
-    settings.deploymentEnabled &&
-    settings.scopeReady &&
-    !settings.reconnectRequired;
 
   async function reload() {
     setReplies(await apiFetch<BookingReply[]>("/booking-replies"));
@@ -34,6 +32,7 @@ export function BookingInboxClient({
   }
 
   async function sync() {
+    if (!canManage) return;
     setBusy("sync");
     setNotice(null);
     try {
@@ -50,6 +49,7 @@ export function BookingInboxClient({
   }
 
   async function updateSettings(patch: Partial<BookingReplySettings>) {
+    if (!isOwner) return;
     setBusy("settings");
     setNotice(null);
     try {
@@ -65,6 +65,7 @@ export function BookingInboxClient({
   }
 
   async function action(id: string, path: string, json?: unknown) {
+    if (!canManage) return;
     setBusy(`${path}-${id}`);
     setNotice(null);
     try {
@@ -75,7 +76,7 @@ export function BookingInboxClient({
       await reload();
       let message = "Reply updated.";
       if (path === "apply-terms") {
-        message = "Reviewed terms were saved on the linked opportunity. Null analysis fields did not erase recorded fees. Next: confirm this booking when Travis is ready.";
+        message = BOOKING_TERMS_APPLIED_COPY;
       } else if (path === "prepare-approval") {
         message = "Reply draft is waiting in Approvals.";
       } else if (path === "prepare-confirmation") {
@@ -91,16 +92,6 @@ export function BookingInboxClient({
 
   return (
     <div className="space-y-5">
-      {loadError ? (
-        <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-          {loadError}
-        </div>
-      ) : null}
-      {accessState === "read_only" ? (
-        <p role="status" className="text-sm text-[var(--text-muted)]">
-          You have read-only access. An owner or member can sync replies and prepare responses.
-        </p>
-      ) : null}
       {notice ? (
         <div
           role="status"
@@ -124,34 +115,19 @@ export function BookingInboxClient({
           <button
             type="button"
             className="sb-btn-primary"
-            disabled={busy !== null || !canManualSync}
+            disabled={!canManage || busy !== null || !settings.syncEnabled}
             onClick={() => void sync()}
           >
             <RefreshCw className="h-4 w-4" />
             Check for replies
           </button>
         </div>
-        {!canManualSync && !loadError ? (
-          <p className="mt-2 text-xs text-[var(--text-muted)]">
-            {settings.reconnectRequired
-              ? "Reconnect Google as an owner before manual reply checks."
-              : !settings.deploymentEnabled
-                ? "Reply sync is disabled on this deployment."
-                : !settings.scopeReady
-                  ? "Gmail read scope is not ready yet."
-                  : "Manual checks are unavailable until your workspace role is verified."}
-          </p>
-        ) : !settings.syncEnabled && canManualSync ? (
-          <p className="mt-2 text-xs text-[var(--text-muted)]">
-            Periodic reply checks are off. You can still check manually anytime.
-          </p>
-        ) : null}
         <div className="mt-4 flex flex-wrap gap-3">
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={settings.syncEnabled}
-              disabled={!settings.deploymentEnabled || !settings.scopeReady || busy !== null}
+              disabled={!isOwner || !settings.deploymentEnabled || !settings.scopeReady || busy !== null}
               onChange={(event) =>
                 void updateSettings({ syncEnabled: event.target.checked })
               }
@@ -162,7 +138,7 @@ export function BookingInboxClient({
             <input
               type="checkbox"
               checked={settings.aiAnalysisEnabled}
-              disabled={busy !== null}
+              disabled={!isOwner || busy !== null}
               onChange={(event) =>
                 void updateSettings({ aiAnalysisEnabled: event.target.checked })
               }
@@ -170,12 +146,12 @@ export function BookingInboxClient({
             Allow AI analysis of a selected reply
           </label>
         </div>
-        {!loadError && !settings.deploymentEnabled ? (
+        {!settings.deploymentEnabled ? (
           <p className="mt-3 text-xs text-amber-300">
             Reply sync is disabled on this deployment. Manual campaign outcomes remain
             available.
           </p>
-        ) : !loadError && settings.reconnectRequired ? (
+        ) : settings.reconnectRequired ? (
           <p className="mt-3 text-xs text-amber-300">
             Reconnect Google as an owner to grant the new read-only Gmail permission.
           </p>
@@ -188,10 +164,10 @@ export function BookingInboxClient({
         ) : null}
       </SurfaceCard>
 
-      {loadError ? null : replies.length === 0 ? (
+      {replies.length === 0 ? (
         <EmptyState
           title="No tracked replies yet"
-          description="After Travis sends an approved Gmail draft from a pitch campaign, replies on those threads can appear here for review."
+          description="After an approved campaign draft is sent or StoryBoard sends an approved pitch, new replies will appear here."
           icon={<MailSearch className="h-6 w-6" />}
         />
       ) : (
@@ -200,6 +176,7 @@ export function BookingInboxClient({
             <ReplyCard
               key={reply.id}
               reply={reply}
+              canManage={canManage}
               busy={busy}
               aiEnabled={settings.aiAnalysisEnabled}
               onAction={action}
@@ -213,11 +190,13 @@ export function BookingInboxClient({
 
 function ReplyCard({
   reply,
+  canManage,
   busy,
   aiEnabled,
   onAction
 }: {
   reply: BookingReply;
+  canManage: boolean;
   busy: string | null;
   aiEnabled: boolean;
   onAction: (id: string, path: string, json?: unknown) => Promise<void>;
@@ -252,7 +231,7 @@ function ReplyCard({
           <button
             type="button"
             className="sb-btn-secondary"
-            disabled={busy !== null}
+            disabled={!canManage || busy !== null}
             onClick={() => void onAction(reply.id, "analyze")}
           >
             <Sparkles className="h-4 w-4" />
@@ -286,7 +265,7 @@ function ReplyCard({
         <button
           type="button"
           className="sb-btn-secondary mt-3"
-          disabled={busy !== null}
+          disabled={!canManage || busy !== null}
           onClick={() => void onAction(reply.id, "apply-terms")}
         >
           <CheckCircle2 className="h-4 w-4" />
@@ -298,7 +277,7 @@ function ReplyCard({
           <button
             type="button"
             className="sb-btn-secondary mt-3"
-            disabled={busy !== null}
+            disabled={!canManage || busy !== null}
             onClick={() => void onAction(reply.id, "prepare-confirmation")}
           >
             <CalendarClock className="h-4 w-4" />
@@ -310,12 +289,14 @@ function ReplyCard({
 
       <div className="mt-4 grid gap-2">
         <input
+          disabled={!canManage}
           aria-label="Reply subject"
           className="sb-input"
           value={subject}
           onChange={(event) => setSubject(event.target.value)}
         />
         <textarea
+          disabled={!canManage}
           aria-label="Reply body"
           className="sb-input min-h-28"
           value={body}
@@ -325,7 +306,7 @@ function ReplyCard({
         <button
           type="button"
           className="sb-btn-primary w-fit"
-          disabled={!body.trim() || busy !== null}
+          disabled={!canManage || !body.trim() || busy !== null}
           onClick={() => void onAction(reply.id, "prepare-approval", { subject, body })}
         >
           Preview & request approval

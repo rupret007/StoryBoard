@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { buildE2eEnvironment } from "../../scripts/e2e-environment.mjs";
 
 const root = "../..";
 const normalizeUrl = (value: string) => value.replace(/\/$/, "");
@@ -33,7 +34,7 @@ export default defineConfig({
       command: "pnpm --filter @storyboard/api start",
       cwd: root,
       url: `${apiUrl}/health`,
-      env: {
+      env: buildE2eEnvironment({
         ...process.env,
         NODE_ENV: "development",
         AUTH_DEV_BYPASS: "true",
@@ -42,14 +43,14 @@ export default defineConfig({
         // Keep the dev session host-only. A developer .env commonly scopes it
         // to localhost, which browsers correctly refuse on the 127.0.0.1 E2E origin.
         COOKIE_DOMAIN: ""
-      },
+      }),
       reuseExistingServer: false
     },
     {
       command: `pnpm --filter @storyboard/web exec next start --port ${webPort}`,
       cwd: root,
       url: webUrl,
-      env: { ...process.env, NODE_ENV: "production" },
+      env: buildE2eEnvironment({ ...process.env, NODE_ENV: "production" }),
       reuseExistingServer: false
     }
   ]

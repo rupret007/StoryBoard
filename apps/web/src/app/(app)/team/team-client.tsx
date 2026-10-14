@@ -1,5 +1,6 @@
 "use client";
 
+import { TEAM_INVITE_HEADING, TEAM_ROLE_HINTS } from "@storyboard/shared";
 import { EmptyState } from "@storyboard/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -28,10 +29,10 @@ function deliveryLabel(inv: InviteRow): string {
   switch (inv.deliveryChannel) {
     case "gmail_draft":
       return inv.deliveredAt
-        ? `Invite email draft · ${new Date(inv.deliveredAt).toLocaleString()}`
-        : "Gmail draft";
+        ? `Draft ready — not sent · ${new Date(inv.deliveredAt).toLocaleString()}`
+        : "Draft only — not sent";
     case "mock":
-      return "Mock email draft (no Gmail)";
+      return "No email sent — share the invite link";
     case "failed":
       return inv.deliveryLastError
         ? `Delivery failed · ${inv.deliveryLastError.slice(0, 80)}`
@@ -39,7 +40,7 @@ function deliveryLabel(inv: InviteRow): string {
     case "skipped":
       return "Skipped";
     default:
-      return "Queued or pending delivery";
+      return "Preparing a draft — no email sent";
   }
 }
 
@@ -50,20 +51,24 @@ export function TeamClient({
   isOwner,
   initialMembers,
   initialInvites,
-  currentOperatorId
+  currentOperatorId,
+  loadError = false
 }: {
   artistId: string;
   isOwner: boolean;
   initialMembers: MemberRow[];
   initialInvites: InviteRow[];
   currentOperatorId: string;
+  loadError?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState("");
+  const [bandName, setBandName] = useState("");
   const [inviteRole, setInviteRole] = useState<string>("member");
   const [error, setError] = useState<string | null>(null);
-  const [inviteResult, setInviteResult] = useState<string | null>(null);
+  const [inviteResult, setInviteResult] = useState<{ url: string; email: string; expires: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function refresh() {
     router.refresh();
@@ -98,9 +103,8 @@ export function TeamClient({
         },
         artistId
       });
-      setInviteResult(
-        `Invite created. Share this link: ${res.acceptUrl} (expires ${res.expiresAt})`
-      );
+      setInviteResult({ url: res.acceptUrl, email: email.trim(), expires: res.expiresAt });
+      setCopied(false);
       setEmail("");
       await refresh();
     } catch (err) {
@@ -112,8 +116,24 @@ export function TeamClient({
     }
   }
 
+  async function createBand(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch("/onboarding/additional-artist", {
+        method: "POST", artistId, json: { name: bandName.trim(), sourceArtistId: artistId }
+      });
+      setBandName("");
+      router.refresh();
+    } catch (err) {
+      setError(`${err instanceof Error ? err.message : "Could not confirm the new workspace"}. Check the band selector before trying again.`);
+    } finally { setBusy(false); }
+  }
+
   async function revokeInvite(id: string) {
     setBusy(true);
+    setError(null);
     try {
       await apiFetch(`/memberships/invites/${id}/revoke`, {
         method: "POST",
@@ -121,6 +141,8 @@ export function TeamClient({
         artistId
       });
       await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Change could not be confirmed. Refresh and check before retrying.");
     } finally {
       setBusy(false);
     }
@@ -128,6 +150,7 @@ export function TeamClient({
 
   async function changeRole(operatorId: string, role: string) {
     setBusy(true);
+    setError(null);
     try {
       await apiFetch("/memberships", {
         method: "PATCH",
@@ -135,6 +158,8 @@ export function TeamClient({
         artistId
       });
       await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Change could not be confirmed. Refresh and check before retrying.");
     } finally {
       setBusy(false);
     }
@@ -145,6 +170,7 @@ export function TeamClient({
       return;
     }
     setBusy(true);
+    setError(null);
     try {
       const qs = new URLSearchParams({ artistId, operatorId });
       await apiFetch(`/memberships?${qs.toString()}`, {
@@ -152,6 +178,8 @@ export function TeamClient({
         artistId
       });
       await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Change could not be confirmed. Refresh and check before retrying.");
     } finally {
       setBusy(false);
     }
@@ -161,27 +189,37 @@ export function TeamClient({
     <div className="space-y-10">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
-          Team
+          {TEAM_INVITE_HEADING}
         </h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Members, roles, and pending invitations for this artist.
+          Manage access to this band. Invitations need to be shared or sent manually.
         </p>
       </div>
 
       {error ? (
-        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        <p role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
           {error}
         </p>
       ) : null}
+      {loadError ? <div role="alert" className="rounded border border-amber-500/30 p-4">
+        <p>Some team information could not be loaded. Existing members or invites may be missing.</p>
+        <button type="button" onClick={() => router.refresh()} className="mt-2 underline">Retry team</button>
+      </div> : null}
       {inviteResult ? (
-        <p className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-4 py-3 text-sm text-[var(--text-secondary)] break-all">
-          {inviteResult}
-        </p>
+        <div role="status" className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 text-sm">
+          <p>No email has been sent. Share this link with {inviteResult.email}.</p>
+          <input aria-label="Invitation link" readOnly value={inviteResult.url} onFocus={(e) => e.target.select()}
+            className="w-full rounded bg-[var(--surface-0)] p-2 text-xs" />
+          <button type="button" className="min-h-11 underline" onClick={() => {
+            void navigator.clipboard.writeText(inviteResult.url).then(() => setCopied(true)).catch(() => setError("Select the invitation link and copy it manually."));
+          }}>{copied ? "Link copied" : "Copy invitation link"}</button>
+          <p className="text-xs">Expires {new Date(inviteResult.expires).toLocaleDateString()}. Keep this link until your bandmate joins.</p>
+        </div>
       ) : null}
 
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-6">
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-          Invite operator
+          {TEAM_INVITE_HEADING}
         </h2>
         <form
           onSubmit={(e) => void onInvite(e)}
@@ -194,7 +232,9 @@ export function TeamClient({
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)]"
+              autoCapitalize="none"
+              autoCorrect="off"
+              className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)]"
               placeholder="colleague@example.com"
             />
           </label>
@@ -203,11 +243,11 @@ export function TeamClient({
             <select
               value={inviteRole}
               onChange={(e) => setInviteRole(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] sm:w-40"
+              className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] sm:w-40"
             >
               {ROLES.map((r) => (
                 <option key={r} value={r}>
-                  {r}
+                  {TEAM_ROLE_HINTS[r].label}
                 </option>
               ))}
             </select>
@@ -215,18 +255,26 @@ export function TeamClient({
           <button
             type="submit"
             disabled={busy}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#05080d] disabled:opacity-50"
+            className="min-h-11 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[#05080d] disabled:opacity-50"
           >
             Invite
           </button>
         </form>
+        <ul className="mt-4 space-y-1 text-xs text-[var(--text-muted)]">
+          {ROLES.map((role) => (
+            <li key={role}>
+              <span className="font-semibold text-[var(--text-secondary)]">{TEAM_ROLE_HINTS[role].label}.</span>{" "}
+              {TEAM_ROLE_HINTS[role].hint}
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section>
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
           Pending invitations
         </h2>
-        {initialInvites.length === 0 ? (
+        {initialInvites.length === 0 && !loadError ? (
           <p className="mt-3 text-sm text-[var(--text-muted)]">
             No pending invites.
           </p>
@@ -252,8 +300,9 @@ export function TeamClient({
                 <button
                   type="button"
                   disabled={busy}
+                  aria-label={`Revoke invitation for ${inv.email}`}
                   onClick={() => void revokeInvite(inv.id)}
-                  className="text-xs font-medium text-amber-200 hover:underline disabled:opacity-50"
+                  className="min-h-11 px-2 text-xs font-medium text-amber-200 hover:underline disabled:opacity-50"
                 >
                   Revoke
                 </button>
@@ -267,7 +316,7 @@ export function TeamClient({
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
           Members
         </h2>
-        {initialMembers.length === 0 ? (
+        {initialMembers.length === 0 && !loadError ? (
           <p className="mt-3 text-sm text-[var(--text-muted)]">
             No members yet.
           </p>
@@ -299,12 +348,13 @@ export function TeamClient({
                         <span className="capitalize">{m.role}</span>
                       ) : (
                         <select
+                          aria-label={`Role for ${m.operator.email}`}
                           value={m.role}
                           disabled={busy}
                           onChange={(e) =>
                             void changeRole(m.operatorId, e.target.value)
                           }
-                          className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1 text-xs capitalize text-[var(--text-primary)]"
+                          className="min-h-11 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1 text-xs capitalize text-[var(--text-primary)]"
                         >
                           {ROLES.map((r) => (
                             <option key={r} value={r}>
@@ -319,8 +369,9 @@ export function TeamClient({
                         <button
                           type="button"
                           disabled={busy}
+                          aria-label={`Remove ${m.operator.email}`}
                           onClick={() => void removeMember(m.operatorId)}
-                          className="text-xs font-medium text-amber-200 hover:underline disabled:opacity-50"
+                          className="min-h-11 px-2 text-xs font-medium text-amber-200 hover:underline disabled:opacity-50"
                         >
                           Remove
                         </button>
@@ -336,6 +387,17 @@ export function TeamClient({
             </table>
           </div>
         )}
+      </section>
+      <section className="rounded-2xl border border-[var(--border)] p-6">
+        <h2 className="text-sm font-semibold">Manage another band</h2>
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">Create a separate workspace. Members, songs, shows, and tasks are not copied.</p>
+        <form onSubmit={(e) => void createBand(e)} className="mt-4 space-y-3">
+          <label className="block text-sm">New band name
+            <input required value={bandName} onChange={(e) => setBandName(e.target.value)}
+              className="mt-1 block w-full rounded border border-[var(--border)] bg-[var(--surface-0)] p-2" />
+          </label>
+          <button type="submit" disabled={busy || !bandName.trim()} className="rounded bg-[var(--accent)] px-4 py-2 text-[#05080d] disabled:opacity-50">Create separate band</button>
+        </form>
       </section>
     </div>
   );

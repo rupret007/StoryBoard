@@ -1,7 +1,6 @@
 "use client";
 
-import { describeBookingTarget, nextBookingStages } from "@storyboard/shared";
-import Link from "next/link";
+import { bookingStageReviewCopy, describeBookingTarget, nextBookingStages } from "@storyboard/shared";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -102,7 +101,7 @@ export function BookingStageEditor({ opportunity, artistId, canManage, onSaved }
       <h4 className="text-sm font-semibold">Review stage change</h4>
       <p className="text-sm">{review.opportunity.stage} → {review.stage}</p>
       <BookingReviewFacts opportunity={review.opportunity} />
-      {review.stage === "confirmed" ? <div className="space-y-2 text-xs text-amber-200"><p>Record confirmed only after Travis has booked it. This creates a linked internal gig if one is missing, using the recorded title, venue, and target date. Existing gig details stay as saved. Fees and conditions remain booking notes; this does not create a contract, payment, Calendar hold, or message.</p><Link className="font-medium text-[var(--accent)] hover:underline" href="/operations?tab=events">Set start, end, and timezone in Shows &amp; calendar →</Link></div> : review.stage === "closed" ? <p className="text-xs text-amber-200">Closing ends this opportunity's pipeline history. It does not cancel an existing gig or send a message.</p> : <p className="text-xs text-[var(--text-muted)]">This records the stage only. Travis books; no pitch or message is sent.</p>}
+      <p data-testid="booking-stage-review-copy" className={review.stage === "confirmed" || review.stage === "closed" ? "text-xs text-amber-200" : "text-xs text-[var(--text-muted)]"}>{bookingStageReviewCopy(review.stage)}</p>
       {stale || mustReview ? <p role="status" className="text-xs text-amber-200">Review the latest saved details before another save. Your selected stage remains {stage}.</p> : null}
       <button type="button" className="sb-btn-primary w-full text-xs" disabled={busy || stale || mustReview || needsReload}
         onClick={() => void save()}>{busy ? "Working…" : "Save reviewed stage"}</button>

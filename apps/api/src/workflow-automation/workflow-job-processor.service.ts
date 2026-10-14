@@ -1,3 +1,4 @@
+import { taskOverdueUtcCutoff } from "@storyboard/shared";
 import { Injectable, Logger } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
 import { ConfigService } from "@nestjs/config";
@@ -175,9 +176,15 @@ export class WorkflowJobProcessorService {
       });
       return { ok: true, skipped: true };
     }
-    if (invite.expiresAt.getTime() < Date.now()) {
-      await this.prisma.client.artistMembershipInvite.update({
-        where: { id: inviteId },
+    const checkedAt = new Date();
+    if (invite.expiresAt <= checkedAt) {
+      await this.prisma.client.artistMembershipInvite.updateMany({
+        where: {
+          id: inviteId,
+          artistId,
+          status: MembershipInviteStatus.pending,
+          expiresAt: { lte: checkedAt }
+        },
         data: { status: MembershipInviteStatus.expired }
       });
       await this.audit.log({
@@ -500,14 +507,15 @@ export class WorkflowJobProcessorService {
 
   private async taskCheckOverdue(job: Job) {
     void job;
+    const now = new Date();
+    const utcDayStart = taskOverdueUtcCutoff(now);
     const groups = await this.prisma.client.task.groupBy({
       by: ["artistId"],
       where: {
         status: { not: TaskStatus.done },
-        dueAt: { lt: new Date() }
+        dueAt: { lt: utcDayStart }
       }
     });
-    const dayStart = startOfUtcDay(new Date());
     let notified = 0;
     const digestKind = WorkflowNotificationKind.task_overdue_digest;
     for (const g of groups) {
@@ -517,7 +525,8 @@ export class WorkflowJobProcessorService {
       });
       const overdue = await this.tasks.overdueByDueDate(
         g.artistId,
-        artist?.workflowOverdueGraceDays ?? null
+        artist?.workflowOverdueGraceDays ?? null,
+        now
       );
       if (overdue.length === 0) {
         continue;
@@ -548,7 +557,7 @@ export class WorkflowJobProcessorService {
           g.artistId,
           r.operatorId,
           digestKind,
-          dayStart
+          utcDayStart
         );
         if (already) {
           continue;
@@ -715,7 +724,8 @@ export class WorkflowJobProcessorService {
         artist.workflowStaleFollowupDays ?? globalStale;
       const overdue = await this.tasks.overdueByDueDate(
         artist.id,
-        artist.workflowOverdueGraceDays ?? null
+        artist.workflowOverdueGraceDays ?? null,
+        now
       );
       const stale = await this.tasks.followUpsOlderThan(artist.id, staleDays);
 

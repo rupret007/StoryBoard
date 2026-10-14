@@ -127,7 +127,8 @@ The NestJS orchestration backend. Current responsibilities:
   finalized settlement expenses fail closed). Booking apply-terms uses
   `booking_terms_apply_v1` so null analysis cannot wipe recorded fees.
 - **Telegram registration:** `telegram-registration.service.ts`, `telegram-webhook.controller.ts` (`POST /integrations/telegram/webhook`), token issuance on `POST /workflow/telegram/registration-token`
-- Global **`CsrfOriginGuard`** (OAuth + Telegram webhook paths excluded for POST)
+- **Stripe inbound webhook:** `POST /integrations/stripe/webhook` verifies `Stripe-Signature` with `STRIPE_WEBHOOK_SECRET` (fail closed if unset), then claims the `evt_` id on `StripeWebhookEvent`. Claim, handler work, `appliedAt`, and `completed` commit in one serializable transaction that holds a `FOR UPDATE NOWAIT` row lock so an expired lease cannot start a second handler while the owner is still running. `appliedAt` is written under the current `leaseOwner` before the handler runs; a persist failure rolls the handler back. Unauthenticated raw-body capture is capped. In-flight unfinished claims return 503 so Stripe keeps retrying. Abandoned unlocked unapplied processing claims can be reclaimed after the lease expires. Intake only — does not apply invoice payments.
+- Global **`CsrfOriginGuard`** (OAuth + Telegram/Stripe webhook paths excluded for POST)
 
 Further responsibilities remain product-driven (more adapters, richer tests, etc.).
 
@@ -170,8 +171,12 @@ Generated client is under `apps/api/src/generated/prisma/` (**gitignored**); run
   diagnostic, including `ApprovalReconciliation → ApprovalRequest`
 - `scripts/prepare-test-database.mjs` / `scripts/reset-test-database.mjs` —
   explicit disposable-database migration and reset; never fall back to the app DB
+- `scripts/backup-database.mjs` / `scripts/restore-database.mjs` — private
+  backup and empty-target restore drill (`pnpm db:backup`, `pnpm db:restore:drill`)
+- `scripts/test/database-recovery.test.mjs` — recovery fencing (`pnpm test:recovery`, also part of `pnpm test`)
+- `scripts/check-pilot-worker.mjs` — live-stack worker proof (`pnpm test:pilot-worker`; needs a running API)
 - `scripts/run-e2e.mjs` — orchestrates the mock-provider browser environment
-- `scripts/run-manager-evals.mjs` — versioned offline Manager safety/usefulness gate
+- `scripts/run-manager-evals.mjs` — versioned offline Manager safety/usefulness gate (`manager_evals_v45`)
 - `scripts/import-catalog.mjs` — local Vault/Show Night catalog import (`pnpm catalog:import`; dry-run by default; never fetches a remote file)
 
 ## Tests

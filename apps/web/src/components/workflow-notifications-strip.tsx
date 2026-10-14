@@ -49,6 +49,15 @@ export function WorkflowNotificationsStrip({ artistId }: { artistId: string }) {
     };
   }, [load]);
 
+  async function retry() {
+    setErr(null);
+    try {
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function markRead(id: string) {
     try {
       await apiFetch(`/workflow/notifications/${encodeURIComponent(id)}/read`, {
@@ -82,7 +91,21 @@ export function WorkflowNotificationsStrip({ artistId }: { artistId: string }) {
   }
 
   if (err) {
-    return null;
+    return (
+      <div
+        role="alert"
+        className="flex flex-wrap items-center gap-2 rounded-[var(--radius-lg)] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100"
+      >
+        <Bell className="h-3 w-3 shrink-0" aria-hidden />
+        <span>Workflow notifications unavailable.</span>
+        <button type="button" className="sb-btn-ghost min-h-11 px-2 text-[11px]" onClick={() => void retry()}>
+          Retry
+        </button>
+        <a href="/notifications" className="underline">
+          Open Notifications
+        </a>
+      </div>
+    );
   }
 
   if (!data) {

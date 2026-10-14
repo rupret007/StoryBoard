@@ -3,11 +3,13 @@
 # a strong session secret, and a non-default database password in .env.production.
 services:
   postgres:
+    restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     # Database access stays on the private Compose network in this template.
     ports: !reset []
   redis:
+    restart: unless-stopped
     # Redis has no application-level password in the current bundle, so never
     # inherit the local demo's host-published port for a public deployment.
     ports: !reset []
@@ -17,6 +19,7 @@ services:
       AUTH_DEV_BYPASS: "false"
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
       WEB_URL: ${WEB_URL:?WEB_URL is required}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:?Shared parent domain is required for web and API sessions}
       API_URL: ${API_URL:?API_URL is required}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:?GOOGLE_CLIENT_ID is required}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:?GOOGLE_CLIENT_SECRET is required}
@@ -28,13 +31,16 @@ services:
   seed:
     environment: *production_api_environment
   api:
+    restart: unless-stopped
     environment: *production_api_environment
   web:
+    restart: unless-stopped
     build:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}
     environment:
       NODE_ENV: production
       AUTH_DEV_BYPASS: "false"
+      WEB_URL: ${WEB_URL:?WEB_URL is required}
       API_URL: ${API_URL:?API_URL is required}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required}

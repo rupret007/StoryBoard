@@ -2656,3 +2656,28 @@ test("database integration: booking confirmation rolls back on audit failure and
   assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: "event.confirmed_from_opportunity" } }), 0);
   assert.equal(await client.auditEvent.count({ where: { artistId: artist.id, action: "booking.stage_changed" } }), 1);
 });
+
+test("pilot: owner creates two isolated workspaces and failed audit rolls back creation", async () => {
+  const { OnboardingService } = await load("memberships/onboarding.service.js");
+  const suffix = randomUUID();
+  const owner = await client.operator.create({ data: { email: `pilot-owner-${suffix}@test.invalid` } });
+  const member = await client.operator.create({ data: { email: `pilot-member-${suffix}@test.invalid` } });
+  const sessions = [];
+  const auth = { newSessionPayload: (operatorId, artistId) => ({ operatorId, artistId }), applySessionCookie: (_reply, payload) => sessions.push(payload) };
+  const onboarding = new OnboardingService(prisma, audit, auth);
+  const first = await onboarding.createFirstArtist({ operatorId: owner.id, actorLabel: owner.email, name: `Pilot Rad Dad ${suffix}`, reply: {} });
+  const second = await onboarding.createAdditionalArtist({ operatorId: owner.id, actorLabel: owner.email, sourceArtistId: first.artistId, name: `Pilot Stalemate ${suffix}`, reply: {} });
+  assert.notEqual(first.artistId, second.artistId);
+  assert.equal(await client.artistMembership.count({ where: { operatorId: owner.id, role: "owner" } }), 2);
+  assert.equal(sessions.at(-1).artistId, second.artistId);
+  assert.equal(await client.bandMember.count({ where: { artistId: second.artistId } }), 0);
+  assert.equal(await client.song.count({ where: { artistId: second.artistId } }), 0);
+  await client.artistMembership.create({ data: { artistId: first.artistId, operatorId: member.id, role: "member" } });
+  await assert.rejects(() => onboarding.createAdditionalArtist({ operatorId: member.id, actorLabel: member.email, sourceArtistId: first.artistId, name: "Unauthorized band", reply: {} }), (e) => e.getStatus() === 403);
+  await assert.rejects(() => onboarding.createAdditionalArtist({ operatorId: member.id, actorLabel: member.email, sourceArtistId: second.artistId, name: "Foreign band", reply: {} }), (e) => e.getStatus() === 403);
+  const before = await client.artist.count();
+  const rollback = new OnboardingService(prisma, { log: async () => { throw new Error("audit unavailable"); } }, auth);
+  await assert.rejects(() => rollback.createAdditionalArtist({ operatorId: owner.id, actorLabel: owner.email, sourceArtistId: first.artistId, name: `Rollback ${suffix}`, reply: {} }), /audit unavailable/);
+  assert.equal(await client.artist.count(), before);
+  assert.equal(sessions.length, 2);
+});

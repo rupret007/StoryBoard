@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSafeHttpUrl } from "@storyboard/shared";
-import { apiFetch } from "@/lib/api";
+import { scopedApiFetch } from "@/lib/api";
 import type { Contact, Venue } from "@/lib/types";
 
 type VenuePackDetail = {
@@ -39,16 +39,18 @@ type VenueOpportunityResult = {
 };
 
 export function VenuesClient({
-  initialVenues,
-  accessState,
-  loadError
+  artistId,
+  canManage,
+  initialVenues
 }: {
+  artistId: string | null;
+  canManage: boolean;
   initialVenues: Venue[];
-  accessState: "manage" | "read_only" | "unavailable";
-  loadError: string;
 }) {
+  const apiFetch = scopedApiFetch(artistId);
   const router = useRouter();
-  const canManage = accessState === "manage";
+  const loadError = "";
+  const accessState = canManage ? "manage" : artistId ? "read_only" : "unavailable";
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [fitScore, setFitScore] = useState("");
@@ -248,6 +250,7 @@ export function VenuesClient({
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <VenueTable
+          artistId={artistId}
           venues={filteredVenues}
           allCount={initialVenues.length}
           filter={filter}
@@ -277,6 +280,7 @@ export function VenuesClient({
 }
 
 function VenueTable({
+  artistId,
   venues,
   allCount,
   filter,
@@ -287,6 +291,7 @@ function VenueTable({
   loadError,
   canManage
 }: {
+  artistId: string | null;
   venues: Venue[];
   allCount: number;
   filter: string;
@@ -355,6 +360,8 @@ function VenueTable({
             {venues.map((v) => (
               <VenueRow
                 key={v.id}
+                artistId={artistId}
+                canManage={canManage}
                 venue={v}
                 selected={selectedId === v.id}
                 onSelect={() => onSelect(v.id)}
@@ -369,16 +376,21 @@ function VenueTable({
 }
 
 function VenueRow({
+  artistId,
+  canManage,
   venue,
   selected,
   onSelect,
   onSaved
 }: {
+  artistId: string | null;
+  canManage: boolean;
   venue: Venue;
   selected: boolean;
   onSelect: () => void;
   onSaved: () => void;
 }) {
+  const apiFetch = scopedApiFetch(artistId);
   const [name, setName] = useState(venue.name);
   const [city, setCity] = useState(venue.city);
   const [fitScore, setFitScore] = useState(
@@ -404,6 +416,7 @@ function VenueRow({
   }, [venue]);
 
   async function save() {
+    if (!canManage) return;
     setBusy(true);
     setSaveError("");
     try {
@@ -444,6 +457,7 @@ function VenueRow({
       </td>
       <td className="px-4 py-3">
         <input
+          disabled={!canManage}
           className="w-full rounded-md border border-transparent bg-transparent px-1 py-1 font-medium text-[var(--text-primary)] outline-none hover:border-[var(--border)] focus:border-[var(--accent)]"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -452,6 +466,7 @@ function VenueRow({
       </td>
       <td className="px-4 py-3">
         <input
+          disabled={!canManage}
           className="w-full rounded-md border border-transparent bg-transparent px-1 py-1 text-[var(--text-primary)] outline-none hover:border-[var(--border)] focus:border-[var(--accent)]"
           value={city}
           onChange={(e) => setCity(e.target.value)}
@@ -463,6 +478,7 @@ function VenueRow({
       </td>
       <td className="px-4 py-3">
         <input
+          disabled={!canManage}
           type="number"
           className="sb-input w-20 py-1.5 text-xs"
           value={fitScore}
@@ -472,6 +488,7 @@ function VenueRow({
       </td>
       <td className="px-4 py-3">
         <input
+          disabled={!canManage}
           type="number"
           className="sb-input w-20 py-1.5 text-xs"
           value={driveMin}
@@ -483,7 +500,7 @@ function VenueRow({
         <div className="flex flex-col gap-1">
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || !canManage}
             onClick={() => void save()}
             className="sb-btn-secondary py-1.5 text-xs"
           >

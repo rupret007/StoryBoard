@@ -161,22 +161,27 @@ export class InvitesService {
       throw new BadRequestException("Invite is not pending");
     }
 
-    await this.prisma.client.artistMembershipInvite.update({
-      where: { id: inviteId },
-      data: {
-        status: MembershipInviteStatus.revoked,
-        revokedAt: new Date()
+    await this.prisma.client.$transaction(async (tx) => {
+      const claimed = await tx.artistMembershipInvite.updateMany({
+        where: { id: inviteId, artistId, status: MembershipInviteStatus.pending },
+        data: {
+          status: MembershipInviteStatus.revoked,
+          revokedAt: new Date()
+        }
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException("Invite is no longer pending");
       }
-    });
 
-    await this.audit.log({
-      artistId,
-      aggregateType: "membership_invite",
-      aggregateId: inviteId,
-      action: "membership_invite.revoked",
-      actorLabel,
-      actorOperatorId,
-      metadata: { email: invite.email }
+      await this.audit.log({
+        artistId,
+        aggregateType: "membership_invite",
+        aggregateId: inviteId,
+        action: "membership_invite.revoked",
+        actorLabel,
+        actorOperatorId,
+        metadata: { email: invite.email }
+      }, tx);
     });
   }
 
@@ -202,9 +207,14 @@ export class InvitesService {
     if (invite.status !== MembershipInviteStatus.pending) {
       throw new BadRequestException("Invite is no longer valid");
     }
-    if (invite.expiresAt.getTime() < Date.now()) {
-      await this.prisma.client.artistMembershipInvite.update({
-        where: { id: invite.id },
+    const checkedAt = new Date();
+    if (invite.expiresAt <= checkedAt) {
+      await this.prisma.client.artistMembershipInvite.updateMany({
+        where: {
+          id: invite.id,
+          status: MembershipInviteStatus.pending,
+          expiresAt: { lte: checkedAt }
+        },
         data: { status: MembershipInviteStatus.expired }
       });
       throw new BadRequestException("Invite has expired");
@@ -218,6 +228,25 @@ export class InvitesService {
     }
 
     const result = await this.prisma.client.$transaction(async (tx) => {
+      // Claim before granting access: a competing terminal transition must win
+      // or lose on this row, and the claim rolls back with membership/audits.
+      const acceptedAt = new Date();
+      const claimed = await tx.artistMembershipInvite.updateMany({
+        where: {
+          id: invite.id,
+          status: MembershipInviteStatus.pending,
+          expiresAt: { gt: acceptedAt }
+        },
+        data: {
+          status: MembershipInviteStatus.accepted,
+          acceptedAt,
+          acceptedOperatorId: operatorId
+        }
+      });
+      if (claimed.count !== 1) {
+        throw new ConflictException("Invite is no longer pending or has expired");
+      }
+
       const membership = await tx.artistMembership.upsert({
         where: {
           operatorId_artistId: { operatorId, artistId: invite.artistId }
@@ -227,49 +256,43 @@ export class InvitesService {
           artistId: invite.artistId,
           role: invite.role
         },
-        update: { role: invite.role }
+        // An invitation grants initial access. Existing roles must be changed
+        // through Team's guarded role-change path, including last-owner checks.
+        update: {}
       });
 
-      await tx.artistMembershipInvite.update({
-        where: { id: invite.id },
-        data: {
-          status: MembershipInviteStatus.accepted,
-          acceptedAt: new Date(),
-          acceptedOperatorId: operatorId
+      await this.audit.log({
+        artistId: invite.artistId,
+        aggregateType: "membership_invite",
+        aggregateId: invite.id,
+        action: "membership_invite.accepted",
+        actorLabel,
+        actorOperatorId: operatorId,
+        metadata: {
+          email: invite.email,
+          role: membership.role,
+          invitedRole: invite.role
         }
-      });
+      }, tx);
+
+      await this.audit.log({
+        artistId: invite.artistId,
+        aggregateType: "artist_membership",
+        aggregateId: membership.id,
+        action: "artist_membership.upsert_via_invite",
+        actorLabel,
+        actorOperatorId: operatorId,
+        metadata: { role: membership.role }
+      }, tx);
 
       return membership;
-    });
-
-    await this.audit.log({
-      artistId: invite.artistId,
-      aggregateType: "membership_invite",
-      aggregateId: invite.id,
-      action: "membership_invite.accepted",
-      actorLabel,
-      actorOperatorId: operatorId,
-      metadata: {
-        email: invite.email,
-        role: invite.role
-      }
-    });
-
-    await this.audit.log({
-      artistId: invite.artistId,
-      aggregateType: "artist_membership",
-      aggregateId: result.id,
-      action: "artist_membership.upsert_via_invite",
-      actorLabel,
-      actorOperatorId: operatorId,
-      metadata: { role: result.role }
     });
 
     try {
       await this.queue.enqueueMembershipInviteAccepted({
         artistId: invite.artistId,
         inviteeEmail: invite.email,
-        role: invite.role
+        role: result.role
       });
     } catch {
       /* best-effort */

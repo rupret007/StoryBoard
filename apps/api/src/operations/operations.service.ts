@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
-import { AFTER_SHOW_STALE_WRITE_MESSAGE, afterShowFactsEqual, afterShowFactsRecorded, afterShowWriteAllowed, eventAfterShowPatchSchema, eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, eventLiveSetPositionSchema, OPS_AFTER_SHOW_POLICY_VERSION, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, summarizeSetlist, catalogImportRequestSchema, planCatalogImport, reconcileCatalogImport, describeSongCatalogStatus, projectOpsLiveRun } from "@storyboard/shared";
+import { AFTER_SHOW_STALE_WRITE_MESSAGE, afterShowFactsEqual, afterShowFactsRecorded, afterShowWriteAllowed, allocateSettlementSplits, eventAfterShowPatchSchema, eventCreateSchema, eventPatchSchema, eventParticipantSchema, eventScheduleItemCreateSchema, eventScheduleItemPatchSchema, eventLiveSetPositionSchema, OPS_AFTER_SHOW_POLICY_VERSION, songCreateSchema, songPatchSchema, setlistCreateSchema, setlistPatchSchema, projectCreateSchema, projectPatchSchema, dealCreateSchema, dealPatchSchema, invoiceCreateSchema, invoicePatchSchema, paymentRecordSchema, expenseCreateSchema, expensePatchSchema, settlementCreateSchema, settlementPatchSchema, settlementSnapshotBody, summarizeSetlist, catalogImportRequestSchema, planCatalogImport, reconcileCatalogImport, describeSongCatalogStatus, projectOpsLiveRun } from "@storyboard/shared";
 import type { Prisma } from "../generated/prisma/client";
 import { ApprovalStatus, InvoiceStatus, SettlementStatus } from "../generated/prisma/enums";
 import { ApprovalsService } from "../approvals/approvals.service";
@@ -330,7 +330,21 @@ export class OperationsService {
     return { id, deleted: true };
   }
   async eventFromOpportunity(artistId: string, opportunityId: string, actorLabel: string, actorOperatorId: string) { const opportunity = await this.prisma.client.bookingOpportunity.findFirst({ where: { id: opportunityId, artistId }, include: { venue: true } }); if (!opportunity) throw new NotFoundException("Booking opportunity not found"); const existing = await this.prisma.client.bandEvent.findUnique({ where: { opportunityId } }); const row = await this.prisma.client.bandEvent.upsert({ where: { opportunityId }, create: { artistId, opportunityId, venueId: opportunity.venueId, type: "gig", status: "confirmed", title: opportunity.title, startsAt: opportunity.targetDate, locationName: opportunity.venue?.name ?? null }, update: {} }); if (!existing) await this.auditWrite(artistId, "BandEvent", row.id, "event.created_from_opportunity", actorLabel, actorOperatorId, { opportunityId }); return this.event(artistId, row.id); }
-  async participant(artistId: string, eventId: string, input: ParticipantInput, actorLabel: string, actorOperatorId: string) { await Promise.all([this.assertArtistRecord("event", artistId, eventId), this.assertArtistRecord("member", artistId, input.bandMemberId)]); const row = await this.prisma.client.eventParticipant.upsert({ where: { eventId_bandMemberId: { eventId, bandMemberId: input.bandMemberId } }, create: { eventId, bandMemberId: input.bandMemberId, response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt: input.response === "unknown" ? null : new Date() }, update: { response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt: input.response === "unknown" ? null : new Date() } }); await this.auditWrite(artistId, "EventParticipant", row.id, "event.availability_recorded", actorLabel, actorOperatorId, { eventId, response: row.response }); return row; }
+  async participant(artistId: string, eventId: string, input: ParticipantInput, actorLabel: string, actorOperatorId: string, forSelf = false) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const event = await tx.bandEvent.findFirst({ where: { id: eventId, artistId }, select: { id: true } });
+      const member = await tx.bandMember.findFirst({ where: { id: input.bandMemberId, artistId, ...(forSelf ? { linkedOperatorId: actorOperatorId, active: true } : {}) }, select: { id: true, linkedOperatorId: true } });
+      if (!event || !member) throw new NotFoundException("Event or band member not found");
+      const respondedAt = input.response === "unknown" ? null : new Date();
+      const row = await tx.eventParticipant.upsert({
+        where: { eventId_bandMemberId: { eventId, bandMemberId: input.bandMemberId } },
+        create: { eventId, bandMemberId: input.bandMemberId, response: input.response, assignment: input.assignment ?? null, notes: input.notes ?? null, respondedAt },
+        update: { response: input.response, ...(input.assignment !== undefined ? { assignment: input.assignment } : {}), ...(input.notes !== undefined ? { notes: input.notes } : {}), respondedAt }
+      });
+      await this.audit.log({ artistId, aggregateType: "EventParticipant", aggregateId: row.id, action: "event.availability_recorded", actorLabel, actorOperatorId, metadata: { eventId, bandMemberId: member.id, response: row.response, recordedForSelf: member.linkedOperatorId === actorOperatorId } }, tx);
+      return row;
+    });
+  }
   async generateAdvance(artistId: string, eventId: string, actorLabel: string, actorOperatorId: string) {
     const event = await this.event(artistId, eventId);
     if (!event.startsAt) throw new BadRequestException("Event start time is required before generating an advance");
@@ -629,6 +643,15 @@ export class OperationsService {
             data: { paidMinor, status: paidMinor === invoice.totalMinor ? InvoiceStatus.paid : InvoiceStatus.partially_paid }
           });
           if (updated.count !== 1) throw new ConflictException("Invoice changed while payment was being recorded");
+          await this.audit.log({
+            artistId,
+            aggregateType: "PaymentRecord",
+            aggregateId: payment.id,
+            action: "invoice.payment_recorded",
+            actorLabel,
+            actorOperatorId,
+            metadata: { invoiceId, amountMinor: input.amountMinor, idempotencyKey: input.idempotencyKey }
+          }, tx);
           return { payment, created: true };
         }, { isolationLevel: "Serializable" });
       } catch (error) {
@@ -639,7 +662,6 @@ export class OperationsService {
       }
     }
     if (!result) throw new ConflictException("Invoice changed while payment was being recorded; try again");
-    if (result.created) await this.auditWrite(artistId, "PaymentRecord", result.payment.id, "invoice.payment_recorded", actorLabel, actorOperatorId, { invoiceId, amountMinor: input.amountMinor, idempotencyKey: input.idempotencyKey });
     return result.payment;
   }
 
@@ -702,7 +724,14 @@ export class OperationsService {
   }
 
   settlements(artistId: string) { return this.prisma.client.settlement.findMany({ where: { artistId }, include: { event: true, expenses: true, splits: { include: { bandMember: true } } }, orderBy: { updatedAt: "desc" } }); }
-  private async validateSplits(artistId: string, splits: { bandMemberId: string; basisPoints: number }[]) { for (const split of splits) await this.assertArtistRecord("member", artistId, split.bandMemberId); if (new Set(splits.map((split) => split.bandMemberId)).size !== splits.length) throw new BadRequestException("A member may appear only once in a settlement"); }
+  private async validateSplits(artistId: string, splits: { bandMemberId: string; basisPoints: number }[]) {
+    if (new Set(splits.map((split) => split.bandMemberId)).size !== splits.length) throw new BadRequestException("A member may appear only once in a settlement");
+    if (!splits.length) return;
+    const ids = splits.map((split) => split.bandMemberId);
+    const members = await this.prisma.client.bandMember.findMany({ where: { artistId, id: { in: ids } }, select: { id: true, active: true } });
+    if (members.length !== ids.length) throw new NotFoundException("Record not found");
+    if (members.some((member) => !member.active)) throw new BadRequestException("Inactive members cannot receive settlement splits");
+  }
   async createSettlement(artistId: string, input: SettlementCreate, actorLabel: string, actorOperatorId: string) {
     await this.assertArtistRecord("event", artistId, input.eventId);
     await this.validateSplits(artistId, input.splits);
@@ -716,7 +745,7 @@ export class OperationsService {
           const expenseMinor = expenses._sum.amountMinor ?? 0;
           const netMinor = input.grossMinor - expenseMinor;
           if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue");
-          return tx.settlement.create({ data: { artistId, eventId: input.eventId, currency, grossMinor: input.grossMinor, expenseMinor, netMinor, notes: input.notes ?? null, splits: { create: input.splits.map((split) => ({ ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) })) } }, include: { splits: true } });
+          return tx.settlement.create({ data: { artistId, eventId: input.eventId, currency, grossMinor: input.grossMinor, expenseMinor, netMinor, notes: input.notes ?? null, splits: { create: allocateSettlementSplits(netMinor, input.splits) } }, include: { splits: true } });
         }, { isolationLevel: "Serializable" });
       } catch (error) {
         if (prismaErrorCode(error) === "P2002") throw new ConflictException("A settlement already exists for this event");
@@ -747,9 +776,10 @@ export class OperationsService {
           const netMinor = grossMinor - expenseMinor;
           if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue");
           const specs = input.splits ?? existing.splits.map((split) => ({ bandMemberId: split.bandMemberId, basisPoints: split.basisPoints }));
+          const allocated = allocateSettlementSplits(netMinor, specs);
           if (input.splits) await tx.memberSplit.deleteMany({ where: { settlementId: id } });
-          if (input.splits) await tx.memberSplit.createMany({ data: specs.map((split) => ({ settlementId: id, ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) })) });
-          else for (const split of specs) await tx.memberSplit.update({ where: { settlementId_bandMemberId: { settlementId: id, bandMemberId: split.bandMemberId } }, data: { amountMinor: Math.floor(netMinor * split.basisPoints / 10000) } });
+          if (input.splits) await tx.memberSplit.createMany({ data: allocated.map((split) => ({ settlementId: id, ...split })) });
+          else for (const split of allocated) await tx.memberSplit.update({ where: { settlementId_bandMemberId: { settlementId: id, bandMemberId: split.bandMemberId } }, data: { amountMinor: split.amountMinor } });
           const updated = await tx.settlement.updateMany({
             where: { id, artistId, status: { not: SettlementStatus.finalized } },
             data: { grossMinor, expenseMinor, netMinor, ...(input.notes !== undefined ? { notes: input.notes } : {}) }
@@ -778,14 +808,17 @@ export class OperationsService {
           if (!settlement) throw new NotFoundException("Settlement not found");
           if (settlement.status === SettlementStatus.finalized) return { row: settlement, created: false };
           if (settlement.splits.length && settlement.splits.reduce((sum, split) => sum + split.basisPoints, 0) !== 10000) throw new BadRequestException("Member splits must total 100%");
+          if (settlement.splits.some((split) => !split.bandMember.active)) throw new BadRequestException("Inactive members cannot receive settlement splits");
           const expenseWhere: Prisma.ExpenseWhereInput = { artistId, eventId: settlement.eventId, currency: { equals: settlement.currency, mode: "insensitive" } };
           const expenses = await tx.expense.aggregate({ where: expenseWhere, _sum: { amountMinor: true } });
           const expenseMinor = expenses._sum.amountMinor ?? 0;
           const netMinor = settlement.grossMinor - expenseMinor;
           if (netMinor < 0) throw new BadRequestException("Settlement expenses exceed gross revenue");
-          const splitAmounts = settlement.splits.map((split) => ({ ...split, amountMinor: Math.floor(netMinor * split.basisPoints / 10000) }));
+          const allocated = allocateSettlementSplits(netMinor, settlement.splits.map((split) => ({ bandMemberId: split.bandMemberId, basisPoints: split.basisPoints })));
+          const amountByMember = new Map(allocated.map((split) => [split.bandMemberId, split.amountMinor]));
+          const splitAmounts = settlement.splits.map((split) => ({ ...split, amountMinor: amountByMember.get(split.bandMemberId) ?? 0 }));
           const title = `${settlement.event.title} settlement`;
-          const body = [`Gross: ${settlement.currency} ${(settlement.grossMinor/100).toFixed(2)}`, `Expenses: ${settlement.currency} ${(expenseMinor/100).toFixed(2)}`, `Net: ${settlement.currency} ${(netMinor/100).toFixed(2)}`, "", ...splitAmounts.map((split) => `${split.bandMember.name}: ${settlement.currency} ${(split.amountMinor/100).toFixed(2)}`)].join("\n");
+          const body = settlementSnapshotBody({ currency: settlement.currency, grossMinor: settlement.grossMinor, expenseMinor, netMinor, splits: splitAmounts });
           const { bytes, sha256 } = renderTextPdf(title, body);
           await tx.expense.updateMany({ where: { ...expenseWhere, settlementId: null }, data: { settlementId: id } });
           for (const split of splitAmounts) await tx.memberSplit.update({ where: { settlementId_bandMemberId: { settlementId: id, bandMemberId: split.bandMemberId } }, data: { amountMinor: split.amountMinor } });

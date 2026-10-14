@@ -1,0 +1,119 @@
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import { Readable } from "node:stream";
+
+export const STRIPE_WEBHOOK_PATH = "/integrations/stripe/webhook";
+/** Matches Fastify's default bodyLimit and is enforced on this unauthenticated path. */
+export const STRIPE_WEBHOOK_MAX_RAW_BODY_BYTES = 1024 * 1024;
+
+export type StripeWebhookRequest = FastifyRequest & { rawBody?: string };
+
+export class StripeWebhookPayloadTooLargeError extends Error {
+  readonly statusCode = 413;
+  readonly code = "FST_ERR_CTP_BODY_TOO_LARGE";
+
+  constructor() {
+    super("Stripe webhook payload exceeds size limit");
+    this.name = "StripeWebhookPayloadTooLargeError";
+  }
+}
+
+export function isStripeWebhookPayloadTooLargeError(
+  error: unknown
+): error is StripeWebhookPayloadTooLargeError {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "name" in error &&
+      error.name === "StripeWebhookPayloadTooLargeError"
+  );
+}
+
+export function readStripeRawBody(req: FastifyRequest): string | null {
+  const raw = (req as StripeWebhookRequest).rawBody;
+  if (typeof raw !== "string" || raw.length === 0) {
+    return null;
+  }
+  if (Buffer.byteLength(raw, "utf8") > STRIPE_WEBHOOK_MAX_RAW_BODY_BYTES) {
+    throw new StripeWebhookPayloadTooLargeError();
+  }
+  return raw;
+}
+
+type StripeWebhookPayloadStream = AsyncIterable<unknown> & {
+  destroy?: (error?: Error) => void;
+  pause?: () => void;
+  socket?: { writable?: boolean } | null;
+};
+
+/**
+ * Stop consuming inbound bytes without tearing down an HTTP socket.
+ * `IncomingMessage.destroy()` closes the connection before Fastify can flush 413;
+ * mock streams have no socket, so they still get `destroy()`.
+ */
+function stopStripeWebhookPayload(payload: StripeWebhookPayloadStream): void {
+  if (payload.socket && typeof payload.pause === "function") {
+    payload.pause();
+    return;
+  }
+  payload.destroy?.();
+}
+
+export async function bufferStripeWebhookRawBody(
+  payload: StripeWebhookPayloadStream,
+  options: { maxBytes?: number; declaredLength?: number } = {}
+): Promise<Buffer> {
+  const maxBytes = options.maxBytes ?? STRIPE_WEBHOOK_MAX_RAW_BODY_BYTES;
+  const declared = options.declaredLength;
+  if (typeof declared === "number" && Number.isFinite(declared) && declared > maxBytes) {
+    stopStripeWebhookPayload(payload);
+    throw new StripeWebhookPayloadTooLargeError();
+  }
+
+  const chunks: Buffer[] = [];
+  let size = 0;
+  // `for await … of` + `break` calls `iterator.return()`, which destroys a
+  // Node Readable / IncomingMessage and its socket before Fastify can flush
+  // HTTP 413. Drive the iterator manually and leave it paused on oversize.
+  const iterator = payload[Symbol.asyncIterator]();
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) {
+      break;
+    }
+    const buffer = Buffer.isBuffer(next.value)
+      ? next.value
+      : Buffer.from(next.value as string | Uint8Array);
+    size += buffer.byteLength;
+    if (size > maxBytes) {
+      stopStripeWebhookPayload(payload);
+      throw new StripeWebhookPayloadTooLargeError();
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, size);
+}
+
+/** Capture the exact posted bytes for Stripe-Signature verification. */
+export function attachStripeWebhookRawBody(fastify: FastifyInstance): void {
+  fastify.addHook("preParsing", async (request, reply, payload) => {
+    const path = String(request.url ?? "").split("?")[0] ?? "";
+    if (!path.startsWith(STRIPE_WEBHOOK_PATH)) {
+      return payload;
+    }
+    const declared = Number(request.headers["content-length"]);
+    try {
+      const buffer = await bufferStripeWebhookRawBody(
+        payload,
+        Number.isFinite(declared) ? { declaredLength: declared } : {}
+      );
+      (request as StripeWebhookRequest).rawBody = buffer.toString("utf8");
+      return Readable.from(buffer);
+    } catch (error) {
+      if (isStripeWebhookPayloadTooLargeError(error)) {
+        // Same as Fastify's own bodyLimit path: write 413, then close leftover inbound bytes.
+        reply.header("connection", "close");
+      }
+      throw error;
+    }
+  });
+}

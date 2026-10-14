@@ -3896,7 +3896,7 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   assert.match(demo.answer, /not a live catalog/i);
   assert.match(demo.answer, /not a Vault import/i);
   assert.match(demo.answer, /will not invent titles, auto-post/i);
-  assert.doesNotMatch(demo.answer, /usually from a local Vault|harbor lights|everyday|parked demo|auto-pitch venues/i);
+  assert.doesNotMatch(demo.answer, /usually from a local Vault|harbor lights|everyday|parked demo|auto-pitch travis/i);
   assert.equal(demo.recommendation, null);
 
   const showNightOnVault = intelligence.deterministicManagerChat(managerFacts({
@@ -4070,7 +4070,7 @@ test("Vault import is the default song path and Manager stays honest after impor
   const setlist = intelligence.deterministicManagerChat(imported, "What's our setlist?", now);
   assert.match(setlist.answer, /Harbor Lights/);
   assert.match(setlist.answer, /Vault default-live/);
-  assert.match(setlist.answer, /will not invent titles, auto-post, or auto-pitch venues/i);
+  assert.match(setlist.answer, /will not invent titles, auto-post, or auto-pitch Travis/i);
   assert.ok(setlist.citations.includes("vault:catalog_import_v1:RD-0001"));
   assert.doesNotMatch(setlist.answer, /parked demo|trailer sketch|booking calendar|cover example/i);
   assert.equal(setlist.recommendation, null);
@@ -4338,9 +4338,13 @@ test("day-of intelligence identifies the next checkpoint, work pressure, and rec
     doorsAt: new Date("2026-07-12T20:00:00.000Z"), setAt: new Date("2026-07-12T21:00:00.000Z"), curfewAt: new Date("2026-07-12T23:00:00.000Z"),
     guaranteeMinor: 100000, depositMinor: 25000, currency: "USD",
     participants: [{ id: "participant-a", bandMemberId: "member-a", response: "available" }],
-    tasks: [{ id: "task-a", title: "Confirm parking", status: "todo", dueAt: new Date("2026-07-11T12:00:00.000Z") }],
+    tasks: [
+      { id: "task-a", title: "Confirm parking", status: "todo", dueAt: new Date("2026-07-11T12:00:00.000Z") },
+      { id: "task-today", title: "Advance later today", status: "todo", dueAt: new Date("2026-07-12T00:00:00.000Z") },
+      { id: "task-done", title: "Finished yesterday", status: "done", dueAt: new Date("2026-07-11T00:00:00.000Z") }
+    ],
     schedule: [],
-    deals: [{ id: "deal-a", status: "accepted", offerAmountMinor: 100000, depositMinor: 25000, invoices: [{ id: "invoice-a", totalMinor: 100000, paidMinor: 25000 }] }],
+    deals: [{ id: "deal-a", status: "accepted", offerAmountMinor: 100000, depositMinor: 25000, invoices: [{ id: "invoice-a", totalMinor: 100000, paidMinor: 25000, status: "partially_paid", currency: "USD" }] }],
     invoices: []
   };
   const readiness = { eventId: event.id, title: "Show", startsAt: event.startsAt.toISOString(), daysUntil: 0, score: 80, status: "attention", confidence: 1, confidenceLabel: "high", observedAt: now.toISOString(), headline: "One gap remains.", nextAction: null, categories: [], gaps: [], evidenceIds: [event.id] };
@@ -4348,10 +4352,14 @@ test("day-of intelligence identifies the next checkpoint, work pressure, and rec
   assert.equal(view.mode, "pre_show");
   assert.equal(view.nextCheckpoint.label, "Load-in");
   assert.equal(view.nextCheckpoint.minutesUntil, 300);
+  assert.equal(view.openTaskCount, 2);
   assert.equal(view.overdueTaskCount, 1);
+  assert.doesNotMatch(view.nextAction, /Advance later today/);
   assert.equal(view.expectedFeeMinor, 100000);
   assert.equal(view.depositRemainingMinor, 0);
   assert.equal(view.openInvoiceBalanceMinor, 75000);
+  assert.equal(view.currencyReviewInvoiceCount, 0);
+  assert.equal(view.currencyReviewMessage, null);
   assert.match(view.nextAction, /Confirm parking/);
   assert.ok(view.evidenceIds.includes("invoice-a"));
   event.status = "cancelled";
@@ -4360,6 +4368,60 @@ test("day-of intelligence identifies the next checkpoint, work pressure, and rec
   assert.equal(closed.nextCheckpoint, null);
   assert.ok(closed.timeline.every((item) => item.state !== "next"));
   assert.match(closed.nextAction, /cancellation outcome/i);
+});
+
+test("day-of money excludes voided invoices and foreign-currency payments from event-currency totals", () => {
+  const readiness = { eventId: "event-day", title: "Show", startsAt: "2026-07-12T21:00:00.000Z", daysUntil: 0, score: 80, status: "attention", confidence: 1, confidenceLabel: "high", observedAt: now.toISOString(), headline: "Open.", nextAction: null, categories: [], gaps: [], evidenceIds: ["event-day"] };
+  const sharedInvoice = { id: "invoice-shared", totalMinor: 100000, paidMinor: 25000, status: "partially_paid", currency: "USD" };
+  const mixed = {
+    id: "event-day", status: "confirmed", startsAt: new Date("2026-07-12T21:00:00.000Z"), endsAt: null,
+    loadInAt: new Date("2026-07-12T17:00:00.000Z"), soundcheckAt: null, doorsAt: null, setAt: null, curfewAt: null,
+    guaranteeMinor: 100000, depositMinor: 10000, currency: "USD",
+    participants: [], tasks: [], schedule: [],
+    deals: [{ id: "deal-a", status: "accepted", currency: "USD", offerAmountMinor: 100000, depositMinor: 10000, invoices: [sharedInvoice] }],
+    invoices: [
+      sharedInvoice,
+      { id: "voided-usd", totalMinor: 10000, paidMinor: 0, status: "voided", currency: "USD" },
+      { id: "paid-eur", totalMinor: 10000, paidMinor: 10000, status: "paid", currency: "EUR" }
+    ]
+  };
+  const view = eventDayOf.deterministicEventDayOf(mixed, readiness, [], now);
+  assert.equal(view.recordedPaidMinor, 25000);
+  assert.equal(view.openInvoiceBalanceMinor, 75000);
+  assert.equal(view.depositRemainingMinor, 0);
+  assert.equal(view.currencyReviewInvoiceCount, 1);
+  assert.deepEqual(view.currencyReviewCurrencies, ["EUR"]);
+  assert.match(view.currencyReviewMessage, /did not convert/i);
+  const voidedOnly = eventDayOf.deterministicEventDayOf({ ...mixed, deals: [], invoices: [{ id: "voided-usd", totalMinor: 10000, paidMinor: 0, status: "voided", currency: "USD" }] }, readiness, [], now);
+  assert.equal(voidedOnly.openInvoiceBalanceMinor, 0);
+  assert.equal(voidedOnly.depositRemainingMinor, 10000);
+  const foreignPaid = eventDayOf.deterministicEventDayOf({ ...mixed, deals: [], invoices: [{ id: "paid-eur", totalMinor: 10000, paidMinor: 10000, status: "paid", currency: "EUR" }] }, readiness, [], now);
+  assert.equal(foreignPaid.recordedPaidMinor, 0);
+  assert.equal(foreignPaid.depositRemainingMinor, 10000);
+});
+
+test("Manager day-of copy does not treat a EUR payment as satisfying a USD deposit", () => {
+  const managerInvoice = { id: "paid-eur", totalMinor: 10000, paidMinor: 10000, status: "paid", currency: "EUR" };
+  const event = {
+    id: "event-day", status: "confirmed", startsAt: new Date("2026-07-12T21:00:00.000Z"), endsAt: null,
+    loadInAt: new Date("2026-07-12T17:00:00.000Z"), soundcheckAt: null, doorsAt: null, setAt: null, curfewAt: null,
+    guaranteeMinor: 100000, depositMinor: 10000, currency: "USD",
+    participants: [], tasks: [], schedule: [],
+    deals: [{ id: "deal-a", status: "accepted", currency: "USD", offerAmountMinor: 100000, depositMinor: 10000, invoices: [managerInvoice] }],
+    invoices: [managerInvoice]
+  };
+  const readiness = { eventId: event.id, title: "Show", startsAt: event.startsAt.toISOString(), daysUntil: 0, score: 80, status: "attention", confidence: 1, confidenceLabel: "high", observedAt: now.toISOString(), headline: "Open.", nextAction: null, categories: [], gaps: [], evidenceIds: [event.id] };
+  const dayOf = eventDayOf.deterministicEventDayOf(event, readiness, [], now);
+  assert.equal(dayOf.recordedPaidMinor, 0);
+  assert.equal(dayOf.depositRemainingMinor, 10000);
+  const facts = managerFacts({
+    events: [{ id: event.id, title: "Tonight", type: "gig", status: "confirmed", startsAt: event.startsAt, timezone: "UTC", participants: [], readiness, dayOf }]
+  });
+  const snapshot = intelligence.deterministicManagerChat(facts, "Give me a manager desk snapshot", now);
+  assert.match(snapshot.answer, /Deposit remaining USD 100\.00/);
+  const schedule = intelligence.deterministicManagerChat(facts, "When is load-in?", now);
+  assert.match(schedule.answer, /Deposit remaining: USD 100\.00/);
+  assert.match(schedule.answer, /Verify payment before doors/);
 });
 
 test("day-of does not invent a live window when the recorded end is missing", () => {

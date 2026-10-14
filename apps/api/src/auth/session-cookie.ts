@@ -79,7 +79,12 @@ export function readSessionFromCookieHeader(
     if (name !== SESSION_COOKIE_NAME) {
       continue;
     }
-    const val = decodeURIComponent(p.slice(eq + 1).trim());
+    let val: string;
+    try {
+      val = decodeURIComponent(p.slice(eq + 1).trim());
+    } catch {
+      return null;
+    }
     return verifySessionPayload(val, secret);
   }
   return null;

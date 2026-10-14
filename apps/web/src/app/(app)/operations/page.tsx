@@ -1,4 +1,4 @@
-import { parseOpsWorkspaceFocus, parseOpsWorkspaceTab } from "@storyboard/shared";
+import { NO_AUTO_PITCH_COPY, parseOpsWorkspaceFocus, parseOpsWorkspaceTab } from "@storyboard/shared";
 import { PageHeader } from "@storyboard/ui";
 import { serverApiFetch } from "@/lib/api-server";
 import type {
@@ -46,13 +46,18 @@ export default async function OperationsPage({
   let songsAvailable = false;
   let setlistsAvailable = false;
   let bookingsAvailable = false;
+  let projectsAvailable = false;
+  let dealsAvailable = false;
+  let invoicesAvailable = false;
   let accessState: OperationsAccessState = "unavailable";
   let isOwner = false;
+  let currentOperatorId: string | null = null;
 
   // Resolve one band before loading its editors. A later band switch must not
   // pair one band's running order with another band's write context.
   const [meResult] = await Promise.allSettled([
     serverApiFetch<{
+      operator: { id: string };
       currentArtistId: string | null;
       memberships: { artistId: string; role: string }[];
     }>("/auth/me", { cache: "no-store" })
@@ -60,6 +65,7 @@ export default async function OperationsPage({
   let artistId: string | null = null;
   if (meResult.status === "fulfilled") {
     const me = meResult.value;
+    currentOperatorId = me.operator.id;
     artistId = me.currentArtistId && me.memberships.some((membership) => membership.artistId === me.currentArtistId)
       ? me.currentArtistId
       : me.memberships[0]?.artistId ?? null;
@@ -117,9 +123,18 @@ export default async function OperationsPage({
     setlists = setlistRows.value;
     setlistsAvailable = true;
   }
-  if (projectRows.status === "fulfilled") projects = projectRows.value;
-  if (dealRows.status === "fulfilled") deals = dealRows.value;
-  if (invoiceRows.status === "fulfilled") invoices = invoiceRows.value;
+  if (projectRows.status === "fulfilled") {
+    projects = projectRows.value;
+    projectsAvailable = true;
+  }
+  if (dealRows.status === "fulfilled") {
+    deals = dealRows.value;
+    dealsAvailable = true;
+  }
+  if (invoiceRows.status === "fulfilled") {
+    invoices = invoiceRows.value;
+    invoicesAvailable = true;
+  }
   if (expenseRows.status === "fulfilled") expenses = expenseRows.value;
   if (settlementRows.status === "fulfilled") settlements = settlementRows.value;
   if (templateRows.status === "fulfilled") templates = templateRows.value;
@@ -157,11 +172,12 @@ export default async function OperationsPage({
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Shows & calendar"
-        description="Show control names the live or next recorded gig, its assigned set, booking posture, and one safe next action before the editors. Travis still books. StoryBoard does not auto-pitch."
+        title="Band operations"
+        description={NO_AUTO_PITCH_COPY}
       />
       <OperationsClient
         artistId={artistId}
+        currentOperatorId={currentOperatorId}
         initialTab={parseOpsWorkspaceTab(params.tab)}
         focusEventId={params.event?.trim() || null}
         focusField={parseOpsWorkspaceFocus(params.focus)}
@@ -170,6 +186,9 @@ export default async function OperationsPage({
         setlistsAvailable={setlistsAvailable}
         songsAvailable={songsAvailable}
         bookingsAvailable={bookingsAvailable}
+        projectsAvailable={projectsAvailable}
+        dealsAvailable={dealsAvailable}
+        invoicesAvailable={invoicesAvailable}
         initialEvents={events}
         initialReadiness={readiness}
         initialSongs={songs}

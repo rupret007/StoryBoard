@@ -9,6 +9,7 @@ import {
   Sparkles,
   Terminal
 } from "lucide-react";
+import { COMMAND_HELPER_COPY } from "@storyboard/shared";
 import { apiFetch } from "@/lib/api";
 
 export function CommandBar({ artistId }: { artistId?: string }) {
@@ -66,6 +67,7 @@ export function CommandBar({ artistId }: { artistId?: string }) {
       </div>
       <form
         className="flex flex-col gap-3 md:flex-row md:items-stretch"
+        aria-busy={loading}
         onSubmit={(e) => void run(e)}
       >
         <label className="sr-only" htmlFor="sb-command">
@@ -98,21 +100,16 @@ export function CommandBar({ artistId }: { artistId?: string }) {
         </button>
       </form>
       <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">
-        Natural language maps to intents. Use a JSON{" "}
-        <code className="rounded bg-[var(--surface-0)] px-1 py-0.5 text-[var(--text-secondary)]">
-          intent
-        </code>{" "}
-        on{" "}
-        <code className="rounded bg-[var(--surface-0)] px-1 py-0.5 text-[var(--text-secondary)]">
-          POST /commands/execute
-        </code>{" "}
-        for stable routing. Risky flows create{" "}
-        <span className="font-medium text-[var(--secondary)]">approval</span>{" "}
-        rows — nothing sends silently.
+        {COMMAND_HELPER_COPY}
       </p>
 
       {result !== null ? (
-        <div className="mt-4 space-y-2">
+        <div
+          className="mt-4 space-y-2"
+          aria-live="polite"
+          aria-atomic="true"
+          role={hasError ? "alert" : "status"}
+        >
           <div className="flex flex-wrap items-center gap-2">
             {hasError ? (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-red-300">

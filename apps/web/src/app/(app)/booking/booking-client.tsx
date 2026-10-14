@@ -1,6 +1,6 @@
 "use client";
 
-import { bookingStageNextAction, bookingStages, describeBookingTarget } from "@storyboard/shared";
+import { bookingStageNextAction, bookingStages, describeBookingTarget, NO_AUTO_PITCH_COPY } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -27,7 +27,8 @@ export function BookingClient({
   opportunityRisks = {},
   artistId,
   accessState,
-  loadError
+  loadError,
+  insightsLoadError = false
 }: {
   initialOpportunities: BookingOpportunity[];
   venues: Venue[];
@@ -35,6 +36,7 @@ export function BookingClient({
   accessState: "manage" | "read_only" | "unavailable";
   loadError: string;
   opportunityRisks?: Record<string, "low" | "med" | "high">;
+  insightsLoadError?: boolean;
 }) {
   const router = useRouter();
   const [opportunities, setOpportunities] = useState(initialOpportunities);
@@ -98,6 +100,7 @@ export function BookingClient({
       {notice ? <p role="status" className="text-sm text-emerald-200">{notice}</p> : null}
       {accessState !== "manage" ? <p role="status" className="text-sm text-[var(--text-muted)]">{accessState === "read_only" ? "You have read-only access. An owner or member can record booking changes." : "Booking access could not be verified. Reload before making changes."}</p> : null}
       {loadError ? <div role="alert" className="text-sm text-amber-200">{loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload pipeline</button></div> : null}
+      {!loadError && insightsLoadError ? <p role="alert" className="text-sm text-amber-200">Opportunity risk badges could not be loaded. Missing badges are not the same as low risk. <button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}>Reload risks</button></p> : null}
       {error ? (
         <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
           {error}
@@ -110,8 +113,7 @@ export function BookingClient({
               New opportunity
             </h2>
             <p className="text-xs text-[var(--text-muted)]">
-              Travis books. StoryBoard tracks the pipeline and will not pitch,
-              post, or send on its own.
+              {NO_AUTO_PITCH_COPY}.
             </p>
           </div>
         </div>
@@ -159,7 +161,7 @@ export function BookingClient({
             className="sb-btn-primary shrink-0"
           >
             <Plus className="h-4 w-4" />
-            Create
+            Create opportunity
           </button>
         </form>
       </SurfaceCard> : null}
@@ -174,7 +176,7 @@ export function BookingClient({
         {loadError ? null : opportunities.length === 0 ? (
           <EmptyState
             title="No opportunities yet"
-            description={canManage ? "Create your first deal above. Cards group by stage so you can scan momentum like a CRM board." : "An owner or member can record the first opportunity. Travis books; this board tracks recorded deals."}
+            description={canManage ? "Create your first deal above. Cards group by stage so you can scan momentum like a CRM board." : `An owner or member can record the first opportunity. ${NO_AUTO_PITCH_COPY}.`}
             icon={<Kanban className="h-6 w-6" />}
           />
         ) : (
@@ -212,7 +214,7 @@ export function BookingClient({
                   </Badge>
                 </div>
                 <div className="min-h-[120px] space-y-2 rounded-[var(--radius-xl)] border border-dashed border-[var(--border)] bg-[var(--surface-0)]/50 p-2">
-                  {byStage[stage].length === 0 ? <p className="p-2 text-sm text-[var(--text-muted)] sm:hidden">No opportunities in {stage}. Choose another stage to see this band's recorded deals.</p> : null}
+                  {byStage[stage].length === 0 ? <p className="p-2 text-sm text-[var(--text-muted)]">No opportunities in {stage}.<span className="sm:hidden"> Choose another stage to see this band's recorded deals.</span></p> : null}
                   {(byStage[stage] ?? []).map((o) => (
                     <OppCard
                       key={o.id}

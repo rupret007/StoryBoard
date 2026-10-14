@@ -101,3 +101,29 @@ test("development can keep Telegram inbound optional without a webhook secret", 
   }));
   assert.equal(config.TELEGRAM_WEBHOOK_SECRET, undefined);
 });
+
+test("production requires a Stripe webhook secret when the Stripe secret key is set", () => {
+  assert.throws(
+    () => envMod.validateEnv(base({
+      NODE_ENV: "production",
+      SESSION_SECRET: "production-session-secret-32chars!!",
+      STRIPE_SECRET_KEY: "sk_test_123"
+    })),
+    /STRIPE_WEBHOOK_SECRET/
+  );
+  const config = envMod.validateEnv(base({
+    NODE_ENV: "production",
+    SESSION_SECRET: "production-session-secret-32chars!!",
+    STRIPE_SECRET_KEY: "sk_test_123",
+    STRIPE_WEBHOOK_SECRET: "whsec_test"
+  }));
+  assert.equal(config.STRIPE_WEBHOOK_SECRET, "whsec_test");
+});
+
+test("development can keep Stripe inbound optional at boot without a webhook secret", () => {
+  const config = envMod.validateEnv(base({
+    NODE_ENV: "development",
+    STRIPE_SECRET_KEY: "sk_test_123"
+  }));
+  assert.equal(config.STRIPE_WEBHOOK_SECRET, undefined);
+});

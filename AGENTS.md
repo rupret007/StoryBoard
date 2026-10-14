@@ -6,7 +6,7 @@ StoryBoard is a pnpm monorepo: **Next.js** (`apps/web`) + **NestJS** (`apps/api`
 
 1. **[docs/codex-handoff.md](docs/codex-handoff.md)** — current delivery state, file map, quality gate, boundaries.
 2. **[docs/developer-runbook.md](docs/developer-runbook.md)** — clone, env, Prisma, run, API tables.
-3. **[README.md](README.md)** — phase summary (3A–5B), workspace commands.
+3. **[README.md](README.md)** — product overview, current features, workspace commands.
 
 ## Rules of engagement
 

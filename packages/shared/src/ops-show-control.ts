@@ -195,7 +195,7 @@ export function showControlActionLabel(code: string): string {
     case "target":
       return "Open booking pipeline";
     case "record_gig":
-      return "Add a recorded gig";
+      return "Add an event";
     case "refresh_ops":
       return "Refresh operations";
     default:
@@ -456,7 +456,7 @@ function projectBooking(input: OpsShowControlInput, now: Date): OpsShowControl["
       stage: null,
       title: null,
       opportunityId: null,
-      nextAction: "Booking records are unavailable. StoryBoard will not invent Travis's next step or auto-pitch.",
+      nextAction: "Booking records are unavailable. StoryBoard will not send a pitch; a person still books.",
       href: "/booking",
       code: "booking_unavailable"
     };
@@ -472,7 +472,7 @@ function projectBooking(input: OpsShowControlInput, now: Date): OpsShowControl["
       stage: null,
       title: null,
       opportunityId: null,
-      nextAction: "No open booking work is recorded. Travis books; StoryBoard will not pitch.",
+      nextAction: "No open booking work is recorded. StoryBoard will not send a pitch; a person still books.",
       href: "/booking",
       code: "booking_empty"
     };

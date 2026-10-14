@@ -4,22 +4,36 @@ import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { CheckCircle2, CircleAlert, Link2, ListTodo, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { ApiHttpError, apiFetch } from "@/lib/api";
 import type { BandMember, BookingOpportunity, Task } from "@/lib/types";
 import { describeTaskDueDate } from "@storyboard/shared";
+
+import { MyTasks } from "./my-tasks";
 
 const STATUSES = ["todo", "in_progress", "blocked", "done"] as const;
 
 export function TasksClient({
   initialTasks,
   opportunities,
-  members
+  members,
+  loadError,
+  contextError,
+  artistId,
+  currentOperatorId,
+  canManage
 }: {
   initialTasks: Task[];
   opportunities: BookingOpportunity[];
   members: BandMember[];
+  loadError?: string;
+  contextError?: string;
+  artistId: string | null;
+  currentOperatorId: string | null;
+  canManage: boolean;
 }) {
   const router = useRouter();
+  const me = members.find((member) => member.active && currentOperatorId && member.linkedOperatorId === currentOperatorId);
+  const [scope, setScope] = useState<"mine" | "all">(me ? "mine" : "all");
   const now = useMemo(() => new Date(), []);
   const grouped = useMemo(() => {
     const blocked: Task[] = [];
@@ -49,13 +63,21 @@ export function TasksClient({
   const [dueAt, setDueAt] = useState("");
   const [bandMemberId, setBandMemberId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [createError, setCreateError] = useState("");
 
   async function createTask(e: React.FormEvent) {
     e.preventDefault();
+    if (!artistId || !canManage || busy) return;
+    setCreateError("");
+    if (!title.trim()) {
+      setCreateError("Enter a task title.");
+      return;
+    }
     setBusy(true);
     try {
       await apiFetch("/tasks", {
         method: "POST",
+        artistId,
         json: {
           title: title.trim(),
           opportunityId: opportunityId || undefined,
@@ -68,6 +90,12 @@ export function TasksClient({
       setDueAt("");
       setBandMemberId("");
       router.refresh();
+    } catch (err) {
+      setCreateError(
+        err instanceof ApiHttpError && err.status < 500
+          ? err.message
+          : "Could not confirm whether the task was created. Your draft is still here. Check the task list before trying again."
+      );
     } finally {
       setBusy(false);
     }
@@ -75,6 +103,23 @@ export function TasksClient({
 
   return (
     <div className="space-y-8">
+      {loadError ? (
+        <div role="alert" className="text-sm text-amber-200">
+          {loadError} <button className="sb-btn-secondary" onClick={() => router.refresh()}>Reload tasks</button>
+        </div>
+      ) : null}
+      {!loadError && contextError ? (
+        <div role="alert" className="text-sm text-amber-200">
+          {contextError} <button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}>Reload context</button>
+        </div>
+      ) : null}
+
+      {!loadError ? <div className="space-y-2">
+        {me ? <><label><span className="sb-label">Task view</span><select className="sb-select mt-1" value={scope} onChange={(event) => setScope(event.target.value as "mine" | "all")}><option value="mine">My tasks · {me.name}</option><option value="all">All band tasks</option></select></label>{scope === "mine" && artistId ? <MyTasks artistId={artistId} tasks={initialTasks.filter((task) => task.bandMemberId === me.id)} canManage={canManage} onSaved={() => router.refresh()} /> : null}</> : <p className="text-sm text-[var(--text-muted)]">Your account is not linked to an active performer. Ask an owner to link it in <a className="text-[var(--accent)]" href="/manager#member-accounts">Manager → Member accounts</a> to show My tasks.</p>}
+        {!canManage ? <p className="text-sm text-[var(--text-muted)]">Read-only access. An owner or member can update tasks.</p> : null}
+      </div> : null}
+      <div hidden={scope === "mine" && Boolean(me)}>
+      <fieldset className="m-0 min-w-0 space-y-8 border-0 p-0" disabled={!canManage || Boolean(loadError)}>
       <SurfaceCard>
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
           New follow-up
@@ -133,9 +178,10 @@ export function TasksClient({
             </button>
           </div>
         </form>
+        {createError ? <p role="alert" className="mt-3 text-sm text-red-200">{createError}</p> : null}
       </SurfaceCard>
 
-      {initialTasks.length === 0 ? (
+      {loadError ? null : initialTasks.length === 0 ? (
         <EmptyState
           title="No tasks"
           description="Create follow-ups so dashboard and summaries can surface what needs attention."
@@ -151,6 +197,7 @@ export function TasksClient({
             onSaved={() => router.refresh()}
             members={members}
             allTasks={initialTasks}
+            artistId={artistId}
           />
           <TaskSection
             title="Overdue"
@@ -160,6 +207,7 @@ export function TasksClient({
             onSaved={() => router.refresh()}
             members={members}
             allTasks={initialTasks}
+            artistId={artistId}
           />
           <TaskSection
             title="Open"
@@ -169,6 +217,7 @@ export function TasksClient({
             onSaved={() => router.refresh()}
             members={members}
             allTasks={initialTasks}
+            artistId={artistId}
           />
           <TaskSection
             title="Done"
@@ -178,9 +227,12 @@ export function TasksClient({
             onSaved={() => router.refresh()}
             members={members}
             allTasks={initialTasks}
+            artistId={artistId}
           />
         </div>
       )}
+      </fieldset>
+      </div>
     </div>
   );
 }
@@ -192,7 +244,8 @@ function TaskSection({
   tone,
   onSaved,
   members,
-  allTasks
+  allTasks,
+  artistId
 }: {
   title: string;
   subtitle: string;
@@ -201,6 +254,7 @@ function TaskSection({
   onSaved: () => void;
   members: BandMember[];
   allTasks: Task[];
+  artistId: string | null;
 }) {
   if (tasks.length === 0) {
     return null;
@@ -253,7 +307,7 @@ function TaskSection({
           </thead>
           <tbody>
             {tasks.map((t) => (
-              <TaskRow key={t.id} task={t} onSaved={onSaved} members={members} allTasks={allTasks} />
+              <TaskRow artistId={artistId} key={t.id} task={t} onSaved={onSaved} members={members} allTasks={allTasks} />
             ))}
           </tbody>
         </table>
@@ -266,12 +320,14 @@ function TaskRow({
   task: t,
   onSaved,
   members,
-  allTasks
+  allTasks,
+  artistId
 }: {
   task: Task;
   onSaved: () => void;
   members: BandMember[];
   allTasks: Task[];
+  artistId: string | null;
 }) {
   const savedOwnerValue = t.bandMemberId ?? (t.ownerLabel ? `legacy:${t.ownerLabel}` : "");
   const [status, setStatus] = useState(t.status);
@@ -294,7 +350,7 @@ function TaskRow({
   const changed = status !== t.status || ownerValue !== savedOwnerValue || dueAt !== (t.dueAt?.slice(0, 10) ?? "") || waitingOn !== (t.waitingOn ?? "") || (status === "blocked" ? blockedReason !== (t.blockedReason ?? "") : Boolean(t.blockedReason));
 
   async function save() {
-    if (!changed || (status === "blocked" && !blockedReason.trim())) {
+    if (!artistId || !changed || (status === "blocked" && !blockedReason.trim())) {
       return;
     }
     setBusy(true);
@@ -302,6 +358,7 @@ function TaskRow({
     try {
       await apiFetch(`/tasks/${t.id}`, {
         method: "PATCH",
+        artistId,
         json: { status, ...(ownerValue !== savedOwnerValue ? { bandMemberId: ownerValue && !ownerValue.startsWith("legacy:") ? ownerValue : null } : {}), dueAt: dueAt || null, waitingOn: status === "done" ? null : waitingOn.trim() || null, blockedReason: status === "blocked" ? blockedReason.trim() : null }
       });
       onSaved();
@@ -313,11 +370,11 @@ function TaskRow({
   }
 
   async function addPrerequisite() {
-    if (!prerequisiteTaskId) return;
+    if (!artistId || !prerequisiteTaskId) return;
     setBusy(true);
     setError("");
     try {
-      await apiFetch(`/tasks/${t.id}/prerequisites`, { method: "POST", json: { prerequisiteTaskId } });
+      await apiFetch(`/tasks/${t.id}/prerequisites`, { method: "POST", artistId, json: { prerequisiteTaskId } });
       setPrerequisiteTaskId("");
       onSaved();
     } catch (err) {
@@ -328,10 +385,11 @@ function TaskRow({
   }
 
   async function removePrerequisite(id: string) {
+    if (!artistId) return;
     setBusy(true);
     setError("");
     try {
-      await apiFetch(`/tasks/${t.id}/prerequisites/${id}`, { method: "DELETE" });
+      await apiFetch(`/tasks/${t.id}/prerequisites/${id}`, { method: "DELETE", artistId });
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not remove prerequisite");

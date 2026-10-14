@@ -1,0 +1,31 @@
+# Apply AFTER app + production. Supply an approved domain/host; never use dev login here.
+services:
+  api:
+    ports: !reset []
+  web:
+    ports: !reset []
+  seed:
+    # Real users create their own band workspaces after Google sign-in.
+    command: ["node", "-e", "console.log('Pilot: use real sign-in and onboarding; no demo seed applied')"]
+  proxy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      STORYBOARD_WEB_HOST: ${STORYBOARD_WEB_HOST:?Set the approved web hostname}
+      STORYBOARD_API_HOST: ${STORYBOARD_API_HOST:?Set the approved API hostname}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro
+      - storyboard_tls:/data
+      - storyboard_proxy_config:/config
+    depends_on:
+      web:
+        condition: service_started
+      api:
+        condition: service_healthy
+volumes:
+  storyboard_tls:
+  storyboard_proxy_config:
