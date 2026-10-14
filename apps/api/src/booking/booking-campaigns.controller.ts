@@ -72,6 +72,9 @@ export class BookingCampaignsController {
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
     const parsed = bookingCampaignCreateSchema.safeParse(body ?? {});
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    if (parsed.data.deliveryMode === "send_on_execution") {
+      await this.roles.assertOwner(operator.id, artistId);
+    }
     return this.campaigns.create(artistId, parsed.data, operator.email, operator.id);
   }
 
@@ -87,6 +90,9 @@ export class BookingCampaignsController {
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
     const parsed = bookingCampaignPatchSchema.safeParse(body ?? {});
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    if (parsed.data.deliveryMode === "send_on_execution") {
+      await this.roles.assertOwner(operator.id, artistId);
+    }
     return this.campaigns.patch(artistId, id, parsed.data, operator.email, operator.id);
   }
 

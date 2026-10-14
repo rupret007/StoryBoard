@@ -18,7 +18,10 @@ export default async function VenuesPage() {
   }
   return (
     <div className="space-y-8">
-      <PageHeader title="Venues" description="Venue CRM — fit scores and drive-time hints for smarter routing and outreach." />
+      <PageHeader
+        title="Venues"
+        description="Find a venue, review its pack, and start an opportunity or prospect without manager chat. Travis books; StoryBoard does not send outreach on its own."
+      />
       {loadError ? <p role="alert" className="text-sm text-rose-200">{loadError}</p> : (
         <VenuesClient key={artistId ?? "unverified"} artistId={artistId} canManage={canManage} initialVenues={venues} />
       )}

@@ -1,26 +1,112 @@
 "use client";
 
 import { EmptyState, SurfaceCard } from "@storyboard/ui";
-import { Building2 } from "lucide-react";
+import { Building2, ChevronRight, ExternalLink, Loader2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { isSafeHttpUrl } from "@storyboard/shared";
 import { scopedApiFetch } from "@/lib/api";
-import type { Venue } from "@/lib/types";
+import type { Contact, Venue } from "@/lib/types";
 
-export function VenuesClient({ artistId, canManage, initialVenues }: { artistId: string | null; canManage: boolean; initialVenues: Venue[] }) {
+type VenuePackDetail = {
+  venue: Venue;
+  contacts: Contact[];
+  pack: {
+    slug: string | null;
+    bookingEmail: string | null;
+    phone: string | null;
+    applyUrl: string | null;
+    webApplicationFirst: boolean;
+    capacity: number | null;
+    notes: string | null;
+    region: string | null;
+  };
+};
+
+type ProspectFromVenueResult = {
+  prospect: { id: string };
+  created: boolean;
+  contactLinked: boolean;
+  applicationTask: { id: string; title: string } | null;
+  travisNote: string;
+};
+
+type VenueOpportunityResult = {
+  id: string;
+  title: string;
+  created: boolean;
+};
+
+export function VenuesClient({
+  artistId,
+  canManage,
+  initialVenues
+}: {
+  artistId: string | null;
+  canManage: boolean;
+  initialVenues: Venue[];
+}) {
   const apiFetch = scopedApiFetch(artistId);
   const router = useRouter();
+  const loadError = "";
+  const accessState = canManage ? "manage" : artistId ? "read_only" : "unavailable";
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [fitScore, setFitScore] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState("");
+  const [venueOpportunityId, setVenueOpportunityId] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [packDetail, setPackDetail] = useState<VenuePackDetail | null>(null);
+  const [packLoading, setPackLoading] = useState(false);
+  const [packError, setPackError] = useState("");
+  const [actionBusy, setActionBusy] = useState<"opportunity" | "prospect" | null>(null);
+  const [actionNotice, setActionNotice] = useState("");
+  const [actionError, setActionError] = useState("");
+
+  const filteredVenues = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return initialVenues;
+    return initialVenues.filter((v) => {
+      const hay = `${v.name} ${v.city} ${v.region ?? ""} ${v.notes ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [filter, initialVenues]);
+
+  const loadPack = useCallback(async (venueId: string) => {
+    setPackLoading(true);
+    setPackError("");
+    setActionNotice("");
+    setActionError("");
+    try {
+      const detail = await apiFetch<VenuePackDetail>(`/venues/${venueId}/pack`);
+      setPackDetail(detail);
+    } catch (err) {
+      setPackDetail(null);
+      setPackError(err instanceof Error ? err.message : "Could not load venue pack");
+    } finally {
+      setPackLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setPackDetail(null);
+      setPackError("");
+      setVenueOpportunityId(null);
+      return;
+    }
+    setVenueOpportunityId(null);
+    void loadPack(selectedId);
+  }, [selectedId, loadPack]);
 
   async function createVenue(e: React.FormEvent) {
     e.preventDefault();
     if (!canManage) return;
-    setError(null);
     setBusy(true);
+    setFormError("");
     try {
       await apiFetch<Venue>("/venues", {
         method: "POST",
@@ -34,17 +120,87 @@ export function VenuesClient({ artistId, canManage, initialVenues }: { artistId:
       setCity("");
       setFitScore("");
       router.refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not create venue");
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Could not create venue");
     } finally {
       setBusy(false);
     }
   }
 
+  async function createOpportunityFromVenue() {
+    if (!selectedId) return;
+    setActionBusy("opportunity");
+    setActionError("");
+    setActionNotice("");
+    try {
+      const opp = await apiFetch<VenueOpportunityResult>(
+        `/venues/${selectedId}/opportunities`,
+        { method: "POST", json: {} }
+      );
+      setVenueOpportunityId(opp.id);
+      setActionNotice(
+        opp.created
+          ? `Opportunity recorded: ${opp.title}. Travis books — StoryBoard will not pitch or send.`
+          : `Open opportunity already on file: ${opp.title}. Linked prospect actions will use this deal.`
+      );
+      router.refresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not create opportunity");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function createProspectFromVenue() {
+    if (!selectedId) return;
+    setActionBusy("prospect");
+    setActionError("");
+    setActionNotice("");
+    try {
+      const result = await apiFetch<ProspectFromVenueResult>(
+        `/venues/${selectedId}/prospects`,
+        {
+          method: "POST",
+          json: venueOpportunityId ? { opportunityId: venueOpportunityId } : {}
+        }
+      );
+      const contactHint = result.contactLinked
+        ? "Venue contact linked."
+        : "No venue contact linked.";
+      const taskHint = result.applicationTask
+        ? ` Application task: ${result.applicationTask.title}`
+        : "";
+      setActionNotice(
+        `${result.created ? "Prospect created" : "Prospect already on file"}. ${contactHint}${taskHint} ${result.travisNote}`
+      );
+      router.refresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not create prospect");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
   return (
     <div className="space-y-8">
-      {error ? <p role="alert" className="text-sm text-rose-200">{error}</p> : null}
-      {canManage ? <SurfaceCard>
+      {loadError ? (
+        <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+          {loadError}{" "}
+          <button type="button" className="sb-btn-secondary" onClick={() => router.refresh()}>
+            Reload venues
+          </button>
+        </div>
+      ) : null}
+      {accessState === "read_only" ? (
+        <p role="status" className="text-sm text-[var(--text-muted)]">
+          You have read-only access. An owner or member can add venues or start booking records.
+        </p>
+      ) : null}
+      {formError ? (
+        <div role="alert" className="text-sm text-red-200">{formError}</div>
+      ) : null}
+      {canManage && !loadError ? (
+      <SurfaceCard>
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">
           Add venue
         </h2>
@@ -89,29 +245,81 @@ export function VenuesClient({ artistId, canManage, initialVenues }: { artistId:
             </button>
           </div>
         </form>
-      </SurfaceCard> : null}
+      </SurfaceCard>
+      ) : null}
 
-      <VenueTable artistId={artistId} canManage={canManage} venues={initialVenues} onSaved={() => router.refresh()} />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+        <VenueTable
+          artistId={artistId}
+          venues={filteredVenues}
+          allCount={initialVenues.length}
+          filter={filter}
+          onFilterChange={setFilter}
+          selectedId={selectedId}
+          onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
+          onSaved={() => router.refresh()}
+          loadError={loadError}
+          canManage={canManage && !loadError}
+        />
+        <VenuePackPanel
+          selectedId={selectedId}
+          detail={packDetail}
+          loading={packLoading}
+          error={packError}
+          actionBusy={actionBusy}
+          actionNotice={actionNotice}
+          actionError={actionError}
+          canManage={canManage && !loadError}
+          onCreateOpportunity={() => void createOpportunityFromVenue()}
+          onCreateProspect={() => void createProspectFromVenue()}
+          onRetry={() => selectedId && void loadPack(selectedId)}
+        />
+      </div>
     </div>
   );
 }
 
 function VenueTable({
   artistId,
-  canManage,
   venues,
-  onSaved
+  allCount,
+  filter,
+  onFilterChange,
+  selectedId,
+  onSelect,
+  onSaved,
+  loadError,
+  canManage
 }: {
   artistId: string | null;
-  canManage: boolean;
   venues: Venue[];
+  allCount: number;
+  filter: string;
+  onFilterChange: (value: string) => void;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
   onSaved: () => void;
+  loadError: string;
+  canManage: boolean;
 }) {
-  if (venues.length === 0) {
+  if (loadError) {
+    return (
+      <SurfaceCard>
+        <p className="text-sm text-[var(--text-muted)]">
+          Venue list unavailable until reload succeeds. StoryBoard is not showing an empty workspace.
+        </p>
+      </SurfaceCard>
+    );
+  }
+  if (allCount === 0) {
     return (
       <EmptyState
         title="No venues yet"
-        description={canManage ? "Venues anchor your CRM and booking outreach. Add one above to get started." : "An owner or member can add venues for this band."}
+        description={
+          canManage
+            ? "Venues anchor your CRM and booking outreach. Add one above to get started."
+            : "No venues are recorded for this band yet. An owner or member can add the first room."
+        }
         icon={<Building2 className="h-6 w-6" />}
       />
     );
@@ -119,12 +327,30 @@ function VenueTable({
 
   return (
     <SurfaceCard padding="none" className="overflow-hidden">
+      <div className="border-b border-[var(--border)] px-4 py-3">
+        <label className="block">
+          <span className="sb-label">Find venue</span>
+          <input
+            className="sb-input mt-1.5"
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value)}
+            placeholder="Name, city, or notes"
+          />
+        </label>
+        {filter.trim() && venues.length === 0 ? (
+          <p className="mt-2 text-xs text-[var(--text-muted)]" role="status">
+            No venues match this filter. Clear the box to see all {allCount} venues.
+          </p>
+        ) : null}
+      </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-sm">
+        <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="border-b border-[var(--border)] bg-[var(--surface-2)] text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             <tr>
+              <th className="px-4 py-3 w-8"> </th>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">City</th>
+              <th className="px-4 py-3">Capacity</th>
               <th className="px-4 py-3">Fit</th>
               <th className="px-4 py-3">Drive</th>
               <th className="px-4 py-3 w-28"> </th>
@@ -132,7 +358,15 @@ function VenueTable({
           </thead>
           <tbody>
             {venues.map((v) => (
-              <VenueRow key={v.id} artistId={artistId} canManage={canManage} venue={v} onSaved={onSaved} />
+              <VenueRow
+                key={v.id}
+                artistId={artistId}
+                canManage={canManage}
+                venue={v}
+                selected={selectedId === v.id}
+                onSelect={() => onSelect(v.id)}
+                onSaved={onSaved}
+              />
             ))}
           </tbody>
         </table>
@@ -145,11 +379,15 @@ function VenueRow({
   artistId,
   canManage,
   venue,
+  selected,
+  onSelect,
   onSaved
 }: {
   artistId: string | null;
   canManage: boolean;
   venue: Venue;
+  selected: boolean;
+  onSelect: () => void;
   onSaved: () => void;
 }) {
   const apiFetch = scopedApiFetch(artistId);
@@ -164,7 +402,7 @@ function VenueRow({
       : ""
   );
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     setName(venue.name);
@@ -179,8 +417,8 @@ function VenueRow({
 
   async function save() {
     if (!canManage) return;
-    setError(null);
     setBusy(true);
+    setSaveError("");
     try {
       await apiFetch(`/venues/${venue.id}`, {
         method: "PATCH",
@@ -193,21 +431,37 @@ function VenueRow({
         }
       });
       onSaved();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save venue");
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Could not save venue");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <tr className="border-b border-[var(--border)] transition-colors hover:bg-[var(--surface-0)]/80">
+    <tr
+      className={`border-b border-[var(--border)] transition-colors hover:bg-[var(--surface-0)]/80 ${selected ? "bg-[var(--accent)]/5" : ""}`}
+    >
+      <td className="px-2 py-3">
+        <button
+          type="button"
+          className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+          aria-label={selected ? `Collapse ${venue.name} pack` : `View ${venue.name} pack`}
+          aria-expanded={selected}
+          onClick={onSelect}
+        >
+          <ChevronRight
+            className={`h-4 w-4 transition-transform ${selected ? "rotate-90" : ""}`}
+          />
+        </button>
+      </td>
       <td className="px-4 py-3">
         <input
           disabled={!canManage}
-          className="w-full rounded-md border border-transparent bg-transparent px-1 py-1 text-[var(--text-primary)] outline-none hover:border-[var(--border)] focus:border-[var(--accent)]"
+          className="w-full rounded-md border border-transparent bg-transparent px-1 py-1 font-medium text-[var(--text-primary)] outline-none hover:border-[var(--border)] focus:border-[var(--accent)]"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
         />
       </td>
       <td className="px-4 py-3">
@@ -216,37 +470,255 @@ function VenueRow({
           className="w-full rounded-md border border-transparent bg-transparent px-1 py-1 text-[var(--text-primary)] outline-none hover:border-[var(--border)] focus:border-[var(--accent)]"
           value={city}
           onChange={(e) => setCity(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
         />
+      </td>
+      <td className="px-4 py-3 text-[var(--text-muted)]">
+        {venue.capacity != null ? venue.capacity : "—"}
       </td>
       <td className="px-4 py-3">
         <input
           disabled={!canManage}
           type="number"
-          className="sb-input w-24 py-1.5 text-xs"
+          className="sb-input w-20 py-1.5 text-xs"
           value={fitScore}
           onChange={(e) => setFitScore(e.target.value)}
+          aria-label={`Fit score for ${venue.name}`}
         />
       </td>
       <td className="px-4 py-3">
         <input
           disabled={!canManage}
           type="number"
-          className="sb-input w-24 py-1.5 text-xs"
+          className="sb-input w-20 py-1.5 text-xs"
           value={driveMin}
           onChange={(e) => setDriveMin(e.target.value)}
+          aria-label={`Drive minutes for ${venue.name}`}
         />
       </td>
       <td className="px-4 py-3">
-        <button
-          type="button"
-          disabled={busy || !canManage}
-          onClick={() => void save()}
-          className="sb-btn-secondary py-1.5 text-xs"
-        >
-          Save
-        </button>
-        {error ? <p role="alert" className="mt-1 text-xs text-rose-200">{error}</p> : null}
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            disabled={busy || !canManage}
+            onClick={() => void save()}
+            className="sb-btn-secondary py-1.5 text-xs"
+          >
+            Save
+          </button>
+          {saveError ? (
+            <span className="text-[10px] text-red-200" role="alert">{saveError}</span>
+          ) : null}
+        </div>
       </td>
     </tr>
+  );
+}
+
+function VenuePackPanel({
+  selectedId,
+  detail,
+  loading,
+  error,
+  actionBusy,
+  actionNotice,
+  actionError,
+  canManage,
+  onCreateOpportunity,
+  onCreateProspect,
+  onRetry
+}: {
+  selectedId: string | null;
+  detail: VenuePackDetail | null;
+  loading: boolean;
+  error: string;
+  actionBusy: "opportunity" | "prospect" | null;
+  actionNotice: string;
+  actionError: string;
+  canManage: boolean;
+  onCreateOpportunity: () => void;
+  onCreateProspect: () => void;
+  onRetry: () => void;
+}) {
+  if (!selectedId) {
+    return (
+      <SurfaceCard className="h-fit">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Venue pack</h2>
+        <p className="mt-2 text-sm text-[var(--text-muted)]">
+          Select a venue to see booking contact, apply link, and notes — no manager chat required.
+        </p>
+      </SurfaceCard>
+    );
+  }
+
+  if (loading) {
+    return (
+      <SurfaceCard className="h-fit">
+        <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]" role="status">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading venue pack…
+        </div>
+      </SurfaceCard>
+    );
+  }
+
+  if (error) {
+    return (
+      <SurfaceCard className="h-fit">
+        <div role="alert" className="space-y-3 text-sm text-amber-200">
+          <p>{error}</p>
+          <button type="button" className="sb-btn-secondary" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
+      </SurfaceCard>
+    );
+  }
+
+  if (!detail) {
+    return null;
+  }
+
+  const { pack, venue } = detail;
+  const safeApplyUrl =
+    pack.applyUrl && isSafeHttpUrl(pack.applyUrl) ? pack.applyUrl : null;
+  const displayNotes =
+    pack.notes?.replace(/^seed:dfw-venue-pack:[^\s]+\s*—\s*/i, "") ?? null;
+
+  return (
+    <SurfaceCard className="h-fit space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">{venue.name}</h2>
+        <p className="text-xs text-[var(--text-muted)]">
+          {[venue.city, pack.region ?? venue.region].filter(Boolean).join(", ")}
+        </p>
+      </div>
+
+      <dl className="space-y-2 text-sm">
+        <div>
+          <dt className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+            Booking email
+          </dt>
+          <dd className="text-[var(--text-primary)]">
+            {pack.bookingEmail ?? "No contact email on file"}
+          </dd>
+        </div>
+        {pack.phone ? (
+          <div>
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              Phone
+            </dt>
+            <dd>{pack.phone}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+            Apply URL
+          </dt>
+          <dd>
+            {safeApplyUrl !== null ? (
+              <a
+                href={safeApplyUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
+              >
+                Open application
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            ) : (
+              <span className="text-[var(--text-muted)]">
+                {pack.applyUrl ? "— Not a safe link" : "—"}
+              </span>
+            )}
+          </dd>
+        </div>
+        {pack.capacity != null ? (
+          <div>
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              Capacity
+            </dt>
+            <dd>{pack.capacity}</dd>
+          </div>
+        ) : null}
+        {displayNotes ? (
+          <div>
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              Notes
+            </dt>
+            <dd className="text-xs text-[var(--text-muted)]">{displayNotes}</dd>
+          </div>
+        ) : null}
+      </dl>
+
+      {pack.webApplicationFirst ? (
+        <p className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs text-[var(--text-muted)]">
+          Primary outreach for this room is a web application.{" "}
+          {safeApplyUrl
+            ? "StoryBoard can track the submit step in a task."
+            : "Add a safe apply URL to track the submit step in a task."}{" "}
+          Gmail drafts still require Travis review before anything sends.
+        </p>
+      ) : null}
+
+      <p className="text-xs text-[var(--text-muted)]">
+        Travis owns the send. StoryBoard records opportunities and prospects only — nothing
+        auto-pitches or auto-sends.
+      </p>
+
+      {actionError ? (
+        <div role="alert" className="text-sm text-red-200">{actionError}</div>
+      ) : null}
+      {actionNotice ? (
+        <div role="status" className="space-y-2 text-sm text-emerald-200">
+          <p>{actionNotice}</p>
+          <div className="flex flex-col gap-2">
+            <Link href="/prospects" className="text-[var(--accent)] hover:underline">
+              View in Find shows →
+            </Link>
+            <Link href="/booking-campaigns" className="text-[var(--accent)] hover:underline">
+              Add to a pitch campaign →
+            </Link>
+            <Link href="/booking" className="text-[var(--accent)] hover:underline">
+              Open booking pipeline →
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-2">
+        <button
+          type="button"
+          disabled={!canManage || actionBusy != null}
+          className="sb-btn-primary w-full justify-center"
+          onClick={onCreateOpportunity}
+        >
+          {actionBusy === "opportunity" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : null}
+          Create opportunity
+        </button>
+        <button
+          type="button"
+          disabled={
+            !canManage ||
+            actionBusy != null ||
+            (!pack.bookingEmail && !safeApplyUrl)
+          }
+          className="sb-btn-secondary w-full justify-center"
+          onClick={onCreateProspect}
+        >
+          {actionBusy === "prospect" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : null}
+          Create prospect
+        </button>
+        {!pack.bookingEmail && !safeApplyUrl ? (
+          <p className="text-xs text-[var(--text-muted)]">
+            Add a booking email or safe apply URL on this venue before creating a prospect.
+          </p>
+        ) : null}
+      </div>
+    </SurfaceCard>
   );
 }

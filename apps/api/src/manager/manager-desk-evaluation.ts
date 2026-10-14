@@ -1,4 +1,4 @@
-import { deterministicManagerBrief, deterministicManagerChat, managerQuestionAsksAboutSchedule, managerQuestionNeedsRecordedDeskAnswer, type ManagerFacts } from "./manager-intelligence";
+import { deterministicManagerBrief, deterministicManagerChat, managerQuestionAsksAboutSchedule, managerQuestionAsksAboutPipelineStages, managerQuestionNeedsRecordedDeskAnswer, type ManagerFacts } from "./manager-intelligence";
 import { deterministicEventDayOf, type EventDayOfInput } from "../operations/event-day-of";
 import { deterministicShowReadiness } from "../operations/event-readiness";
 
@@ -58,6 +58,69 @@ const cases: { name: string; question: string; facts: ManagerFacts; check: (answ
     check: (a) => /has no recorded day-of timeline/.test(a) && !/next checkpoint is/.test(a) },
   { name: "desk-cross-domain-plural-routing", question: "Summary of booking and invoices", facts: populated,
     check: (a) => /Manager desk snapshot/.test(a) && /Invoices:/.test(a) },
+  { name: "desk-herman-marshall-venue-pack", question: "Package Herman Marshall", 
+    facts: { ...empty, opportunities: [{ id: "opp-hm", title: "Herman Marshall Tasting Room (Wylie)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /hermanmarshall\.com/.test(a) && /info@hmwhiskey\.com/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-hm") },
+  { name: "desk-my-stomping-grounds-venue-pack", question: "Package My Stomping Grounds", 
+    facts: { ...empty, opportunities: [{ id: "opp-msg", title: "My Stomping Grounds (Haltom City)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /mystompinggrounds\.com/.test(a) && /info@mystompinggrounds\.com/.test(a) && /817.*231.*8080/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-msg") },
+  { name: "desk-birdies-social-club-venue-pack", question: "Package Birdies Social Club", 
+    facts: { ...empty, opportunities: [{ id: "opp-bsc", title: "Birdie's Social Club (Fort Worth)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /birdiessocialclub\.com\/music-submission/.test(a) && /hiring@birdiessocialclub\.com/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-bsc") },
+  { name: "desk-dans-silverleaf-venue-pack", question: "Package Dan's Silverleaf", 
+    facts: { ...empty, opportunities: [{ id: "opp-dsl", title: "Dan's Silverleaf (Denton)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /danssilverleaf\.com\/contact/.test(a) && /booking@danssilverleaf\.com/.test(a) && /940.*252.*4369/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-dsl") },
+  { name: "desk-double-wide-venue-pack", question: "Package Double Wide", 
+    facts: { ...empty, opportunities: [{ id: "opp-dw", title: "Double Wide (Deep Ellum)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /doublewidedallas\.com\/contact/.test(a) && /dwbookings@gmail\.com/.test(a) && /469.*872.*0191/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-dw") },
+  { name: "desk-kessler-theater-venue-pack", question: "Package The Kessler", 
+    facts: { ...empty, opportunities: [{ id: "opp-kessler", title: "The Kessler Theater (Oak Cliff)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /thekessler\.org\/faq/.test(a) && /booking@kesslerpresents\.com/.test(a) && /214.*272.*8346/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-kessler") },
+  { name: "desk-granada-theater-venue-pack", question: "Package Granada Theater", 
+    facts: { ...empty, opportunities: [{ id: "opp-granada", title: "Granada Theater (Lower Greenville)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /granadatheater\.com\/faqs/.test(a) && /booking@granadatheater\.com/.test(a) && /214.*841.*4900/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-granada") },
+  { name: "desk-magnolia-motor-lounge-venue-pack", question: "Package Magnolia Motor Lounge", 
+    facts: { ...empty, opportunities: [{ id: "opp-mml", title: "Magnolia Motor Lounge (Fort Worth)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /magnoliamotorlounge\.com\/contact/.test(a) && /booking@mmlbar\.com/.test(a) && /817.*332.*3344/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-mml") },
+  { name: "desk-tulips-venue-pack", question: "Package Tulips", 
+    facts: { ...empty, opportunities: [{ id: "opp-tulips", title: "Tulips (Fort Worth)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /tulipsftw\.com\/book-an-event/.test(a) && /info@tulipsftw\.com/.test(a) && /817.*367.*9798/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-tulips") },
+  { name: "desk-sons-of-hermann-hall-venue-pack", question: "Package Sons of Hermann Hall", 
+    facts: { ...empty, opportunities: [{ id: "opp-sohh", title: "Sons of Hermann Hall (Deep Ellum)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /sonsofhermannhall\.com\/services-4/.test(a) && /sohhgm@gmail\.com/.test(a) && /972.*834.*6899/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-sohh") },
+  { name: "desk-adairs-saloon-venue-pack", question: "Package Adair's Saloon", 
+    facts: { ...empty, opportunities: [{ id: "opp-adairs", title: "Adair's Saloon (Deep Ellum)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /adairssaloon\.com\/contact/.test(a) && /joel@adairssaloon\.com/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-adairs") },
+  { name: "desk-club-dada-venue-pack", question: "Package Club Dada", 
+    facts: { ...empty, opportunities: [{ id: "opp-club-dada", title: "Club Dada (Deep Ellum)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }] },
+    check: (a, c) => /Positioning/.test(a) && /Live links placeholders/.test(a) && /Set formats/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && /dadadallas\.com\/contact/.test(a) && /booking@dadadallas\.com/.test(a) && /outreach on Booking/.test(a) && c.includes("opp-club-dada") },
+  { name: "desk-venue-pack-linked-venue-name", question: "Package Birdie's Social Club",
+    facts: { ...empty, opportunities: [{ id: "opp-ryman-bsc", title: "Ryman — fall window", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z"), venueName: "Birdie's Social Club" }] },
+    check: (a, c) => /hiring@birdiessocialclub\.com/.test(a) && /birdiessocialclub\.com\/music-submission/.test(a) && /Travis owns the send/.test(a) && /Jeff\+Travis yes before pitch/.test(a) && c.includes("opp-ryman-bsc") },
+  { name: "desk-venue-pack-theater-no-crosswire", question: "pack the granada theater",
+    facts: { ...empty, opportunities: [
+      { id: "opp-kessler", title: "The Kessler Theater (Oak Cliff)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") },
+      { id: "opp-granada", title: "Granada Theater (Lower Greenville)", stage: "target", targetDate: null, updatedAt: new Date("2026-09-24T00:00:00Z") }
+    ] },
+    check: (a, c) => /booking@granadatheater\.com/.test(a) && !/booking@kesslerpresents\.com/.test(a) && c.includes("opp-granada") && !c.includes("opp-kessler") },
+  { name: "desk-pipeline-stage-breakdown", question: "Show me the pipeline by stage",
+    facts: { ...empty, opportunities: [
+      { id: "opp-1", title: "Bluebird hold", stage: "hold", targetDate: new Date("2026-10-15T00:00:00Z"), updatedAt: new Date("2026-09-20T00:00:00Z") },
+      { id: "opp-2", title: "Exit offer", stage: "offer", targetDate: new Date("2026-11-01T00:00:00Z"), updatedAt: new Date("2026-09-22T00:00:00Z") },
+      { id: "opp-3", title: "Hideaway target", stage: "target", targetDate: null, updatedAt: new Date("2026-09-23T00:00:00Z") },
+      { id: "opp-4", title: "Skylark offer", stage: "offer", targetDate: new Date("2026-10-20T00:00:00Z"), updatedAt: new Date("2026-09-21T00:00:00Z") }
+    ] },
+    check: (a, c) => /Pipeline by stage:/.test(a) && /target: 1/.test(a) && /offer: 2/.test(a) && /hold: 1/.test(a) && c.includes("opp-1") && c.includes("opp-2") },
+  { name: "desk-pipeline-stale-opportunity-warning", question: "What is the pipeline status by stage?",
+    facts: { ...empty, opportunities: [
+      { id: "opp-stale", title: "Old hold", stage: "hold", targetDate: null, updatedAt: new Date("2026-08-01T00:00:00Z") }
+    ] },
+    check: (a, c) => /Pipeline by stage:/.test(a) && /hold: 1/.test(a) && /very stale/.test(a) && /Old hold/.test(a) && /has not changed in/.test(a) && c.includes("opp-stale") },
+  { name: "desk-pipeline-21-day-stale-check", question: "Pipeline stage breakdown",
+    facts: { ...empty, opportunities: [
+      { id: "opp-21", title: "Three week old", stage: "conversation", targetDate: null, updatedAt: new Date("2026-09-02T00:00:00Z") }
+    ] },
+    check: (a) => /Pipeline by stage:/.test(a) && /conversation: 1/.test(a) && /may need a status check/.test(a) && /Three week old/.test(a) },
 ];
 
 export function managerDeskTranscripts() {
@@ -72,6 +135,8 @@ export function evaluateManagerDesk() {
     { name: "desk-calendar-brief-agrees-with-chat", source: "golden" as const,
       passed: !JSON.stringify(deterministicManagerBrief(populated, now)).includes("Collect overdue"), detail: "An invoice due today never becomes overdue advice in the brief." },
     { name: "desk-provider-route-and-intent-boundary", source: "golden" as const,
-      passed: cases.every((item) => managerQuestionNeedsRecordedDeskAnswer(item.question)) && !managerQuestionAsksAboutSchedule("When is our invoice due?") && !managerQuestionAsksAboutSchedule("What time should we discuss the album?"), detail: "Desk questions bypass provider rewriting without classifying every when/what-time question as run-of-show." }
+      passed: cases.every((item) => managerQuestionNeedsRecordedDeskAnswer(item.question)) && !managerQuestionAsksAboutSchedule("When is our invoice due?") && !managerQuestionAsksAboutSchedule("What time should we discuss the album?"), detail: "Desk questions bypass provider rewriting without classifying every when/what-time question as run-of-show." },
+    { name: "desk-pipeline-stage-question-boundary", source: "golden" as const,
+      passed: managerQuestionAsksAboutPipelineStages("Show me the pipeline by stage") && managerQuestionAsksAboutPipelineStages("What is the funnel breakdown?") && managerQuestionAsksAboutPipelineStages("How many are in each stage?") && !managerQuestionAsksAboutPipelineStages("What's the booking status?") && !managerQuestionAsksAboutPipelineStages("Any new prospects?"), detail: "Pipeline stage questions are routed to stage breakdown without overly broad matching." }
   ];
 }

@@ -90,7 +90,9 @@ async function main() {
       console.log(vaultImport.message);
     }
 
-    console.log("Seed OK:", { artistId, operatorId, email: seedEmail, demoOps: demo, vaultImport });
+    const dfwVenuePacks = await seedDfwVenuePackRows(client, artistId);
+
+    console.log("Seed OK:", { artistId, operatorId, email: seedEmail, demoOps: demo, vaultImport, dfwVenuePacks });
   } finally {
     await client.end();
   }
@@ -168,6 +170,17 @@ async function seedGenericDemoOps(client, artistId) {
     [invoiceId, artistId, "Generic demo invoice for local payment practice. Not a live buyer.", now, now]
   );
   return { songs: ["Demo Opener", "Demo Closer"], setlist: "Demo set", invoice: "DEMO-001" };
+}
+
+async function seedDfwVenuePackRows(client, artistId) {
+  const sharedSeedPath = resolve("packages/shared/dist/dfw-venue-pack-seed.js");
+  if (!existsSync(sharedSeedPath)) {
+    throw new Error(
+      "DFW venue pack seed requires @storyboard/shared build. Run: pnpm --filter @storyboard/shared build"
+    );
+  }
+  const { seedDfwVenuePacks } = await import(sharedSeedPath);
+  return seedDfwVenuePacks(client, artistId);
 }
 
 main().catch((e) => {
