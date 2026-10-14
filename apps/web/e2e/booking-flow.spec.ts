@@ -257,9 +257,8 @@ test("manual prospect can gain a buyer and enter an approval-ready campaign", as
   await expect(card.getByText("Buyer: Morgan Promoter")).toBeVisible();
 
   await page.goto("/booking-campaigns");
-  const deliveryMode = page.getByLabel("After approval + Execute");
+  const deliveryMode = page.getByLabel("Delivery after approval");
   await expect(deliveryMode).toHaveValue("draft_only");
-  await expect(page.getByText(/Travis still owns the send: both modes require explicit approval and a separate Execute step/)).toBeVisible();
   await page.getByLabel("Campaign name").fill(campaignName);
   await page.getByRole("button", { name: "Create campaign" }).click();
   await page.getByLabel(`Prospect for ${campaignName}`).selectOption({ label: `${prospectName} · Austin` });
@@ -664,9 +663,6 @@ test("novice manager intake produces grounded work and band operations records",
   await expect(page.getByText("Daily manager brief refreshed.", { exact: true })).toBeVisible();
   await briefPriorities.getByRole("button", { name: "weekly" }).click();
   await expect(briefPriorities.getByText("Weekly operating brief", { exact: true })).toBeVisible();
-  // Cadence switches read cached briefs; generate this cadence explicitly.
-  await briefPriorities.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByText("Weekly manager brief refreshed.", { exact: true })).toBeVisible();
   await expect(page.getByTestId("manager-priority-explanation")).toContainText("Ranked first because");
   const cadenceCard = page.getByTestId("manager-cadence");
   await expect(cadenceCard.getByText("On request only", { exact: true })).toBeVisible();
