@@ -96,6 +96,7 @@ const envSchema = z
       .string()
       .optional()
       .transform((value) => (value === "real" ? "real" : "mock")),
+    SOCIAL_MEDIA_DIR: z.string().optional(),
     META_APP_ID: z.string().optional(),
     META_APP_SECRET: z.string().optional(),
     FACEBOOK_PAGE_ACCESS_TOKEN: z.string().optional(),

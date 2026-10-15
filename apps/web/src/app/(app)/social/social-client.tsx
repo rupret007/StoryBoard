@@ -1,8 +1,8 @@
 "use client";
 
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
-import { Check, Link2, Megaphone, ShieldCheck } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Check, Link2, Megaphone, ShieldCheck, Upload } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { publicApiBaseUrl, scopedApiFetch } from "@/lib/api";
 
 export type SocialTarget = {
@@ -89,8 +89,14 @@ export function SocialClient({
   const [note, setNote] = useState("");
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaKind, setMediaKind] = useState<"photo" | "video">("photo");
+  const [mediaAssetId, setMediaAssetId] = useState<string | null>(null);
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const [localFileName, setLocalFileName] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [eventId, setEventId] = useState("");
-  const [busy, setBusy] = useState<"drop" | "post" | null>(null);
+  const [busy, setBusy] = useState<"drop" | "post" | "upload" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [activePost, setActivePost] = useState<SocialPost | null>(initial?.posts[0] ?? null);
@@ -115,6 +121,61 @@ export function SocialClient({
     }
   }
 
+  async function uploadFile(file: File) {
+    if (!canManage) return;
+    setBusy("upload");
+    setError("");
+    setNotice("");
+    setMediaAssetId(null);
+    if (localPreview) URL.revokeObjectURL(localPreview);
+    const preview = URL.createObjectURL(file);
+    setLocalPreview(preview);
+    setLocalFileName(file.name);
+    setMediaKind(file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm)$/i.test(file.name) ? "video" : "photo");
+    setUploadProgress(0);
+    try {
+      const init = await apiFetch<{
+        id: string;
+        chunkSize: number;
+        byteSize: number;
+      }>("/social/media", {
+        method: "POST",
+        json: {
+          filename: file.name,
+          mimeType: file.type || (file.name.endsWith(".mov") ? "video/quicktime" : "application/octet-stream"),
+          byteSize: file.size
+        }
+      });
+      let offset = 0;
+      while (offset < file.size) {
+        const end = Math.min(offset + init.chunkSize, file.size);
+        const buf = await file.slice(offset, end).arrayBuffer();
+        const next = await apiFetch<{ receivedBytes: number }>("/social/media/" + init.id + "/chunks", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "Content-Range": `bytes ${offset}-${end - 1}/${file.size}`
+          },
+          body: buf
+        });
+        offset = next.receivedBytes;
+        setUploadProgress(Math.round((offset / file.size) * 100));
+      }
+      const done = await apiFetch<{ id: string; ready: boolean }>("/social/media/" + init.id + "/complete", {
+        method: "POST"
+      });
+      setMediaAssetId(done.id);
+      setUploadProgress(100);
+      setNotice("File is stored on the server. Add a note, then draft captions. Nothing has posted.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The file could not be stored.");
+      setMediaAssetId(null);
+      setUploadProgress(null);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function drop() {
     if (!canManage) return;
     setBusy("drop");
@@ -125,7 +186,8 @@ export function SocialClient({
         method: "POST",
         json: {
           note,
-          mediaUrl: mediaUrl.trim() || undefined,
+          mediaAssetId: mediaAssetId || undefined,
+          mediaUrl: mediaAssetId ? undefined : mediaUrl.trim() || undefined,
           mediaKind,
           eventId: eventId || undefined
         }
@@ -269,16 +331,80 @@ export function SocialClient({
               disabled={!canManage}
             />
           </label>
-          <label className="block text-sm">
-            <span className="text-[var(--text-secondary)]">Public https media URL</span>
+          <div>
+            <span className="text-sm text-[var(--text-secondary)]">Photo or video</span>
             <input
-              className="sb-input mt-1"
-              value={mediaUrl}
-              onChange={(event) => setMediaUrl(event.target.value)}
-              placeholder="https://…"
-              disabled={!canManage}
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/*,video/mp4,video/quicktime,video/webm"
+              className="sr-only"
+              data-testid="social-file-input"
+              disabled={!canManage || busy !== null}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void uploadFile(file);
+                event.target.value = "";
+              }}
             />
-          </label>
+            <button
+              type="button"
+              data-testid="social-file-dropzone"
+              className={`mt-1 flex min-h-32 w-full flex-col items-center justify-center rounded-xl border border-dashed px-4 py-6 text-center ${
+                dragging
+                  ? "border-[var(--accent)] bg-cyan-500/10"
+                  : "border-[var(--border)] bg-[var(--surface-0)]"
+              }`}
+              disabled={!canManage || busy !== null}
+              onClick={() => fileInputRef.current?.click()}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragging(false);
+                const file = event.dataTransfer.files?.[0];
+                if (file) void uploadFile(file);
+              }}
+            >
+              <Upload className="h-5 w-5 text-[var(--accent)]" />
+              <p className="mt-2 text-sm font-medium">Drop a photo or video, or tap to choose one</p>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Works from a phone camera roll. Videos up to 2 GB upload in chunks with progress.
+              </p>
+            </button>
+            {uploadProgress !== null ? (
+              <div className="mt-3" data-testid="social-upload-progress">
+                <div className="h-2 overflow-hidden rounded-full bg-[var(--surface-2)]">
+                  <div
+                    className="h-full bg-[var(--accent)]"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  {uploadProgress < 100 ? `Uploading ${uploadProgress}%` : `Stored ${localFileName}`}
+                </p>
+              </div>
+            ) : null}
+            {localPreview && mediaKind === "photo" ? (
+              <img src={localPreview} alt="" className="mt-3 max-h-48 rounded-lg border border-[var(--border)] object-contain" />
+            ) : null}
+            {localPreview && mediaKind === "video" ? (
+              <video src={localPreview} controls className="mt-3 max-h-48 w-full rounded-lg border border-[var(--border)]" />
+            ) : null}
+            <label className="mt-4 block text-sm">
+              <span className="text-[var(--text-secondary)]">Optional public https URL</span>
+              <input
+                className="sb-input mt-1"
+                value={mediaUrl}
+                onChange={(event) => setMediaUrl(event.target.value)}
+                placeholder="Only if the file already lives on the web"
+                disabled={!canManage || Boolean(mediaAssetId)}
+              />
+            </label>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-sm">
               <span className="text-[var(--text-secondary)]">Media kind</span>
@@ -313,7 +439,7 @@ export function SocialClient({
             type="button"
             className="sb-btn-primary min-h-11 px-4 text-sm font-medium"
             onClick={() => void drop()}
-            disabled={!canManage || !note.trim() || busy !== null}
+            disabled={!canManage || !note.trim() || busy !== null || (uploadProgress !== null && uploadProgress < 100)}
           >
             {busy === "drop" ? "Drafting…" : "Draft captions"}
           </button>
@@ -423,7 +549,7 @@ export function SocialClient({
       ) : (
         <EmptyState
           title="No drop in review"
-          description="Write a note, optionally add a public media URL and a show, then draft captions."
+          description="Write a note, drop a photo or video (or paste a public https URL), then draft captions."
         />
       )}
 

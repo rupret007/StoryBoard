@@ -11,7 +11,7 @@ import { attachStripeWebhookRawBody } from "./integrations/stripe-webhook-raw-bo
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter()
+    new FastifyAdapter({ bodyLimit: 10 * 1024 * 1024 })
   );
 
   const config = app.get(ConfigService);
@@ -31,7 +31,15 @@ async function bootstrap() {
     secret: config.getOrThrow<string>("SESSION_SECRET")
   });
 
-  attachStripeWebhookRawBody(app.getHttpAdapter().getInstance());
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer", bodyLimit: 10 * 1024 * 1024 },
+    (_request, body, done) => {
+      done(null, body);
+    }
+  );
+  attachStripeWebhookRawBody(fastify);
 
   const port = config.getOrThrow<number>("API_PORT");
   await app.listen(port, "0.0.0.0");

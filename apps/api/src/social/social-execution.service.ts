@@ -13,6 +13,7 @@ import {
   type SocialStoredSecrets
 } from "./social-credentials";
 import { parseSocialPostPayload, sendSocialTarget, type SocialPublisherPort } from "./social-publisher";
+import { socialMediaAbsolutePath, socialMediaRoot } from "./social-media.store";
 
 @Injectable()
 export class SocialExecutionService implements SocialPublisherPort {
@@ -169,6 +170,14 @@ export class SocialExecutionService implements SocialPublisherPort {
         payload,
         target,
         mediaUrl: post.mediaAsset?.publicUrl ?? payload.mediaUrl,
+        mediaPath: post.mediaAsset?.storageKey
+          ? socialMediaAbsolutePath(
+              socialMediaRoot(this.config.get<string>("SOCIAL_MEDIA_DIR")),
+              post.mediaAsset.storageKey
+            )
+          : undefined,
+        mediaByteSize: post.mediaAsset?.byteSize ?? undefined,
+        mediaMimeType: post.mediaAsset?.mimeType ?? undefined,
         mediaKind: post.mediaAsset?.kind ?? payload.mediaKind,
         adapter: adapters[target.platform],
         accessToken: secrets?.accessToken ?? secrets?.pageAccessToken,

@@ -46,6 +46,9 @@ export type SocialTargetSendInput = {
   payload: SocialPostBatchPayload;
   target: SocialPostBatchPayload["targets"][number];
   mediaUrl?: string | undefined;
+  mediaPath?: string | undefined;
+  mediaByteSize?: number | undefined;
+  mediaMimeType?: string | undefined;
   mediaKind?: "photo" | "video" | undefined;
   adapter: SocialPlatformAdapter;
   accessToken?: string | undefined;
@@ -150,6 +153,9 @@ async function sendSocialTargetAsync(input: SocialTargetSendInput): Promise<Soci
     title: input.target.title,
     tags: input.target.tags,
     mediaUrl: input.mediaUrl,
+    mediaPath: input.mediaPath,
+    mediaByteSize: input.mediaByteSize,
+    mediaMimeType: input.mediaMimeType,
     mediaKind: input.mediaKind,
     includeFacebookEvent: input.target.includeFacebookEvent,
     facebookEventName: input.target.facebookEventName,

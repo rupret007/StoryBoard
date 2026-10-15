@@ -111,7 +111,18 @@ export class SocialService {
     if (socialAdapterMode(this.execution.env()) === "mock") {
       await this.ensureMockAccounts(artistId, artist.name, voiceKey);
     }
-    const mediaKind = input.mediaKind ?? (input.mediaUrl?.match(/\.(mp4|mov|webm)$/i) ? "video" : "photo");
+    const uploaded = input.mediaAssetId
+      ? await this.prisma.client.socialMediaAsset.findFirst({
+          where: { id: input.mediaAssetId, artistId }
+        })
+      : null;
+    if (input.mediaAssetId && (!uploaded || uploaded.uploadStatus !== "ready")) {
+      throw new BadRequestException("Wait for the file upload to finish before drafting captions.");
+    }
+    const mediaKind =
+      input.mediaKind ??
+      uploaded?.kind ??
+      (input.mediaUrl?.match(/\.(mp4|mov|webm)$/i) ? "video" : "photo");
     const show = await this.resolveShow(artistId, input);
     const drafts = draftPlatformCaptions({
       voice: voiceKey,
@@ -122,17 +133,21 @@ export class SocialService {
     const accounts = await this.prisma.client.socialAccount.findMany({ where: { artistId } });
 
     const created = await this.prisma.client.$transaction(async (tx) => {
-      const mediaAsset = input.mediaUrl
-        ? await tx.socialMediaAsset.create({
-            data: {
-              artistId,
-              filename: input.mediaUrl.split("/").pop() ?? "media",
-              mimeType: mediaKind === "video" ? "video/mp4" : "image/jpeg",
-              publicUrl: input.mediaUrl,
-              kind: mediaKind
-            }
-          })
-        : null;
+      const mediaAsset = uploaded
+        ? uploaded
+        : input.mediaUrl
+          ? await tx.socialMediaAsset.create({
+              data: {
+                artistId,
+                filename: input.mediaUrl.split("/").pop() ?? "media",
+                mimeType: mediaKind === "video" ? "video/mp4" : "image/jpeg",
+                publicUrl: input.mediaUrl,
+                kind: mediaKind,
+                uploadStatus: "ready",
+                receivedBytes: 0
+              }
+            })
+          : null;
       const post = await tx.socialPost.create({
         data: {
           artistId,

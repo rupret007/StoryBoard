@@ -19,6 +19,7 @@ export function buildE2eEnvironment(inherited = process.env) {
     TICKETMASTER_API_KEY: "",
     YOUTUBE_API_KEY: "",
     SOCIAL_ADAPTER: "mock",
+    SOCIAL_MEDIA_DIR: "",
     META_APP_ID: "",
     META_APP_SECRET: "",
     FACEBOOK_PAGE_ACCESS_TOKEN: "",

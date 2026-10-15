@@ -1,6 +1,8 @@
-import type { SocialPlatform } from "@storyboard/shared";
+import { SOCIAL_MEDIA_CHUNK_SIZE, tiktokFileUploadPlan, type SocialPlatform } from "@storyboard/shared";
+import { buildMultipartBody, readFileSlice } from "./social-media-bytes";
 import {
   META_GRAPH_BASE,
+  META_GRAPH_VIDEO_BASE,
   TIKTOK_INBOX_INIT_URL,
   TIKTOK_PHOTO_INIT_URL,
   YOUTUBE_API_BASE,
@@ -15,6 +17,9 @@ export type SocialPublishInput = {
   title?: string | undefined;
   tags?: string[] | undefined;
   mediaUrl?: string | undefined;
+  mediaPath?: string | undefined;
+  mediaByteSize?: number | undefined;
+  mediaMimeType?: string | undefined;
   mediaKind?: "photo" | "video" | undefined;
   includeFacebookEvent?: boolean | undefined;
   facebookEventName?: string | undefined;
@@ -157,6 +162,13 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
         }
       }
 
+      if (input.mediaKind === "video" && input.mediaPath && input.mediaByteSize) {
+        return this.publishLocalVideo(input, token, pageId, start);
+      }
+      if (input.mediaKind !== "video" && input.mediaPath && input.mediaByteSize) {
+        return this.publishLocalPhoto(input, token, pageId, start);
+      }
+
       const endpoint =
         input.mediaKind === "video"
           ? `${META_GRAPH_BASE}/${pageId}/videos`
@@ -177,27 +189,7 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
       if (!posted.ok) {
         return this.fail(start, posted.status, posted.data, "Facebook publish failed");
       }
-      const id = typeof asRecord(posted.data).id === "string" ? String(asRecord(posted.data).id).trim() : "";
-      if (!id) {
-        return {
-          success: false,
-          isDraftOnly: false,
-          responseCode: posted.status,
-          errorMessage: "Facebook Graph API returned success without a post id. Nothing was marked posted.",
-          durationMs: Date.now() - start,
-          requestSummary: { platform: "facebook", endpoint }
-        };
-      }
-      const shortId = id.includes("_") ? id.split("_")[1] : id;
-      return {
-        success: true,
-        isDraftOnly: false,
-        externalPostId: id,
-        externalPostUrl: `https://www.facebook.com/permalink.php?story_fbid=${shortId}&id=${pageId}`,
-        responseCode: posted.status,
-        durationMs: Date.now() - start,
-        requestSummary: { platform: "facebook", endpoint }
-      };
+      return this.requireFacebookId(posted.status, posted.data, start, endpoint, pageId);
     } catch (error) {
       return {
         success: false,
@@ -219,6 +211,135 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
     if (!response.ok) return false;
     const data = asRecord(await response.json());
     return typeof data.id === "string";
+  }
+
+  private async publishLocalVideo(
+    input: SocialPublishInput,
+    token: string,
+    pageId: string,
+    start: number
+  ): Promise<SocialPublishResult> {
+    const started = await this.postForm(`${META_GRAPH_VIDEO_BASE}/${pageId}/videos`, {
+      upload_phase: "start",
+      file_size: String(input.mediaByteSize),
+      access_token: token
+    });
+    if (!started.ok) return this.fail(start, started.status, started.data, "Facebook resumable start failed");
+    const session = asRecord(started.data);
+    const uploadSessionId = typeof session.upload_session_id === "string" ? session.upload_session_id : "";
+    if (!uploadSessionId) {
+      return {
+        success: false,
+        isDraftOnly: false,
+        errorMessage: "Facebook resumable start returned no upload_session_id. Nothing was marked posted.",
+        durationMs: Date.now() - start,
+        requestSummary: { platform: "facebook", step: "resumable_start" }
+      };
+    }
+    let offset = typeof session.start_offset === "string" ? Number(session.start_offset) : 0;
+    let end = typeof session.end_offset === "string" ? Number(session.end_offset) : input.mediaByteSize ?? 0;
+    while (offset < end) {
+      const chunk = await readFileSlice(input.mediaPath!, offset, end - offset);
+      const part = buildMultipartBody(
+        {
+          upload_phase: "transfer",
+          upload_session_id: uploadSessionId,
+          start_offset: String(offset),
+          access_token: token
+        },
+        {
+          fieldName: "video_file_chunk",
+          filename: "clip.mp4",
+          mimeType: input.mediaMimeType ?? "video/mp4",
+          bytes: chunk
+        }
+      );
+      const transferred = await this.http(`${META_GRAPH_VIDEO_BASE}/${pageId}/videos`, {
+        method: "POST",
+        headers: { "Content-Type": part.contentType },
+        body: part.body
+      });
+      const data = asRecord(await transferred.json());
+      if (!transferred.ok) return this.fail(start, transferred.status, data, "Facebook resumable transfer failed");
+      offset = typeof data.start_offset === "string" ? Number(data.start_offset) : end;
+      end = typeof data.end_offset === "string" ? Number(data.end_offset) : end;
+    }
+    const finished = await this.postForm(`${META_GRAPH_VIDEO_BASE}/${pageId}/videos`, {
+      upload_phase: "finish",
+      upload_session_id: uploadSessionId,
+      description: input.caption,
+      access_token: token
+    });
+    if (!finished.ok) return this.fail(start, finished.status, finished.data, "Facebook resumable finish failed");
+    return this.requireFacebookId(
+      finished.status,
+      finished.data,
+      start,
+      `${META_GRAPH_VIDEO_BASE}/${pageId}/videos`,
+      pageId
+    );
+  }
+
+  private async publishLocalPhoto(
+    input: SocialPublishInput,
+    token: string,
+    pageId: string,
+    start: number
+  ): Promise<SocialPublishResult> {
+    const bytes = await readFileSlice(input.mediaPath!, 0, input.mediaByteSize ?? 0);
+    const part = buildMultipartBody(
+      { caption: input.caption, access_token: token },
+      {
+        fieldName: "source",
+        filename: "photo.jpg",
+        mimeType: input.mediaMimeType ?? "image/jpeg",
+        bytes
+      }
+    );
+    const posted = await this.http(`${META_GRAPH_BASE}/${pageId}/photos`, {
+      method: "POST",
+      headers: { "Content-Type": part.contentType },
+      body: part.body
+    });
+    const data = await posted.json();
+    if (!posted.ok) return this.fail(start, posted.status, data, "Facebook photo upload failed");
+    return this.requireFacebookId(
+      posted.status,
+      data,
+      start,
+      `${META_GRAPH_BASE}/${pageId}/photos`,
+      pageId
+    );
+  }
+
+  private requireFacebookId(
+    status: number,
+    data: unknown,
+    start: number,
+    endpoint: string,
+    pageId: string
+  ): SocialPublishResult {
+    const id = typeof asRecord(data).id === "string" ? String(asRecord(data).id).trim() : "";
+    if (!id) {
+      return {
+        success: false,
+        isDraftOnly: false,
+        responseCode: status,
+        errorMessage: "Facebook Graph API returned success without a post id. Nothing was marked posted.",
+        durationMs: Date.now() - start,
+        requestSummary: { platform: "facebook", endpoint }
+      };
+    }
+    const shortId = id.includes("_") ? id.split("_")[1] : id;
+    return {
+      success: true,
+      isDraftOnly: false,
+      externalPostId: id,
+      externalPostUrl: `https://www.facebook.com/permalink.php?story_fbid=${shortId}&id=${pageId}`,
+      responseCode: status,
+      durationMs: Date.now() - start,
+      requestSummary: { platform: "facebook", endpoint }
+    };
   }
 
   private fail(
@@ -245,6 +366,15 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
     });
     return { ok: response.ok, status: response.status, data: await response.json() };
   }
+
+  private async postForm(url: string, fields: Record<string, string>) {
+    const response = await this.http(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(fields).toString()
+    });
+    return { ok: response.ok, status: response.status, data: await response.json() };
+  }
 }
 
 export class InstagramRealAdapter implements SocialPlatformAdapter {
@@ -266,11 +396,13 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
         requestSummary: { platform: "instagram" }
       };
     }
-    if (!input.mediaUrl?.startsWith("https://")) {
+    const canHostUrl = Boolean(input.mediaUrl?.startsWith("https://"));
+    const canResumable = Boolean(input.mediaPath && input.mediaByteSize);
+    if (!canHostUrl && !canResumable) {
       return {
         success: false,
         isDraftOnly: true,
-        errorMessage: "Instagram feed posts require a public https image or video URL. Nothing was published.",
+        errorMessage: "Instagram needs a local file (resumable) or a public https URL. Nothing was published.",
         durationMs: Date.now() - start,
         requestSummary: { platform: "instagram" }
       };
@@ -298,14 +430,26 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
       }
 
       const isVideo = input.mediaKind === "video";
+      const useResumable = Boolean(isVideo && input.mediaPath && input.mediaByteSize);
+      if (!isVideo && !canHostUrl) {
+        return {
+          success: false,
+          isDraftOnly: false,
+          errorMessage:
+            "Instagram photos need a public https hosted URL (set API_URL to https). Local video uses resumable upload instead. Nothing was published.",
+          durationMs: Date.now() - start,
+          requestSummary: { platform: "instagram", step: "photo_hosted_url" }
+        };
+      }
       const containerBody: Record<string, unknown> = {
         caption: input.caption,
         access_token: token
       };
       if (isVideo) {
         containerBody.media_type = "REELS";
-        containerBody.video_url = input.mediaUrl;
         containerBody.share_to_feed = true;
+        if (useResumable) containerBody.upload_type = "resumable";
+        else containerBody.video_url = input.mediaUrl;
       } else {
         containerBody.image_url = input.mediaUrl;
       }
@@ -335,6 +479,43 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
           durationMs: Date.now() - start,
           requestSummary: { platform: "instagram", step: "container" }
         };
+      }
+      if (useResumable) {
+        const uri = typeof containerData.uri === "string" ? containerData.uri : "";
+        if (!uri) {
+          return {
+            success: false,
+            isDraftOnly: false,
+            errorMessage: "Instagram resumable container did not return an upload uri. Nothing was marked posted.",
+            durationMs: Date.now() - start,
+            requestSummary: { platform: "instagram", step: "resumable_uri" }
+          };
+        }
+        const total = input.mediaByteSize ?? 0;
+        let offset = 0;
+        while (offset < total) {
+          const length = Math.min(SOCIAL_MEDIA_CHUNK_SIZE, total - offset);
+          const uploaded = await this.http(uri, {
+            method: "POST",
+            headers: {
+              Authorization: `OAuth ${token}`,
+              offset: String(offset),
+              file_size: String(total)
+            },
+            body: await readFileSlice(input.mediaPath!, offset, length)
+          });
+          if (!uploaded.ok) {
+            return {
+              success: false,
+              isDraftOnly: false,
+              responseCode: uploaded.status,
+              errorMessage: "Instagram resumable binary upload failed. Nothing was marked posted.",
+              durationMs: Date.now() - start,
+              requestSummary: { platform: "instagram", step: "resumable_put", offset }
+            };
+          }
+          offset += length;
+        }
       }
       if (isVideo) {
         const ready = await this.waitForContainer(creationId, token);
@@ -434,11 +615,11 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
 
   async publish(input: SocialPublishInput): Promise<SocialPublishResult> {
     const start = Date.now();
-    if (!input.mediaUrl?.startsWith("https://")) {
+    if (!input.mediaPath && !input.mediaUrl?.startsWith("https://")) {
       return {
         success: false,
         isDraftOnly: true,
-        errorMessage: "YouTube upload needs an https video URL. Nothing was uploaded.",
+        errorMessage: "YouTube upload needs a local video file or an https video URL. Nothing was uploaded.",
         durationMs: Date.now() - start,
         requestSummary: { platform: "youtube" }
       };
@@ -452,7 +633,8 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
           headers: {
             Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
-            "X-Upload-Content-Type": "video/*"
+            "X-Upload-Content-Type": input.mediaMimeType ?? "video/*",
+            ...(input.mediaByteSize ? { "X-Upload-Content-Length": String(input.mediaByteSize) } : {})
           },
           body: JSON.stringify({
             snippet: {
@@ -478,16 +660,7 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
           requestSummary: { platform: "youtube", step: "resumable_init" }
         };
       }
-      const media = await this.http(input.mediaUrl);
-      const bytes = await media.text();
-      const uploaded = await this.http(location, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "video/*"
-        },
-        body: bytes
-      });
+      const uploaded = await this.putYouTubeBytes(location, accessToken, input);
       const data = asRecord(await uploaded.json());
       const id = typeof data.id === "string" ? data.id.trim() : "";
       if (!uploaded.ok || !id) {
@@ -534,6 +707,52 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
     }
   }
 
+  private async putYouTubeBytes(
+    location: string,
+    accessToken: string,
+    input: SocialPublishInput
+  ) {
+    if (input.mediaPath && input.mediaByteSize) {
+      let offset = 0;
+      let last: Awaited<ReturnType<SocialHttpFetch>> | null = null;
+      while (offset < input.mediaByteSize) {
+        const length = Math.min(SOCIAL_MEDIA_CHUNK_SIZE, input.mediaByteSize - offset);
+        const chunk = await readFileSlice(input.mediaPath, offset, length);
+        last = await this.http(location, {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": input.mediaMimeType ?? "video/*",
+            "Content-Range": `bytes ${offset}-${offset + length - 1}/${input.mediaByteSize}`
+          },
+          body: chunk
+        });
+        if (!last.ok && last.status !== 308) return last;
+        offset += length;
+      }
+      if (!last) {
+        return {
+          ok: false,
+          status: 400,
+          json: async () => ({}),
+          text: async () => "",
+          headers: { get: () => null }
+        };
+      }
+      return last;
+    }
+    const media = await this.http(input.mediaUrl ?? "");
+    const bytes = new Uint8Array(Buffer.from(await media.text()));
+    return this.http(location, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": input.mediaMimeType ?? "video/*"
+      },
+      body: bytes
+    });
+  }
+
   private async accessToken(input: SocialPublishInput): Promise<string> {
     if (input.account.accessToken) return input.account.accessToken;
     if (!input.account.refreshToken || !input.account.clientId || !input.account.clientSecret) {
@@ -575,32 +794,49 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
         requestSummary: { platform: "tiktok" }
       };
     }
-    if (!input.mediaUrl?.startsWith("https://")) {
+    if (!input.mediaPath && !input.mediaUrl?.startsWith("https://")) {
       return {
         success: false,
         isDraftOnly: true,
-        errorMessage: "TikTok inbox draft needs an https media URL from a verified domain.",
+        errorMessage: "TikTok inbox draft needs a local file (FILE_UPLOAD) or an https media URL.",
         durationMs: Date.now() - start,
         requestSummary: { platform: "tiktok" }
       };
     }
     try {
       const isPhoto = input.mediaKind === "photo";
+      const fileUpload = Boolean(input.mediaPath && input.mediaByteSize);
       const url = isPhoto ? TIKTOK_PHOTO_INIT_URL : TIKTOK_INBOX_INIT_URL;
+      const plan = fileUpload ? tiktokFileUploadPlan(input.mediaByteSize ?? 0) : null;
       const body = isPhoto
         ? {
             post_info: { title: input.title ?? input.caption.slice(0, 90), description: input.caption },
-            source_info: {
-              source: "PULL_FROM_URL",
-              photo_cover_index: 0,
-              photo_images: [input.mediaUrl]
-            },
+            source_info: fileUpload
+              ? {
+                  source: "FILE_UPLOAD",
+                  photo_cover_index: 0,
+                  photo_images: []
+                }
+              : {
+                  source: "PULL_FROM_URL",
+                  photo_cover_index: 0,
+                  photo_images: [input.mediaUrl]
+                },
             post_mode: "MEDIA_UPLOAD",
             media_type: "PHOTO"
           }
-        : {
-            source_info: { source: "PULL_FROM_URL", video_url: input.mediaUrl }
-          };
+        : fileUpload && plan
+          ? {
+              source_info: {
+                source: "FILE_UPLOAD",
+                video_size: plan.videoSize,
+                chunk_size: plan.chunkSize,
+                total_chunk_count: plan.totalChunkCount
+              }
+            }
+          : {
+              source_info: { source: "PULL_FROM_URL", video_url: input.mediaUrl }
+            };
       const response = await this.http(url, {
         method: "POST",
         headers: {
@@ -613,6 +849,7 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
       const data = asRecord(payload.data);
       const error = asRecord(payload.error);
       const publishId = typeof data.publish_id === "string" ? data.publish_id.trim() : "";
+      const uploadUrl = typeof data.upload_url === "string" ? data.upload_url : "";
       if (!response.ok || error.code && error.code !== "ok" || !publishId) {
         return {
           success: false,
@@ -626,6 +863,39 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
           requestSummary: { platform: "tiktok", mode: "inbox_draft" }
         };
       }
+      if (fileUpload && plan) {
+        if (!uploadUrl) {
+          return {
+            success: false,
+            isDraftOnly: true,
+            errorMessage: "TikTok FILE_UPLOAD init returned no upload_url. Nothing was marked posted.",
+            durationMs: Date.now() - start,
+            requestSummary: { platform: "tiktok", mode: "file_upload" }
+          };
+        }
+        for (const chunk of plan.chunks) {
+          const bytes = await readFileSlice(input.mediaPath!, chunk.start, chunk.length);
+          const put = await this.http(uploadUrl, {
+            method: "PUT",
+            headers: {
+              "Content-Type": input.mediaMimeType ?? "video/mp4",
+              "Content-Length": String(chunk.length),
+              "Content-Range": `bytes ${chunk.start}-${chunk.endExclusive - 1}/${plan.videoSize}`
+            },
+            body: bytes
+          });
+          if (!put.ok) {
+            return {
+              success: false,
+              isDraftOnly: true,
+              responseCode: put.status,
+              errorMessage: "TikTok FILE_UPLOAD chunk failed. Nothing was marked posted.",
+              durationMs: Date.now() - start,
+              requestSummary: { platform: "tiktok", mode: "file_upload", offset: chunk.start }
+            };
+          }
+        }
+      }
       return {
         success: true,
         isDraftOnly: true,
@@ -633,7 +903,10 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
         externalPostUrl: "https://www.tiktok.com/",
         responseCode: response.status,
         durationMs: Date.now() - start,
-        requestSummary: { platform: "tiktok", mode: "inbox_draft" }
+        requestSummary: {
+          platform: "tiktok",
+          mode: fileUpload ? "file_upload_inbox_draft" : "inbox_draft"
+        }
       };
     } catch (error) {
       return {

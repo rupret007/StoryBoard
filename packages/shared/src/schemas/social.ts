@@ -17,6 +17,7 @@ export const socialShowHintSchema = z
 export const socialDropInputSchema = z
   .object({
     note: z.string().trim().min(1).max(4000),
+    mediaAssetId: z.string().trim().min(1).optional(),
     mediaUrl: z
       .string()
       .trim()
@@ -45,6 +46,14 @@ export const socialApproveAndPostSchema = z
   .object({
     postId: z.string().trim().min(1),
     targets: z.array(socialTargetEditSchema).min(1).optional()
+  })
+  .strict();
+
+export const socialMediaInitSchema = z
+  .object({
+    filename: z.string().trim().min(1).max(240),
+    mimeType: z.string().trim().min(1).max(120),
+    byteSize: z.number().int().positive().max(2_000_000_000)
   })
   .strict();
 
@@ -84,4 +93,5 @@ export type SocialDropInput = z.infer<typeof socialDropInputSchema>;
 export type SocialTargetEdit = z.infer<typeof socialTargetEditSchema>;
 export type SocialApproveAndPostInput = z.infer<typeof socialApproveAndPostSchema>;
 export type SocialPostBatchPayload = z.infer<typeof socialPostBatchPayloadSchema>;
+export type SocialMediaInitInput = z.infer<typeof socialMediaInitSchema>;
 export type SocialConnectProvider = z.infer<typeof socialConnectProviderSchema>;

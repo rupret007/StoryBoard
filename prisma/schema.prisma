@@ -206,6 +206,13 @@ enum SocialMediaKind {
   video
 }
 
+enum SocialMediaUploadStatus {
+  pending
+  uploading
+  ready
+  failed
+}
+
 enum SocialPostStatus {
   draft
   pending_approval
@@ -1940,18 +1947,23 @@ model SocialAccount {
 }
 
 model SocialMediaAsset {
-  id        String          @id @default(cuid())
-  artistId  String
-  filename  String
-  mimeType  String
-  byteSize  Int             @default(0)
-  publicUrl String
-  kind      SocialMediaKind
-  createdAt DateTime        @default(now())
-  artist    Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  posts     SocialPost[]
+  id            String                   @id @default(cuid())
+  artistId      String
+  filename      String
+  mimeType      String
+  byteSize      Int                      @default(0)
+  receivedBytes Int                      @default(0)
+  publicUrl     String
+  storageKey    String?
+  uploadStatus  SocialMediaUploadStatus  @default(ready)
+  kind          SocialMediaKind
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  artist        Artist                   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  posts         SocialPost[]
 
   @@index([artistId, createdAt])
+  @@index([artistId, uploadStatus])
 }
 
 model SocialPost {

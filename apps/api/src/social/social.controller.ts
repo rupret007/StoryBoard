@@ -6,6 +6,7 @@ import {
   Headers,
   Param,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -27,6 +28,7 @@ import {
   TIKTOK_OAUTH_SCOPES,
   YOUTUBE_UPLOAD_SCOPE
 } from "./social.constants";
+import { SocialMediaService } from "./social-media.service";
 import { SocialService } from "./social.service";
 
 @Controller("social")
@@ -34,6 +36,7 @@ import { SocialService } from "./social.service";
 export class SocialController {
   constructor(
     private readonly social: SocialService,
+    private readonly media: SocialMediaService,
     private readonly membership: MembershipService,
     private readonly roles: RolePolicyService,
     private readonly config: ConfigService
@@ -72,6 +75,70 @@ export class SocialController {
     const artistId = await this.artistId(operator, req, artistHeader);
     await this.roles.assertCanRead(operator.id, artistId);
     return this.social.getPost(artistId, id);
+  }
+
+  @Post("media")
+  async initMedia(
+    @Body() body: unknown,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator, req, artistHeader);
+    await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    return this.media.init(artistId, body);
+  }
+
+  @Put("media/:id/chunks")
+  async uploadChunk(
+    @Param("id") id: string,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string,
+    @Headers("content-range") contentRange?: string
+  ) {
+    const artistId = await this.artistId(operator, req, artistHeader);
+    await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    const raw = req.body;
+    const bytes = Buffer.isBuffer(raw)
+      ? raw
+      : raw instanceof Uint8Array
+        ? raw
+        : null;
+    if (!bytes) {
+      throw new BadRequestException("Send the file chunk as application/octet-stream.");
+    }
+    return this.media.appendChunk(artistId, id, contentRange, bytes);
+  }
+
+  @Post("media/:id/complete")
+  async completeMedia(
+    @Param("id") id: string,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator, req, artistHeader);
+    await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    return this.media.complete(artistId, id);
+  }
+
+  @Get("media/:id/file")
+  async mediaFile(
+    @Param("id") id: string,
+    @CurrentOperator() operator: RequestOperator,
+    @Req() req: FastifyRequest,
+    @Res({ passthrough: false }) reply: FastifyReply,
+    @Headers("x-artist-id") artistHeader?: string
+  ) {
+    const artistId = await this.artistId(operator, req, artistHeader);
+    await this.roles.assertCanRead(operator.id, artistId);
+    const file = await this.media.openForArtist(artistId, id);
+    return reply
+      .header("Content-Type", file.mimeType)
+      .header("Content-Length", String(file.byteSize))
+      .header("Content-Disposition", `inline; filename="${file.filename.replace(/"/g, "")}"`)
+      .send(file.stream);
   }
 
   @Post("drops")

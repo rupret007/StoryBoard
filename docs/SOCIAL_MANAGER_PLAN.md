@@ -93,15 +93,25 @@ guides that day.
 
 ## Phase 1 — approve and post (built)
 
-Flow: drop media URL + note → per-platform drafts in band voice → one
-**Approve & post** → background adapter calls → live status only after an ID.
+Flow: drop a photo/video file (drag-and-drop or picker, including phone)
+or an optional public URL + note → chunked store on the server with
+progress → per-platform drafts in band voice → one **Approve & post** →
+adapter calls from the local file → live status only after an ID.
 
-| Platform | What Phase 1 sends |
+| Platform | How Phase 1 sends the file |
 | --- | --- |
-| Facebook | Photo or video, plus an optional Page Event for a linked show |
-| Instagram | Feed photo or Reel (video) |
-| YouTube | Resumable `videos.insert`, private until audit |
-| TikTok | Inbox draft (`publish_id` only) |
+| Facebook | Local photo as `source` upload; local video as Graph **resumable** `upload_phase` start/transfer/finish. Public `https` URL still works. |
+| Instagram | Video: resumable (`upload_type=resumable` + rupload). Photo: hosted token URL (`API_URL` must be public https) or an existing `https` URL. |
+| YouTube | Resumable `videos.insert` from the stored file (chunked `Content-Range`) |
+| TikTok | Inbox draft via **FILE_UPLOAD** (`video_size` / `chunk_size` / `total_chunk_count`) then PUT chunks. `publish_id` only. |
+
+Local files live under `SOCIAL_MEDIA_DIR` (default `data/social-media`). Photos
+max 20 MB, videos max 2 GB, 8 MB chunks. Official transfer docs:
+
+- https://developers.facebook.com/docs/graph-api/video-uploads
+- https://developers.facebook.com/docs/instagram-platform/content-publishing
+- https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol
+- https://developers.tiktok.com/doc/content-posting-api-media-transfer-guide
 
 Connect buttons (owner-only) start OAuth for Meta, YouTube upload, and TikTok.
 Env-var tokens remain a fallback, matching StoryLiner. `SOCIAL_ADAPTER=mock`

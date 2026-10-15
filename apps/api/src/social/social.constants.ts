@@ -1,6 +1,7 @@
 /** Current Graph version used for Page photos, videos, Events, and IG publish. */
 export const META_GRAPH_VERSION = "v23.0";
 export const META_GRAPH_BASE = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
+export const META_GRAPH_VIDEO_BASE = `https://graph-video.facebook.com/${META_GRAPH_VERSION}`;
 
 export const YOUTUBE_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos";
 export const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
@@ -41,7 +42,7 @@ export type SocialHttpFetch = (
   init?: {
     method?: string;
     headers?: Record<string, string>;
-    body?: string;
+    body?: string | Uint8Array;
   }
 ) => Promise<{
   ok: boolean;
