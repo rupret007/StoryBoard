@@ -10,7 +10,8 @@ follow-through. **Public repo:**
 **Bob is the front door. StoryBoard is the band-business engine.**
 [AI-Music-Vault](https://github.com/rupret007/AI-Music-Vault) is the sole song
 catalog. StoryBoard imports that catalog; it is not a second place to maintain
-songs. Promo stays in StoryLiner. WebJam stays the making room. See
+songs. Promo drafting still lives in StoryLiner; StoryBoard Social can
+approve-and-post after an explicit approval record. WebJam stays the making room. See
 [`APPS.md`](APPS.md) and [`docs/catalog-import.md`](docs/catalog-import.md).
 
 Try a production-built local demo with
@@ -33,8 +34,13 @@ development, use [Run locally](#run-locally-from-zero) and the
 - **Band operations:** events/availability, show readiness and phone day-of,
   Vault-imported songs/setlists, projects, offers, invoices, expenses, and
   settlements.
+- **Social (Phase 1):** drop media plus a note, draft per-platform captions in
+  the Stalemate or Rad Dad voice, approve once, then post. Facebook photo/video
+  plus an optional show Event, Instagram feed or Reel, YouTube private upload,
+  TikTok inbox draft. Nothing posts without an approval record or a platform ID.
+  See [`docs/SOCIAL_MANAGER_PLAN.md`](docs/SOCIAL_MANAGER_PLAN.md).
 - **Approvals:** human decide → explicit execute → append-only reconciliation.
-  Gmail, Calendar, and Drive stay behind adapters (mock when unset).
+  Gmail, Calendar, Drive, and social sends stay behind adapters (mock when unset).
 - **Team and auth:** Google operator sign-in (optional local Dev login),
   owner/member/viewer roles, invites, and first-artist onboarding.
 - **Two-band pilot (engineering candidate, not activated):** owners can create

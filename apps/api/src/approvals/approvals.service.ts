@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
-  NotFoundException
+  NotFoundException,
+  Optional
 } from "@nestjs/common";
 import {
   calendarHoldBatchPayloadSchema,
@@ -34,6 +36,8 @@ import {
 } from "../operations/event-logistics";
 import { PrismaService } from "../prisma/prisma.service";
 import { StoryboardQueueService } from "../queue/storyboard-queue.service";
+import type { SocialPublisherPort } from "../social/social-publisher";
+import { SOCIAL_SERVICE } from "../social/social.tokens";
 import {
   APPROVAL_EXECUTION_LEASE_MS,
   APPROVAL_LIFECYCLE_POLICY_VERSION,
@@ -236,7 +240,10 @@ export class ApprovalsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly registryResolver: AdapterRegistryResolver,
-    private readonly storyboardQueue: StoryboardQueueService
+    private readonly storyboardQueue: StoryboardQueueService,
+    @Optional()
+    @Inject(SOCIAL_SERVICE)
+    private readonly social?: SocialPublisherPort
   ) {}
 
   private notifyApproval(
@@ -1754,6 +1761,11 @@ export class ApprovalsService {
           opportunityId: bookingReplyConfirmationPayload!.opportunityId,
           replyId: bookingReplyConfirmationPayload!.replyId
         };
+      } else if (approvalRow.actionType === "social_post_batch") {
+        preview = this.social?.previewApproved(approvalRow.payload) ?? {
+          wouldPublish: [],
+          socialMode: "mock"
+        };
       }
       const nextPayload = {
         ...basePayload,
@@ -2103,6 +2115,49 @@ export class ApprovalsService {
           }
         });
         this.notifyApproval(artistId, id, "executed");
+        return updated;
+      }
+
+      if (approvalRow.actionType === "social_post_batch") {
+        if (!this.social) {
+          throw new BadRequestException("Social publisher is not configured");
+        }
+        const published = await this.social.executeApproved(artistId, id, {
+          label: actorLabel,
+          operatorId: actorOperatorId
+        });
+        const executionResult = published.executionResult;
+        providerExecutionResult = executionResult;
+        const nextPayload = { ...basePayload, executionResult };
+        const updated = await this.finalizeSimpleExecution(
+          artistId,
+          id,
+          published.approvalStatus === "failed" ? ApprovalStatus.failed : ApprovalStatus.executed,
+          nextPayload as object,
+          actorLabel,
+          actorOperatorId
+        );
+        await this.audit.log({
+          artistId,
+          severity:
+            published.approvalStatus === "failed"
+              ? AuditSeverity.critical
+              : AuditSeverity.info,
+          aggregateType: "ApprovalRequest",
+          aggregateId: id,
+          action:
+            published.approvalStatus === "failed"
+              ? "approval.execution.failed"
+              : "approval.execution.succeeded",
+          actorLabel,
+          actorOperatorId,
+          metadata: { actionType: approvalRow.actionType }
+        });
+        this.notifyApproval(
+          artistId,
+          id,
+          published.approvalStatus === "failed" ? "failed" : "executed"
+        );
         return updated;
       }
 

@@ -188,6 +188,85 @@ enum BandMode {
   hybrid
 }
 
+enum SocialPlatform {
+  facebook
+  instagram
+  youtube
+  tiktok
+}
+
+enum SocialVoiceKey {
+  stalemate
+  rad_dad
+  unknown
+}
+
+enum SocialMediaKind {
+  photo
+  video
+}
+
+enum SocialPostStatus {
+  draft
+  pending_approval
+  approved
+  posting
+  posted
+  partial
+  failed
+  cancelled
+}
+
+enum SocialTargetStatus {
+  draft
+  skipped
+  pending
+  sending
+  posted
+  draft_only
+  failed
+  refused
+}
+
+enum SocialSendOutcome {
+  sent
+  draft_only
+  failed
+  refused_no_approval
+  refused_account_mismatch
+  refused_no_id
+  refused_voice_mismatch
+}
+
+enum SocialInboxKind {
+  comment
+  dm
+}
+
+enum SocialInboxTriage {
+  thanks
+  question
+  booking
+  troll
+  spam
+  unknown
+}
+
+enum SocialReplyStatus {
+  drafted
+  pending_approval
+  approved
+  sent
+  failed
+  skipped
+}
+
+enum SocialWeeklyPlanStatus {
+  drafted
+  pending_approval
+  approved
+}
+
 enum ManagerWorkstream {
   live
   releases
@@ -381,6 +460,7 @@ model Operator {
   managerEvaluationRunsCreated      ManagerEvaluationRun[]       @relation("ManagerEvaluationRunner")
   bandMemberCheckInsRecorded        BandMemberCheckIn[]          @relation("BandMemberCheckInRecorder")
   approvalReconciliationsRecorded   ApprovalReconciliation[]     @relation("ApprovalReconciliationRecorder")
+  socialPostsCreated                SocialPost[]                 @relation("SocialPostCreator")
 }
 
 model ArtistMembership {
@@ -459,6 +539,14 @@ model Artist {
   payments                    PaymentRecord[]
   expenses                    Expense[]
   settlements                 Settlement[]
+  socialVoiceProfile          SocialVoiceProfile?
+  socialAccounts              SocialAccount[]
+  socialMediaAssets           SocialMediaAsset[]
+  socialPosts                 SocialPost[]
+  socialSendLogs              SocialSendLog[]
+  socialInboxItems            SocialInboxItem[]
+  socialWeeklyPlans           SocialWeeklyPlan[]
+  socialAnalyticsSnapshots    SocialAnalyticsSnapshot[]
 }
 
 model ArtistOperatingProfile {
@@ -1323,6 +1411,7 @@ model ApprovalRequest {
   bookingCampaign         BookingCampaign?          @relation("CampaignApproval")
   campaignDeliveries      BookingCampaignDelivery[]
   reconciliations         ApprovalReconciliation[]
+  socialPost              SocialPost?
 
   @@unique([artistId, sourceKey])
   @@unique([id, artistId])
@@ -1469,6 +1558,7 @@ model BandEvent {
   settlement             Settlement?
   managerRecommendations ManagerRecommendation[]
   approvals              ApprovalRequest[]
+  socialPosts            SocialPost[]
 
   @@index([artistId, status, startsAt])
   @@index([liveSetlistItemId])
@@ -1812,4 +1902,193 @@ model WorkflowNotification {
 
   @@index([recipientOperatorId, artistId, readAt])
   @@index([artistId, createdAt])
+}
+
+model SocialVoiceProfile {
+  id               String         @id @default(cuid())
+  artistId         String         @unique
+  voiceKey         SocialVoiceKey
+  toneDescription  String
+  toneRules        String[]
+  bannedPhrases    String[]
+  bannedTopics     String[]
+  emojiTolerance   Int            @default(3)
+  confirmedFacts   Json           @default("[]")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  artist           Artist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+}
+
+model SocialAccount {
+  id                 String          @id @default(cuid())
+  artistId           String
+  platform           SocialPlatform
+  accountLabel       String
+  externalAccountId  String
+  voiceKey           SocialVoiceKey
+  status             String          @default("active")
+  scopes             String[]
+  handle             String?
+  metadata           Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  artist             Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  targets            SocialPostTarget[]
+
+  @@unique([artistId, platform])
+  @@index([artistId, status])
+}
+
+model SocialMediaAsset {
+  id        String          @id @default(cuid())
+  artistId  String
+  filename  String
+  mimeType  String
+  byteSize  Int             @default(0)
+  publicUrl String
+  kind      SocialMediaKind
+  createdAt DateTime        @default(now())
+  artist    Artist          @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  posts     SocialPost[]
+
+  @@index([artistId, createdAt])
+}
+
+model SocialPost {
+  id                  String           @id @default(cuid())
+  artistId            String
+  approvalRequestId   String?          @unique
+  mediaAssetId        String?
+  eventId             String?
+  note                String
+  voiceKey            SocialVoiceKey
+  status              SocialPostStatus @default(draft)
+  createdByOperatorId String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  artist              Artist           @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  approval            ApprovalRequest? @relation(fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  mediaAsset          SocialMediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
+  event               BandEvent?       @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  createdBy           Operator?        @relation("SocialPostCreator", fields: [createdByOperatorId], references: [id], onDelete: SetNull)
+  targets             SocialPostTarget[]
+  sendLogs            SocialSendLog[]
+
+  @@index([artistId, status, createdAt])
+}
+
+model SocialPostTarget {
+  id                    String             @id @default(cuid())
+  postId                String
+  accountId             String?
+  platform              SocialPlatform
+  enabled               Boolean            @default(true)
+  caption               String
+  title                 String?
+  tags                  String[]
+  mediaKind             SocialMediaKind?
+  includeFacebookEvent  Boolean            @default(false)
+  facebookEventName     String?
+  facebookEventStartsAt DateTime?
+  facebookEventPlace    String?
+  status                SocialTargetStatus @default(draft)
+  externalPostId        String?
+  externalPostUrl       String?
+  isDraftOnly           Boolean            @default(false)
+  lastError             String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  post                  SocialPost         @relation(fields: [postId], references: [id], onDelete: Cascade)
+  account               SocialAccount?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  sendLogs              SocialSendLog[]
+
+  @@index([postId, platform])
+}
+
+model SocialSendLog {
+  id                 String            @id @default(cuid())
+  artistId           String
+  postId             String
+  targetId           String?
+  approvalRequestId  String
+  platform           SocialPlatform
+  accountExternalId  String?
+  voiceKey           SocialVoiceKey
+  attemptedAt        DateTime          @default(now())
+  outcome            SocialSendOutcome
+  requestSummary     Json
+  responseCode       Int?
+  externalPostId     String?
+  errorMessage       String?
+  durationMs         Int
+  adapterMode        String
+  artist             Artist            @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  post               SocialPost        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  target             SocialPostTarget? @relation(fields: [targetId], references: [id], onDelete: SetNull)
+
+  @@index([artistId, attemptedAt])
+  @@index([approvalRequestId])
+  @@index([postId, attemptedAt])
+}
+
+// Phase 2: unified reply inbox (comments/DMs). Unused in Phase 1 send path.
+model SocialInboxItem {
+  id           String            @id @default(cuid())
+  artistId     String
+  platform     SocialPlatform
+  kind         SocialInboxKind
+  externalId   String
+  authorLabel  String
+  body         String
+  triage       SocialInboxTriage @default(unknown)
+  needsReply   Boolean           @default(true)
+  receivedAt   DateTime          @default(now())
+  createdAt    DateTime          @default(now())
+  artist       Artist            @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  replies      SocialReplyDraft[]
+
+  @@unique([artistId, platform, kind, externalId])
+  @@index([artistId, needsReply, receivedAt])
+}
+
+model SocialReplyDraft {
+  id                String            @id @default(cuid())
+  inboxItemId       String
+  body              String
+  status            SocialReplyStatus @default(drafted)
+  approvalRequestId String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  sentExternalId    String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  inboxItem         SocialInboxItem   @relation(fields: [inboxItemId], references: [id], onDelete: Cascade)
+
+  @@index([inboxItemId, status])
+}
+
+// Phase 3: weekly plan + analytics snapshots. Unused in Phase 1 send path.
+model SocialWeeklyPlan {
+  id        String                 @id @default(cuid())
+  artistId  String
+  weekStart DateTime
+  status    SocialWeeklyPlanStatus @default(drafted)
+  items     Json
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  artist    Artist                 @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@unique([artistId, weekStart])
+}
+
+model SocialAnalyticsSnapshot {
+  id         String         @id @default(cuid())
+  artistId   String
+  platform   SocialPlatform
+  capturedAt DateTime
+  metrics    Json
+  createdAt  DateTime       @default(now())
+  artist     Artist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@index([artistId, platform, capturedAt])
 }

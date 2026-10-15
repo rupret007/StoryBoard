@@ -24,6 +24,7 @@ import { MembershipsModule } from "./memberships/memberships.module";
 import { BookingAdvisorModule } from "./advisor/booking-advisor.module";
 import { ManagerModule } from "./manager/manager.module";
 import { OperationsModule } from "./operations/operations.module";
+import { SocialModule } from "./social/social.module";
 
 @Module({
   imports: [
@@ -51,7 +52,8 @@ import { OperationsModule } from "./operations/operations.module";
     GoogleOAuthCallbackModule,
     BookingAdvisorModule,
     ManagerModule,
-    OperationsModule
+    OperationsModule,
+    SocialModule
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: CsrfOriginGuard }]

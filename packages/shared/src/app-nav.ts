@@ -32,6 +32,7 @@ export const APP_NAV_LINKS = [
   { href: "/booking-campaigns", label: "Pitch campaigns" },
   { href: "/booking-inbox", label: "Booking inbox" },
   { href: "/tasks", label: "Tasks" },
+  { href: "/social", label: "Social" },
   { href: "/approvals", label: "Approvals" },
   { href: "/summary", label: "Weekly summary" },
   { href: "/notifications", label: "Notifications" },
@@ -55,6 +56,7 @@ export const APP_NAV_BOOKING_CLUSTER = [
 ] as const satisfies readonly AppNavLink[];
 
 export const APP_NAV_MORE_CLUSTER = [
+  { href: "/social", label: "Social" },
   { href: "/approvals", label: "Approvals" },
   { href: "/summary", label: "Weekly summary" },
   { href: "/notifications", label: "Notifications" },
