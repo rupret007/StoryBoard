@@ -26,7 +26,7 @@ export default async function SocialPage() {
     <div className="space-y-8">
       <PageHeader
         title="Social"
-        description="Drop a photo or video from your phone or computer (or paste a URL), review per-platform drafts in this band's voice, then approve once. Nothing posts without that approval record, and nothing is marked posted until the platform returns an ID."
+        description="Drop a photo or video from your phone or computer (or paste a URL). The manager LLM drafts caption variants in this band's voice from confirmed facts, then you approve once. Nothing posts without that approval record, and nothing is marked posted until the platform returns an ID."
       />
       {loadError ? (
         <p role="alert" className="text-sm text-rose-200">

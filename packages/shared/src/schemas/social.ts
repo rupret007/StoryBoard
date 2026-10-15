@@ -38,7 +38,8 @@ export const socialTargetEditSchema = z
     caption: z.string().max(63206),
     title: z.string().max(100).optional(),
     tags: z.array(z.string().trim().max(40)).max(15).optional(),
-    includeFacebookEvent: z.boolean().optional()
+    includeFacebookEvent: z.boolean().optional(),
+    selectedVariantIndex: z.number().int().min(0).max(4).optional()
   })
   .strict();
 

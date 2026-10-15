@@ -95,8 +95,14 @@ guides that day.
 
 Flow: drop a photo/video file (drag-and-drop or picker, including phone)
 or an optional public URL + note → chunked store on the server with
-progress → per-platform drafts in band voice → one **Approve & post** →
+progress → the manager LLM drafts 2–3 caption variants per platform
+(template fallback when `OPENAI_ENABLED` is off) → one **Approve & post** →
 adapter calls from the local file → live status only after an ID.
+
+Captions use only confirmed facts (note, show name, venue, date, ticket URL).
+They never invent dates, prices, or locations. `#chicago` and other city tags
+appear only when that place is in the data. Instagram/TikTok stay short;
+Facebook is longer; YouTube is a title plus description.
 
 | Platform | How Phase 1 sends the file |
 | --- | --- |

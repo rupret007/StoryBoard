@@ -71,6 +71,8 @@ export class SocialExecutionService implements SocialPublisherPort {
     note: string;
     voiceKey: SocialVoiceKey;
     status: string;
+    captionSource?: string | null;
+    captionNotice?: string | null;
     approvalRequestId: string | null;
     createdAt: Date;
     mediaAsset: { publicUrl: string; kind: string; filename: string } | null;
@@ -88,6 +90,8 @@ export class SocialExecutionService implements SocialPublisherPort {
       caption: string;
       title: string | null;
       tags: string[];
+      captionVariants?: unknown;
+      selectedVariantIndex?: number;
       includeFacebookEvent: boolean;
       facebookEventName: string | null;
       status: string;
@@ -111,10 +115,16 @@ export class SocialExecutionService implements SocialPublisherPort {
       note: post.note,
       voiceKey: post.voiceKey,
       status: post.status,
+      captionSource: post.captionSource === "llm" ? "llm" : "template",
+      captionNotice: post.captionNotice ?? null,
       approvalRequestId: post.approvalRequestId,
       createdAt: post.createdAt,
       media: post.mediaAsset,
-      targets: post.targets,
+      targets: post.targets.map((target) => ({
+        ...target,
+        captionVariants: Array.isArray(target.captionVariants) ? target.captionVariants : [],
+        selectedVariantIndex: target.selectedVariantIndex ?? 0
+      })),
       sendLogs: post.sendLogs,
       approval: post.approval
         ? {

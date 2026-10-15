@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import {
-  draftPlatformCaptions,
   resolveSocialVoice,
   socialApproveAndPostSchema,
   socialDropInputSchema,
@@ -16,6 +15,7 @@ import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { connectReadiness, socialAdapterMode } from "./social-credentials";
 import { SOCIAL_POST_ACTION_TYPE } from "./social.constants";
+import { SocialCaptionService } from "./social-caption.service";
 import { SocialExecutionService } from "./social-execution.service";
 
 const PLATFORMS: SocialPlatform[] = ["facebook", "instagram", "youtube", "tiktok"];
@@ -32,7 +32,8 @@ export class SocialService {
     private readonly prisma: PrismaService,
     private readonly approvals: ApprovalsService,
     private readonly audit: AuditService,
-    private readonly execution: SocialExecutionService
+    private readonly execution: SocialExecutionService,
+    private readonly captions: SocialCaptionService
   ) {}
 
   async workspace(artistId: string) {
@@ -95,7 +96,8 @@ export class SocialService {
         scopes: row.scopes
       })),
       events,
-      posts: posts.map((post) => this.execution.presentPost(post))
+      posts: posts.map((post) => this.execution.presentPost(post)),
+      captionDrafting: this.captions.draftingStatus()
     };
   }
 
@@ -124,12 +126,18 @@ export class SocialService {
       uploaded?.kind ??
       (input.mediaUrl?.match(/\.(mp4|mov|webm)$/i) ? "video" : "photo");
     const show = await this.resolveShow(artistId, input);
-    const drafts = draftPlatformCaptions({
+    const voiceRow = await this.prisma.client.socialVoiceProfile.findUnique({ where: { artistId } });
+    const extraFacts = Array.isArray(voiceRow?.confirmedFacts)
+      ? voiceRow.confirmedFacts.filter((row): row is string => typeof row === "string")
+      : [];
+    const drafted = await this.captions.draft({
       voice: voiceKey,
       note: input.note,
       mediaKind,
-      show
-    }).filter((draft) => (input.platforms ?? PLATFORMS).includes(draft.platform));
+      show,
+      extraFacts
+    });
+    const drafts = drafted.drafts.filter((draft) => (input.platforms ?? PLATFORMS).includes(draft.platform));
     const accounts = await this.prisma.client.socialAccount.findMany({ where: { artistId } });
 
     const created = await this.prisma.client.$transaction(async (tx) => {
@@ -155,6 +163,8 @@ export class SocialService {
           note: input.note,
           voiceKey,
           status: "pending_approval",
+          captionSource: drafted.source,
+          captionNotice: drafted.notice,
           mediaAssetId: mediaAsset?.id ?? null,
           createdByOperatorId: actor.operatorId
         }
@@ -170,6 +180,8 @@ export class SocialService {
             caption: draft.caption,
             title: draft.title ?? null,
             tags: draft.tags,
+            captionVariants: draft.variants,
+            selectedVariantIndex: draft.selectedVariantIndex,
             mediaKind,
             includeFacebookEvent: draft.includeFacebookEvent,
             facebookEventName: show?.name ?? null,
@@ -205,7 +217,7 @@ export class SocialService {
       action: "social.drop.created",
       actorLabel: actor.label,
       actorOperatorId: actor.operatorId,
-      metadata: { voiceKey, platforms: drafts.map((row) => row.platform) }
+      metadata: { voiceKey, platforms: drafts.map((row) => row.platform), captionSource: drafted.source }
     });
     return this.execution.getPost(artistId, created);
   }
@@ -230,7 +242,8 @@ export class SocialService {
             caption: edit.caption,
             title: edit.title ?? null,
             tags: edit.tags ?? [],
-            includeFacebookEvent: edit.includeFacebookEvent ?? false
+            includeFacebookEvent: edit.includeFacebookEvent ?? false,
+            selectedVariantIndex: edit.selectedVariantIndex ?? 0
           }
         });
       }

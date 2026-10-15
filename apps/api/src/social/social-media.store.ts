@@ -1,6 +1,6 @@
 import { createWriteStream } from "node:fs";
 import { mkdir, open, stat } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 

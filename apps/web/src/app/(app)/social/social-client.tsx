@@ -5,6 +5,12 @@ import { Check, Link2, Megaphone, ShieldCheck, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { publicApiBaseUrl, scopedApiFetch } from "@/lib/api";
 
+export type SocialCaptionVariant = {
+  caption: string;
+  title?: string;
+  tags: string[];
+};
+
 export type SocialTarget = {
   id: string;
   platform: "facebook" | "instagram" | "youtube" | "tiktok";
@@ -12,6 +18,8 @@ export type SocialTarget = {
   caption: string;
   title: string | null;
   tags: string[];
+  captionVariants?: SocialCaptionVariant[];
+  selectedVariantIndex?: number;
   includeFacebookEvent: boolean;
   facebookEventName: string | null;
   status: string;
@@ -28,6 +36,8 @@ export type SocialPost = {
   status: string;
   approvalRequestId: string | null;
   createdAt: string;
+  captionSource?: "llm" | "template";
+  captionNotice?: string | null;
   media: { publicUrl: string; kind: string; filename: string } | null;
   targets: SocialTarget[];
   sendLogs: Array<{
@@ -64,6 +74,7 @@ export type SocialWorkspace = {
   connections: Array<{ provider: string; status: string; accountLabel: string | null }>;
   events: Array<{ id: string; title: string; startsAt: string | null; locationName: string | null }>;
   posts: SocialPost[];
+  captionDrafting?: { llmReady: boolean; notice: string };
 };
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -194,7 +205,11 @@ export function SocialClient({
       });
       setActivePost(created);
       setDrafts(created.targets);
-      setNotice("Drafts ready. Review each platform, then approve once. Nothing has posted.");
+      setNotice(
+        created.captionNotice
+          ? `${created.captionNotice} Review each platform, then approve once. Nothing has posted.`
+          : "Drafts ready. Review each platform, then approve once. Nothing has posted."
+      );
       await refresh(created.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The drop could not be drafted.");
@@ -219,7 +234,8 @@ export function SocialClient({
             caption: row.caption,
             title: row.title ?? undefined,
             tags: row.tags,
-            includeFacebookEvent: row.includeFacebookEvent
+            includeFacebookEvent: row.includeFacebookEvent,
+            selectedVariantIndex: row.selectedVariantIndex ?? 0
           }))
         }
       });
@@ -272,6 +288,13 @@ export function SocialClient({
         <p className="mt-4 text-sm text-[var(--text-secondary)]">
           Stalemate and Rad Dad stay on separate voice profiles. An account check runs before every send.
           Manager chat still will not publish.
+        </p>
+        <p
+          data-testid="social-caption-source"
+          className="mt-3 text-sm text-[var(--text-secondary)]"
+        >
+          {workspace.captionDrafting?.notice ??
+            "Template captions — no LLM key is set. These are the fallback drafts."}
         </p>
       </SurfaceCard>
 
@@ -458,6 +481,11 @@ export function SocialClient({
                 {" · "}
                 {activePost.status}
               </p>
+              {activePost.captionNotice ? (
+                <p className="mt-2 text-xs text-[var(--text-muted)]" data-testid="social-caption-notice">
+                  {activePost.captionNotice}
+                </p>
+              ) : null}
             </div>
             <button
               type="button"
@@ -489,6 +517,36 @@ export function SocialClient({
                     On
                   </label>
                 </div>
+                {(target.captionVariants?.length ?? 0) > 1 ? (
+                  <div className="mt-3 flex flex-wrap gap-2" data-testid={`social-caption-variants-${target.platform}`}>
+                    {target.captionVariants!.map((variant, variantIndex) => (
+                      <button
+                        key={`${target.id}-variant-${variantIndex}`}
+                        type="button"
+                        data-testid={`social-caption-variant-${target.platform}-${variantIndex}`}
+                        className={`min-h-11 rounded-lg px-3 text-sm ${
+                          (target.selectedVariantIndex ?? 0) === variantIndex
+                            ? "bg-[var(--accent)] font-semibold text-slate-950"
+                            : "border border-[var(--border)] text-[var(--text-secondary)]"
+                        }`}
+                        disabled={!canManage}
+                        onClick={() => {
+                          const next = [...drafts];
+                          next[index] = {
+                            ...target,
+                            caption: variant.caption,
+                            title: variant.title ?? target.title,
+                            tags: variant.tags,
+                            selectedVariantIndex: variantIndex
+                          };
+                          setDrafts(next);
+                        }}
+                      >
+                        Option {variantIndex + 1}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 {target.platform === "youtube" ? (
                   <input
                     className="sb-input mt-3"

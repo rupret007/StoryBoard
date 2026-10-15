@@ -213,6 +213,11 @@ enum SocialMediaUploadStatus {
   failed
 }
 
+enum SocialCaptionSource {
+  template
+  llm
+}
+
 enum SocialPostStatus {
   draft
   pending_approval
@@ -1975,6 +1980,8 @@ model SocialPost {
   note                String
   voiceKey            SocialVoiceKey
   status              SocialPostStatus @default(draft)
+  captionSource       SocialCaptionSource @default(template)
+  captionNotice       String?
   createdByOperatorId String?
   createdAt           DateTime         @default(now())
   updatedAt           DateTime         @updatedAt
@@ -1998,6 +2005,8 @@ model SocialPostTarget {
   caption               String
   title                 String?
   tags                  String[]
+  captionVariants       Json               @default("[]")
+  selectedVariantIndex  Int                @default(0)
   mediaKind             SocialMediaKind?
   includeFacebookEvent  Boolean            @default(false)
   facebookEventName     String?
