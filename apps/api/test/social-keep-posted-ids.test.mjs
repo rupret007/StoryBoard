@@ -23,3 +23,56 @@ test("social execution will not re-send or erase a platform id", () => {
     /approval.status !== ApprovalStatus.approved && approval.status !== ApprovalStatus.executed/
   );
 });
+
+import { postedIdHarness as harness } from "./helpers/social-posted-id-harness.mjs";
+
+const actor = { label: "owner", operatorId: "operator" };
+const execute = (h) => h.execution.executeApproved("artist", "approval", actor);
+
+test("an executed approval cannot erase its previously recorded platform id", async () => {
+  const h = harness();
+  await execute(h);
+  h.approval.status = "executed";
+  const receipt = structuredClone(h.target);
+  const log = structuredClone(h.post.sendLogs);
+  const writeCount = h.writes.length;
+
+  await assert.rejects(execute(h), /claimed owner approval/);
+  assert.deepEqual(h.target, receipt);
+  assert.equal(h.target.externalPostId, "provider-id");
+  assert.deepEqual(h.post.sendLogs, log);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.writes.length, writeCount);
+});
+
+test("an existing platform id prevents a target send even when its status is still pending", async () => {
+  const h = harness();
+  h.target.externalPostId = "page_99";
+  h.target.externalPostUrl = "https://example.invalid/posts/99";
+  const receipt = structuredClone(h.target);
+
+  await assert.rejects(execute(h), /Posting stopped/);
+  assert.deepEqual(h.target, receipt);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.post.sendLogs.length, 0);
+  assert.equal(h.writes.includes("target"), false);
+});
+
+test("a platform id recorded after the read snapshot survives a later send attempt", async () => {
+  const h = harness();
+  const claimPost = h.client.socialPost.updateMany;
+  h.client.socialPost.updateMany = async (input) => {
+    const claimed = await claimPost(input);
+    h.target.externalPostId = "page_100";
+    h.target.externalPostUrl = "https://example.invalid/posts/100";
+    return claimed;
+  };
+
+  await assert.rejects(execute(h), /Posting stopped/);
+  assert.equal(h.target.externalPostId, "page_100");
+  assert.equal(h.target.externalPostUrl, "https://example.invalid/posts/100");
+  assert.equal(h.target.status, "pending");
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.post.sendLogs.length, 0);
+  assert.equal(h.writes.includes("target"), false);
+});
