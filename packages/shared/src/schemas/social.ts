@@ -26,7 +26,6 @@ export const socialDropInputSchema = z
       .optional(),
     mediaKind: socialMediaKindSchema.optional(),
     eventId: z.string().trim().min(1).optional(),
-    show: socialShowHintSchema.optional(),
     platforms: z.array(socialPlatformSchema).min(1).max(4).optional()
   })
   .strict();
