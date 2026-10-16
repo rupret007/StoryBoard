@@ -147,7 +147,7 @@ export function SocialClient({
     setWorkspace((current) => (current ? { ...current, ...mergeSocialPost(current, post) } : current));
   }
 
-  async function refresh(preferredPostId?: string) {
+  async function reloadWorkspaceFromServer(preferredPostId?: string) {
     if (!artistId) return;
     const next = await apiFetch<SocialWorkspace>("/social");
     setWorkspace(next);
@@ -288,7 +288,7 @@ export function SocialClient({
 
   async function refreshStatus() {
     try {
-      await refresh();
+      await reloadWorkspaceFromServer();
       setError("");
     } catch {
       setError("Status could not be refreshed. The send outcome is still unconfirmed.");
