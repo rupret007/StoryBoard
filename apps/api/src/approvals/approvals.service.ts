@@ -1651,6 +1651,9 @@ export class ApprovalsService {
   ) {
     const approvalRow = await this.get(artistId, id);
     const updated = await this.prisma.client.$transaction(async (tx) => {
+      if (approvalRow.actionType === "social_post_batch") {
+        await assertSocialOwner(tx, artistId, actorOperatorId);
+      }
       const changed = await tx.approvalRequest.updateMany({
         where: {
           id,

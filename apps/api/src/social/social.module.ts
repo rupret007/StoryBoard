@@ -6,6 +6,7 @@ import { SocialMediaPublicController } from "./social-media-public.controller";
 import { SocialOAuthController } from "./social-oauth.controller";
 import { SocialExecutionService } from "./social-execution.service";
 import { SocialCaptionService } from "./social-caption.service";
+import { SocialCaptionBudgetService } from "./social-caption-budget.service";
 import { SocialMediaService } from "./social-media.service";
 import { SocialService } from "./social.service";
 import { SOCIAL_SERVICE } from "./social.tokens";
@@ -16,6 +17,7 @@ import { SOCIAL_SERVICE } from "./social.tokens";
   providers: [
     SocialMediaService,
     SocialCaptionService,
+    SocialCaptionBudgetService,
     SocialExecutionService,
     SocialService,
     { provide: SOCIAL_SERVICE, useExisting: SocialExecutionService }

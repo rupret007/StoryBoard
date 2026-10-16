@@ -248,3 +248,72 @@ test("uncertain post-send finalization cannot leave a target presented as still 
   h.approval.executionAttemptedAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
   assert.equal(h.execution.presentPost(h.post).status, "unknown");
 });
+
+test("missing credentials leave an unattempted receipt instead of asking for owner approval again", async () => {
+  const h = harness();
+  h.client.integrationConnection.findUnique = async () => null;
+  await assert.rejects(execute(h), /Posting stopped/);
+  const before = structuredClone(h.post);
+  const dto = h.execution.presentPost(h.post);
+  assert.equal(dto.status, "unknown");
+  assert.equal(dto.targets[0].status, "not_attempted");
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.post.sendLogs.length, 0);
+  assert.equal(h.target.status, "pending");
+  assert.deepEqual(h.post, before, "projection preserves the stored execution evidence");
+});
+
+test("pending targets distinguish recorded approval, stopped work, and inconsistent attempt evidence", () => {
+  const h = harness();
+  h.approval.executionAttemptedAt = null;
+  assert.equal(h.execution.presentPost(h.post).targets[0].status, "approved");
+  h.approval.status = "failed";
+  assert.equal(h.execution.presentPost(h.post).targets[0].status, "not_attempted");
+  h.target.externalPostId = "historical-reference";
+  assert.equal(h.execution.presentPost(h.post).targets[0].status, "unknown",
+    "a provider reference prevents a no-attempt claim without a matching send log");
+  h.target.externalPostId = null;
+  h.target.externalPostUrl = "https://provider.invalid/post";
+  assert.equal(h.execution.presentPost(h.post).targets[0].status, "unknown");
+  h.target.externalPostUrl = null;
+  h.post.sendLogs.push({ id: "attempt", targetId: h.target.id, platform: "facebook", outcome: "unknown",
+    externalPostId: null, adapterMode: "real", attemptedAt: new Date() });
+  assert.equal(h.execution.presentPost(h.post).targets[0].status, "unknown",
+    "an existing attempt prevents a no-attempt claim even if the target state is stale");
+  assert.equal(h.target.status, "pending");
+  assert.equal(h.writes.length, 0);
+});
+
+for (const approvalStatus of ["rejected", "expired"]) {
+  test(`${approvalStatus} receipts preserve attempted work and close only targets without attempt evidence`, () => {
+    for (const targetStatus of ["draft", "pending", "skipped"]) {
+      for (const evidence of ["none", "log", "id", "url"]) {
+        const h = harness();
+        h.approval.status = approvalStatus;
+        h.post.status = "pending_approval";
+        h.target.status = targetStatus;
+        if (evidence === "id") h.target.externalPostId = "provider-reference";
+        if (evidence === "url") h.target.externalPostUrl = "https://provider.invalid/post";
+        if (evidence === "log") h.post.sendLogs.push({ id: "attempt", targetId: h.target.id,
+          platform: "facebook", outcome: "unknown", externalPostId: null,
+          adapterMode: "real", attemptedAt: new Date() });
+        const before = structuredClone(h.post);
+        const dto = h.execution.presentPost(h.post);
+        assert.equal(dto.targets[0].status, evidence === "none" ? "cancelled" : "unknown",
+          `${approvalStatus}/${targetStatus}/${evidence}`);
+        assert.deepEqual(h.post, before, "closure projection preserves stored evidence");
+        assert.equal(h.writes.length, 0);
+      }
+    }
+    const h = harness();
+    h.approval.status = approvalStatus;
+    h.target.status = "sending";
+    assert.equal(h.execution.presentPost(h.post).targets[0].status, "sending");
+    h.target.status = "posted";
+    h.target.externalPostId = "provider-reference";
+    h.post.sendLogs.push({ id: "sent", targetId: h.target.id, platform: "facebook", outcome: "sent",
+      externalPostId: "provider-reference", adapterMode: "real", attemptedAt: new Date(),
+      requestSummary: { deliveryState: "published" } });
+    assert.equal(h.execution.presentPost(h.post).targets[0].status, "posted");
+  });
+}
