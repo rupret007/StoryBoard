@@ -47,13 +47,6 @@ export function socialApproveBlockReason(
   return null;
 }
 
-export function canApproveSocialPost(
-  post: SocialComposerPost | null | undefined,
-  drafts: SocialComposerTarget[] = post?.targets ?? []
-): boolean {
-  return socialApproveBlockReason(post, drafts) === null;
-}
-
 export function noteFromRecordedShow(
   currentNote: string,
   event: { title: string } | null | undefined

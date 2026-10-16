@@ -227,6 +227,11 @@ enum SocialPostStatus {
   partial
   failed
   cancelled
+  simulated
+  draft_only
+  private_upload
+  processing
+  unknown
 }
 
 enum SocialTargetStatus {
@@ -238,6 +243,10 @@ enum SocialTargetStatus {
   draft_only
   failed
   refused
+  simulated
+  private_upload
+  processing
+  unknown
 }
 
 enum SocialSendOutcome {
@@ -248,6 +257,10 @@ enum SocialSendOutcome {
   refused_account_mismatch
   refused_no_id
   refused_voice_mismatch
+  simulated
+  private_upload
+  processing
+  unknown
 }
 
 enum SocialInboxKind {
@@ -1914,6 +1927,12 @@ model WorkflowNotification {
 
   @@index([recipientOperatorId, artistId, readAt])
   @@index([artistId, createdAt])
+}
+
+// Global provider-call budget shared by all bands and API processes.
+model SocialCaptionDailyUsage {
+  day   DateTime @id @db.Date
+  calls Int
 }
 
 model SocialVoiceProfile {

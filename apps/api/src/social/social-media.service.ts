@@ -1,5 +1,6 @@
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
@@ -46,7 +47,7 @@ export class SocialMediaService {
       data: {
         artistId,
         filename: input.filename,
-        mimeType: input.mimeType,
+        mimeType: input.mimeType.trim().toLowerCase(),
         byteSize: input.byteSize,
         receivedBytes: 0,
         publicUrl: "local://uploading",
@@ -64,39 +65,51 @@ export class SocialMediaService {
   }
 
   async appendChunk(artistId: string, id: string, rangeHeader: string | undefined, bytes: Uint8Array) {
-    const asset = await this.requireOwned(artistId, id);
-    if (asset.uploadStatus !== "uploading" || !asset.storageKey) {
-      throw new BadRequestException("This file is not accepting more chunks.");
-    }
-    let range;
-    try {
-      range = parseSocialContentRange(rangeHeader, asset.byteSize);
-      nextReceivedBytes(asset.receivedBytes, range);
-    } catch (error) {
-      throw new BadRequestException(error instanceof Error ? error.message : "The chunk range is invalid.");
-    }
-    if (bytes.byteLength !== range.length) {
-      throw new BadRequestException("Chunk byte length does not match Content-Range.");
-    }
-    const path = socialMediaAbsolutePath(this.root(), asset.storageKey);
-    const receivedBytes = await appendSocialMediaChunk(path, bytes, asset.receivedBytes);
-    const updated = await this.prisma.client.socialMediaAsset.update({
-      where: { id: asset.id },
-      data: { receivedBytes }
+    return this.prisma.client.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "SocialMediaAsset" WHERE id = ${id} AND "artistId" = ${artistId} FOR UPDATE`;
+      const asset = await tx.socialMediaAsset.findFirst({ where: { id, artistId } });
+      if (!asset) throw new NotFoundException("Media not found");
+      if (asset.uploadStatus !== "uploading" || !asset.storageKey) {
+        throw new BadRequestException("This file is not accepting more chunks.");
+      }
+      let range;
+      try {
+        range = parseSocialContentRange(rangeHeader, asset.byteSize);
+        nextReceivedBytes(asset.receivedBytes, range);
+      } catch (error) {
+        throw new BadRequestException(error instanceof Error ? error.message : "The chunk range is invalid.");
+      }
+      if (bytes.byteLength !== range.length) {
+        throw new BadRequestException("Chunk byte length does not match Content-Range.");
+      }
+      const path = socialMediaAbsolutePath(this.root(), asset.storageKey);
+      const receivedBytes = await appendSocialMediaChunk(path, bytes, asset.receivedBytes);
+      const updated = await tx.socialMediaAsset.update({
+        where: { id: asset.id },
+        data: { receivedBytes }
+      });
+      return this.present(updated);
     });
-    return this.present(updated);
   }
 
   async complete(artistId: string, id: string) {
-    const asset = await this.requireOwned(artistId, id);
-    if (asset.receivedBytes !== asset.byteSize || !asset.storageKey) {
-      throw new BadRequestException("The file is not finished uploading.");
-    }
-    const updated = await this.prisma.client.socialMediaAsset.update({
-      where: { id: asset.id },
-      data: { uploadStatus: "ready", publicUrl: this.hostedUrl(asset.id) }
+    return this.prisma.client.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "SocialMediaAsset" WHERE id = ${id} AND "artistId" = ${artistId} FOR UPDATE`;
+      const asset = await tx.socialMediaAsset.findFirst({ where: { id, artistId } });
+      if (!asset) throw new NotFoundException("Media not found");
+      if (asset.receivedBytes !== asset.byteSize || !asset.storageKey) {
+        throw new BadRequestException("The file is not finished uploading.");
+      }
+      const file = await stat(socialMediaAbsolutePath(this.root(), asset.storageKey));
+      if (file.size !== asset.byteSize) {
+        throw new BadRequestException("The uploaded file size does not match the recorded upload.");
+      }
+      const updated = await tx.socialMediaAsset.update({
+        where: { id: asset.id },
+        data: { uploadStatus: "ready", publicUrl: this.hostedUrl(asset.id) }
+      });
+      return this.present(updated);
     });
-    return this.present(updated);
   }
 
   async requireReady(artistId: string, id: string) {
@@ -110,6 +123,7 @@ export class SocialMediaService {
   async openForArtist(artistId: string, id: string) {
     const asset = await this.requireOwned(artistId, id);
     if (!asset.storageKey) throw new NotFoundException("That file is a remote URL, not a local upload.");
+    this.assertSafeToServe(asset);
     return {
       stream: createReadStream(socialMediaAbsolutePath(this.root(), asset.storageKey)),
       mimeType: asset.mimeType,
@@ -126,6 +140,7 @@ export class SocialMediaService {
     if (!asset?.storageKey || asset.uploadStatus !== "ready") {
       throw new NotFoundException("Media is not available.");
     }
+    this.assertSafeToServe(asset);
     return {
       stream: createReadStream(socialMediaAbsolutePath(this.root(), asset.storageKey)),
       mimeType: asset.mimeType,
@@ -155,7 +170,7 @@ export class SocialMediaService {
       mimeType: asset.mimeType,
       byteSize: asset.byteSize,
       receivedBytes: asset.receivedBytes,
-      publicUrl: asset.publicUrl,
+      publicUrl: `/social/media/${encodeURIComponent(asset.id)}/file`,
       kind: socialMediaKindFromMime(asset.mimeType, asset.filename),
       uploadStatus: asset.uploadStatus,
       chunkSize: this.chunkSize(),
@@ -177,7 +192,20 @@ export class SocialMediaService {
   }
 
   private verifyPublicToken(assetId: string, token: string): boolean {
-    return token === this.publicToken(assetId);
+    const expected = Buffer.from(this.publicToken(assetId));
+    const actual = Buffer.from(token);
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+
+  private assertSafeToServe(asset: { mimeType: string; filename: string; byteSize: number; receivedBytes: number; uploadStatus: string }) {
+    if (asset.uploadStatus !== "ready" || asset.receivedBytes !== asset.byteSize) {
+      throw new NotFoundException("Media is not available.");
+    }
+    try {
+      assertSocialMediaLimits(asset);
+    } catch {
+      throw new NotFoundException("Media is not available.");
+    }
   }
 
   private async requireOwned(artistId: string, id: string) {

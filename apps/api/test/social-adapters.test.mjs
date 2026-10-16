@@ -29,11 +29,11 @@ const account = {
   instagramBusinessId: "ig-1"
 };
 
-test("Facebook photo publish requires a Graph id before success", async () => {
+test("Facebook photo publish requires a Graph post receipt before published", async () => {
   const calls = [];
   const http = async (url, init) => {
     calls.push({ url, init });
-    if (String(url).includes("/photos")) return jsonResponse(200, { id: "page-1_99" });
+    if (String(url).includes("/photos")) return jsonResponse(200, { id: "photo-1", post_id: "page-1_99" });
     return jsonResponse(500, { error: { message: "unexpected" } });
   };
   const adapter = new adapters.FacebookRealAdapter(http);
@@ -46,6 +46,7 @@ test("Facebook photo publish requires a Graph id before success", async () => {
   });
   assert.equal(result.success, true);
   assert.equal(result.externalPostId, "page-1_99");
+  assert.equal(result.deliveryState, "published");
   assert.match(calls[0].url, /\/page-1\/photos/);
 });
 
@@ -79,6 +80,8 @@ test("Instagram waits for a media_publish id and checks quota", async () => {
   });
   assert.equal(result.success, true);
   assert.equal(result.externalPostId, "ig-post-1");
+  assert.equal(result.deliveryState, "published");
+  assert.equal(result.externalPostUrl, undefined, "numeric media ids are not Instagram permalinks");
 });
 
 test("Instagram refuses when content_publishing_limit is exhausted", async () => {
@@ -100,11 +103,13 @@ test("Instagram refuses when content_publishing_limit is exhausted", async () =>
 });
 
 test("YouTube resumable upload is not posted without a video id", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sb-yt-no-id-"));
+  const mediaPath = join(root, "clip.mp4");
+  await writeFile(mediaPath, "video");
   const http = async (url, init) => {
     if (String(url).includes("uploadType=resumable")) {
       return jsonResponse(200, {}, { location: "https://upload.example/session" });
     }
-    if (String(url).includes("cdn.example")) return jsonResponse(200, "bytes");
     if (String(url).includes("upload.example")) return jsonResponse(200, {});
     return jsonResponse(500, {});
   };
@@ -114,6 +119,8 @@ test("YouTube resumable upload is not posted without a video id", async () => {
     caption: "Live",
     title: "Burlington",
     mediaUrl: "https://cdn.example/clip.mp4",
+    mediaPath,
+    mediaByteSize: 5,
     mediaKind: "video",
     account: { ...account, accessToken: "yt" }
   });
@@ -135,6 +142,8 @@ test("TikTok inbox init is draft-only and needs publish_id", async () => {
   assert.equal(result.success, true);
   assert.equal(result.isDraftOnly, true);
   assert.equal(result.externalPostId, "v_inbox_url~v2.1");
+  assert.equal(result.deliveryState, "processing");
+  assert.equal(result.externalPostUrl, undefined);
 });
 
 test("Facebook local video uses resumable upload_phase and still needs an id", async () => {
@@ -166,6 +175,7 @@ test("Facebook local video uses resumable upload_phase and still needs an id", a
   });
   assert.equal(result.success, true);
   assert.equal(result.externalPostId, "page-1_77");
+  assert.equal(result.deliveryState, "processing", "video upload ids do not prove publication");
   assert.ok(calls.some((row) => row.body.includes("upload_phase=start")));
 });
 
@@ -196,6 +206,8 @@ test("YouTube resumable PUT uses the local file, not a public URL", async () => 
   });
   assert.equal(result.success, true);
   assert.equal(result.externalPostId, "yt_vid_1");
+  assert.equal(result.deliveryState, "private_upload");
+  assert.equal(result.isDraftOnly, true);
   assert.equal(Buffer.from(bodies[0]).toString(), "yt-bytes");
 });
 
@@ -228,6 +240,7 @@ test("TikTok local video uses FILE_UPLOAD then PUT chunks", async () => {
   assert.equal(result.success, true);
   assert.equal(result.isDraftOnly, true);
   assert.equal(result.externalPostId, "v_inbox_file~1");
+  assert.equal(result.deliveryState, "processing");
   assert.match(calls[0].body, /FILE_UPLOAD/);
 });
 
@@ -283,7 +296,7 @@ test("Instagram photos still require a public https URL, not only a local file",
   assert.match(result.errorMessage ?? "", /public https hosted URL/);
 });
 
-test("mock adapters still return an id so tests can prove the posted gate", async () => {
+test("mock adapter receipts explicitly identify simulation and have no provider link", async () => {
   const registry = adapters.mockSocialAdapters();
   const posted = await registry.facebook.publish({
     platform: "facebook",
@@ -292,6 +305,8 @@ test("mock adapters still return an id so tests can prove the posted gate", asyn
   });
   assert.equal(posted.success, true);
   assert.ok(posted.externalPostId);
+  assert.equal(posted.deliveryState, "simulated");
+  assert.equal(posted.externalPostUrl, undefined);
   const draft = await registry.tiktok.publish({
     platform: "tiktok",
     caption: "Mock",
@@ -299,4 +314,58 @@ test("mock adapters still return an id so tests can prove the posted gate", asyn
   });
   assert.equal(draft.isDraftOnly, true);
   assert.ok(draft.externalPostId);
+  assert.equal(draft.deliveryState, "simulated");
+});
+
+test("Facebook photo object ids cannot claim the corresponding feed post exists", async () => {
+  const adapter = new adapters.FacebookRealAdapter(async () => jsonResponse(200, { id: "photo-1" }));
+  const result = await adapter.publish({ platform: "facebook", caption: "Photo", mediaUrl: "https://cdn.example/image.jpg", mediaKind: "photo", account });
+  assert.equal(result.success, true);
+  assert.equal(result.deliveryState, "processing");
+  assert.equal(result.externalPostUrl, undefined);
+});
+
+test("Facebook event option fails before either external effect", async () => {
+  let calls = 0;
+  const adapter = new adapters.FacebookRealAdapter(async () => { calls += 1; return jsonResponse(200, { id: "unexpected" }); });
+  const result = await adapter.publish({ platform: "facebook", caption: "Show", includeFacebookEvent: true, facebookEventName: "Show", facebookEventStartsAt: "2030-01-01T00:00:00Z", account });
+  assert.equal(result.success, false);
+  assert.equal(calls, 0);
+  assert.match(result.errorMessage, /separate durable approval/);
+});
+
+test("YouTube never fetches an owner-supplied media URL or starts a session without local video bytes", async () => {
+  let calls = 0;
+  const adapter = new adapters.YouTubeRealAdapter(async () => { calls += 1; throw new Error("unexpected network access"); });
+  const result = await adapter.publish({ platform: "youtube", caption: "Video", mediaUrl: "https://127.0.0.1/private", mediaKind: "video", account });
+  assert.equal(result.success, false);
+  assert.equal(calls, 0);
+  assert.match(result.errorMessage, /completed local video file/);
+});
+
+test("TikTok local photos fail before an unsupported FILE_UPLOAD request", async () => {
+  let calls = 0;
+  const adapter = new adapters.TikTokRealAdapter(async () => { calls += 1; return jsonResponse(200, {}); });
+  const result = await adapter.publish({ platform: "tiktok", caption: "Photo", mediaPath: "/unused/photo.jpg", mediaByteSize: 10, mediaKind: "photo", account });
+  assert.equal(result.success, false);
+  assert.equal(calls, 0);
+});
+
+test("provider errors and transport exceptions cannot expose credentials in adapter receipts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sb-errors-"));
+  const mediaPath = join(root, "clip.mp4");
+  await writeFile(mediaPath, "video");
+  const secret = "synthetic-secret-do-not-return";
+  for (const [platform, Adapter] of Object.entries({ facebook: adapters.FacebookRealAdapter, instagram: adapters.InstagramRealAdapter, youtube: adapters.YouTubeRealAdapter, tiktok: adapters.TikTokRealAdapter })) {
+    for (const throwing of [false, true]) {
+      const http = async () => {
+        if (throwing) throw new Error(`request failed with access_token=${secret}`);
+        return jsonResponse(400, { error: { code: "denied", message: secret }, message: secret, access_token: secret });
+      };
+      const result = await new Adapter(http).publish({ platform, caption: "Caption", mediaKind: "video", mediaPath, mediaByteSize: 5, mediaUrl: "https://cdn.example/video.mp4", account: { ...account, accessToken: secret } });
+      assert.equal(result.success, false);
+      assert.equal(result.deliveryState, "unknown", "an attempted request cannot claim there was no external effect");
+      assert.ok(!JSON.stringify(result).includes(secret), `${platform} leaked credential material`);
+    }
+  }
 });

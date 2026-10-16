@@ -19,7 +19,7 @@ export function socialMediaStorageKey(artistId: string, assetId: string): string
 
 export function socialMediaAbsolutePath(root: string, storageKey: string): string {
   const absolute = resolve(root, storageKey);
-  if (!absolute.startsWith(resolve(root))) {
+  if (!absolute.startsWith(`${resolve(root)}${sep}`)) {
     throw new Error("Rejected a media path outside the social media directory.");
   }
   return absolute;

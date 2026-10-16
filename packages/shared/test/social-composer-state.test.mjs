@@ -28,16 +28,15 @@ test("Approve & post stays off after a drop already has platform IDs", () => {
     approval: { status: "executed" },
     targets: [{ enabled: true, externalPostId: "fb_1" }]
   };
-  assert.equal(shared.canApproveSocialPost(posted), false);
   assert.equal(shared.socialApproveBlockReason(posted), "already_posted");
   assert.equal(
-    shared.canApproveSocialPost({
+    shared.socialApproveBlockReason({
       id: "post-2",
       status: "pending_approval",
       approval: { status: "pending" },
       targets: [{ enabled: true, externalPostId: null }]
     }),
-    true
+    null
   );
   assert.equal(
     shared.socialApproveBlockReason(

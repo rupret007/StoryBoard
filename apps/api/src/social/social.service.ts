@@ -1,6 +1,8 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import {
+  resolveRecordedSocialShow,
   resolveSocialVoice,
+  SOCIAL_SHOW_NOT_RECORDED,
   socialApproveAndPostSchema,
   socialDropInputSchema,
   voiceProfileFor,
@@ -14,6 +16,8 @@ import { ApprovalsService } from "../approvals/approvals.service";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { connectReadiness, socialAdapterMode } from "./social-credentials";
+import { socialReviewFingerprint, recordedSocialReviewFingerprint } from "./social-review";
+import { assertSocialOwner } from "./social-owner";
 import { SOCIAL_POST_ACTION_TYPE } from "./social.constants";
 import { SocialCaptionService } from "./social-caption.service";
 import { SocialExecutionService } from "./social-execution.service";
@@ -183,7 +187,7 @@ export class SocialService {
             captionVariants: draft.variants,
             selectedVariantIndex: draft.selectedVariantIndex,
             mediaKind,
-            includeFacebookEvent: draft.includeFacebookEvent,
+            includeFacebookEvent: false,
             facebookEventName: show?.name ?? null,
             facebookEventStartsAt: parseOptionalDate(show?.startsAt),
             facebookEventPlace: show?.place ?? null,
@@ -232,47 +236,101 @@ export class SocialService {
     actor: { label: string; operatorId: string }
   ) {
     const input = socialApproveAndPostSchema.parse(raw);
-    const post = await this.execution.requirePost(artistId, input.postId);
-    if (input.targets) {
-      for (const edit of input.targets) {
-        await this.prisma.client.socialPostTarget.updateMany({
-          where: { id: edit.id, postId: post.id },
-          data: {
-            enabled: edit.enabled,
-            caption: edit.caption,
-            title: edit.title ?? null,
-            tags: edit.tags ?? [],
-            includeFacebookEvent: edit.includeFacebookEvent ?? false,
-            selectedVariantIndex: edit.selectedVariantIndex ?? 0
-          }
-        });
+    const decision = await this.prisma.client.$transaction(async (tx) => {
+      await assertSocialOwner(tx, artistId, actor.operatorId);
+      const post = await tx.socialPost.findFirst({
+        where: { id: input.postId, artistId },
+        include: { targets: { include: { account: true } }, mediaAsset: true, approval: true }
+      });
+      if (!post?.approval || post.approval.artistId !== artistId ||
+          post.approval.actionType !== SOCIAL_POST_ACTION_TYPE ||
+          post.approval.sourceKey !== `social_post:${post.id}`) {
+        throw new BadRequestException("This drop has no matching approval record.");
+      }
+      const reviewedFingerprint = post.approval.status === ApprovalStatus.pending || post.approval.status === ApprovalStatus.proposed
+        ? socialReviewFingerprint(post, socialAdapterMode(this.execution.env()))
+        : recordedSocialReviewFingerprint(post.approval.payload) ?? socialReviewFingerprint(post, socialAdapterMode(this.execution.env()));
+      if (input.reviewFingerprint !== reviewedFingerprint) {
+        throw new ConflictException("The draft, account, media, or posting mode changed. Reload and review before approving.");
+      }
+      if (input.targets?.some((target) => target.includeFacebookEvent)) {
+        throw new BadRequestException("Facebook Event creation is unavailable. Approve a social post separately.");
+      }
+      const ids = input.targets?.map((target) => target.id) ?? [];
+      if (new Set(ids).size !== ids.length || ids.some((id) => !post.targets.some((row) => row.id === id))) {
+        throw new BadRequestException("Review targets must belong to this drop and cannot repeat.");
+      }
+      if (post.approval.status !== ApprovalStatus.pending && post.approval.status !== ApprovalStatus.proposed) {
+        return { approvalId: post.approval.id, execute: false };
+      }
+      const targets = post.targets.map((target) => {
+        const edit = input.targets?.find((row) => row.id === target.id);
+        return edit ? { ...target, ...edit, title: edit.title ?? null, tags: edit.tags ?? [],
+          includeFacebookEvent: edit.includeFacebookEvent ?? false,
+          selectedVariantIndex: edit.selectedVariantIndex ?? 0 } : target;
+      });
+      if (!targets.some((target) => target.enabled)) {
+        throw new BadRequestException("Select at least one platform before approving.");
+      }
+      // Claim the decision before changing any target. Approval Center and concurrent
+      // clicks compete on the same row; the winning payload is immutable thereafter.
+      const approved = await tx.approvalRequest.updateMany({
+        where: { id: post.approval.id, artistId,
+          status: { in: [ApprovalStatus.pending, ApprovalStatus.proposed] }, executionAttemptedAt: null },
+        data: { status: ApprovalStatus.approved, approvedAt: new Date(), approvedBy: actor.label,
+          payload: { ...this.payloadFromPost({ ...post, targets }, post.voiceKey), reviewFingerprint: input.reviewFingerprint } as object }
+      });
+      if (approved.count !== 1) return { approvalId: post.approval.id, execute: false };
+      for (const target of targets) {
+        await tx.socialPostTarget.update({ where: { id: target.id }, data: {
+          enabled: target.enabled, caption: target.caption, title: target.title, tags: target.tags,
+          includeFacebookEvent: target.includeFacebookEvent,
+          selectedVariantIndex: target.selectedVariantIndex,
+          status: target.enabled ? "pending" : "skipped"
+        } });
+      }
+      await tx.socialPost.update({ where: { id: post.id }, data: { status: "approved" } });
+      await tx.auditEvent.create({ data: {
+        artistId, severity: AuditSeverity.info, aggregateType: "ApprovalRequest",
+        aggregateId: post.approval.id, action: "approval.approved", actorLabel: actor.label,
+        actorOperatorId: actor.operatorId,
+        metadata: { actionType: SOCIAL_POST_ACTION_TYPE, ownerApproved: true }
+      } });
+      return { approvalId: post.approval.id, execute: true };
+    });
+    if (!decision.execute) {
+      const current = await this.execution.requirePost(artistId, input.postId);
+      if (input.targets?.some((edit) => {
+        const row = current.targets.find((target) => target.id === edit.id);
+        return !row || row.enabled !== edit.enabled || row.caption !== edit.caption ||
+          row.title !== (edit.title ?? null) || JSON.stringify(row.tags) !== JSON.stringify(edit.tags ?? []) ||
+          row.includeFacebookEvent !== (edit.includeFacebookEvent ?? false) ||
+          row.selectedVariantIndex !== (edit.selectedVariantIndex ?? 0);
+      })) throw new ConflictException("This drop has already been reviewed. Its approved content cannot change.");
+      // Failed/uncertain attempts are reads. A separately approved, unclaimed
+      // request can still execute after this owner's explicit unchanged review.
+      if (current.approval?.status !== ApprovalStatus.approved || current.approval.executionAttemptedAt) {
+        return this.execution.getPost(artistId, input.postId);
       }
     }
-    const current = await this.execution.requirePost(artistId, post.id);
-    if (!current.approvalRequestId) {
-      throw new BadRequestException("This drop has no approval record.");
+    try {
+      await this.approvals.executeApproved(artistId, decision.approvalId, actor.label, {
+        actorOperatorId: actor.operatorId
+      });
+    } catch (error) {
+      const current = await this.execution.requirePost(artistId, input.postId);
+      if (!current.approval?.executionAttemptedAt) throw error;
+      // A competing click won the durable execution claim. Return its persisted
+      // state without performing another provider call or changing the snapshot.
     }
-    const approval = await this.prisma.client.approvalRequest.findUniqueOrThrow({
-      where: { id: current.approvalRequestId }
-    });
-    await this.prisma.client.approvalRequest.update({
-      where: { id: approval.id },
-      data: { payload: this.payloadFromPost(current, current.voiceKey) as object }
-    });
-    if (approval.status === ApprovalStatus.pending || approval.status === ApprovalStatus.proposed) {
-      await this.approvals.approve(artistId, approval.id, actor.label, actor.operatorId);
-    }
-    await this.approvals.executeApproved(artistId, approval.id, actor.label, {
-      actorOperatorId: actor.operatorId
-    });
-    return this.execution.getPost(artistId, post.id);
+    return this.execution.getPost(artistId, input.postId);
   }
 
   private payloadFromPost(
     post: {
       id: string;
       voiceKey: SocialVoiceKey;
-      mediaAsset: { publicUrl: string; kind: "photo" | "video" } | null;
+      mediaAsset: { publicUrl: string; kind: "photo" | "video"; storageKey?: string | null } | null;
       targets: Array<{
         id: string;
         platform: SocialPlatform;
@@ -291,8 +349,9 @@ export class SocialService {
   ): SocialPostBatchPayload {
     return {
       postId: post.id,
+      adapterMode: socialAdapterMode(this.execution.env()),
       voiceKey,
-      mediaUrl: post.mediaAsset?.publicUrl,
+      mediaUrl: post.mediaAsset?.storageKey ? undefined : post.mediaAsset?.publicUrl,
       mediaKind: post.mediaAsset?.kind,
       targets: post.targets.map((target) => ({
         targetId: target.id,
@@ -313,17 +372,17 @@ export class SocialService {
   }
 
   private async resolveShow(artistId: string, input: SocialDropInput) {
-    if (input.show) return input.show;
     if (!input.eventId) return null;
     const event = await this.prisma.client.bandEvent.findFirst({
-      where: { id: input.eventId, artistId }
+      where: { id: input.eventId, artistId },
+      select: { title: true, startsAt: true, locationName: true }
     });
-    if (!event) return null;
-    return {
-      name: event.title,
-      startsAt: event.startsAt?.toISOString() ?? undefined,
-      place: event.locationName ?? undefined
-    };
+    try {
+      return resolveRecordedSocialShow({ eventId: input.eventId, event });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : SOCIAL_SHOW_NOT_RECORDED;
+      throw new BadRequestException(message);
+    }
   }
 
   private async ensureVoiceProfile(artistId: string, voiceKey: SocialVoiceKey) {
@@ -357,7 +416,7 @@ export class SocialService {
           status: "active",
           handle: artistName.toLowerCase().replace(/\s+/g, "")
         },
-        update: { voiceKey, accountLabel: `${artistName} ${platform}` }
+        update: {}
       });
     }
   }

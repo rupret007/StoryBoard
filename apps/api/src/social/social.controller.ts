@@ -26,6 +26,7 @@ import {
   META_OAUTH_SCOPES,
   TIKTOK_OAUTH_AUTHORIZE,
   TIKTOK_OAUTH_SCOPES,
+  YOUTUBE_READONLY_SCOPE,
   YOUTUBE_UPLOAD_SCOPE
 } from "./social.constants";
 import { SocialMediaService } from "./social-media.service";
@@ -136,6 +137,8 @@ export class SocialController {
     const file = await this.media.openForArtist(artistId, id);
     return reply
       .header("Content-Type", file.mimeType)
+      .header("X-Content-Type-Options", "nosniff")
+      .header("Content-Security-Policy", "sandbox")
       .header("Content-Length", String(file.byteSize))
       .header("Content-Disposition", `inline; filename="${file.filename.replace(/"/g, "")}"`)
       .send(file.stream);
@@ -164,7 +167,7 @@ export class SocialController {
     @Headers("x-artist-id") artistHeader?: string
   ) {
     const artistId = await this.artistId(operator, req, artistHeader);
-    await this.roles.assertCanMutateWorkflow(operator.id, artistId);
+    await this.roles.assertOwner(operator.id, artistId);
     return this.social.approveAndPost(artistId, body, {
       label: operator.email,
       operatorId: operator.id
@@ -219,7 +222,7 @@ export class SocialController {
         client_id: clientId,
         redirect_uri: redirect,
         response_type: "code",
-        scope: YOUTUBE_UPLOAD_SCOPE,
+        scope: `${YOUTUBE_UPLOAD_SCOPE} ${YOUTUBE_READONLY_SCOPE}`,
         access_type: "offline",
         prompt: "consent",
         state

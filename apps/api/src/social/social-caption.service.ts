@@ -1,9 +1,10 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import OpenAI from "openai";
 import {
   SOCIAL_CAPTION_LLM_NOTICE_FAILED,
   SOCIAL_CAPTION_LLM_NOTICE_NO_KEY,
+  assertSafeSocialCaptionInput,
   completeSocialCaptionDrafts,
   socialCaptionLlmInput,
   socialCaptionLlmInstructions,
@@ -11,6 +12,7 @@ import {
   type DraftCaptionsInput,
   type SocialCaptionDraftResult
 } from "@storyboard/shared";
+import { SocialCaptionBudgetService } from "./social-caption-budget.service";
 
 export type SocialCaptionResponsesClient = {
   responses: {
@@ -28,7 +30,7 @@ export type SocialCaptionResponsesClient = {
           schema: Record<string, unknown>;
         };
       };
-    }): Promise<{ output_text: string }>;
+    }): Promise<{ output_text: string; status?: string }>;
   };
 };
 
@@ -42,7 +44,10 @@ export function socialCaptionLlmReady(env: {
 
 @Injectable()
 export class SocialCaptionService {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly budget: SocialCaptionBudgetService
+  ) {}
 
   draftingStatus() {
     if (this.llmReady()) {
@@ -68,12 +73,20 @@ export class SocialCaptionService {
     input: DraftCaptionsInput,
     client?: SocialCaptionResponsesClient
   ): Promise<SocialCaptionDraftResult> {
-    const canCall = Boolean(client) || this.llmReady();
-    if (!canCall) {
-      return completeSocialCaptionDrafts(input, null);
-    }
     try {
-      const llm = client ?? new OpenAI({ apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY") });
+      assertSafeSocialCaptionInput(input);
+      const canCall = Boolean(client) || this.llmReady();
+      if (!canCall) {
+        return completeSocialCaptionDrafts(input);
+      }
+      // Reserve before constructing/calling the provider. Failed calls still
+      // consume their slot; missing or unavailable storage never permits a call.
+      await this.budget.reserve();
+      const llm = client ?? new OpenAI({
+        apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY"),
+        timeout: 30_000,
+        maxRetries: 0
+      });
       const response = await llm.responses.create({
         model: this.config.get<string>("OPENAI_MANAGER_MODEL") ?? "gpt-5.6-terra",
         store: false,
@@ -89,10 +102,14 @@ export class SocialCaptionService {
           }
         }
       });
+      if (response.status && response.status !== "completed") {
+        throw new Error("Caption generation did not complete.");
+      }
       return completeSocialCaptionDrafts(input, JSON.parse(response.output_text));
     } catch {
-      const fallback = completeSocialCaptionDrafts(input, null);
-      return { ...fallback, notice: SOCIAL_CAPTION_LLM_NOTICE_FAILED };
+      // Never turn a configured provider failure into a successful draft or expose
+      // provider errors, which may contain request details or credentials.
+      throw new ServiceUnavailableException(SOCIAL_CAPTION_LLM_NOTICE_FAILED);
     }
   }
 }

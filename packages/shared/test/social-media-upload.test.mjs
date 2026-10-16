@@ -32,3 +32,12 @@ test("TikTok FILE_UPLOAD plan uses chunked FILE_UPLOAD, not a public URL", () =>
   assert.equal(plan.totalChunkCount, 3);
   assert.equal(plan.chunks.at(-1)?.length, 5 * 1024 * 1024);
 });
+
+test("active content cannot masquerade as social media by MIME prefix or filename", () => {
+  for (const mimeType of ["text/html", "image/svg+xml", "video/x-script", "application/xhtml+xml", "application/octet-stream"]) {
+    assert.equal(shared.isAllowedSocialMediaMime(mimeType, "photo.jpg"), false);
+    assert.throws(() => shared.assertSocialMediaLimits({ mimeType, filename: "photo.jpg", byteSize: 32 }), /Choose a photo or video/);
+  }
+  assert.equal(shared.isAllowedSocialMediaMime("image/png", "photo.png"), true);
+  assert.equal(shared.isAllowedSocialMediaMime("video/mp4", "clip.mp4"), true);
+});

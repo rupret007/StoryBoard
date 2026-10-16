@@ -33,3 +33,11 @@ test("appended chunks stay sequential on disk", async () => {
   assert.equal(await readFile(path, "utf8"), "abcdef");
   await assert.rejects(() => store.appendSocialMediaChunk(path, Buffer.from("x"), 2), /expected offset/);
 });
+
+test("media paths reject parent traversal and sibling directories sharing the root prefix", () => {
+  const root = join(tmpdir(), "sb-media");
+  assert.throws(() => store.socialMediaAbsolutePath(root, "../sb-media-private/secret"), /outside/);
+  assert.throws(() => store.socialMediaAbsolutePath(root, ".."), /outside/);
+  assert.throws(() => store.socialMediaAbsolutePath(root, "."), /outside/);
+  assert.equal(store.socialMediaAbsolutePath(root, "artist/asset"), join(root, "artist/asset"));
+});
