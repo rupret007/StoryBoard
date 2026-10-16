@@ -35,9 +35,9 @@ development, use [Run locally](#run-locally-from-zero) and the
   Vault-imported songs/setlists, projects, offers, invoices, expenses, and
   settlements.
 - **Social (Phase 1):** drop media plus a note, draft per-platform captions in
-  the Stalemate or Rad Dad voice, approve once, then post. Facebook photo/video
-  plus an optional show Event, Instagram feed or Reel, YouTube private upload,
-  TikTok inbox draft. Nothing posts without an approval record or a platform ID.
+  the Stalemate or Rad Dad voice, approve once, then post. Facebook photo/video, Instagram feed or Reel, YouTube private upload,
+  and TikTok inbox transfer. Only an owner can approve; simulation, private
+  upload, processing, and confirmed public publication have distinct receipts.
   See [`docs/SOCIAL_MANAGER_PLAN.md`](docs/SOCIAL_MANAGER_PLAN.md).
 - **Approvals:** human decide → explicit execute → append-only reconciliation.
   Gmail, Calendar, Drive, and social sends stay behind adapters (mock when unset).

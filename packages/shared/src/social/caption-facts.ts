@@ -70,13 +70,31 @@ export function confirmedSocialFactBag(facts: ConfirmedSocialFacts): string {
 
 export function factBagIncludes(bag: string, value: string): boolean {
   const needle = normalizeFactText(value);
-  return Boolean(needle) && bag.includes(needle);
+  if (!needle) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, "u").test(bag);
+}
+
+function linksInText(text: string): string[] {
+  return (text.match(/(?:https?:\/\/|www\.)[^\s<>"']+|\b(?:[a-z\d](?:[a-z\d-]*[a-z\d])?\.)+[a-z]{2,}(?:\/[^\s<>"']*)?/gi) ?? [])
+    .map((link) => link.replace(/[.,;!?)]+$/, ""));
 }
 
 export function inventedFactsInText(text: string, facts: ConfirmedSocialFacts): string[] {
   const bag = confirmedSocialFactBag(facts);
   const invented: string[] = [];
   const body = text ?? "";
+  const confirmedLinks = new Set(linksInText([
+    facts.note,
+    facts.show?.name,
+    facts.show?.place,
+    facts.show?.startsAt,
+    facts.show?.ticketUrl,
+    ...(facts.extra ?? [])
+  ].filter(Boolean).join(" ")));
+  for (const link of linksInText(body)) {
+    if (!confirmedLinks.has(link)) invented.push(link);
+  }
 
   for (const match of body.match(/\$\d+(?:\.\d{1,2})?/g) ?? []) {
     if (!factBagIncludes(bag, match)) invented.push(match);
@@ -93,7 +111,13 @@ export function inventedFactsInText(text: string, facts: ConfirmedSocialFacts): 
   for (const match of body.match(/\b\d{4}-\d{2}-\d{2}\b/g) ?? []) {
     if (!factBagIncludes(bag, match)) invented.push(match);
   }
-  for (const match of body.match(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g) ?? []) {
+  for (const match of body.match(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g) ?? []) {
+    if (!factBagIncludes(bag, match)) invented.push(match);
+  }
+  for (const match of body.match(/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tonight|tomorrow|yesterday)\b/gi) ?? []) {
+    if (!factBagIncludes(bag, match)) invented.push(match);
+  }
+  for (const match of body.match(/\b(?:\d{1,2}(?::\d{2})?\s*[ap]\.?m\.?|\d{1,2}:\d{2})\b/gi) ?? []) {
     if (!factBagIncludes(bag, match)) invented.push(match);
   }
 
@@ -101,8 +125,8 @@ export function inventedFactsInText(text: string, facts: ConfirmedSocialFacts): 
   for (const city of SOCIAL_LOCATION_TOKENS) {
     const hashed = `#${city.replace(/\s+/g, "")}`;
     const mentioned =
-      lower.includes(city) ||
-      normalizeFactText(body).includes(city.replace(/\s+/g, "")) ||
+      factBagIncludes(lower, city) ||
+      factBagIncludes(lower, city.replace(/\s+/g, "")) ||
       body.toLowerCase().includes(hashed);
     if (mentioned && !factBagIncludes(bag, city) && !factBagIncludes(bag, city.replace(/\s+/g, ""))) {
       invented.push(city);

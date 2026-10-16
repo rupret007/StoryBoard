@@ -63,7 +63,7 @@ test("Chicago hashtags appear only when Chicago is in the confirmed facts", () =
 });
 
 test("completeSocialCaptionDrafts drops invented prices, dates, and cities", () => {
-  const result = shared.completeSocialCaptionDrafts(
+  assert.throws(() => shared.completeSocialCaptionDrafts(
     {
       voice: "stalemate",
       note: "Manic live at Burlington, Friday.",
@@ -102,7 +102,13 @@ test("completeSocialCaptionDrafts drops invented prices, dates, and cities", () 
         }
       ]
     }
-  );
+  ), /No draft was created/);
+  const result = shared.completeSocialCaptionDrafts({
+    voice: "stalemate",
+    note: "Manic live at Burlington, Friday.",
+    mediaKind: "video",
+    show: { name: "Stalemate at Burlington Bar", place: "Burlington Bar", startsAt: "Friday" }
+  });
   assert.equal(result.source, "template");
   assert.match(result.notice, /template/i);
   for (const draft of result.drafts) {
@@ -115,6 +121,58 @@ test("completeSocialCaptionDrafts drops invented prices, dates, and cities", () 
       }).length,
       0
     );
+  }
+});
+
+test("caption grounding rejects fabricated links, relative dates, times, and substring price matches", () => {
+  const facts = {
+    voice: "stalemate",
+    note: "Friday, $25, 9pm at Burlington Bar.",
+    mediaKind: "video",
+    show: { name: "Stalemate at Burlington Bar", ticketUrl: "https://example.com/tickets" }
+  };
+  for (const caption of [
+    "Tickets https://invented.example/tickets",
+    "Tickets https://example.com/tickets/surprise",
+    "Tickets invented.example/tickets",
+    "See you Saturday",
+    "Playing tomorrow",
+    "Doors 8pm",
+    "Show 20:00",
+    "See you 10/15",
+    "Tickets $2"
+  ]) {
+    assert.ok(shared.inventedFactsInText(caption, facts).length > 0, caption);
+  }
+  assert.deepEqual(shared.inventedFactsInText("Friday, 9pm, $25. https://example.com/tickets", facts), []);
+});
+
+test("configured caption output requires all platforms and validates every variant and hashtag", () => {
+  const input = { voice: "stalemate", note: "Friday at Burlington Bar.", mediaKind: "video" };
+  const valid = () => ({
+    platforms: ["facebook", "instagram", "youtube", "tiktok"].map((platform) => ({
+      platform,
+      variants: [
+        { caption: "Burlington Bar Friday.", title: platform === "youtube" ? "Stalemate at Burlington Bar" : "", tags: ["stalemate"] },
+        { caption: "Playing Burlington Bar.", title: platform === "youtube" ? "Stalemate at Burlington Bar" : "", tags: ["stalemate"] }
+      ]
+    }))
+  });
+  assert.equal(shared.completeSocialCaptionDrafts(input, valid()).source, "llm");
+  const partial = valid();
+  partial.platforms.pop();
+  const duplicate = valid();
+  duplicate.platforms[3] = duplicate.platforms[0];
+  const inventedThird = valid();
+  inventedThird.platforms[0].variants.push({ caption: "Tickets $30", title: "", tags: [] });
+  const inventedTag = valid();
+  inventedTag.platforms[1].variants[0].tags.push("milwaukee");
+  const inventedInlineTag = valid();
+  inventedInlineTag.platforms[1].variants[0].caption += " #milwaukee";
+  const emptyTitle = valid();
+  emptyTitle.platforms[2].variants[0].title = "";
+  for (const output of [null, {}, partial, duplicate, inventedThird, inventedTag, inventedInlineTag, emptyTitle]) {
+    assert.throws(() => shared.completeSocialCaptionDrafts(input, output), /No draft was created/);
   }
 });
 

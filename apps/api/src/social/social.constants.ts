@@ -7,6 +7,7 @@ export const YOUTUBE_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/
 export const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload";
+export const YOUTUBE_READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly";
 
 export const TIKTOK_INBOX_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/";
 export const TIKTOK_PHOTO_INIT_URL = "https://open.tiktokapis.com/v2/post/publish/content/init/";

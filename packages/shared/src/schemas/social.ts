@@ -46,6 +46,7 @@ export const socialTargetEditSchema = z
 export const socialApproveAndPostSchema = z
   .object({
     postId: z.string().trim().min(1),
+    reviewFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     targets: z.array(socialTargetEditSchema).min(1).optional()
   })
   .strict();
@@ -63,6 +64,8 @@ export const socialConnectProviderSchema = z.enum(["meta", "youtube_publish", "t
 export const socialPostBatchPayloadSchema = z
   .object({
     postId: z.string().trim().min(1),
+    adapterMode: z.enum(["mock", "real"]),
+    reviewFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     voiceKey: socialVoiceKeySchema,
     mediaUrl: z.string().url().optional(),
     mediaKind: socialMediaKindSchema.optional(),

@@ -19,14 +19,14 @@ export default async function SocialPage() {
     });
   } catch {
     loadError =
-      "Social could not be loaded. Reload to verify your band. Nothing was posted.";
+      "Social could not be loaded. Reload to verify your band and posting status.";
   }
 
   return (
     <div className="space-y-8">
       <PageHeader
         title="Social"
-        description="Drop a photo or video from your phone or computer (or paste a URL). The manager LLM drafts caption variants in this band's voice from confirmed facts, then you approve once. Nothing posts without that approval record, and nothing is marked posted until the platform returns an ID."
+        description="Drop a photo or video from your phone or computer (or paste a URL). The manager LLM drafts caption variants in this band's voice from confirmed facts, then an owner reviews and approves. Mock sends, private uploads, processing, and confirmed public posts have separate receipts."
       />
       {loadError ? (
         <p role="alert" className="text-sm text-rose-200">

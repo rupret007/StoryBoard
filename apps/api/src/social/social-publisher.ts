@@ -16,6 +16,10 @@ export type SocialSendLogRecord = {
   accountExternalId: string | null;
   voiceKey: SocialVoiceKey;
   outcome:
+    | "simulated"
+    | "private_upload"
+    | "processing"
+    | "unknown"
     | "sent"
     | "draft_only"
     | "failed"
@@ -62,6 +66,7 @@ export type SocialTargetSendResult = {
   targetId: string;
   platform: SocialPlatform;
   posted: boolean;
+  deliveryState?: SocialPublishResult["deliveryState"];
   isDraftOnly: boolean;
   externalPostId?: string | undefined;
   externalPostUrl?: string | undefined;
@@ -147,7 +152,9 @@ async function sendSocialTargetAsync(input: SocialTargetSendInput): Promise<Soci
     };
   }
 
-  const result = await input.adapter.publish({
+  let result: SocialPublishResult;
+  try {
+    result = await input.adapter.publish({
     platform: input.target.platform,
     caption: input.target.caption,
     title: input.target.title,
@@ -170,13 +177,22 @@ async function sendSocialTargetAsync(input: SocialTargetSendInput): Promise<Soci
       clientSecret: input.clientSecret,
       instagramBusinessId: input.instagramBusinessId
     }
-  });
+    });
+  } catch {
+    const log: SocialSendLogRecord = { ...baseLog, outcome: "unknown",
+      errorMessage: "Provider outcome is unknown. Check the platform before creating another approval.",
+      durationMs: Date.now() - start };
+    return { targetId: input.target.targetId, platform: input.target.platform,
+      posted: false, isDraftOnly: false, deliveryState: "unknown", errorMessage: log.errorMessage, log };
+  }
 
   if (!postedOnlyWithId(result)) {
+    const uncertain = result.success || result.deliveryState === "unknown";
     const log: SocialSendLogRecord = {
       ...baseLog,
       approvalRequestId: input.approval.id,
-      outcome: "refused_no_id",
+      outcome: uncertain ? "unknown" : "failed",
+      externalPostId: result.externalPostId,
       requestSummary: result.requestSummary,
       responseCode: result.responseCode,
       errorMessage:
@@ -189,33 +205,45 @@ async function sendSocialTargetAsync(input: SocialTargetSendInput): Promise<Soci
       platform: input.target.platform,
       posted: false,
       isDraftOnly: Boolean(result.isDraftOnly),
+      deliveryState: uncertain ? "unknown" : undefined,
+      externalPostId: result.externalPostId,
       errorMessage: log.errorMessage,
       log
     };
   }
 
+  const state = input.adapter.mode === "mock" ? "simulated" : result.deliveryState ?? "unknown";
+  const posted = input.adapter.mode === "real" && state === "published";
   const log: SocialSendLogRecord = {
     ...baseLog,
     approvalRequestId: input.approval.id,
-    outcome: result.isDraftOnly ? "draft_only" : "sent",
-    requestSummary: result.requestSummary,
+    outcome: posted ? "sent" : state === "published" ? "unknown" : state,
+    requestSummary: { ...result.requestSummary, deliveryState: state },
     responseCode: result.responseCode,
     externalPostId: result.externalPostId,
-    durationMs: result.durationMs || Date.now() - start
+    durationMs: result.durationMs || Date.now() - start,
+    ...(state === "unknown" ? { errorMessage: "Provider outcome needs review; an id alone does not confirm publication." } : {})
   };
   return {
     targetId: input.target.targetId,
     platform: input.target.platform,
-    posted: !result.isDraftOnly,
-    isDraftOnly: Boolean(result.isDraftOnly),
+    posted,
+    deliveryState: state,
+    isDraftOnly: state === "draft_only" || state === "private_upload" || state === "processing",
     externalPostId: result.externalPostId,
     externalPostUrl: result.externalPostUrl,
+    errorMessage: log.errorMessage,
     log
   };
 }
 
 export function parseSocialPostPayload(payload: unknown): SocialPostBatchPayload {
-  return socialPostBatchPayloadSchema.parse(payload);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return socialPostBatchPayloadSchema.parse(payload);
+  }
+  const source = { ...payload } as Record<string, unknown>;
+  for (const key of ["dryRunPreview", "executionResult", "executionError", "executionFailedAt"]) delete source[key];
+  return socialPostBatchPayloadSchema.parse(source);
 }
 
 export type SocialPublisherPort = {
