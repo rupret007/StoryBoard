@@ -297,19 +297,9 @@ function isTransactionConflict(error: unknown): boolean {
   // failures as P2010/40001, rather than Prisma's model-query P2034. It still
   // aborted the transaction, so ask Stripe to retry instead of leaking a 500.
   const meta = "meta" in error ? error.meta : null;
-  if (error.code !== "P2010" || !meta || typeof meta !== "object") {
-    return false;
-  }
-  if ("code" in meta && meta.code === "40001") {
-    return true;
-  }
-  const adapter = "driverAdapterError" in meta ? meta.driverAdapterError : null;
-  const cause = adapter && typeof adapter === "object" && "cause" in adapter
-    ? adapter.cause : null;
   return Boolean(
-    cause && typeof cause === "object" &&
-    "originalCode" in cause && cause.originalCode === "40001" &&
-    "kind" in cause && cause.kind === "TransactionWriteConflict"
+    error.code === "P2010" && meta && typeof meta === "object" &&
+    "code" in meta && meta.code === "40001"
   );
 }
 

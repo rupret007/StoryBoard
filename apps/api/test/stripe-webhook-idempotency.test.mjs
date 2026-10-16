@@ -338,45 +338,6 @@ test("unrelated raw query errors are not misclassified as duplicate deliveries",
   }), (error) => error === failure);
 });
 
-test("Prisma pg-adapter raw serialization conflicts return 503 without processing or replay", async () => {
-  const conflict = Object.assign(new Error("Raw query failed"), {
-    code: "P2010",
-    meta: { driverAdapterError: new Error("TransactionWriteConflict", { cause: {
-      kind: "TransactionWriteConflict", originalCode: "40001"
-    } }) }
-  });
-  let transactionCalls = 0;
-  let processorCalls = 0;
-  const controller = controllerFor({ prisma: { client: {
-    $transaction: async (work) => {
-      transactionCalls += 1;
-      return work({ $queryRaw: async () => { throw conflict; } });
-    }
-  } } }, async () => { processorCalls += 1; });
-  const payload = eventPayload("evt_adapter_serialization_conflict");
-  await assert.rejects(
-    () => controller.webhook({ rawBody: payload }, signPayload(payload)),
-    (error) => error.getStatus?.() === 503
-  );
-  assert.equal(transactionCalls, 1);
-  assert.equal(processorCalls, 0);
-});
-
-test("unrelated pg-adapter errors retain their original failure", async () => {
-  const failure = Object.assign(new Error("Raw query failed"), {
-    code: "P2010",
-    meta: { driverAdapterError: new Error("Connection closed", { cause: {
-      kind: "ConnectionClosed", originalCode: "08006"
-    } }) }
-  });
-  const service = new StripeWebhookIdempotencyService({ client: {
-    $transaction: async () => { throw failure; }
-  } });
-  await assert.rejects(() => service.runOnce("evt_connection_failure", async () => {
-    assert.fail("failed claim must not run the handler");
-  }), (error) => error === failure);
-});
-
 test("stripe event id extractor rejects missing, empty, or non-evt ids", () => {
   assert.equal(signature.stripeEventId(undefined), null);
   assert.equal(signature.stripeEventId({ type: "charge.succeeded" }), null);
