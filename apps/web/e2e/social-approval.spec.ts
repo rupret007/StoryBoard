@@ -37,7 +37,7 @@ test("owner approval with a lost response remains a single simulated send after 
     await route.abort("failed");
   });
   await page.getByTestId("social-approve-and-post").click();
-  await expect(page.getByRole("alert")).toContainText("A send may have started");
+  await expect(page.locator("p[role='alert']")).toContainText("A send may have started");
   await expect(page.getByTestId("social-approve-and-post")).toBeDisabled();
   await page.getByRole("button", { name: "Refresh status", exact: true }).click();
   for (const platform of ["facebook", "instagram", "youtube", "tiktok"]) {
