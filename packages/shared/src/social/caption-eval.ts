@@ -68,27 +68,30 @@ export function runSocialCaptionEvaluation(): {
 } {
   const results: SocialCaptionEvalResult[] = [];
 
-  const invented = completeSocialCaptionDrafts(
-    { voice: "stalemate", note: "Manic live at Burlington, Friday.", mediaKind: "video", show },
-    llmPayload({
-      facebookCaption: "Doors $25 this October 99 in Chicago.",
-      instagramCaption: "Don't miss Chicago October 99. $25",
-      tiktokCaption: "$25 Chicago October 99",
-      youtubeCaption: "Tickets $25 in Chicago on October 99"
-    })
-  );
+  let rejectedInvented = false;
+  try {
+    completeSocialCaptionDrafts(
+      { voice: "stalemate", note: "Manic live at Burlington, Friday.", mediaKind: "video", show },
+      llmPayload({
+        facebookCaption: "Doors $25 this October 99 in Chicago.",
+        instagramCaption: "Don't miss Chicago October 99. $25",
+        tiktokCaption: "$25 Chicago October 99",
+        youtubeCaption: "Tickets $25 in Chicago on October 99"
+      })
+    );
+  } catch {
+    rejectedInvented = true;
+  }
+  const templateFacts = { voice: "stalemate" as const, note: "Manic live at Burlington, Friday.", mediaKind: "video" as const, show };
+  const safeTemplates = completeSocialCaptionDrafts(templateFacts);
   results.push({
     name: "no-invented-facts",
     passed:
-      invented.source === "template" &&
-      invented.drafts.every((draft) => inventedFactsInText(`${draft.caption} ${draft.title ?? ""}`, {
-        voice: "stalemate",
-        note: "Manic live at Burlington, Friday.",
-        mediaKind: "video",
-        show
-      }).length === 0) &&
-      invented.drafts.every((draft) => !/#chicago/i.test(draft.caption) && !draft.tags.includes("chicago")),
-    detail: "Mocked LLM dates, prices, and Chicago are dropped; template uses only confirmed show facts."
+      rejectedInvented &&
+      safeTemplates.source === "template" &&
+      safeTemplates.drafts.every((draft) => inventedFactsInText(`${draft.caption} ${draft.title ?? ""}`, templateFacts).length === 0) &&
+      safeTemplates.drafts.every((draft) => !/#chicago/i.test(draft.caption) && !draft.tags.includes("chicago")),
+    detail: "Mocked LLM dates, prices, and Chicago fail the entire draft; explicit unconfigured templates use only confirmed show facts."
   });
 
   const stalemate = completeSocialCaptionDrafts(

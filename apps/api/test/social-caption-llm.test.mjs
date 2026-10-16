@@ -46,9 +46,9 @@ test("caption service uses the template and says so when no LLM key is set", asy
   assert.ok(result.drafts.every((row) => row.variants.length >= 2));
 });
 
-test("mocked LLM invented facts fall back to the template", async () => {
+test("mocked LLM invented facts fail closed without fallback drafts", async () => {
   const service = new captions.SocialCaptionService(config(true));
-  const result = await service.draft(input, {
+  await assert.rejects(service.draft(input, {
     responses: {
       create: async () => ({
         output_text: JSON.stringify({
@@ -62,10 +62,57 @@ test("mocked LLM invented facts fall back to the template", async () => {
         })
       })
     }
-  });
-  assert.equal(result.source, "template");
-  assert.match(result.notice, /invented facts|template/i);
-  assert.doesNotMatch(result.drafts.find((row) => row.platform === "instagram").caption, /#chicago/i);
+  }), (error) => error.getStatus() === 503 && /No draft was created/.test(error.message));
+});
+
+test("caption provider errors, refusals, and incomplete or malformed responses fail closed with sanitized errors", async () => {
+  const service = new captions.SocialCaptionService(config(true));
+  const responses = [
+    async () => { throw new Error("Provider error with sk-synthetic-private-token"); },
+    async () => ({ output_text: "" }),
+    async () => ({ output_text: "not json" }),
+    async () => ({ output_text: "null" }),
+    async () => ({ output_text: "{}" }),
+    async () => ({ output_text: JSON.stringify({ platforms: [] }) }),
+    async () => ({ status: "incomplete", output_text: JSON.stringify(validOutput()) })
+  ];
+  for (const create of responses) {
+    await assert.rejects(service.draft(input, { responses: { create } }), (error) => {
+      assert.equal(error.getStatus(), 503);
+      assert.match(error.message, /No draft was created/);
+      assert.doesNotMatch(JSON.stringify(error.getResponse()), /synthetic-private-token|template/i);
+      return true;
+    });
+  }
+});
+
+function validOutput() {
+  return {
+    platforms: ["facebook", "instagram", "youtube", "tiktok"].map((platform) => ({
+      platform,
+      variants: [
+        { caption: "Burlington Bar Friday.", title: platform === "youtube" ? "Stalemate at Burlington Bar" : "", tags: ["stalemate"] },
+        { caption: "Playing Burlington Bar.", title: platform === "youtube" ? "Stalemate at Burlington Bar" : "", tags: ["stalemate"] }
+      ]
+    }))
+  };
+}
+
+test("caption provider output cannot silently mix generated and template platforms", async () => {
+  const service = new captions.SocialCaptionService(config(true));
+  const missing = validOutput();
+  missing.platforms.pop();
+  const duplicate = validOutput();
+  duplicate.platforms[3] = duplicate.platforms[0];
+  const invalidVariant = validOutput();
+  invalidVariant.platforms[2].variants.push({ caption: "Buy tickets https://invented.example/tickets", title: "Stalemate", tags: [] });
+  const empty = validOutput();
+  empty.platforms[1].variants[0].caption = " ";
+  for (const output of [missing, duplicate, invalidVariant, empty]) {
+    await assert.rejects(service.draft(input, {
+      responses: { create: async () => ({ output_text: JSON.stringify(output) }) }
+    }), (error) => error.getStatus() === 503 && /No draft was created/.test(error.message));
+  }
 });
 
 test("mocked LLM keeps Stalemate and Rad Dad voices on their own facts", async () => {

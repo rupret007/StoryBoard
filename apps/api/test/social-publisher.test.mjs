@@ -80,7 +80,7 @@ test("refuses a Rad Dad account on a Stalemate workspace before the adapter runs
   assert.equal(result.log.outcome, "refused_account_mismatch");
 });
 
-test("does not count a send as posted when the platform omits an id", async () => {
+test("a reported send without a platform id stays unknown and never counts as posted", async () => {
   const adapter = {
     platform: "facebook",
     mode: "real",
@@ -98,10 +98,11 @@ test("does not count a send as posted when the platform omits an id", async () =
     adapter
   });
   assert.equal(result.posted, false);
-  assert.equal(result.log.outcome, "refused_no_id");
+  assert.equal(result.log.outcome, "unknown");
+  assert.equal(result.deliveryState, "unknown");
 });
 
-test("logs a send only after the platform returns an id", async () => {
+test("mock identifiers are recorded as simulation and never count as posted", async () => {
   const result = await sendSocialTarget({
     artistId: "artist-1",
     artistName: "Stalemate",
@@ -111,13 +112,13 @@ test("logs a send only after the platform returns an id", async () => {
     target: payload.targets[0],
     adapter: new MockSocialPlatformAdapter("facebook")
   });
-  assert.equal(result.posted, true);
-  assert.equal(result.log.outcome, "sent");
+  assert.equal(result.posted, false);
+  assert.equal(result.log.outcome, "simulated");
   assert.ok(result.externalPostId);
   assert.equal(result.log.approvalRequestId, "approval-1");
 });
 
-test("TikTok inbox success is draft_only and still requires a publish id", async () => {
+test("mock TikTok inbox identifiers remain simulated", async () => {
   const result = await sendSocialTarget({
     artistId: "artist-1",
     artistName: "Stalemate",
@@ -128,7 +129,27 @@ test("TikTok inbox success is draft_only and still requires a publish id", async
     adapter: new MockSocialPlatformAdapter("tiktok")
   });
   assert.equal(result.posted, false);
-  assert.equal(result.isDraftOnly, true);
-  assert.equal(result.log.outcome, "draft_only");
+  assert.equal(result.isDraftOnly, false);
+  assert.equal(result.log.outcome, "simulated");
   assert.ok(result.externalPostId);
+});
+
+for (const [state, posted] of [["published", true], ["private_upload", false], ["processing", false], ["draft_only", false], [undefined, false]]) {
+  test(`real adapter state ${state} cannot imply more public delivery than proved`, async () => {
+    const result = await sendSocialTarget({ artistId: "artist-1", artistName: "Stalemate", artistVoice: "stalemate",
+      approval: approval(), payload, target: payload.targets[0], adapter: { platform: "facebook", mode: "real",
+        async publish() { return { success: true, externalPostId: "provider-id", deliveryState: state,
+          isDraftOnly: false, durationMs: 1, requestSummary: {} }; } } });
+    assert.equal(result.posted, posted);
+    assert.equal(result.log.outcome, posted ? "sent" : state ?? "unknown");
+  });
+}
+
+test("a thrown provider exception is unknown and does not expose its secret text", async () => {
+  const result = await sendSocialTarget({ artistId: "artist-1", artistName: "Stalemate", artistVoice: "stalemate",
+    approval: approval(), payload, target: payload.targets[0], adapter: { platform: "facebook", mode: "real",
+      async publish() { throw new Error("synthetic-access-token"); } } });
+  assert.equal(result.posted, false);
+  assert.equal(result.log.outcome, "unknown");
+  assert.doesNotMatch(JSON.stringify(result), /synthetic-access-token/);
 });

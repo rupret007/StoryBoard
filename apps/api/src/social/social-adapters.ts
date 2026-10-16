@@ -39,6 +39,8 @@ export type SocialPublishInput = {
 export type SocialPublishResult = {
   success: boolean;
   isDraftOnly: boolean;
+  /** Receipt evidence, never inferred from an upload/container id. */
+  deliveryState?: "published" | "private_upload" | "processing" | "simulated" | "draft_only" | "unknown";
   externalPostId?: string;
   externalPostUrl?: string;
   responseCode?: number;
@@ -55,7 +57,7 @@ export interface SocialPlatformAdapter {
 }
 
 const defaultFetch: SocialHttpFetch = async (input, init) => {
-  const request: RequestInit = {};
+  const request: RequestInit = { signal: AbortSignal.timeout(30_000) };
   if (init?.method) request.method = init.method;
   if (init?.headers) request.headers = init.headers;
   if (init?.body !== undefined) request.body = init.body;
@@ -69,15 +71,8 @@ const defaultFetch: SocialHttpFetch = async (input, init) => {
   };
 };
 
-function readErrorMessage(data: unknown, fallback: string): string {
-  if (!data || typeof data !== "object") return fallback;
-  const record = data as Record<string, unknown>;
-  const nested = record.error;
-  if (nested && typeof nested === "object") {
-    const message = (nested as Record<string, unknown>).message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  if (typeof record.message === "string" && record.message.trim()) return record.message;
+function readErrorMessage(_data: unknown, fallback: string): string {
+  // Provider bodies and transport exceptions can echo access tokens and request URLs.
   return fallback;
 }
 
@@ -97,11 +92,9 @@ export class MockSocialPlatformAdapter implements SocialPlatformAdapter {
     const id = `mock_${this.platform}_${Date.now().toString(36)}`;
     return {
       success: true,
+      deliveryState: "simulated",
       isDraftOnly: draftOnly,
       externalPostId: id,
-      externalPostUrl: draftOnly
-        ? `https://www.tiktok.com/inbox?draft=${id}`
-        : `https://mock.${this.platform}.example/posts/${id}`,
       responseCode: 200,
       durationMs: Date.now() - start,
       requestSummary: {
@@ -138,35 +131,15 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
     }
 
     try {
-      if (input.includeFacebookEvent && input.facebookEventName && input.facebookEventStartsAt) {
-        const event = await this.postJson(`${META_GRAPH_BASE}/${pageId}/events`, {
-          name: input.facebookEventName,
-          start_time: input.facebookEventStartsAt,
-          description: input.caption,
-          ...(input.facebookEventPlace ? { location: input.facebookEventPlace } : {}),
-          access_token: token
-        });
-        if (!event.ok) {
-          return this.fail(start, event.status, event.data, "Facebook Event create failed");
-        }
-        const eventId = typeof asRecord(event.data).id === "string" ? String(asRecord(event.data).id) : "";
-        if (!eventId) {
-          return {
-            success: false,
-            isDraftOnly: false,
-            responseCode: event.status,
-            errorMessage: "Facebook Event create returned no id. Nothing was marked posted.",
-            durationMs: Date.now() - start,
-            requestSummary: { platform: "facebook", kind: "event" }
-          };
-        }
+      if (input.includeFacebookEvent) {
+        return this.fail(start, 400, null, "Facebook Event creation is unavailable until it has a separate durable approval and receipt. No request was sent.", false);
       }
 
       if (input.mediaKind === "video" && input.mediaPath && input.mediaByteSize) {
-        return this.publishLocalVideo(input, token, pageId, start);
+        return await this.publishLocalVideo(input, token, pageId, start);
       }
       if (input.mediaKind !== "video" && input.mediaPath && input.mediaByteSize) {
-        return this.publishLocalPhoto(input, token, pageId, start);
+        return await this.publishLocalPhoto(input, token, pageId, start);
       }
 
       const endpoint =
@@ -190,11 +163,12 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
         return this.fail(start, posted.status, posted.data, "Facebook publish failed");
       }
       return this.requireFacebookId(posted.status, posted.data, start, endpoint, pageId);
-    } catch (error) {
+    } catch {
       return {
         success: false,
+        deliveryState: "unknown",
         isDraftOnly: false,
-        errorMessage: error instanceof Error ? error.message : "Facebook publish failed",
+        errorMessage: "Facebook publish could not be confirmed. Check the provider before trying again.",
         durationMs: Date.now() - start,
         requestSummary: { platform: "facebook" }
       };
@@ -230,6 +204,7 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
     if (!uploadSessionId) {
       return {
         success: false,
+        deliveryState: "unknown",
         isDraftOnly: false,
         errorMessage: "Facebook resumable start returned no upload_session_id. Nothing was marked posted.",
         durationMs: Date.now() - start,
@@ -271,9 +246,12 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
       access_token: token
     });
     if (!finished.ok) return this.fail(start, finished.status, finished.data, "Facebook resumable finish failed");
+    const finishedData = asRecord(finished.data);
     return this.requireFacebookId(
       finished.status,
-      finished.data,
+      finishedData.success === true && !finishedData.id && typeof session.video_id === "string"
+        ? { ...finishedData, id: session.video_id }
+        : finished.data,
       start,
       `${META_GRAPH_VIDEO_BASE}/${pageId}/videos`,
       pageId
@@ -319,10 +297,13 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
     endpoint: string,
     pageId: string
   ): SocialPublishResult {
-    const id = typeof asRecord(data).id === "string" ? String(asRecord(data).id).trim() : "";
+    const record = asRecord(data);
+    const postId = typeof record.post_id === "string" ? record.post_id.trim() : "";
+    const id = postId || (typeof record.id === "string" ? record.id.trim() : "");
     if (!id) {
       return {
         success: false,
+        deliveryState: "unknown",
         isDraftOnly: false,
         responseCode: status,
         errorMessage: "Facebook Graph API returned success without a post id. Nothing was marked posted.",
@@ -331,11 +312,13 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
       };
     }
     const shortId = id.includes("_") ? id.split("_")[1] : id;
+    const published = endpoint.endsWith("/feed") || (endpoint.endsWith("/photos") && Boolean(postId));
     return {
       success: true,
+      deliveryState: published ? "published" : "processing",
       isDraftOnly: false,
       externalPostId: id,
-      externalPostUrl: `https://www.facebook.com/permalink.php?story_fbid=${shortId}&id=${pageId}`,
+      ...(published ? { externalPostUrl: `https://www.facebook.com/permalink.php?story_fbid=${encodeURIComponent(shortId ?? id)}&id=${encodeURIComponent(pageId)}` } : {}),
       responseCode: status,
       durationMs: Date.now() - start,
       requestSummary: { platform: "facebook", endpoint }
@@ -346,10 +329,12 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
     start: number,
     status: number,
     data: unknown,
-    fallback: string
+    fallback: string,
+    uncertain = true
   ): SocialPublishResult {
     return {
       success: false,
+      ...(uncertain ? { deliveryState: "unknown" as const } : {}),
       isDraftOnly: false,
       responseCode: status,
       errorMessage: readErrorMessage(data, fallback),
@@ -462,6 +447,7 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
       if (!container.ok) {
         return {
           success: false,
+          deliveryState: "unknown",
           isDraftOnly: false,
           responseCode: container.status,
           errorMessage: readErrorMessage(containerData, "Instagram media container failed"),
@@ -473,6 +459,7 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
       if (!creationId) {
         return {
           success: false,
+          deliveryState: "unknown",
           isDraftOnly: false,
           responseCode: container.status,
           errorMessage: "Instagram media container was created without an id. Nothing was marked posted.",
@@ -485,6 +472,7 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
         if (!uri) {
           return {
             success: false,
+            deliveryState: "unknown",
             isDraftOnly: false,
             errorMessage: "Instagram resumable container did not return an upload uri. Nothing was marked posted.",
             durationMs: Date.now() - start,
@@ -507,6 +495,7 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
           if (!uploaded.ok) {
             return {
               success: false,
+              deliveryState: "unknown",
               isDraftOnly: false,
               responseCode: uploaded.status,
               errorMessage: "Instagram resumable binary upload failed. Nothing was marked posted.",
@@ -522,6 +511,7 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
         if (!ready.ok) {
           return {
             success: false,
+            deliveryState: "unknown",
             isDraftOnly: false,
             errorMessage: ready.error,
             durationMs: Date.now() - start,
@@ -538,6 +528,7 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
       if (!publish.ok) {
         return {
           success: false,
+          deliveryState: "unknown",
           isDraftOnly: false,
           responseCode: publish.status,
           errorMessage: readErrorMessage(publishData, "Instagram media_publish failed"),
@@ -549,6 +540,7 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
       if (!postId) {
         return {
           success: false,
+          deliveryState: "unknown",
           isDraftOnly: false,
           responseCode: publish.status,
           errorMessage: "Instagram publish returned success without a post id. Nothing was marked posted.",
@@ -558,18 +550,19 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
       }
       return {
         success: true,
+        deliveryState: "published",
         isDraftOnly: false,
         externalPostId: postId,
-        externalPostUrl: `https://www.instagram.com/p/${postId}/`,
         responseCode: publish.status,
         durationMs: Date.now() - start,
         requestSummary: { platform: "instagram", creationId }
       };
-    } catch (error) {
+    } catch {
       return {
         success: false,
+        deliveryState: "unknown",
         isDraftOnly: false,
-        errorMessage: error instanceof Error ? error.message : "Instagram publish failed",
+        errorMessage: "Instagram publish could not be confirmed. Check the provider before trying again.",
         durationMs: Date.now() - start,
         requestSummary: { platform: "instagram" }
       };
@@ -602,7 +595,7 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
     if (status === "FINISHED" || status === "PUBLISHED") return { ok: true };
     return {
       ok: false,
-      error: `Instagram video container is not ready (${String(status ?? "unknown")}). Nothing was marked posted.`
+      error: "Instagram video container is not ready. Nothing was marked posted."
     };
   }
 }
@@ -615,11 +608,11 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
 
   async publish(input: SocialPublishInput): Promise<SocialPublishResult> {
     const start = Date.now();
-    if (!input.mediaPath && !input.mediaUrl?.startsWith("https://")) {
+    if (!input.mediaPath || !input.mediaByteSize || input.mediaKind !== "video") {
       return {
         success: false,
         isDraftOnly: true,
-        errorMessage: "YouTube upload needs a local video file or an https video URL. Nothing was uploaded.",
+        errorMessage: "YouTube upload needs a completed local video file. No request was sent.",
         durationMs: Date.now() - start,
         requestSummary: { platform: "youtube" }
       };
@@ -653,6 +646,7 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
       if (!init.ok || !location) {
         return {
           success: false,
+          deliveryState: "unknown",
           isDraftOnly: false,
           responseCode: init.status,
           errorMessage: "YouTube resumable upload session did not return a Location. Nothing was marked posted.",
@@ -666,6 +660,7 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
       if (!uploaded.ok || !id) {
         return {
           success: false,
+          deliveryState: "unknown",
           isDraftOnly: false,
           responseCode: uploaded.status,
           errorMessage: readErrorMessage(data, "YouTube videos.insert returned no video id. Nothing was marked posted."),
@@ -675,18 +670,20 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
       }
       return {
         success: true,
-        isDraftOnly: false,
+        deliveryState: "private_upload",
+        isDraftOnly: true,
         externalPostId: id,
         externalPostUrl: `https://www.youtube.com/watch?v=${id}`,
         responseCode: uploaded.status,
         durationMs: Date.now() - start,
         requestSummary: { platform: "youtube", privacyStatus: "private" }
       };
-    } catch (error) {
+    } catch {
       return {
         success: false,
+        deliveryState: "unknown",
         isDraftOnly: false,
-        errorMessage: error instanceof Error ? error.message : "YouTube upload failed",
+        errorMessage: "YouTube private upload could not be confirmed. Check the provider before trying again.",
         durationMs: Date.now() - start,
         requestSummary: { platform: "youtube" }
       };
@@ -741,20 +738,11 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
       }
       return last;
     }
-    const media = await this.http(input.mediaUrl ?? "");
-    const bytes = new Uint8Array(Buffer.from(await media.text()));
-    return this.http(location, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": input.mediaMimeType ?? "video/*"
-      },
-      body: bytes
-    });
+    throw new Error("A completed local video file is required.");
   }
 
   private async accessToken(input: SocialPublishInput): Promise<string> {
-    if (input.account.accessToken) return input.account.accessToken;
+    if (input.account.accessToken && !input.account.refreshToken) return input.account.accessToken;
     if (!input.account.refreshToken || !input.account.clientId || !input.account.clientSecret) {
       throw new Error("YouTube OAuth refresh token is missing.");
     }
@@ -806,6 +794,15 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
     try {
       const isPhoto = input.mediaKind === "photo";
       const fileUpload = Boolean(input.mediaPath && input.mediaByteSize);
+      if (isPhoto && fileUpload) {
+        return {
+          success: false,
+          isDraftOnly: true,
+          errorMessage: "TikTok photo uploads require a verified hosted URL. Local photo transfer is unavailable. No request was sent.",
+          durationMs: Date.now() - start,
+          requestSummary: { platform: "tiktok", mode: "photo" }
+        };
+      }
       const url = isPhoto ? TIKTOK_PHOTO_INIT_URL : TIKTOK_INBOX_INIT_URL;
       const plan = fileUpload ? tiktokFileUploadPlan(input.mediaByteSize ?? 0) : null;
       const body = isPhoto
@@ -853,12 +850,10 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
       if (!response.ok || error.code && error.code !== "ok" || !publishId) {
         return {
           success: false,
+          deliveryState: "unknown",
           isDraftOnly: true,
           responseCode: response.status,
-          errorMessage:
-            typeof error.message === "string" && error.message
-              ? error.message
-              : "TikTok inbox init returned no publish_id. Nothing was marked posted.",
+          errorMessage: "TikTok inbox init failed or returned no publish_id. Nothing was marked posted.",
           durationMs: Date.now() - start,
           requestSummary: { platform: "tiktok", mode: "inbox_draft" }
         };
@@ -867,6 +862,7 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
         if (!uploadUrl) {
           return {
             success: false,
+            deliveryState: "unknown",
             isDraftOnly: true,
             errorMessage: "TikTok FILE_UPLOAD init returned no upload_url. Nothing was marked posted.",
             durationMs: Date.now() - start,
@@ -887,6 +883,7 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
           if (!put.ok) {
             return {
               success: false,
+              deliveryState: "unknown",
               isDraftOnly: true,
               responseCode: put.status,
               errorMessage: "TikTok FILE_UPLOAD chunk failed. Nothing was marked posted.",
@@ -898,9 +895,9 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
       }
       return {
         success: true,
+        deliveryState: "processing",
         isDraftOnly: true,
         externalPostId: publishId,
-        externalPostUrl: "https://www.tiktok.com/",
         responseCode: response.status,
         durationMs: Date.now() - start,
         requestSummary: {
@@ -908,11 +905,12 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
           mode: fileUpload ? "file_upload_inbox_draft" : "inbox_draft"
         }
       };
-    } catch (error) {
+    } catch {
       return {
         success: false,
+        deliveryState: "unknown",
         isDraftOnly: true,
-        errorMessage: error instanceof Error ? error.message : "TikTok inbox draft failed",
+        errorMessage: "TikTok inbox upload could not be confirmed. Check the provider before trying again.",
         durationMs: Date.now() - start,
         requestSummary: { platform: "tiktok" }
       };

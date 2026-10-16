@@ -14,7 +14,27 @@ export type SocialStoredSecrets = {
   pageId?: string | undefined;
   instagramBusinessId?: string | undefined;
   openId?: string | undefined;
+  channelId?: string | undefined;
 };
+
+/** Credentials must name the same provider account the owner reviewed. */
+export function boundSocialSecrets(
+  platform: SocialPlatform,
+  externalAccountId: string | undefined,
+  secrets: SocialStoredSecrets | null
+): SocialStoredSecrets | null {
+  if (!secrets || !externalAccountId?.trim()) return null;
+  const actualId = platform === "facebook" ? secrets.pageId
+    : platform === "instagram" ? secrets.instagramBusinessId
+      : platform === "youtube" ? secrets.channelId : secrets.openId;
+  if (!actualId || actualId !== externalAccountId) return null;
+  if (platform === "facebook" || platform === "instagram") {
+    if (!cred(secrets.pageAccessToken)) return null;
+    return { ...secrets, accessToken: secrets.pageAccessToken };
+  }
+  if (!cred(secrets.accessToken) && !(platform === "youtube" && cred(secrets.refreshToken))) return null;
+  return secrets;
+}
 
 export type SocialCredentialEnv = {
   SOCIAL_ADAPTER?: string | undefined;
