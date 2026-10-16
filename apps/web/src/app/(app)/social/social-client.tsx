@@ -1,5 +1,6 @@
 "use client";
 
+import { socialApproveAndPostBlockReason } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { Check, Link2, Megaphone, ShieldCheck, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -118,6 +119,10 @@ export function SocialClient({
     if (workspace?.voiceKey === "rad_dad") return "Rad Dad";
     return "Unknown — will not inherit Stalemate or Rad Dad";
   }, [workspace?.voiceKey]);
+  const approveBlockReason = socialApproveAndPostBlockReason({
+    postStatus: activePost?.status ?? null,
+    approvalStatus: activePost?.approval?.status ?? null
+  });
 
   async function refresh(preferredPostId?: string) {
     if (!artistId) return;
@@ -219,7 +224,7 @@ export function SocialClient({
   }
 
   async function approveAndPost() {
-    if (!canManage || !activePost) return;
+    if (!canManage || !activePost || approveBlockReason) return;
     setBusy("post");
     setError("");
     setNotice("");
@@ -486,16 +491,21 @@ export function SocialClient({
                   {activePost.captionNotice}
                 </p>
               ) : null}
+              {approveBlockReason ? (
+                <p className="mt-2 text-xs text-[var(--text-muted)]" data-testid="social-approve-blocked">
+                  {approveBlockReason}
+                </p>
+              ) : null}
             </div>
             <button
               type="button"
               className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950"
               onClick={() => void approveAndPost()}
-              disabled={!canManage || busy !== null}
+              disabled={!canManage || busy !== null || Boolean(approveBlockReason)}
               data-testid="social-approve-and-post"
             >
               <ShieldCheck className="h-4 w-4" />
-              {busy === "post" ? "Posting…" : "Approve & post"}
+              {busy === "post" ? "Posting…" : approveBlockReason ? "Already posted" : "Approve & post"}
             </button>
           </div>
           <div className="mt-5 grid gap-4 lg:grid-cols-2">
@@ -512,7 +522,7 @@ export function SocialClient({
                         next[index] = { ...target, enabled: event.target.checked };
                         setDrafts(next);
                       }}
-                      disabled={!canManage}
+                      disabled={!canManage || Boolean(approveBlockReason)}
                     />
                     On
                   </label>
@@ -529,7 +539,7 @@ export function SocialClient({
                             ? "bg-[var(--accent)] font-semibold text-slate-950"
                             : "border border-[var(--border)] text-[var(--text-secondary)]"
                         }`}
-                        disabled={!canManage}
+                        disabled={!canManage || Boolean(approveBlockReason)}
                         onClick={() => {
                           const next = [...drafts];
                           next[index] = {
@@ -556,7 +566,7 @@ export function SocialClient({
                       next[index] = { ...target, title: event.target.value };
                       setDrafts(next);
                     }}
-                    disabled={!canManage}
+                    disabled={!canManage || Boolean(approveBlockReason)}
                     aria-label="YouTube title"
                   />
                 ) : null}
@@ -568,7 +578,7 @@ export function SocialClient({
                     next[index] = { ...target, caption: event.target.value };
                     setDrafts(next);
                   }}
-                  disabled={!canManage}
+                  disabled={!canManage || Boolean(approveBlockReason)}
                   aria-label={`${PLATFORM_LABEL[target.platform]} caption`}
                 />
                 {target.platform === "facebook" ? (
@@ -581,7 +591,7 @@ export function SocialClient({
                         next[index] = { ...target, includeFacebookEvent: event.target.checked };
                         setDrafts(next);
                       }}
-                      disabled={!canManage}
+                      disabled={!canManage || Boolean(approveBlockReason)}
                     />
                     Create Facebook Event
                   </label>

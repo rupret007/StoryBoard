@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import {
   resolveSocialVoice,
+  socialApproveAndPostBlockReason,
   socialApproveAndPostSchema,
   socialDropInputSchema,
   voiceProfileFor,
@@ -233,6 +234,13 @@ export class SocialService {
   ) {
     const input = socialApproveAndPostSchema.parse(raw);
     const post = await this.execution.requirePost(artistId, input.postId);
+    const blocked = socialApproveAndPostBlockReason({
+      postStatus: post.status,
+      approvalStatus: post.approval?.status
+    });
+    if (blocked) {
+      throw new BadRequestException(blocked);
+    }
     if (input.targets) {
       for (const edit of input.targets) {
         await this.prisma.client.socialPostTarget.updateMany({

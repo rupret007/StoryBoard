@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { SocialPlatform, SocialVoiceKey } from "@storyboard/shared";
+import { shouldSendSocialTarget, type SocialPlatform, type SocialVoiceKey } from "@storyboard/shared";
 import { ApprovalStatus, AuditSeverity } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { SecretBox } from "../integrations/crypto/secret-box";
@@ -162,6 +162,14 @@ export class SocialExecutionService implements SocialPublisherPort {
     for (const target of payload.targets.filter((row) => row.enabled)) {
       const row = post.targets.find((item) => item.id === target.targetId);
       if (!row) continue;
+      if (
+        !shouldSendSocialTarget({
+          enabled: target.enabled,
+          existingExternalPostId: row.externalPostId
+        })
+      ) {
+        continue;
+      }
       await this.prisma.client.socialPostTarget.update({
         where: { id: row.id },
         data: { status: "sending" }

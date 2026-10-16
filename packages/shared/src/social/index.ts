@@ -1,5 +1,6 @@
 export * from "./voice";
 export * from "./account-check";
+export * from "./approve-guard";
 export * from "./caption-facts";
 export * from "./captions";
 export * from "./caption-llm";
