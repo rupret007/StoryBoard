@@ -2683,10 +2683,11 @@ test("pilot: owner creates two isolated workspaces and failed audit rolls back c
 });
 
 test("database integration: social owner approval is atomic, concurrent posting is one-shot, and uncertain outcomes cannot retry", async () => {
-  const [{ SocialService }, { SocialExecutionService }, { SocialCaptionService }] = await Promise.all([
+  const [{ SocialService }, { SocialExecutionService }, { SocialCaptionService }, { SocialCaptionBudgetService }] = await Promise.all([
     load("social/social.service.js"),
     load("social/social-execution.service.js"),
-    load("social/social-caption.service.js")
+    load("social/social-caption.service.js"),
+    load("social/social-caption-budget.service.js")
   ]);
   const suffix = randomUUID();
   const artist = await client.artist.create({ data: { name: "Stalemate", slug: `social-safety-${suffix}` } });
@@ -2725,7 +2726,7 @@ test("database integration: social owner approval is atomic, concurrent posting 
   const approvals = new approvalsMod.ApprovalsService(prisma, audit,
     { resolveForArtist: async () => mockAdaptersMod.mockAdapters },
     { enqueueApprovalNotify: async () => undefined }, execution);
-  const captions = new SocialCaptionService(config);
+  const captions = new SocialCaptionService(config, new SocialCaptionBudgetService(config, prisma));
   const social = new SocialService(prisma, approvals, audit, execution, captions);
   const newDrop = (note) => social.createDrop(artist.id, {
     note, mediaUrl: "https://example.invalid/synthetic-photo.jpg", mediaKind: "photo", platforms: ["facebook"]
@@ -2839,16 +2840,19 @@ test("database integration: social owner approval is atomic, concurrent posting 
     client.approvalRequest.count({ where: { artistId: artist.id } })
   ]);
   const beforeCaptionFailure = await counts();
-  const configuredCaptions = new SocialCaptionService({ get: (key) => key === "OPENAI_ENABLED" ? true : undefined });
+  const captionConfig = { get: (key) => key === "OPENAI_ENABLED" ? true : undefined };
+  const configuredCaptions = new SocialCaptionService(captionConfig, new SocialCaptionBudgetService(captionConfig, prisma));
+  let captionCalls = 0;
   const failingCaptions = new SocialService(prisma, approvals, audit, execution, {
     draft: (input) => configuredCaptions.draft(input, {
-      responses: { create: async () => { throw new Error("Synthetic configured LLM failure"); } }
+      responses: { create: async () => { captionCalls += 1; throw new Error("Synthetic configured LLM failure"); } }
     })
   });
   await assert.rejects(() => failingCaptions.createDrop(artist.id, {
     note: "Friday at Burlington Bar.", mediaKind: "photo",
     mediaUrl: "https://example.invalid/never-persisted.jpg", platforms: ["facebook"]
   }, ownerActor), (error) => error.getStatus() === 503);
+  assert.equal(captionCalls, 1, "the reserved attempt reaches the failing provider exactly once");
   assert.deepEqual(await counts(), beforeCaptionFailure);
   assert.equal(adapterCalls, 2);
 

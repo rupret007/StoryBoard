@@ -57,7 +57,7 @@ test("owner approval with a lost response remains a single simulated send after 
   await expect(page.getByTestId("social-receipt-facebook")).toContainText("Simulated — nothing sent");
 });
 
-test("members can review drafts but neither Social nor Approval Center accepts their approval", async ({ page, browser }) => {
+test("members can review drafts but cannot approve, reject, or execute social work", async ({ page, browser }) => {
   const artistId = await setup(page);
   const created = await page.request.post(`${api}/social/drops`, {
     headers: { origin: web, "x-artist-id": artistId }, data: { note: "Band rehearsal", platforms: ["facebook"] }
@@ -85,7 +85,12 @@ test("members can review drafts but neither Social nor Approval Center accepts t
     await member.goto(`${web}/social`);
     await expect(member.getByText("Only an owner can approve and post.")).toBeVisible();
     await expect(member.getByTestId("social-approve-and-post")).toBeDisabled();
-    for (const path of ["/social/approve-and-post", `/approvals/${draft.approvalRequestId}/approve`]) {
+    for (const path of [
+      "/social/approve-and-post",
+      `/approvals/${draft.approvalRequestId}/approve`,
+      `/approvals/${draft.approvalRequestId}/reject`,
+      `/approvals/${draft.approvalRequestId}/execute`
+    ]) {
       const denied = await member.request.post(`${api}${path}`, {
         headers: { origin: web, "x-artist-id": artistId }, data: { postId: draft.id }
       });

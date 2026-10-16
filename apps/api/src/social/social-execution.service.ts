@@ -29,16 +29,10 @@ export class SocialExecutionService implements SocialPublisherPort {
   env(): SocialCredentialEnv {
     return {
       SOCIAL_ADAPTER: this.config.get<string>("SOCIAL_ADAPTER"),
-      FACEBOOK_PAGE_ACCESS_TOKEN: this.config.get<string>("FACEBOOK_PAGE_ACCESS_TOKEN"),
-      FACEBOOK_PAGE_ID: this.config.get<string>("FACEBOOK_PAGE_ID"),
-      INSTAGRAM_BUSINESS_ACCOUNT_ID: this.config.get<string>("INSTAGRAM_BUSINESS_ACCOUNT_ID"),
       YOUTUBE_CLIENT_ID: this.config.get<string>("YOUTUBE_CLIENT_ID"),
       YOUTUBE_CLIENT_SECRET: this.config.get<string>("YOUTUBE_CLIENT_SECRET"),
-      YOUTUBE_REFRESH_TOKEN: this.config.get<string>("YOUTUBE_REFRESH_TOKEN"),
       TIKTOK_CLIENT_KEY: this.config.get<string>("TIKTOK_CLIENT_KEY"),
       TIKTOK_CLIENT_SECRET: this.config.get<string>("TIKTOK_CLIENT_SECRET"),
-      TIKTOK_ACCESS_TOKEN: this.config.get<string>("TIKTOK_ACCESS_TOKEN"),
-      TIKTOK_OPEN_ID: this.config.get<string>("TIKTOK_OPEN_ID"),
       META_APP_ID: this.config.get<string>("META_APP_ID"),
       META_APP_SECRET: this.config.get<string>("META_APP_SECRET"),
       GOOGLE_CLIENT_ID: this.config.get<string>("GOOGLE_CLIENT_ID"),
@@ -133,14 +127,23 @@ export class SocialExecutionService implements SocialPublisherPort {
       (["posting", "approved", "pending_approval"].includes(post.status) && (post.approval?.status === "failed" ||
         Boolean(post.approval?.status === "approved" && post.approval.executionAttemptedAt &&
           Date.now() - post.approval.executionAttemptedAt.getTime() >= 60 * 60 * 1000)));
+    const unattemptedNeedsReview = unresolvedAttempt ||
+      ["failed", "executed"].includes(post.approval?.status ?? "") ||
+      ["failed", "partial", "posted", "simulated", "private_upload", "processing", "draft_only"].includes(post.status);
     const targets = post.targets.map((target) => {
       const log = post.sendLogs.find((row) => row.targetId === target.id || (!row.targetId && row.platform === target.platform));
       const outcome = log ? projectedLogOutcome(log) : null;
+      const hasAttemptEvidence = Boolean(log || target.externalPostId || target.externalPostUrl);
       const status = ["posted", "draft_only"].includes(target.status)
         ? outcome === "sent" ? "posted" : outcome === "simulated" || outcome === "private_upload" ||
           outcome === "processing" || outcome === "draft_only" ? outcome : "unknown"
-        : cancelled && ["draft", "pending", "skipped"].includes(target.status) ? "cancelled"
-        : target.status === "sending" && unresolvedAttempt ? "unknown" : target.status;
+        : cancelled && ["draft", "pending", "skipped"].includes(target.status)
+          ? hasAttemptEvidence ? "unknown" : "cancelled"
+        : target.status === "sending" && unresolvedAttempt ? "unknown"
+        : target.enabled && ["draft", "pending"].includes(target.status)
+          ? hasAttemptEvidence ? "unknown" : unattemptedNeedsReview ? "not_attempted"
+            : post.approval?.status === "approved" ? "approved" : target.status
+          : target.status;
       return { ...target, status };
     });
     const enabledStatuses = targets.filter((target) => target.enabled).map((target) => target.status);

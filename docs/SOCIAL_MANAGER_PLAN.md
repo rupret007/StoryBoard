@@ -111,12 +111,27 @@ processing, unknown, or simulated receipts. Configured caption-provider errors
 return a sanitized failure with no drop or approval created; templates are
 reserved for explicitly disabled or unconfigured caption generation.
 
-Caption prompts use confirmed facts (note, show name, venue, date, ticket URL).
-Validation rejects malformed or incomplete batches and detected unsupported
-links, dates, times, prices, locations, and hashtags. These lexical checks are
-conservative, not a semantic guarantee; the owner must review every caption.
+Caption prompts separate note data from fixed instructions. Instruction overrides,
+role delimiters, and similar attacks in notes or fact fields are rejected before
+the provider call, including when templates are used. Validation rejects malformed
+or incomplete batches and detected unsupported links, dates, times, prices,
+locations, venues, lineups, and hashtags across every caption, title, and variant.
+Generated wording must use supplied fact spans and a small presentation vocabulary;
+venue and lineup relations also require evidence. These conservative lexical
+checks can reject otherwise reasonable paraphrases and do not verify whether a
+user-supplied fact is true; the owner must review every caption.
 `#chicago` and other recognized city tags require that place in the data. Instagram/TikTok stay short;
 Facebook is longer; YouTube is a title plus description.
+
+Caption SDK calls have a 30-second timeout and no retries. Before each call,
+`SocialCaptionDailyUsage` atomically reserves one attempt across all bands and
+API processes using the database's UTC day. `SOCIAL_CAPTION_DAILY_CALL_LIMIT`
+defaults to 100; zero disables calls. Failed, rate-limited, timed-out, or invalid
+responses consume their reservation. A missing migration, unavailable database,
+invalid setting, or exhausted cap blocks generation with no fallback draft.
+Disabled/unconfigured LLM templates do not consume a call. Apply the forward
+`20261016010000_social_caption_daily_budget` migration before enabling drafting.
+This cap covers Social caption calls; it does not change Manager chat budgets.
 
 | Platform | How Phase 1 sends the file |
 | --- | --- |

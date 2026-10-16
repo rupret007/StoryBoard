@@ -377,6 +377,57 @@ test("unrelated pg-adapter errors retain their original failure", async () => {
   }), (error) => error === failure);
 });
 
+test("Prisma raw errors with SQLSTATE only in the message still return 503", async () => {
+  const conflict = Object.assign(new Error('Raw query failed. Code: `40001`. Message: `write conflict`'), {
+    code: "P2010"
+  });
+  let transactionCalls = 0;
+  const controller = controllerFor({ prisma: { client: {
+    $transaction: async (work) => {
+      transactionCalls += 1;
+      return work({ $queryRaw: async () => { throw conflict; } });
+    }
+  } } }, async () => {
+    assert.fail("a conflicting claim must not run the handler");
+  });
+  const payload = eventPayload("evt_message_serialization_conflict");
+
+  await assert.rejects(
+    () => controller.webhook({ rawBody: payload }, signPayload(payload)),
+    (error) => error.getStatus?.() === 503
+  );
+  assert.equal(transactionCalls, 1);
+});
+
+test("incomplete or mismatched pg-adapter metadata preserves the original claim error", async () => {
+  const failures = [
+    { code: "P2010" },
+    { code: "P2010", meta: null },
+    { code: "P2010", meta: { driverAdapterError: "TransactionWriteConflict" } },
+    { code: "P2010", meta: { driverAdapterError: { cause: null } } },
+    { code: "P2010", meta: { driverAdapterError: { cause: { originalCode: "40001" } } } },
+    { code: "P2010", meta: { driverAdapterError: { cause: { kind: "TransactionWriteConflict" } } } },
+    { code: "P2010", meta: { driverAdapterError: { cause: {
+      kind: "TransactionWriteConflict", originalCode: "08006"
+    } } } },
+    { code: "P2010", meta: { driverAdapterError: { cause: {
+      kind: "ConnectionClosed", originalCode: "40001"
+    } } } },
+    { code: "P2002", meta: { driverAdapterError: { cause: {
+      kind: "TransactionWriteConflict", originalCode: "40001"
+    } } } }
+  ];
+  for (const fields of failures) {
+    const failure = Object.assign(new Error("Raw query failed"), fields);
+    const service = new StripeWebhookIdempotencyService({ client: {
+      $transaction: async (work) => work({ $queryRaw: async () => { throw failure; } })
+    } });
+    await assert.rejects(() => service.runOnce("evt_adapter_metadata_failure", async () => {
+      assert.fail("a failed claim must not run the handler");
+    }), (error) => error === failure);
+  }
+});
+
 test("stripe event id extractor rejects missing, empty, or non-evt ids", () => {
   assert.equal(signature.stripeEventId(undefined), null);
   assert.equal(signature.stripeEventId({ type: "charge.succeeded" }), null);

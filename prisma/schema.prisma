@@ -1929,6 +1929,12 @@ model WorkflowNotification {
   @@index([artistId, createdAt])
 }
 
+// Global provider-call budget shared by all bands and API processes.
+model SocialCaptionDailyUsage {
+  day   DateTime @id @db.Date
+  calls Int
+}
+
 model SocialVoiceProfile {
   id               String         @id @default(cuid())
   artistId         String         @unique

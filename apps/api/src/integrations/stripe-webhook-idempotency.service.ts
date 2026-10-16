@@ -46,6 +46,25 @@ type LockedEventRow = {
   appliedAt: Date | null;
 };
 
+// Prisma's pg adapter can wrap a raw-query serialization failure without a
+// top-level SQLSTATE. Keep this metadata path alongside the existing Prisma
+// code/message handling so either representation asks Stripe to retry.
+function isPgAdapterTransactionConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error) || error.code !== "P2010") {
+    return false;
+  }
+  const meta = "meta" in error ? error.meta : null;
+  const adapter = meta && typeof meta === "object" && "driverAdapterError" in meta
+    ? meta.driverAdapterError : null;
+  const cause = adapter && typeof adapter === "object" && "cause" in adapter
+    ? adapter.cause : null;
+  return Boolean(
+    cause && typeof cause === "object" &&
+    "originalCode" in cause && cause.originalCode === "40001" &&
+    "kind" in cause && cause.kind === "TransactionWriteConflict"
+  );
+}
+
 @Injectable()
 export class StripeWebhookIdempotencyService {
   private readonly log = new Logger(StripeWebhookIdempotencyService.name);
@@ -90,7 +109,7 @@ export class StripeWebhookIdempotencyService {
       if (isStripeWebhookInFlightError(error)) {
         throw error;
       }
-      if (isTransactionConflict(error) || isLockNotAvailable(error)) {
+      if (isTransactionConflict(error) || isPgAdapterTransactionConflict(error) || isLockNotAvailable(error)) {
         throw new StripeWebhookInFlightError(eventId);
       }
       throw error;
@@ -286,31 +305,46 @@ export class StripeWebhookIdempotencyService {
   }
 }
 
-function isTransactionConflict(error: unknown): boolean {
-  if (!error || typeof error !== "object" || !("code" in error)) {
-    return false;
+function prismaDatabaseErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
   }
-  if (error.code === "P2034") {
-    return true;
-  }
-  // The raw INSERT ... ON CONFLICT claim surfaces PostgreSQL serialization
-  // failures as P2010/40001, rather than Prisma's model-query P2034. It still
-  // aborted the transaction, so ask Stripe to retry instead of leaking a 500.
   const meta = "meta" in error ? error.meta : null;
-  if (error.code !== "P2010" || !meta || typeof meta !== "object") {
+  if (meta && typeof meta === "object" && "code" in meta) {
+    return String(meta.code);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /Code: `([^`]+)`/.exec(message)?.[1] ?? null;
+}
+
+function isTransactionConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
     return false;
   }
-  if ("code" in meta && meta.code === "40001") {
+  const code = "code" in error ? String(error.code) : "";
+  if (code === "P2034") {
     return true;
   }
-  const adapter = "driverAdapterError" in meta ? meta.driverAdapterError : null;
-  const cause = adapter && typeof adapter === "object" && "cause" in adapter
-    ? adapter.cause : null;
-  return Boolean(
-    cause && typeof cause === "object" &&
-    "originalCode" in cause && cause.originalCode === "40001" &&
-    "kind" in cause && cause.kind === "TransactionWriteConflict"
-  );
+  if (code === "P2010") {
+    const meta = "meta" in error ? error.meta : null;
+    if (meta && typeof meta === "object" && "code" in meta && meta.code === "40001") {
+      return true;
+    }
+    if (prismaDatabaseErrorCode(error) === "40001") {
+      return true;
+    }
+    const adapter = meta && typeof meta === "object" && "driverAdapterError" in meta
+      ? meta.driverAdapterError : null;
+    const cause = adapter && typeof adapter === "object" && "cause" in adapter
+      ? adapter.cause : null;
+    if (cause && typeof cause === "object" &&
+        "originalCode" in cause && cause.originalCode === "40001" &&
+        "kind" in cause && cause.kind === "TransactionWriteConflict") {
+      return true;
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /could not serialize access|serialization failure/i.test(message);
 }
 
 function isLockNotAvailable(error: unknown): boolean {

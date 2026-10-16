@@ -25,3 +25,25 @@ test("only an owner reviewing an unsent pending approval can approve", () => {
     assert.equal(canApproveSocialPost({ ...pending, postStatus }), false);
   }
 });
+
+test("unattempted and unfamiliar receipts do not ask for an already-consumed approval", () => {
+  for (const status of ["approved", "not_attempted", "unrecognized"]) {
+    const label = socialReceiptLabel({ status, externalPostId: null });
+    assert.notEqual(label, "Awaiting owner approval");
+    assert.notEqual(label, "Public post confirmed");
+  }
+  assert.equal(socialReceiptLabel({ status: "approved", externalPostId: null }),
+    "Owner approved — no send attempt recorded");
+  assert.equal(socialReceiptLabel({ status: "not_attempted", externalPostId: null }),
+    "No send attempt recorded — review approval status");
+  assert.equal(socialReceiptLabel({ status: "unrecognized", externalPostId: null }),
+    "Status unconfirmed — refresh to review");
+  for (const status of ["draft", "pending"]) {
+    assert.equal(socialReceiptLabel({ status, externalPostId: null }), "Awaiting owner approval");
+  }
+});
+
+test("closed approval receipts do not misidentify expiry as rejection or promise no external effect", () => {
+  assert.equal(socialReceiptLabel({ status: "cancelled", externalPostId: null }),
+    "Approval closed — no send attempt recorded");
+});

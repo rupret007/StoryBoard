@@ -21,6 +21,7 @@ function fakeHarness({
   opportunity = null,
   reply = null,
   recommendation = null,
+  membershipRole = "owner",
   failSuccessAudit = false,
   driveExecution = null
 } = {}) {
@@ -33,6 +34,7 @@ function fakeHarness({
   );
   const auditEvents = [];
   const notifications = [];
+  const membershipLookups = [];
   const reconciliationReceipts = [];
   const providerCalls = { calendar: 0, drive: 0 };
   const matches = (row, where = {}) => {
@@ -158,6 +160,10 @@ function fakeHarness({
     }
   };
   const client = {
+    artistMembership: { findUnique: async ({ where }) => {
+      membershipLookups.push(where);
+      return { role: membershipRole };
+    } },
     approvalRequest: approvalDelegate,
     approvalReconciliation: {
       findUnique: async ({ where }) => {
@@ -217,7 +223,7 @@ function fakeHarness({
     { resolveForArtist: async () => adapters },
     { enqueueApprovalNotify: async (input) => notifications.push(input) }
   );
-  return { service, approvals, opportunities, events, recommendations, auditEvents, notifications, providerCalls, reconciliationReceipts };
+  return { service, approvals, opportunities, events, recommendations, auditEvents, notifications, providerCalls, reconciliationReceipts, membershipLookups };
 }
 
 function approvalRow(overrides = {}) {
@@ -245,6 +251,47 @@ function approvalRow(overrides = {}) {
 
 function recommendationRow(overrides = {}) {
   return { id: "recommendation-1", artistId: "artist-1", outcome: "suggested", outcomeReason: null, ...overrides };
+}
+
+for (const status of ["pending", "proposed"]) {
+  test(`a member cannot reject ${status} social work even with an owner label`, async () => {
+    const approval = approvalRow({ status, actionType: "social_post_batch", payload: { postId: "post-1" } });
+    const before = structuredClone(approval);
+    const harness = fakeHarness({ approval, membershipRole: "member" });
+
+    await assert.rejects(
+      () => harness.service.reject("artist-1", approval.id, "owner@test.invalid", "Cancel it", "member-1"),
+      (error) => error.getStatus() === 403 && /owner/.test(error.message)
+    );
+
+    assert.deepEqual(harness.membershipLookups, [{ operatorId_artistId: { operatorId: "member-1", artistId: "artist-1" } }]);
+    assert.deepEqual(approval, before);
+    assert.deepEqual(harness.auditEvents, []);
+    assert.deepEqual(harness.notifications, []);
+    assert.deepEqual(harness.providerCalls, { calendar: 0, drive: 0 });
+  });
+
+  test(`an owner can reject ${status} social work and records the decision`, async () => {
+    const payload = { postId: "post-1", targets: [{ targetId: "target-1", caption: "Reviewed words" }] };
+    const approval = approvalRow({ status, actionType: "social_post_batch", payload });
+    const harness = fakeHarness({ approval, membershipRole: "owner" });
+
+    const result = await harness.service.reject("artist-1", approval.id, "owner@test.invalid", "Needs revision", "owner-1");
+
+    assert.deepEqual(harness.membershipLookups, [{ operatorId_artistId: { operatorId: "owner-1", artistId: "artist-1" } }]);
+    assert.equal(result.status, "rejected");
+    assert.equal(approval.status, "rejected");
+    assert.equal(approval.approvedBy, "owner@test.invalid");
+    assert.ok(approval.approvedAt instanceof Date);
+    assert.deepEqual(approval.payload, { ...payload, rejectionReason: "Needs revision" });
+    assert.deepEqual(harness.auditEvents, [{
+      artistId: "artist-1", severity: "warning", aggregateType: "ApprovalRequest", aggregateId: approval.id,
+      action: "approval.rejected", actorLabel: "owner@test.invalid", actorOperatorId: "owner-1",
+      metadata: { reason: "Needs revision" }
+    }]);
+    assert.deepEqual(harness.notifications, [{ artistId: "artist-1", approvalId: approval.id, event: "rejected" }]);
+    assert.deepEqual(harness.providerCalls, { calendar: 0, drive: 0 });
+  });
 }
 
 test("idempotent approval creation reuses intent, attaches only an unlinked recommendation, and notifies once", async () => {
