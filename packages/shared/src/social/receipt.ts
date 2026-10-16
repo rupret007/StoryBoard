@@ -15,9 +15,13 @@ export function socialReceiptLabel(target: SocialReceiptTarget): string {
     case "unknown": return "Outcome unknown — check the platform before any new approval";
     case "failed": return "Failed — publication unconfirmed";
     case "refused": return "Send refused";
+    case "approved": return "Owner approved — no send attempt recorded";
+    case "not_attempted": return "No send attempt recorded — review approval status";
     case "skipped": return "Disabled";
-    case "cancelled": return "Approval rejected — not sent";
-    default: return "Awaiting owner approval";
+    case "cancelled": return "Approval closed — no send attempt recorded";
+    case "draft":
+    case "pending": return "Awaiting owner approval";
+    default: return "Status unconfirmed — refresh to review";
   }
 }
 

@@ -127,14 +127,23 @@ export class SocialExecutionService implements SocialPublisherPort {
       (["posting", "approved", "pending_approval"].includes(post.status) && (post.approval?.status === "failed" ||
         Boolean(post.approval?.status === "approved" && post.approval.executionAttemptedAt &&
           Date.now() - post.approval.executionAttemptedAt.getTime() >= 60 * 60 * 1000)));
+    const unattemptedNeedsReview = unresolvedAttempt ||
+      ["failed", "executed"].includes(post.approval?.status ?? "") ||
+      ["failed", "partial", "posted", "simulated", "private_upload", "processing", "draft_only"].includes(post.status);
     const targets = post.targets.map((target) => {
       const log = post.sendLogs.find((row) => row.targetId === target.id || (!row.targetId && row.platform === target.platform));
       const outcome = log ? projectedLogOutcome(log) : null;
+      const hasAttemptEvidence = Boolean(log || target.externalPostId || target.externalPostUrl);
       const status = ["posted", "draft_only"].includes(target.status)
         ? outcome === "sent" ? "posted" : outcome === "simulated" || outcome === "private_upload" ||
           outcome === "processing" || outcome === "draft_only" ? outcome : "unknown"
-        : cancelled && ["draft", "pending", "skipped"].includes(target.status) ? "cancelled"
-        : target.status === "sending" && unresolvedAttempt ? "unknown" : target.status;
+        : cancelled && ["draft", "pending", "skipped"].includes(target.status)
+          ? hasAttemptEvidence ? "unknown" : "cancelled"
+        : target.status === "sending" && unresolvedAttempt ? "unknown"
+        : target.enabled && ["draft", "pending"].includes(target.status)
+          ? hasAttemptEvidence ? "unknown" : unattemptedNeedsReview ? "not_attempted"
+            : post.approval?.status === "approved" ? "approved" : target.status
+          : target.status;
       return { ...target, status };
     });
     const enabledStatuses = targets.filter((target) => target.enabled).map((target) => target.status);
