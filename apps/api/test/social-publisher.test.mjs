@@ -38,6 +38,25 @@ function approval() {
   };
 }
 
+test("refuses to send when the approval is already executed", async () => {
+  const result = await sendSocialTarget({
+    artistId: "artist-1",
+    artistName: "Stalemate",
+    artistVoice: "stalemate",
+    approval: {
+      id: "approval-1",
+      status: "executed",
+      approvedAt: new Date("2026-10-15T12:00:00.000Z"),
+      actionType: "social_post_batch"
+    },
+    payload,
+    target: payload.targets[0],
+    adapter: new MockSocialPlatformAdapter("facebook")
+  });
+  assert.equal(result.posted, false);
+  assert.equal(result.log.outcome, "refused_no_approval");
+});
+
 test("refuses to send without an explicit approval record", async () => {
   const result = await sendSocialTarget({
     artistId: "artist-1",

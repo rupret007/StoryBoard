@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { SocialPlatform, SocialVoiceKey } from "@storyboard/shared";
+import {
+  preserveSocialTargetPostId,
+  shouldSkipSocialTargetSend,
+  type SocialPlatform,
+  type SocialVoiceKey
+} from "@storyboard/shared";
 import { ApprovalStatus, AuditSeverity } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { SecretBox } from "../integrations/crypto/secret-box";
@@ -147,7 +152,7 @@ export class SocialExecutionService implements SocialPublisherPort {
       where: { id: approvalId, artistId }
     });
     if (!approval) throw new NotFoundException("Approval not found");
-    if (approval.status !== ApprovalStatus.approved && approval.status !== ApprovalStatus.executed) {
+    if (approval.status !== ApprovalStatus.approved) {
       throw new BadRequestException("Nothing posts without an explicit approval record.");
     }
     const payload = parseSocialPostPayload(approval.payload);
@@ -161,7 +166,7 @@ export class SocialExecutionService implements SocialPublisherPort {
     });
     for (const target of payload.targets.filter((row) => row.enabled)) {
       const row = post.targets.find((item) => item.id === target.targetId);
-      if (!row) continue;
+      if (!row || shouldSkipSocialTargetSend(row)) continue;
       await this.prisma.client.socialPostTarget.update({
         where: { id: row.id },
         data: { status: "sending" }
@@ -214,15 +219,16 @@ export class SocialExecutionService implements SocialPublisherPort {
           adapterMode: sent.log.adapterMode
         }
       });
-      const posted = Boolean(sent.externalPostId);
+      const externalPostId = preserveSocialTargetPostId(row.externalPostId, sent.externalPostId);
+      const posted = Boolean(externalPostId);
       await this.prisma.client.socialPostTarget.update({
         where: { id: row.id },
         data: {
           status: posted ? (sent.isDraftOnly ? "draft_only" : "posted") : sent.log.outcome.startsWith("refused") ? "refused" : "failed",
-          externalPostId: sent.externalPostId ?? null,
-          externalPostUrl: sent.externalPostUrl ?? null,
+          externalPostId,
+          externalPostUrl: sent.externalPostUrl ?? row.externalPostUrl ?? null,
           isDraftOnly: sent.isDraftOnly,
-          lastError: sent.errorMessage ?? null
+          lastError: posted ? null : sent.errorMessage ?? null
         }
       });
       await this.audit.log({
