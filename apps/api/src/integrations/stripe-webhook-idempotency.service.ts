@@ -287,19 +287,8 @@ export class StripeWebhookIdempotencyService {
 }
 
 function isTransactionConflict(error: unknown): boolean {
-  if (!error || typeof error !== "object" || !("code" in error)) {
-    return false;
-  }
-  if (error.code === "P2034") {
-    return true;
-  }
-  // The raw INSERT ... ON CONFLICT claim surfaces PostgreSQL serialization
-  // failures as P2010/40001, rather than Prisma's model-query P2034. It still
-  // aborted the transaction, so ask Stripe to retry instead of leaking a 500.
-  const meta = "meta" in error ? error.meta : null;
   return Boolean(
-    error.code === "P2010" && meta && typeof meta === "object" &&
-    "code" in meta && meta.code === "40001"
+    error && typeof error === "object" && "code" in error && error.code === "P2034"
   );
 }
 
