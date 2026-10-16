@@ -36,6 +36,7 @@ import {
 } from "../operations/event-logistics";
 import { PrismaService } from "../prisma/prisma.service";
 import { StoryboardQueueService } from "../queue/storyboard-queue.service";
+import { assertSocialOwner } from "../social/social-owner";
 import type { SocialPublisherPort } from "../social/social-publisher";
 import { SOCIAL_SERVICE } from "../social/social.tokens";
 import {
@@ -1187,7 +1188,8 @@ export class ApprovalsService {
   async workQueue(
     artistId: string,
     canMutate: boolean,
-    pagination: ApprovalListPagination = {}
+    pagination: ApprovalListPagination = {},
+    isOwner = false
   ) {
     const observedAt = new Date();
     const capabilities = {
@@ -1234,7 +1236,8 @@ export class ApprovalsService {
       take: queryWindow.take
     });
     const items = rows.flatMap((row) => {
-      const item = projectApprovalLifecycleItem(row, capabilities, observedAt);
+      const item = projectApprovalLifecycleItem(row, row.actionType === "social_post_batch"
+        ? { ...capabilities, canDecide: isOwner, canExecute: isOwner } : capabilities, observedAt);
       return item ? [item] : [];
     });
     const {
@@ -1595,6 +1598,9 @@ export class ApprovalsService {
   ) {
     const approvalRow = await this.get(artistId, id);
     const updated = await this.prisma.client.$transaction(async (tx) => {
+      if (approvalRow.actionType === "social_post_batch") {
+        await assertSocialOwner(tx, artistId, actorOperatorId);
+      }
       const changed = await tx.approvalRequest.updateMany({
         where: {
           id,
@@ -1620,7 +1626,7 @@ export class ApprovalsService {
           action: "approval.approved",
           actorLabel,
           actorOperatorId: actorOperatorId ?? null,
-          metadata: { actionType: approvalRow.actionType }
+          metadata: { actionType: approvalRow.actionType, ...(approvalRow.actionType === "social_post_batch" ? { ownerApproved: true } : {}) }
         }
       });
       await this.reconcileApprovalRecommendation(
@@ -1645,6 +1651,9 @@ export class ApprovalsService {
   ) {
     const approvalRow = await this.get(artistId, id);
     const updated = await this.prisma.client.$transaction(async (tx) => {
+      if (approvalRow.actionType === "social_post_batch") {
+        await assertSocialOwner(tx, artistId, actorOperatorId);
+      }
       const changed = await tx.approvalRequest.updateMany({
         where: {
           id,
@@ -1701,6 +1710,9 @@ export class ApprovalsService {
     options?: { dryRun?: boolean; actorOperatorId?: string | null }
   ) {
     const approvalRow = await this.get(artistId, id);
+    if (approvalRow.actionType === "social_post_batch") {
+      await assertSocialOwner(this.prisma.client, artistId, options?.actorOperatorId);
+    }
     if (approvalRow.status === ApprovalStatus.executed) {
       throw new BadRequestException("Approval already executed");
     }
@@ -2171,7 +2183,9 @@ export class ApprovalsService {
         this.notifyApproval(artistId, id, "executed");
         return finalized;
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = approvalRow.actionType === "social_post_batch"
+        ? "Social execution stopped. Review recorded platform outcomes before creating a new approval."
+        : err instanceof Error ? err.message : String(err);
       const nextPayload = {
         ...basePayload,
         ...(providerExecutionResult

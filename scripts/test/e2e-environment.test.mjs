@@ -14,7 +14,11 @@ const providerCredentials = [
   "INTEGRATION_SECRETS_ENCRYPTION_KEY", "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_BOT_USERNAME", "TELEGRAM_WEBHOOK_SECRET", "BANDSINTOWN_APP_ID",
   "TICKETMASTER_API_KEY", "OPENAI_API_KEY", "YOUTUBE_API_KEY",
-  "SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"
+  "SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET",
+  "META_APP_ID", "META_APP_SECRET", "FACEBOOK_PAGE_ACCESS_TOKEN", "FACEBOOK_PAGE_ID",
+  "INSTAGRAM_BUSINESS_ACCOUNT_ID", "YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET",
+  "YOUTUBE_REFRESH_TOKEN", "TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET",
+  "TIKTOK_ACCESS_TOKEN", "TIKTOK_OPEN_ID"
 ];
 const disabledFlags = [
   "OPENAI_ENABLED", "ENABLE_QUEUE_WORKER", "GMAIL_REPLY_SYNC_ENABLED",
@@ -22,13 +26,17 @@ const disabledFlags = [
 ];
 const liveEnvironment = Object.fromEntries([
   ...providerCredentials.map((key) => [key, `synthetic-live-${key}`]),
-  ...disabledFlags.map((key) => [key, "true"])
+  ...disabledFlags.map((key) => [key, "true"]),
+  ["SOCIAL_ADAPTER", "real"],
+  ["SOCIAL_MEDIA_DIR", "/synthetic/live-social-media"]
 ]);
-const providerKeys = [...providerCredentials, ...disabledFlags];
+const providerKeys = [...providerCredentials, ...disabledFlags, "SOCIAL_ADAPTER", "SOCIAL_MEDIA_DIR"];
 
 function assertMockEnvironment(env) {
   for (const key of providerCredentials) assert.equal(env[key], "", key);
   for (const key of disabledFlags) assert.equal(env[key], "false", key);
+  assert.equal(env.SOCIAL_ADAPTER, "mock");
+  assert.equal(env.SOCIAL_MEDIA_DIR, "");
 }
 
 // Execute the real runner, intercepting all child commands before they can

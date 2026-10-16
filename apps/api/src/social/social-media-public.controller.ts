@@ -16,6 +16,8 @@ export class SocialMediaPublicController {
     const file = await this.media.openPublic(id, token);
     return reply
       .header("Content-Type", file.mimeType)
+      .header("X-Content-Type-Options", "nosniff")
+      .header("Content-Security-Policy", "sandbox")
       .header("Content-Length", String(file.byteSize))
       .header("Cache-Control", "private, max-age=3600")
       .send(file.stream);

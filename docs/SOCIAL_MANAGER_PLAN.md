@@ -12,12 +12,19 @@ guides that day.
 ## Hard rules (all phases)
 
 - Nothing posts without an explicit `ApprovalRequest` (`actionType=social_post_batch`,
-  `status=approved`, `approvedAt` set).
-- Nothing is marked posted until the platform returns an ID (`post id`,
-  YouTube `video.id`, or TikTok `publish_id` for inbox drafts).
-- Every send attempt writes `SocialSendLog`.
+  `status=approved`, `approvedAt` set) and an audited owner decision.
+  The approved snapshot is immutable; durable claims prevent replay or concurrent
+  clicks from sending twice. Failed or uncertain sends require platform review,
+  never an automatic retry.
+- An ID alone does not prove public publication. Mock sends are `simulated`,
+  YouTube receipts are `private_upload`, and TikTok init receipts are
+  `processing`. Only confirmed public post receipts are `posted`. Lost
+  responses and interrupted sends stay unconfirmed.
+- Every send attempt records `SocialSendLog` before the provider call and
+  finalizes it with the result. Interrupted attempts retain an unknown outcome.
 - Free official APIs only. No scraping, no browser bots, no X/Twitter.
-- Secrets stay in env vars or encrypted `IntegrationConnection` blobs. Never
+- App secrets stay in env vars; publishing tokens stay in encrypted,
+  artist-bound `IntegrationConnection` blobs matching the approved account. Never
   commit tokens.
 - Stalemate and Rad Dad keep separate voice profiles. An account-mismatch check
   runs before every send.
@@ -31,7 +38,8 @@ guides that day.
 - Photo: `POST /{page-id}/photos`
 - Video: `POST /{page-id}/videos`
 - Feed text: `POST /{page-id}/feed`
-- Show Event: `POST /{page-id}/events`
+- Show Event: disabled in this phase; it needs a separate durable approval
+  and receipt before it can become a supported side effect.
 - Permissions used in Connect: `pages_show_list`, `pages_manage_posts`,
   `pages_read_engagement`, `pages_manage_engagement`, `pages_read_user_content`,
   `pages_messaging`, `read_insights`
@@ -82,8 +90,9 @@ guides that day.
 - Phase 1 uses **upload-to-inbox / draft**, not Direct Post:
   `POST /v2/post/publish/inbox/video/init/` (`video.upload`).
   Photos use `/v2/post/publish/content/init/` with `post_mode=MEDIA_UPLOAD`.
-- Success is a `publish_id`. Jeff finishes in the TikTok app. That ID is
-  logged as `draft_only`, never as a live public post.
+- Init returns a `publish_id` tracking asynchronous transfer. It is logged
+  as `processing`, never as a delivered inbox draft or public post. Check
+  TikTok for completion and finish publication in the app.
 - Unaudited clients: private / `SELF_ONLY` for Direct Post; inbox draft is
   the supported unaudited path.
 - Docs:
@@ -97,12 +106,32 @@ Flow: drop a photo/video file (drag-and-drop or picker, including phone)
 or an optional public URL + note → chunked store on the server with
 progress → the manager LLM drafts 2–3 caption variants per platform
 (template fallback when `OPENAI_ENABLED` is off) → one **Approve & post** →
-adapter calls from the local file → live status only after an ID.
+adapter calls from the local file → separate confirmed-public, private-upload,
+processing, unknown, or simulated receipts. Configured caption-provider errors
+return a sanitized failure with no drop or approval created; templates are
+reserved for explicitly disabled or unconfigured caption generation.
 
-Captions use only confirmed facts (note, show name, venue, date, ticket URL).
-They never invent dates, prices, or locations. `#chicago` and other city tags
-appear only when that place is in the data. Instagram/TikTok stay short;
+Caption prompts separate note data from fixed instructions. Instruction overrides,
+role delimiters, and similar attacks in notes or fact fields are rejected before
+the provider call, including when templates are used. Validation rejects malformed
+or incomplete batches and detected unsupported links, dates, times, prices,
+locations, venues, lineups, and hashtags across every caption, title, and variant.
+Generated wording must use supplied fact spans and a small presentation vocabulary;
+venue and lineup relations also require evidence. These conservative lexical
+checks can reject otherwise reasonable paraphrases and do not verify whether a
+user-supplied fact is true; the owner must review every caption.
+`#chicago` and other recognized city tags require that place in the data. Instagram/TikTok stay short;
 Facebook is longer; YouTube is a title plus description.
+
+Caption SDK calls have a 30-second timeout and no retries. Before each call,
+`SocialCaptionDailyUsage` atomically reserves one attempt across all bands and
+API processes using the database's UTC day. `SOCIAL_CAPTION_DAILY_CALL_LIMIT`
+defaults to 100; zero disables calls. Failed, rate-limited, timed-out, or invalid
+responses consume their reservation. A missing migration, unavailable database,
+invalid setting, or exhausted cap blocks generation with no fallback draft.
+Disabled/unconfigured LLM templates do not consume a call. Apply the forward
+`20261016010000_social_caption_daily_budget` migration before enabling drafting.
+This cap covers Social caption calls; it does not change Manager chat budgets.
 
 | Platform | How Phase 1 sends the file |
 | --- | --- |
@@ -120,7 +149,8 @@ max 20 MB, videos max 2 GB, 8 MB chunks. Official transfer docs:
 - https://developers.tiktok.com/doc/content-posting-api-media-transfer-guide
 
 Connect buttons (owner-only) start OAuth for Meta, YouTube upload, and TikTok.
-Env-var tokens remain a fallback, matching StoryLiner. `SOCIAL_ADAPTER=mock`
+Publishing requires a verified, encrypted connection for this band; global
+env-var tokens cannot silently choose a destination for another workspace. `SOCIAL_ADAPTER=mock`
 is the default; mock mode provisions workspace-bound accounts so local demo
 never talks to a live API.
 
@@ -173,7 +203,9 @@ Artist
 ```
 
 `IntegrationConnection.provider` values `meta`, `youtube_publish`, and `tiktok`
-hold encrypted OAuth secrets. Page tokens never go in git.
+hold encrypted OAuth secrets and verified destination IDs. Client DTOs omit
+credentials, local storage paths, and provider media bearer URLs. Page tokens
+never go in git.
 
 ## What Jeff still connects
 

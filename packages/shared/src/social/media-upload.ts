@@ -39,11 +39,9 @@ export function socialMediaKindFromMime(mimeType: string, filename = ""): Social
   return "photo";
 }
 
-export function isAllowedSocialMediaMime(mimeType: string, filename = ""): boolean {
+export function isAllowedSocialMediaMime(mimeType: string, _filename = ""): boolean {
   const mime = mimeType.trim().toLowerCase();
-  if (PHOTO_TYPES.has(mime) || VIDEO_TYPES.has(mime)) return true;
-  if (mime.startsWith("image/") || mime.startsWith("video/")) return true;
-  return /\.(jpe?g|png|webp|gif|heic|mp4|mov|m4v|webm|3gp)$/i.test(filename);
+  return PHOTO_TYPES.has(mime) || VIDEO_TYPES.has(mime);
 }
 
 export function assertSocialMediaLimits(input: {
