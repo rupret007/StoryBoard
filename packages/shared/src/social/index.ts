@@ -4,4 +4,5 @@ export * from "./caption-facts";
 export * from "./captions";
 export * from "./caption-llm";
 export * from "./caption-eval";
+export * from "./composer-state";
 export * from "./media-upload";
