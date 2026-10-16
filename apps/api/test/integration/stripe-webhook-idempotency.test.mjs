@@ -153,6 +153,10 @@ test("postgres: concurrent first deliveries run the handler once", async () => {
       (result.reason.getStatus?.() === 503 || isStripeWebhookInFlightError(result.reason))
   );
 
+  assert.deepEqual(results.filter(
+    (result) => result.status === "rejected" && !inFlight.includes(result)
+  ), [], "concurrent deliveries must not leak an unexpected database error");
+
   assert.equal(processorCalls, 1);
   assert.equal(processed.length, 1);
   assert.equal(duplicates.length + inFlight.length, 1);
@@ -189,6 +193,52 @@ test("postgres: an expired unapplied claim can be recovered after a crashed owne
   assert.equal(row.status, "completed");
   assert.ok(row.appliedAt instanceof Date);
   assert.equal(await client.stripeWebhookEvent.count({ where: { eventId } }), 1);
+});
+
+test("postgres: a claim from an older snapshot returns in-flight after the winning delivery commits", async () => {
+  await resetDatabase();
+  const eventId = `evt_pg_snapshot_${randomUUID().replaceAll("-", "")}`;
+  let releaseOwner;
+  let ownerStarted;
+  const held = new Promise((resolve) => { releaseOwner = resolve; });
+  const started = new Promise((resolve) => { ownerStarted = resolve; });
+  let processorCalls = 0;
+  const owner = new StripeWebhookIdempotencyService(prisma).runOnce(eventId, async (tx) => {
+    processorCalls += 1;
+    ownerStarted();
+    await held;
+    await recordEffect(tx, eventId);
+    return "owner";
+  });
+  await Promise.race([started, owner]);
+
+  // Take a real serializable snapshot while the owner's row is uncommitted.
+  // The later INSERT then conflicts with a row invisible to this snapshot,
+  // deterministically exercising the raw-query P2010/40001 path without sleeps.
+  const follower = new StripeWebhookIdempotencyService({ client: {
+    $transaction: (work, options) => client.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw`
+        SELECT "eventId" FROM "StripeWebhookEvent" WHERE "eventId" = ${eventId}
+      `;
+      assert.deepEqual(rows, []);
+      releaseOwner();
+      await owner;
+      return work(tx);
+    }, options)
+  } });
+
+  try {
+    await assert.rejects(() => follower.runOnce(eventId, async () => {
+      processorCalls += 1;
+      assert.fail("a conflicting delivery must not run the handler");
+    }), isStripeWebhookInFlightError);
+  } finally {
+    releaseOwner();
+    await owner;
+  }
+  assert.equal(processorCalls, 1);
+  assert.equal(await effectCount(eventId), 1);
+  assert.equal((await eventRow(eventId)).status, "completed");
 });
 
 test("postgres: a failed handler rolls the claim and side effect back so a retry can process", async () => {
