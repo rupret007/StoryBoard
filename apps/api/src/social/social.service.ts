@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import {
+  resolveRecordedSocialShow,
   resolveSocialVoice,
+  SOCIAL_SHOW_NOT_RECORDED,
   socialApproveAndPostSchema,
   socialDropInputSchema,
   voiceProfileFor,
@@ -370,17 +372,17 @@ export class SocialService {
   }
 
   private async resolveShow(artistId: string, input: SocialDropInput) {
-    if (!input.eventId) return input.show ?? null;
+    if (!input.eventId) return null;
     const event = await this.prisma.client.bandEvent.findFirst({
-      where: { id: input.eventId, artistId }
+      where: { id: input.eventId, artistId },
+      select: { title: true, startsAt: true, locationName: true }
     });
-    if (!event) throw new BadRequestException("Selected show does not belong to this band.");
-    if (input.show) return input.show;
-    return {
-      name: event.title,
-      startsAt: event.startsAt?.toISOString() ?? undefined,
-      place: event.locationName ?? undefined
-    };
+    try {
+      return resolveRecordedSocialShow({ eventId: input.eventId, event });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : SOCIAL_SHOW_NOT_RECORDED;
+      throw new BadRequestException(message);
+    }
   }
 
   private async ensureVoiceProfile(artistId: string, voiceKey: SocialVoiceKey) {
