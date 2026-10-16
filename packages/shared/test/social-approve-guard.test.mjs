@@ -37,7 +37,7 @@ test("approve-and-post is blocked after a send so captions cannot be rewritten",
       postStatus: "partial",
       approvalStatus: "executed"
     }),
-    /already posted/i
+    /already has a posting attempt/i
   );
   assert.match(
     shared.socialApproveAndPostBlockReason({
@@ -53,6 +53,17 @@ test("approve-and-post is blocked after a send so captions cannot be rewritten",
     }),
     /already posting/i
   );
+});
+
+test("finished mock/private and uncertain receipts never claim a public post or a safe retry", () => {
+  for (const postStatus of ["simulated", "private_upload", "draft_only", "processing", "unknown", "failed", "partial"]) {
+    const reason = shared.socialApproveAndPostBlockReason({ postStatus, approvalStatus: "executed" });
+    assert.equal(typeof reason, "string");
+    assert.doesNotMatch(reason, /already posted|nothing extra was sent|try again/i);
+  }
+  for (const approvalStatus of ["rejected", "expired"]) {
+    assert.match(shared.socialApproveAndPostBlockReason({ postStatus: "pending_approval", approvalStatus }), /closed/);
+  }
 });
 
 test("a target that already has a platform id is not sent again", () => {

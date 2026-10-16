@@ -9,16 +9,20 @@ const service = readFileSync(join(dir, "../src/social/social.service.ts"), "utf8
 const execution = readFileSync(join(dir, "../src/social/social-execution.service.ts"), "utf8");
 
 test("approve-and-post refuses a terminal drop before rewriting captions", () => {
-  assert.match(service, /socialApproveAndPostBlockReason/);
-  assert.match(service, /if \(blocked\) \{\s*throw new BadRequestException\(blocked\);/s);
-  assert.match(service, /const post = await this.execution.requirePost/);
+  const approvalMethod = service.slice(service.indexOf("async approveAndPost("));
+  assert.match(approvalMethod, /\$transaction\(async \(tx\) =>/);
+  assert.match(approvalMethod, /await assertSocialOwner\(tx, artistId, actor.operatorId\)/);
+  assert.match(approvalMethod, /post.approval.status !== ApprovalStatus.pending && post.approval.status !== ApprovalStatus.proposed/);
+  assert.match(approvalMethod, /if \(approved.count !== 1\) return \{ approvalId: post.approval.id, execute: false \}/);
   assert.ok(
-    service.indexOf("socialApproveAndPostBlockReason") < service.indexOf("if (input.targets)"),
-    "the block check must run before target caption writes"
+    approvalMethod.indexOf("if (approved.count !== 1)") < approvalMethod.indexOf("await tx.socialPostTarget.update("),
+    "the pending approval must be claimed before any caption write"
   );
 });
 
-test("execution skips a target that already has a platform id", () => {
-  assert.match(execution, /shouldSendSocialTarget/);
-  assert.match(execution, /existingExternalPostId: row.externalPostId/);
+test("execution refuses a target that already has a platform id", () => {
+  const executeMethod = execution.slice(execution.indexOf("async executeApproved("));
+  assert.match(executeMethod, /status: \{ in: \["draft", "pending"\] \}, externalPostId: null/);
+  assert.match(executeMethod, /if \(claimed.count !== 1\) throw new BadRequestException/);
+  assert.ok(executeMethod.indexOf("if (claimed.count !== 1)") < executeMethod.indexOf("await sendSocialTarget("));
 });

@@ -1,10 +1,11 @@
 "use client";
 
-import { socialApproveAndPostBlockReason } from "@storyboard/shared";
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
-import { Check, Link2, Megaphone, ShieldCheck, Upload } from "lucide-react";
+import { canApproveSocialPost, socialReceiptLabel, SOCIAL_APPROVAL_UNCERTAIN } from "@storyboard/shared";
+import { Link2, Megaphone, ShieldCheck, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { publicApiBaseUrl, scopedApiFetch } from "@/lib/api";
+import { socialApproveAndPostBlockReason } from "@storyboard/shared";
 
 export type SocialCaptionVariant = {
   caption: string;
@@ -21,6 +22,8 @@ export type SocialTarget = {
   tags: string[];
   captionVariants?: SocialCaptionVariant[];
   selectedVariantIndex?: number;
+  accountLabel?: string | null;
+  accountExternalId?: string | null;
   includeFacebookEvent: boolean;
   facebookEventName: string | null;
   status: string;
@@ -36,6 +39,7 @@ export type SocialPost = {
   voiceKey: string;
   status: string;
   approvalRequestId: string | null;
+  reviewFingerprint: string;
   createdAt: string;
   captionSource?: "llm" | "template";
   captionNotice?: string | null;
@@ -110,9 +114,21 @@ export function SocialClient({
   const [eventId, setEventId] = useState("");
   const [busy, setBusy] = useState<"drop" | "post" | "upload" | null>(null);
   const [error, setError] = useState("");
+  const postingRef = useRef(false);
+  const [uncertainPostId, setUncertainPostId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [activePost, setActivePost] = useState<SocialPost | null>(initial?.posts[0] ?? null);
   const [drafts, setDrafts] = useState<SocialTarget[]>(initial?.posts[0]?.targets ?? []);
+
+  const approvalAllowed = activePost !== null && canApproveSocialPost({
+    isOwner,
+    approvalStatus: activePost.approval?.status,
+    postStatus: activePost.status,
+    hasEnabledTarget: drafts.some((target) => target.enabled)
+  });
+  const canEditDraft = canManage && activePost?.approval?.status === "pending" &&
+    ["draft", "pending_approval"].includes(activePost.status) && busy === null &&
+    uncertainPostId !== activePost.id;
 
   const voiceLabel = useMemo(() => {
     if (workspace?.voiceKey === "stalemate") return "Stalemate";
@@ -120,8 +136,8 @@ export function SocialClient({
     return "Unknown — will not inherit Stalemate or Rad Dad";
   }, [workspace?.voiceKey]);
   const approveBlockReason = socialApproveAndPostBlockReason({
-    postStatus: activePost?.status ?? null,
-    approvalStatus: activePost?.approval?.status ?? null
+    postStatus: activePost?.status,
+    approvalStatus: activePost?.approval?.status
   });
 
   async function refresh(preferredPostId?: string) {
@@ -134,6 +150,7 @@ export function SocialClient({
     if (match) {
       setActivePost(match);
       setDrafts(match.targets);
+      setUncertainPostId(null);
     }
   }
 
@@ -224,7 +241,8 @@ export function SocialClient({
   }
 
   async function approveAndPost() {
-    if (!canManage || !activePost || approveBlockReason) return;
+    if (!approvalAllowed || !activePost || postingRef.current || uncertainPostId === activePost.id) return;
+    postingRef.current = true;
     setBusy("post");
     setError("");
     setNotice("");
@@ -233,6 +251,7 @@ export function SocialClient({
         method: "POST",
         json: {
           postId: activePost.id,
+          reviewFingerprint: activePost.reviewFingerprint,
           targets: drafts.map((row) => ({
             id: row.id,
             enabled: row.enabled,
@@ -246,19 +265,23 @@ export function SocialClient({
       });
       setActivePost(posted);
       setDrafts(posted.targets);
-      const missing = posted.targets.filter((row) => row.enabled && !row.externalPostId);
-      setNotice(
-        missing.length
-          ? "Approval was recorded. Platforms without an ID were not marked posted."
-          : posted.targets.some((row) => row.isDraftOnly)
-            ? "Approval recorded. TikTok is an inbox draft until you finish it in the TikTok app."
-            : "Approval recorded. Each live platform returned an ID."
-      );
+      setNotice("Approval recorded. Review each platform's receipt below; an ID alone does not confirm publication.");
       await refresh(posted.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Approve & post failed. Nothing extra was sent.");
+    } catch {
+      setUncertainPostId(activePost.id);
+      setError(SOCIAL_APPROVAL_UNCERTAIN);
     } finally {
+      postingRef.current = false;
       setBusy(null);
+    }
+  }
+
+  async function refreshStatus() {
+    try {
+      await refresh();
+      setError("");
+    } catch {
+      setError("Status could not be refreshed. The send outcome is still unconfirmed.");
     }
   }
 
@@ -309,7 +332,7 @@ export function SocialClient({
           <h3 className="text-base font-semibold">Connect accounts</h3>
         </div>
         <p className="mt-2 text-sm text-[var(--text-secondary)]">
-          Owner-only OAuth. Tokens are stored encrypted server-side or read from env vars. Nothing is committed.
+          An owner connects each band’s publishing accounts.
         </p>
         <dl className="mt-4 grid gap-3 sm:grid-cols-3">
           {[
@@ -447,7 +470,7 @@ export function SocialClient({
               </select>
             </label>
             <label className="block text-sm">
-              <span className="text-[var(--text-secondary)]">Show (Facebook Event)</span>
+              <span className="text-[var(--text-secondary)]">Show for caption facts</span>
               <select
                 className="sb-select mt-1"
                 value={eventId}
@@ -501,13 +524,28 @@ export function SocialClient({
               type="button"
               className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950"
               onClick={() => void approveAndPost()}
-              disabled={!canManage || busy !== null || Boolean(approveBlockReason)}
+              disabled={!approvalAllowed || busy !== null || uncertainPostId === activePost.id}
               data-testid="social-approve-and-post"
             >
               <ShieldCheck className="h-4 w-4" />
-              {busy === "post" ? "Posting…" : approveBlockReason ? "Already posted" : "Approve & post"}
+              {busy === "post" ? "Posting…" : activePost.status === "posted" ? "Already posted" : approveBlockReason ? "Approval unavailable" : "Approve & post"}
             </button>
           </div>
+          {!isOwner ? <p className="mt-3 text-sm text-[var(--text-muted)]">Only an owner can approve and post.</p> : null}
+          <button type="button" className="sb-btn-secondary mt-3 min-h-11 px-3 text-sm" disabled={busy !== null} onClick={() => void refreshStatus()}>
+            Refresh status
+          </button>
+          {workspace.adapterMode === "mock" ? <p className="mt-3 text-sm">Mock mode: approval simulates sends. Nothing is published.</p> : null}
+          {activePost.media ? (
+            <div className="mt-4">
+              <p className="text-sm text-[var(--text-secondary)]">Media for this approval: {activePost.media.filename}</p>
+              {activePost.media.kind === "video" ? (
+                <video controls className="mt-2 max-h-64 w-full rounded-lg" src={activePost.media.publicUrl.startsWith("/") ? `${publicApiBaseUrl()}${activePost.media.publicUrl}` : activePost.media.publicUrl} />
+              ) : (
+                <img alt="Media for the selected post" referrerPolicy="no-referrer" className="mt-2 max-h-64 rounded-lg object-contain" src={activePost.media.publicUrl.startsWith("/") ? `${publicApiBaseUrl()}${activePost.media.publicUrl}` : activePost.media.publicUrl} />
+              )}
+            </div>
+          ) : <p className="mt-3 text-sm text-[var(--text-muted)]">No media attached to this approval.</p>}
           <div className="mt-5 grid gap-4 lg:grid-cols-2">
             {drafts.map((target, index) => (
               <article key={target.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-4">
@@ -522,11 +560,15 @@ export function SocialClient({
                         next[index] = { ...target, enabled: event.target.checked };
                         setDrafts(next);
                       }}
-                      disabled={!canManage || Boolean(approveBlockReason)}
+                      disabled={!canEditDraft}
                     />
                     On
                   </label>
                 </div>
+                <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                  Destination: {target.accountLabel ?? "No connected account"}
+                  {target.accountExternalId ? ` · ${target.accountExternalId}` : ""}
+                </p>
                 {(target.captionVariants?.length ?? 0) > 1 ? (
                   <div className="mt-3 flex flex-wrap gap-2" data-testid={`social-caption-variants-${target.platform}`}>
                     {target.captionVariants!.map((variant, variantIndex) => (
@@ -539,7 +581,7 @@ export function SocialClient({
                             ? "bg-[var(--accent)] font-semibold text-slate-950"
                             : "border border-[var(--border)] text-[var(--text-secondary)]"
                         }`}
-                        disabled={!canManage || Boolean(approveBlockReason)}
+                        disabled={!canEditDraft}
                         onClick={() => {
                           const next = [...drafts];
                           next[index] = {
@@ -566,7 +608,7 @@ export function SocialClient({
                       next[index] = { ...target, title: event.target.value };
                       setDrafts(next);
                     }}
-                    disabled={!canManage || Boolean(approveBlockReason)}
+                    disabled={!canEditDraft}
                     aria-label="YouTube title"
                   />
                 ) : null}
@@ -578,35 +620,21 @@ export function SocialClient({
                     next[index] = { ...target, caption: event.target.value };
                     setDrafts(next);
                   }}
-                  disabled={!canManage || Boolean(approveBlockReason)}
+                  disabled={!canEditDraft}
                   aria-label={`${PLATFORM_LABEL[target.platform]} caption`}
                 />
-                {target.platform === "facebook" ? (
-                  <label className="mt-3 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                    <input
-                      type="checkbox"
-                      checked={target.includeFacebookEvent}
-                      onChange={(event) => {
-                        const next = [...drafts];
-                        next[index] = { ...target, includeFacebookEvent: event.target.checked };
-                        setDrafts(next);
-                      }}
-                      disabled={!canManage || Boolean(approveBlockReason)}
-                    />
-                    Create Facebook Event
-                  </label>
+                {target.platform === "youtube" ? (
+                  <p className="mt-3 text-xs text-[var(--text-muted)]">YouTube uploads stay private. Publish separately in YouTube Studio.</p>
                 ) : null}
                 {target.platform === "tiktok" ? (
                   <p className="mt-3 text-xs text-[var(--text-muted)]">
                     TikTok sends an inbox draft. Finish it in the TikTok app.
                   </p>
                 ) : null}
-                {target.externalPostId ? (
-                  <p className="mt-3 flex items-center gap-1 text-xs text-emerald-300">
-                    <Check className="h-3 w-3" />
-                    {target.isDraftOnly ? "Draft ID" : "Posted ID"}: {target.externalPostId}
-                  </p>
-                ) : null}
+                <p className="mt-3 text-xs text-[var(--text-secondary)]" data-testid={`social-receipt-${target.platform}`}>
+                  {socialReceiptLabel(target)}
+                  {target.externalPostId ? ` · Reference ID: ${target.externalPostId}` : ""}
+                </p>
                 {target.lastError ? (
                   <p className="mt-3 text-xs text-rose-200">{target.lastError}</p>
                 ) : null}
@@ -643,6 +671,7 @@ export function SocialClient({
                 <button
                   type="button"
                   className="text-left text-sm font-medium"
+                  disabled={busy !== null}
                   onClick={() => {
                     setActivePost(post);
                     setDrafts(post.targets);
