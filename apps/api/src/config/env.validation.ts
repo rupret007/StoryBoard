@@ -106,17 +106,11 @@ const envSchema = z
     SOCIAL_CAPTION_DAILY_CALL_LIMIT: socialCaptionDailyCallLimitSchema,
     META_APP_ID: z.string().optional(),
     META_APP_SECRET: z.string().optional(),
-    FACEBOOK_PAGE_ACCESS_TOKEN: z.string().optional(),
-    FACEBOOK_PAGE_ID: z.string().optional(),
-    INSTAGRAM_BUSINESS_ACCOUNT_ID: z.string().optional(),
     YOUTUBE_CLIENT_ID: z.string().optional(),
     YOUTUBE_CLIENT_SECRET: z.string().optional(),
-    YOUTUBE_REFRESH_TOKEN: z.string().optional(),
     YOUTUBE_PUBLISH_REDIRECT_URI: z.string().optional(),
     TIKTOK_CLIENT_KEY: z.string().optional(),
-    TIKTOK_CLIENT_SECRET: z.string().optional(),
-    TIKTOK_ACCESS_TOKEN: z.string().optional(),
-    TIKTOK_OPEN_ID: z.string().optional()
+    TIKTOK_CLIENT_SECRET: z.string().optional()
   })
   .superRefine((data, ctx) => {
     if (data.AUTH_DEV_BYPASS && data.NODE_ENV === "production") {

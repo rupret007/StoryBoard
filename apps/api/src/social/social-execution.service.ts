@@ -29,16 +29,10 @@ export class SocialExecutionService implements SocialPublisherPort {
   env(): SocialCredentialEnv {
     return {
       SOCIAL_ADAPTER: this.config.get<string>("SOCIAL_ADAPTER"),
-      FACEBOOK_PAGE_ACCESS_TOKEN: this.config.get<string>("FACEBOOK_PAGE_ACCESS_TOKEN"),
-      FACEBOOK_PAGE_ID: this.config.get<string>("FACEBOOK_PAGE_ID"),
-      INSTAGRAM_BUSINESS_ACCOUNT_ID: this.config.get<string>("INSTAGRAM_BUSINESS_ACCOUNT_ID"),
       YOUTUBE_CLIENT_ID: this.config.get<string>("YOUTUBE_CLIENT_ID"),
       YOUTUBE_CLIENT_SECRET: this.config.get<string>("YOUTUBE_CLIENT_SECRET"),
-      YOUTUBE_REFRESH_TOKEN: this.config.get<string>("YOUTUBE_REFRESH_TOKEN"),
       TIKTOK_CLIENT_KEY: this.config.get<string>("TIKTOK_CLIENT_KEY"),
       TIKTOK_CLIENT_SECRET: this.config.get<string>("TIKTOK_CLIENT_SECRET"),
-      TIKTOK_ACCESS_TOKEN: this.config.get<string>("TIKTOK_ACCESS_TOKEN"),
-      TIKTOK_OPEN_ID: this.config.get<string>("TIKTOK_OPEN_ID"),
       META_APP_ID: this.config.get<string>("META_APP_ID"),
       META_APP_SECRET: this.config.get<string>("META_APP_SECRET"),
       GOOGLE_CLIENT_ID: this.config.get<string>("GOOGLE_CLIENT_ID"),
