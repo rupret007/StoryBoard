@@ -464,18 +464,6 @@ export function SocialClient({
                 </p>
               ) : null}
             </div>
-            <div className="sticky bottom-3 z-10 w-full sm:static sm:w-auto">
-              <button
-                type="button"
-                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 sm:w-auto"
-                onClick={() => void approveAndPost()}
-                disabled={!approveEnabled}
-                data-testid="social-approve-and-post"
-              >
-                <ShieldCheck className="h-4 w-4" />
-                {busy === "post" ? "Posting…" : "Approve & post"}
-              </button>
-            </div>
           </div>
           <div className="mt-5 grid gap-4 lg:grid-cols-2">
             {drafts.map((target, index) => (
@@ -581,6 +569,18 @@ export function SocialClient({
                 ) : null}
               </article>
             ))}
+          </div>
+          <div className="sticky bottom-3 z-10 mt-4 w-full sm:static sm:flex sm:justify-end">
+            <button
+              type="button"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 sm:w-auto"
+              onClick={() => void approveAndPost()}
+              disabled={!approveEnabled}
+              data-testid="social-approve-and-post"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              {busy === "post" ? "Posting…" : "Approve & post"}
+            </button>
           </div>
         </SurfaceCard>
       ) : (
