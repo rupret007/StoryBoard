@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import {
   SOCIAL_CAPTION_LLM_NOTICE_FAILED,
   SOCIAL_CAPTION_LLM_NOTICE_NO_KEY,
+  assertSafeSocialCaptionInput,
   completeSocialCaptionDrafts,
   socialCaptionLlmInput,
   socialCaptionLlmInstructions,
@@ -11,6 +12,7 @@ import {
   type DraftCaptionsInput,
   type SocialCaptionDraftResult
 } from "@storyboard/shared";
+import { SocialCaptionBudgetService } from "./social-caption-budget.service";
 
 export type SocialCaptionResponsesClient = {
   responses: {
@@ -42,7 +44,10 @@ export function socialCaptionLlmReady(env: {
 
 @Injectable()
 export class SocialCaptionService {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly budget: SocialCaptionBudgetService
+  ) {}
 
   draftingStatus() {
     if (this.llmReady()) {
@@ -68,11 +73,15 @@ export class SocialCaptionService {
     input: DraftCaptionsInput,
     client?: SocialCaptionResponsesClient
   ): Promise<SocialCaptionDraftResult> {
-    const canCall = Boolean(client) || this.llmReady();
-    if (!canCall) {
-      return completeSocialCaptionDrafts(input);
-    }
     try {
+      assertSafeSocialCaptionInput(input);
+      const canCall = Boolean(client) || this.llmReady();
+      if (!canCall) {
+        return completeSocialCaptionDrafts(input);
+      }
+      // Reserve before constructing/calling the provider. Failed calls still
+      // consume their slot; missing or unavailable storage never permits a call.
+      await this.budget.reserve();
       const llm = client ?? new OpenAI({
         apiKey: this.config.getOrThrow<string>("OPENAI_API_KEY"),
         timeout: 30_000,

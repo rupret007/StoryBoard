@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+const socialCaptionCallLimit = z.number().int().min(0).max(2_147_483_647);
+export const socialCaptionDailyCallLimitSchema = z.union([
+  socialCaptionCallLimit,
+  z.string().regex(/^(?:0|[1-9]\d*)$/).transform(Number).pipe(socialCaptionCallLimit)
+]).default(100);
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -97,6 +103,7 @@ const envSchema = z
       .optional()
       .transform((value) => (value === "real" ? "real" : "mock")),
     SOCIAL_MEDIA_DIR: z.string().optional(),
+    SOCIAL_CAPTION_DAILY_CALL_LIMIT: socialCaptionDailyCallLimitSchema,
     META_APP_ID: z.string().optional(),
     META_APP_SECRET: z.string().optional(),
     FACEBOOK_PAGE_ACCESS_TOKEN: z.string().optional(),

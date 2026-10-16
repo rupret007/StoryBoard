@@ -27,7 +27,7 @@ test("failed configured caption generation creates no post, target, media, appro
   };
   const captionService = new SocialCaptionService({
     get: (key) => key === "OPENAI_ENABLED" ? true : key === "OPENAI_API_KEY" ? "synthetic-test-key" : undefined
-  });
+  }, { reserve: async () => {} });
   const service = new SocialService(
     prisma,
     { create: unexpectedWrite("approval") },

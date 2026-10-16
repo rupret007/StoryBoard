@@ -47,7 +47,7 @@ test("caption service uses the template and says so when no LLM key is set", asy
 });
 
 test("mocked LLM invented facts fail closed without fallback drafts", async () => {
-  const service = new captions.SocialCaptionService(config(true));
+  const service = new captions.SocialCaptionService(config(true), { reserve: async () => {} });
   await assert.rejects(service.draft(input, {
     responses: {
       create: async () => ({
@@ -66,7 +66,7 @@ test("mocked LLM invented facts fail closed without fallback drafts", async () =
 });
 
 test("caption provider errors, refusals, and incomplete or malformed responses fail closed with sanitized errors", async () => {
-  const service = new captions.SocialCaptionService(config(true));
+  const service = new captions.SocialCaptionService(config(true), { reserve: async () => {} });
   const responses = [
     async () => { throw new Error("Provider error with sk-synthetic-private-token"); },
     async () => ({ output_text: "" }),
@@ -99,7 +99,7 @@ function validOutput() {
 }
 
 test("caption provider output cannot silently mix generated and template platforms", async () => {
-  const service = new captions.SocialCaptionService(config(true));
+  const service = new captions.SocialCaptionService(config(true), { reserve: async () => {} });
   const missing = validOutput();
   missing.platforms.pop();
   const duplicate = validOutput();
@@ -116,7 +116,7 @@ test("caption provider output cannot silently mix generated and template platfor
 });
 
 test("mocked LLM keeps Stalemate and Rad Dad voices on their own facts", async () => {
-  const service = new captions.SocialCaptionService(config(true));
+  const service = new captions.SocialCaptionService(config(true), { reserve: async () => {} });
   const stalemate = await service.draft(input, {
     responses: {
       create: async () => ({

@@ -1,4 +1,5 @@
 import {
+  assertSafeSocialCaptionFacts,
   enforceCaptionLength,
   locationHashtagsFromFacts,
   type ConfirmedSocialFacts,
@@ -249,6 +250,7 @@ function unknownDrafts(input: DraftCaptionsInput): SocialCaptionDraft[] {
 
 /** Deterministic per-platform drafts in the band's voice. Used when no LLM key is set. */
 export function draftPlatformCaptions(input: DraftCaptionsInput): SocialCaptionDraft[] {
+  assertSafeSocialCaptionFacts(factsFromInput(input));
   const next = { ...input, note: input.note.trim() };
   if (next.voice === "stalemate") return stalemateDrafts(next);
   if (next.voice === "rad_dad") return radDadDrafts(next);
