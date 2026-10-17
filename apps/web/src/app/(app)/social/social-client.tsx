@@ -5,6 +5,7 @@ import { canApproveSocialPost, socialReceiptLabel, SOCIAL_APPROVAL_UNCERTAIN } f
 import { Link2, Megaphone, ShieldCheck, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { publicApiBaseUrl, scopedApiFetch } from "@/lib/api";
+import { socialApproveAndPostBlockReason } from "@storyboard/shared";
 
 export type SocialCaptionVariant = {
   caption: string;
@@ -134,6 +135,10 @@ export function SocialClient({
     if (workspace?.voiceKey === "rad_dad") return "Rad Dad";
     return "Unknown — will not inherit Stalemate or Rad Dad";
   }, [workspace?.voiceKey]);
+  const approveBlockReason = socialApproveAndPostBlockReason({
+    postStatus: activePost?.status,
+    approvalStatus: activePost?.approval?.status
+  }) ?? (activePost && uncertainPostId === activePost.id ? SOCIAL_APPROVAL_UNCERTAIN : null);
 
   async function refresh(preferredPostId?: string) {
     if (!artistId) return;
@@ -509,6 +514,11 @@ export function SocialClient({
                   {activePost.captionNotice}
                 </p>
               ) : null}
+              {approveBlockReason ? (
+                <p className="mt-2 text-xs text-[var(--text-muted)]" data-testid="social-approve-blocked">
+                  {approveBlockReason}
+                </p>
+              ) : null}
             </div>
             <button
               type="button"
@@ -518,7 +528,7 @@ export function SocialClient({
               data-testid="social-approve-and-post"
             >
               <ShieldCheck className="h-4 w-4" />
-              {busy === "post" ? "Posting…" : "Approve & post"}
+              {busy === "post" ? "Posting…" : activePost.status === "posted" ? "Already posted" : approveBlockReason ? "Approval unavailable" : "Approve & post"}
             </button>
           </div>
           {!isOwner ? <p className="mt-3 text-sm text-[var(--text-muted)]">Only an owner can approve and post.</p> : null}

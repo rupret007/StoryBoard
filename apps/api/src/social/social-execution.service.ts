@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { SocialPlatform, SocialVoiceKey } from "@storyboard/shared";
+import { shouldSendSocialTarget, type SocialPlatform, type SocialVoiceKey } from "@storyboard/shared";
 import { ApprovalStatus, AuditSeverity, type SocialPostStatus, type SocialTargetStatus } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { SecretBox } from "../integrations/crypto/secret-box";
@@ -262,6 +262,13 @@ export class SocialExecutionService implements SocialPublisherPort {
     try {
       for (const target of enabled) {
         const row = post.targets.find((item) => item.id === target.targetId)!;
+        if (!shouldSendSocialTarget({
+          enabled: true,
+          existingExternalPostId: row.externalPostId,
+          status: row.status
+        })) {
+          throw new BadRequestException("A target already has a posting attempt.");
+        }
         const secrets = adapters[target.platform].mode === "real"
           ? await this.secretsFor(artistId, target.platform, target.accountExternalId ?? "") : null;
         const attempt = await this.prisma.client.$transaction(async (tx) => {

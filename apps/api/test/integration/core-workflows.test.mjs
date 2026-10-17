@@ -2726,7 +2726,7 @@ test("database integration: social owner approval is atomic, concurrent posting 
   const approvals = new approvalsMod.ApprovalsService(prisma, audit,
     { resolveForArtist: async () => mockAdaptersMod.mockAdapters },
     { enqueueApprovalNotify: async () => undefined }, execution);
-  const captions = new SocialCaptionService(config);
+  const captions = new SocialCaptionService(config, new SocialCaptionBudgetService(config, prisma));
   const social = new SocialService(prisma, approvals, audit, execution, captions);
   const newDrop = (note) => social.createDrop(artist.id, {
     note, mediaUrl: "https://example.invalid/synthetic-photo.jpg", mediaKind: "photo", platforms: ["facebook"]

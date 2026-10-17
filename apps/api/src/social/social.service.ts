@@ -3,6 +3,7 @@ import {
   resolveRecordedSocialShow,
   resolveSocialVoice,
   SOCIAL_SHOW_NOT_RECORDED,
+  socialApproveAndPostBlockReason,
   socialApproveAndPostSchema,
   socialDropInputSchema,
   voiceProfileFor,
@@ -246,6 +247,15 @@ export class SocialService {
           post.approval.actionType !== SOCIAL_POST_ACTION_TYPE ||
           post.approval.sourceKey !== `social_post:${post.id}`) {
         throw new BadRequestException("This drop has no matching approval record.");
+      }
+      if (post.approval.status === ApprovalStatus.pending || post.approval.status === ApprovalStatus.proposed) {
+        const approveBlockReason = socialApproveAndPostBlockReason({
+          postStatus: post.status,
+          approvalStatus: post.approval.status
+        });
+        if (approveBlockReason) {
+          throw new ConflictException(approveBlockReason);
+        }
       }
       const reviewedFingerprint = post.approval.status === ApprovalStatus.pending || post.approval.status === ApprovalStatus.proposed
         ? socialReviewFingerprint(post, socialAdapterMode(this.execution.env()))
