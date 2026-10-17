@@ -59,8 +59,8 @@ export function ManagerClient({ activeArtistId, initialProfile, profileLoadError
   useEffect(() => setPlanHealth(initialPlanHealth), [initialPlanHealth]);
   useEffect(() => setContextHealth(initialContextHealth), [initialContextHealth]);
   useEffect(() => setKnowledgeHealth(initialKnowledgeHealth), [initialKnowledgeHealth]);
-  useEffect(() => setEvalExamples((current) => mergeEvalExamples(initialEvalExamples, current)), [initialEvalExamples]);
-  useEffect(() => setResponseEvalExamples((current) => mergeResponseEvalExamples(initialResponseEvalExamples, current)), [initialResponseEvalExamples]);
+  useEffect(() => setEvalExamples(initialEvalExamples), [initialEvalExamples]);
+  useEffect(() => setResponseEvalExamples(initialResponseEvalExamples), [initialResponseEvalExamples]);
   useEffect(() => setEvaluation(initialEvaluation), [initialEvaluation]);
   useEffect(() => setLearning(initialLearning), [initialLearning]);
   useEffect(() => setFollowThrough(initialFollowThrough), [initialFollowThrough]);
@@ -844,28 +844,6 @@ function ManagerMessageBubble({ message, busy, canManage, evalExamples, response
     {message.canSubmitFeedback ? (correcting ? <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3"><label><span className="sb-label">What should improve?</span><select className="sb-select mt-1 w-full" value={reason} onChange={(event) => setReason(event.target.value)}><option value="missed_question">Missed my question</option><option value="incorrect">Something was incorrect</option><option value="too_vague">Too vague</option><option value="too_long">Too long</option><option value="wrong_tone">Tone felt wrong</option><option value="missing_context">Missing context</option><option value="other">Other</option></select></label><label className="mt-2 block"><span className="sb-label">Correction (optional)</span><input className="sb-input mt-1 w-full" value={note} maxLength={1000} onChange={(event) => setNote(event.target.value)} placeholder="What would have made this useful?" /></label><div className="mt-3 flex gap-2"><button className="sb-btn-secondary" disabled={busy} onClick={() => void saveCorrection()}>Save feedback</button><button className="sb-btn-ghost" disabled={busy} onClick={() => setCorrecting(false)}>Cancel</button></div></div> : <div className="mt-3 flex items-center gap-1 border-t border-[var(--border)] pt-2 text-xs text-[var(--text-muted)]"><span className="mr-1">Was this useful?</span><button className={message.feedback?.helpful ? "rounded-md bg-[var(--accent-muted)] px-2 py-1 text-[var(--accent)]" : "rounded-md px-2 py-1 hover:bg-[var(--surface-1)]"} disabled={busy} onClick={() => void markHelpful()}><ThumbsUp className="mr-1 inline h-3.5 w-3.5" /> Helpful</button><button className={message.feedback && !message.feedback.helpful ? "rounded-md bg-[var(--accent-muted)] px-2 py-1 text-[var(--accent)]" : "rounded-md px-2 py-1 hover:bg-[var(--surface-1)]"} disabled={busy} onClick={() => setCorrecting(true)}><ThumbsDown className="mr-1 inline h-3.5 w-3.5" /> Needs work</button>{message.feedback ? <span className="ml-auto">Saved</span> : null}</div>) : null}
     {message.canSubmitFeedback && responseEvalExamples && message.feedback ? responseEval ? <div className="mt-2 flex justify-end"><Badge variant={responseEval.label === "useful" ? "success" : "warning"}>answer in eval set</Badge></div> : message.feedback.helpful ? <div className="mt-2 flex justify-end"><button className="sb-btn-ghost" disabled={busy} onClick={() => void addResponseEval()}><ShieldCheck className="h-4 w-4" /> Add answer to evals</button></div> : reviewingEval ? <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3"><p className="text-sm font-medium">Capture the expected behavior</p><p className="mt-1 text-xs text-[var(--text-muted)]">This unresolved example will block the current intelligence release gate.</p><label className="mt-2 block"><span className="sb-label">What should the Manager do instead?</span><textarea className="sb-input mt-1 min-h-20 w-full" value={expectedBehavior} maxLength={3000} onChange={(event) => setExpectedBehavior(event.target.value)} /></label><div className="mt-3 flex gap-2"><button className="sb-btn-secondary" disabled={busy || expectedBehavior.trim().length < 10} onClick={() => void addResponseEval()}>Save eval example</button><button className="sb-btn-ghost" disabled={busy} onClick={() => setReviewingEval(false)}>Cancel</button></div></div> : <div className="mt-2 flex justify-end"><button className="sb-btn-ghost" disabled={busy} onClick={() => setReviewingEval(true)}><ShieldCheck className="h-4 w-4" /> Add answer to evals</button></div> : null}
   </div>;
-}
-
-function mergeEvalExamples(server: ManagerEvalExample[] | null, local: ManagerEvalExample[] | null) {
-  if (!server) return local;
-  if (!local) return server;
-  const merged = new Map(server.map((item) => [item.recommendationId, item]));
-  for (const item of local) {
-    const existing = merged.get(item.recommendationId);
-    if (!existing || new Date(item.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) merged.set(item.recommendationId, item);
-  }
-  return [...merged.values()];
-}
-
-function mergeResponseEvalExamples(server: ManagerResponseEvalExample[] | null, local: ManagerResponseEvalExample[] | null) {
-  if (!server) return local;
-  if (!local) return server;
-  const merged = new Map(server.map((item) => [item.managerMessageId, item]));
-  for (const item of local) {
-    const existing = merged.get(item.managerMessageId);
-    if (!existing || new Date(item.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) merged.set(item.managerMessageId, item);
-  }
-  return [...merged.values()];
 }
 
 function friendlyReason(reason: string) {

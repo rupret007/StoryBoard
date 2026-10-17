@@ -8,9 +8,10 @@ const load = async (file) => {
   const module = await import(pathToFileURL(join(dir, "../dist/social", file)).href);
   return module.default ?? module;
 };
-const [{ SocialService }, { SocialExecutionService }] = await Promise.all([
+const [{ SocialService }, { SocialExecutionService }, { socialReviewFingerprint }] = await Promise.all([
   load("social.service.js"),
-  load("social-execution.service.js")
+  load("social-execution.service.js"),
+  load("social-review.js")
 ]);
 
 function reviewTargetInput(target) {
@@ -121,18 +122,27 @@ for (const [postStatus, approvalStatus] of [
   });
 }
 
-test("approve-and-post refuses a terminal postStatus when approvalStatus is pending", async () => {
-  const target = { id: "target-1", caption: "Approved caption", enabled: true,
-    title: null, tags: [], includeFacebookEvent: false, selectedVariantIndex: 0 };
-  const reviewFingerprint = "a".repeat(64);
+function pendingApprovalGateFixture(postStatus) {
+  const target = {
+    id: "target-1", platform: "instagram", caption: "Draft caption", enabled: true,
+    title: null, tags: [], includeFacebookEvent: false, selectedVariantIndex: 0,
+    facebookEventName: null, facebookEventStartsAt: null, facebookEventPlace: null,
+    account: { externalAccountId: "ig_1", accountLabel: "Band", voiceKey: "stalemate", status: "active" }
+  };
+  const post = {
+    id: "post-1", status: postStatus, voiceKey: "stalemate", mediaAsset: null,
+    targets: [target], approvalRequestId: "approval-1"
+  };
+  const reviewFingerprint = socialReviewFingerprint(post, "mock");
   const unchangedTargets = [reviewTargetInput(target)];
-  const approval = { id: "approval-1", artistId: "artist-1", status: "pending",
+  const approval = {
+    id: "approval-1", artistId: "artist-1", status: "pending",
     actionType: "social_post_batch", sourceKey: "social_post:post-1",
     executionAttemptedAt: null,
-    payload: { reviewFingerprint, caption: target.caption } };
-  const post = { id: "post-1", status: "posted", approval,
-    targets: [target], approvalRequestId: approval.id };
-  const before = structuredClone({ target, approval });
+    payload: { reviewFingerprint, caption: target.caption }
+  };
+  post.approval = approval;
+  const before = structuredClone({ target, approval, postStatus: post.status });
   const calls = [];
   const write = (name, row) => async ({ where, data }) => {
     if (where?.status?.in && !where.status.in.includes(row.status)) {
@@ -160,7 +170,12 @@ test("approve-and-post refuses a terminal postStatus when approvalStatus is pend
     { client },
     {
       approve: async () => calls.push("approve"),
-      executeApproved: async () => calls.push("execute")
+      executeApproved: async () => {
+        calls.push("execute");
+        approval.status = "approved";
+        approval.executionAttemptedAt = new Date("2026-10-15T12:01:00Z");
+        post.status = "approved";
+      }
     },
     { log: async () => calls.push("audit") },
     {
@@ -170,19 +185,64 @@ test("approve-and-post refuses a terminal postStatus when approvalStatus is pend
     },
     {}
   );
-  const actor = { label: "Owner", operatorId: "operator-1" };
+  return {
+    service, post, target, approval, reviewFingerprint, unchangedTargets, before, calls,
+    actor: { label: "Owner", operatorId: "operator-1" }
+  };
+}
 
-  await assert.rejects(
-    service.approveAndPost("artist-1", {
+for (const [postStatus, pattern] of [
+  ["posted", /already posted/i],
+  ["partial", /already has a posting attempt/i],
+  ["unknown", /already has a posting attempt/i],
+  ["processing", /already has a posting attempt/i],
+  ["failed", /already failed/i],
+  ["simulated", /already been used/i],
+  ["private_upload", /already been used/i],
+  ["draft_only", /already been used/i]
+]) {
+  test(`approve-and-post blocks pending approval at the service gate for ${postStatus}`, async () => {
+    const { service, post, target, approval, reviewFingerprint, unchangedTargets, before, calls, actor } =
+      pendingApprovalGateFixture(postStatus);
+
+    await assert.rejects(
+      service.approveAndPost("artist-1", {
+        postId: post.id,
+        reviewFingerprint,
+        targets: unchangedTargets
+      }, actor),
+      (error) => error.getStatus() === 409 && pattern.test(error.message)
+    );
+    assert.deepEqual(calls, []);
+    assert.deepEqual({ target, approval }, { target: before.target, approval: before.approval });
+  });
+}
+
+for (const postStatus of ["pending_approval", "approved"]) {
+  test(`approve-and-post allows the first owner claim when approval is pending on ${postStatus}`, async () => {
+    const { service, post, reviewFingerprint, unchangedTargets, calls, actor, approval } =
+      pendingApprovalGateFixture(postStatus);
+
+    await service.approveAndPost("artist-1", {
       postId: post.id,
       reviewFingerprint,
       targets: unchangedTargets
-    }, actor),
-    (error) => error.getStatus() === 409 && /already posted/i.test(error.message)
-  );
-  assert.deepEqual(calls, []);
-  assert.deepEqual({ target, approval }, before);
-});
+    }, actor);
+    assert.ok(calls.includes("approval write"));
+    assert.ok(calls.includes("execute"));
+    assert.equal(approval.status, "approved");
+
+    await assert.rejects(
+      service.approveAndPost("artist-1", {
+        postId: post.id,
+        reviewFingerprint,
+        targets: [{ ...unchangedTargets[0], caption: "Rewritten after claim" }]
+      }, actor),
+      (error) => error.getStatus() === 409 && /approved content cannot change/i.test(error.message)
+    );
+    assert.equal(calls.filter((name) => name === "execute").length, 1);
+  });
+}
 
 function executionFixture(existingReceipt) {
   const targets = [
