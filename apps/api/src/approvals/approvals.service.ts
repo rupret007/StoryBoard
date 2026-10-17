@@ -1144,7 +1144,7 @@ export class ApprovalsService {
         where: {
           artistId,
           status: ApprovalStatus.approved,
-          executionAttemptedAt: { gte: leaseWindowStart },
+          executionAttemptedAt: { gt: leaseWindowStart },
           ...socialVisibility
         }
       }),
@@ -1244,7 +1244,10 @@ export class ApprovalsService {
     const rows = await this.prisma.client.approvalRequest.findMany({
       where: {
         artistId,
-        status: { in: [...APPROVAL_LIFECYCLE_RELEVANT_STATUSES] }
+        status: { in: [...APPROVAL_LIFECYCLE_RELEVANT_STATUSES] },
+        ...(excludeSocialPostBatch
+          ? { actionType: { not: "social_post_batch" as const } }
+          : {})
       },
       include: {
         bookingCampaign: {

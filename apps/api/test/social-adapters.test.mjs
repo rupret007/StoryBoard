@@ -490,6 +490,44 @@ test("YouTubeRealAdapter refreshes OAuth token when stored accessToken is expire
   assert.equal(authHeaders[1], "Bearer fresh-yt-token");
 });
 
+test("youtube publish 401 on init with failed refresh does not mark delivery unknown", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sb-yt-401-refresh-"));
+  const mediaPath = join(root, "clip.mp4");
+  await writeFile(mediaPath, "video");
+  let calls = 0;
+  const http = async (url) => {
+    calls += 1;
+    if (String(url).includes("oauth2.googleapis.com/token")) {
+      throw new Error("refresh rejected");
+    }
+    if (String(url).includes("uploadType=resumable")) {
+      return jsonResponse(401, { error: "invalid_token" });
+    }
+    throw new Error(`unexpected network access: ${url}`);
+  };
+  const adapter = new adapters.YouTubeRealAdapter(http);
+  const result = await adapter.publish({
+    platform: "youtube",
+    caption: "Local",
+    mediaKind: "video",
+    mediaPath,
+    mediaByteSize: 5,
+    mediaMimeType: "video/mp4",
+    account: {
+      ...account,
+      accessToken: "stale-yt",
+      refreshToken: "refresh-token",
+      clientId: "client-id",
+      clientSecret: "client-secret"
+    }
+  });
+  assert.equal(result.success, false);
+  assert.equal(result.deliveryState, undefined);
+  assert.equal(result.isDraftOnly, true);
+  assert.match(result.errorMessage ?? "", /refresh rejected/);
+  assert.equal(calls, 2);
+});
+
 test("YouTubeRealAdapter.publish fails without unknown deliveryState when token refresh fails before resumable init", async () => {
   let calls = 0;
   const root = await mkdtemp(join(tmpdir(), "sb-yt-auth-"));
@@ -537,6 +575,25 @@ test("YouTube never fetches an owner-supplied media URL or starts a session with
   assert.equal(result.success, false);
   assert.equal(calls, 0);
   assert.match(result.errorMessage, /completed local video file/);
+});
+
+test("tiktok publish rejects local path without byte size before network call", async () => {
+  let calls = 0;
+  const adapter = new adapters.TikTokRealAdapter(async () => {
+    calls += 1;
+    return jsonResponse(200, {});
+  });
+  const result = await adapter.publish({
+    platform: "tiktok",
+    caption: "Video",
+    mediaPath: "/tmp/clip.mp4",
+    mediaKind: "video",
+    account
+  });
+  assert.equal(result.success, false);
+  assert.equal(result.isDraftOnly, true);
+  assert.equal(calls, 0);
+  assert.match(result.errorMessage ?? "", /local file \(FILE_UPLOAD\) or an https media URL/);
 });
 
 test("TikTok local photos fail before an unsupported FILE_UPLOAD request", async () => {

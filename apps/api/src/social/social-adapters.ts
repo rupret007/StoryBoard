@@ -750,8 +750,21 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
         init.status === 401 &&
         this.youtubeOAuthRefreshAvailable(input)
       ) {
-        accessToken = await this.refreshYouTubeAccessToken(input);
-        init = await initResumable(accessToken);
+        try {
+          accessToken = await this.refreshYouTubeAccessToken(input);
+          init = await initResumable(accessToken);
+        } catch (error) {
+          return {
+            success: false,
+            isDraftOnly: true,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : "YouTube OAuth token refresh failed before upload.",
+            durationMs: Date.now() - start,
+            requestSummary: { platform: "youtube", step: "oauth" }
+          };
+        }
       }
       const location = init.headers.get("location") ?? init.headers.get("Location");
       if (!init.ok || !location) {
@@ -941,7 +954,8 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
         requestSummary: { platform: "tiktok" }
       };
     }
-    if (!input.mediaPath && !input.mediaUrl?.startsWith("https://")) {
+    const hasLocalFile = Boolean(input.mediaPath && input.mediaByteSize);
+    if (!hasLocalFile && !input.mediaUrl?.startsWith("https://")) {
       return {
         success: false,
         isDraftOnly: true,
@@ -952,7 +966,7 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
     }
     try {
       const isPhoto = input.mediaKind === "photo";
-      const fileUpload = Boolean(input.mediaPath && input.mediaByteSize);
+      const fileUpload = hasLocalFile;
       if (isPhoto && fileUpload) {
         return {
           success: false,

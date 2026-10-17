@@ -39,7 +39,7 @@ export function presentApprovalResponse(value: unknown): unknown {
           typeof adapterDraftOnly === "boolean"
             ? adapterDraftOnly
             : ["private_upload", "draft_only", "processing"].includes(String(state));
-        return { ...pick(row, ["platform", "externalPostId"]), deliveryState: state,
+        return { ...pick(row, ["platform", "externalPostId", "externalPostUrl"]), deliveryState: state,
           posted: execution.socialMode === "real" && state === "published" && Boolean(row.externalPostId),
           isDraftOnly,
           ...(row.error ? { error: "Platform outcome needs review." } : {}) };
