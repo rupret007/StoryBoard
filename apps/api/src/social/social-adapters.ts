@@ -362,11 +362,22 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
   }
 }
 
+const INSTAGRAM_CONTAINER_POLL_INTERVAL_MS = 2_000;
+const INSTAGRAM_CONTAINER_POLL_MAX_ATTEMPTS = 30;
+
+type InstagramContainerPollOptions = {
+  intervalMs?: number;
+  maxAttempts?: number;
+};
+
 export class InstagramRealAdapter implements SocialPlatformAdapter {
   readonly platform = "instagram" as const;
   readonly mode = "real" as const;
 
-  constructor(private readonly http: SocialHttpFetch = defaultFetch) {}
+  constructor(
+    private readonly http: SocialHttpFetch = defaultFetch,
+    private readonly containerPoll: InstagramContainerPollOptions = {}
+  ) {}
 
   async publish(input: SocialPublishInput): Promise<SocialPublishResult> {
     const start = Date.now();
@@ -585,14 +596,27 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
     creationId: string,
     token: string
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const response = await this.http(
-      `${META_GRAPH_BASE}/${creationId}?fields=status_code&access_token=${encodeURIComponent(token)}`
-    );
-    if (!response.ok) {
-      return { ok: false, error: "Instagram video container status could not be read. Nothing was marked posted." };
+    const intervalMs = this.containerPoll.intervalMs ?? INSTAGRAM_CONTAINER_POLL_INTERVAL_MS;
+    const maxAttempts = this.containerPoll.maxAttempts ?? INSTAGRAM_CONTAINER_POLL_MAX_ATTEMPTS;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await this.http(
+        `${META_GRAPH_BASE}/${creationId}?fields=status_code&access_token=${encodeURIComponent(token)}`
+      );
+      if (!response.ok) {
+        return { ok: false, error: "Instagram video container status could not be read. Nothing was marked posted." };
+      }
+      const status = asRecord(await response.json()).status_code;
+      if (status === "FINISHED" || status === "PUBLISHED") return { ok: true };
+      if (status === "ERROR" || status === "EXPIRED") {
+        return {
+          ok: false,
+          error: "Instagram video container failed during processing. Nothing was marked posted."
+        };
+      }
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
     }
-    const status = asRecord(await response.json()).status_code;
-    if (status === "FINISHED" || status === "PUBLISHED") return { ok: true };
     return {
       ok: false,
       error: "Instagram video container is not ready. Nothing was marked posted."

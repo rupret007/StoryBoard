@@ -277,6 +277,41 @@ test("Instagram local video uses resumable upload_type and still needs a publish
   assert.match(calls.find((row) => row.url.endsWith("/media")).body, /resumable/);
 });
 
+test("Instagram local video polls container status until FINISHED", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sb-ig-poll-"));
+  const mediaPath = join(root, "reel.mp4");
+  await writeFile(mediaPath, "reel");
+  let statusReads = 0;
+  const http = async (url) => {
+    if (String(url).includes("content_publishing_limit")) {
+      return jsonResponse(200, { data: [{ quota_usage: 0, config: { quota_total: 50 } }] });
+    }
+    if (String(url).endsWith("/media")) {
+      return jsonResponse(200, { id: "container-poll", uri: "https://rupload.example/ig" });
+    }
+    if (String(url).includes("rupload.example")) return jsonResponse(200, {});
+    if (String(url).includes("status_code")) {
+      statusReads += 1;
+      return jsonResponse(200, { status_code: statusReads < 2 ? "IN_PROGRESS" : "FINISHED" });
+    }
+    if (String(url).includes("media_publish")) return jsonResponse(200, { id: "ig-reel-poll" });
+    return jsonResponse(500, {});
+  };
+  const adapter = new adapters.InstagramRealAdapter(http, { intervalMs: 0, maxAttempts: 5 });
+  const result = await adapter.publish({
+    platform: "instagram",
+    caption: "Reel",
+    mediaKind: "video",
+    mediaPath,
+    mediaByteSize: 4,
+    mediaMimeType: "video/mp4",
+    account
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.externalPostId, "ig-reel-poll");
+  assert.equal(statusReads, 2);
+});
+
 test("Instagram photos still require a public https URL, not only a local file", async () => {
   const root = await mkdtemp(join(tmpdir(), "sb-ig-photo-"));
   const mediaPath = join(root, "shot.jpg");
