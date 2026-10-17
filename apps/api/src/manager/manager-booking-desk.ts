@@ -13,7 +13,13 @@ const boundary = "Travis owns booking and follow-ups. Prepare for Travis review 
 const openStages = new Set(["target", "outreach", "conversation", "offer", "hold"]);
 
 export function managerQuestionAsksForBookingPack(question: string) {
-  return /\b(?:pitch|venue)\s+(?:pitch\s+)?pack(?:age)?\b/i.test(question);
+  const packPhrase = /\b(?:pitch|venue)\s+(?:pitch\s+)?pack(?:age)?\b/i.test(question);
+  if (!packPhrase) return false;
+  const fromRecords = /\bfrom records only\b/i.test(question);
+  const hasPitch = /\bpitch\b/i.test(question);
+  // Plain "venue pack" targets DFW registry packaging; recorded pitch packs require "pitch" or "from records only".
+  if (!hasPitch && !fromRecords && /\bvenue\s+pack\b/i.test(question)) return false;
+  return true;
 }
 export function managerQuestionAsksForTravisDecision(question: string) {
   return /\btravis\b/i.test(question) && /\b(decisions?|decide|next|follow[- ]?ups?)\b/i.test(question);
@@ -39,10 +45,11 @@ function finiteTime(date: Date | null | undefined) {
 }
 function pitchPackRequestedTarget(question: string) {
   const strip = (value: string) => value.trim().replace(/^["“]|["”]$/g, "");
-  const forAt = question.match(/\b(?:for|at)\s+(.+?)(?:\s+from records only)?[?.!]*$/i)?.[1];
-  const draft = question.match(/\bdraft\s+a\s+(.+?)\s+venue\s+(?:pitch\s+)?pack\b/i)?.[1];
-  let requested = strip(forAt ?? draft ?? "");
-  requested = requested.replace(/\s*(?:for\s+)?travis(?:'s)?\s+(?:review|decision)\b\s*$/i, "").trim();
+  const withoutReviewerSuffix = question.replace(/\s*(?:for\s+)?travis(?:'s)?\s+(?:review|decision)\b[?.!]*$/i, "").trim();
+  const forAt = withoutReviewerSuffix.match(/\b(?:for|at)\s+(.+?)(?:\s+from records only)?[?.!]*$/i)?.[1];
+  const draft = withoutReviewerSuffix.match(/\bdraft\s+a\s+(.+?)\s+venue\s+(?:pitch\s+)?pack\b/i)?.[1];
+  let requested = strip(forAt ?? "");
+  if (!requested && draft) requested = strip(draft);
   if (!requested) return null;
   if (/\btravis\b/i.test(requested) && /\b(?:review|decision|decide)\b/i.test(requested)) return null;
   return requested;

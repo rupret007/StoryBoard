@@ -208,6 +208,49 @@ test("pitch-pack-target-with-travis-review-suffix-preserves-target", () => {
   assert.match(result.answer, /Fixture Vault title/);
 });
 
+test("pitch-pack-prefix-target-with-travis-review-suffix-preserves-target", () => {
+  const facts = factsFor(opportunity);
+  assert.match(
+    deterministicManagerChat(facts, "Draft a Missing venue pitch pack for Travis review", now).answer,
+    /requested booking\/venue is not uniquely recorded/
+  );
+  const multi = {
+    ...empty,
+    opportunities: [opportunity, { ...opportunity, id: "other", title: "Other booking" }]
+  };
+  const result = deterministicManagerChat(
+    multi,
+    "Draft a Fixture booking venue pitch pack for Travis review",
+    now
+  );
+  assert.match(result.answer, /Venue pitch pack — draft for Travis review/);
+  assert.match(result.answer, /Fixture booking/);
+  assert.doesNotMatch(result.answer, /multiple open opportunities/);
+});
+
+test("venue-pack-vs-recorded-pitch-pack-routing", () => {
+  const herman = {
+    id: "opp-hm",
+    title: "Herman Marshall Tasting Room (Wylie)",
+    stage: "target",
+    targetDate: null,
+    packRecords: { venue: null, setlist: null }
+  };
+  const facts = { ...empty, opportunities: [herman] };
+  const venuePack = deterministicManagerChat(facts, "Venue pack for Herman Marshall", now);
+  assert.match(venuePack.answer, /Package summary for Herman Marshall Tasting Room/);
+  assert.match(venuePack.answer, /info@hmwhiskey\.com/);
+  assert.doesNotMatch(venuePack.answer, /Pitch pack blocked/);
+
+  const pitchPack = deterministicManagerChat(
+    facts,
+    "Draft a venue pitch pack for Herman Marshall from records only",
+    now
+  );
+  assert.match(pitchPack.answer, /Pitch pack blocked/);
+  assert.doesNotMatch(pitchPack.answer, /Package summary/);
+});
+
 test("pitch-pack-citations-capped-at-ten", () => {
   const songs = Array.from({ length: 10 }, (_, index) => ({
     id: `song-${index}`,
