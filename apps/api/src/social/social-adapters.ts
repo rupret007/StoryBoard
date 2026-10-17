@@ -712,29 +712,39 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
       };
     }
     try {
-      const init = await this.http(
-        `${YOUTUBE_UPLOAD_URL}?uploadType=resumable&part=snippet,status`,
-        {
+      const initBody = JSON.stringify({
+        snippet: {
+          title: input.title?.trim() || input.caption.slice(0, 100),
+          description: input.caption.slice(0, 5000),
+          tags: input.tags ?? []
+        },
+        status: {
+          privacyStatus: "private",
+          selfDeclaredMadeForKids: false
+        }
+      });
+      const initResumable = async (token: string) =>
+        this.http(`${YOUTUBE_UPLOAD_URL}?uploadType=resumable&part=snippet,status`, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
             "X-Upload-Content-Type": input.mediaMimeType ?? "video/*",
-            ...(input.mediaByteSize ? { "X-Upload-Content-Length": String(input.mediaByteSize) } : {})
+            ...(input.mediaByteSize
+              ? { "X-Upload-Content-Length": String(input.mediaByteSize) }
+              : {})
           },
-          body: JSON.stringify({
-            snippet: {
-              title: input.title?.trim() || input.caption.slice(0, 100),
-              description: input.caption.slice(0, 5000),
-              tags: input.tags ?? []
-            },
-            status: {
-              privacyStatus: "private",
-              selfDeclaredMadeForKids: false
-            }
-          })
-        }
-      );
+          body: initBody
+        });
+      let init = await initResumable(accessToken);
+      if (
+        !init.ok &&
+        init.status === 401 &&
+        this.youtubeOAuthRefreshAvailable(input)
+      ) {
+        accessToken = await this.refreshYouTubeAccessToken(input);
+        init = await initResumable(accessToken);
+      }
       const location = init.headers.get("location") ?? init.headers.get("Location");
       if (!init.ok || !location) {
         return {
@@ -785,10 +795,21 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
 
   async validateAccount(input: SocialPublishInput): Promise<boolean> {
     try {
-      const accessToken = await this.accessToken(input);
-      const response = await this.http(`${YOUTUBE_API_BASE}/channels?part=id,snippet&mine=true`, {
+      let accessToken = await this.accessToken(input);
+      const channelsUrl = `${YOUTUBE_API_BASE}/channels?part=id,snippet&mine=true`;
+      let response = await this.http(channelsUrl, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
+      if (
+        !response.ok &&
+        response.status === 401 &&
+        this.youtubeOAuthRefreshAvailable(input)
+      ) {
+        accessToken = await this.refreshYouTubeAccessToken(input);
+        response = await this.http(channelsUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+      }
       if (!response.ok) return false;
       const items = asRecord(await response.json()).items;
       return Array.isArray(items) && items.length > 0;
@@ -834,16 +855,35 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
     throw new Error("A completed local video file is required.");
   }
 
-  private async accessToken(input: SocialPublishInput): Promise<string> {
-    const direct = input.account.accessToken?.trim();
-    if (direct && direct !== "replace-me") return direct;
+  private youtubeOAuthRefreshAvailable(input: SocialPublishInput): boolean {
+    const refresh = input.account.refreshToken?.trim();
+    const clientId = input.account.clientId?.trim();
+    const clientSecret = input.account.clientSecret?.trim();
+    return Boolean(
+      refresh &&
+        refresh !== "replace-me" &&
+        clientId &&
+        clientSecret &&
+        clientId !== "replace-me" &&
+        clientSecret !== "replace-me"
+    );
+  }
+
+  private async refreshYouTubeAccessToken(
+    input: SocialPublishInput
+  ): Promise<string> {
     const refresh = input.account.refreshToken?.trim();
     if (!refresh || refresh === "replace-me") {
       throw new Error("YouTube OAuth refresh token is missing.");
     }
     const clientId = input.account.clientId?.trim();
     const clientSecret = input.account.clientSecret?.trim();
-    if (!clientId || !clientSecret || clientId === "replace-me" || clientSecret === "replace-me") {
+    if (
+      !clientId ||
+      !clientSecret ||
+      clientId === "replace-me" ||
+      clientSecret === "replace-me"
+    ) {
       throw new Error("YouTube OAuth client credentials are missing.");
     }
     const response = await this.http(GOOGLE_TOKEN_URL, {
@@ -861,6 +901,12 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
       throw new Error(readErrorMessage(data, "YouTube OAuth token refresh failed"));
     }
     return data.access_token;
+  }
+
+  private async accessToken(input: SocialPublishInput): Promise<string> {
+    const direct = input.account.accessToken?.trim();
+    if (direct && direct !== "replace-me") return direct;
+    return this.refreshYouTubeAccessToken(input);
   }
 }
 

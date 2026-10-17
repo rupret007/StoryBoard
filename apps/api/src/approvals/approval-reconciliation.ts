@@ -206,6 +206,26 @@ export function approvalReconciliationHasKnownExternalEffect(
   return false;
 }
 
+export function socialPostBatchApprovalIsSimulated(approval: {
+  status: string;
+  actionType: string;
+  payload?: unknown;
+}): boolean {
+  if (
+    approval.status !== "executed" ||
+    approval.actionType !== "social_post_batch"
+  ) {
+    return false;
+  }
+  const payload = record(approval.payload);
+  const result = record(payload?.executionResult);
+  if (!result) return false;
+  if (result.socialMode === "mock") return true;
+  return socialResultRows(result).some(
+    (row) => row.deliveryState === "simulated"
+  );
+}
+
 export function approvalReconciliationIsConclusive(
   outcome: string | null | undefined
 ): outcome is Exclude<ApprovalReconciliationOutcome, "still_unknown"> {

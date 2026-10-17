@@ -55,6 +55,7 @@ import {
   approvalReconciliationHasKnownExternalEffect,
   approvalReconciliationIntentMatches,
   approvalReconciliationIsConclusive,
+  socialPostBatchApprovalIsSimulated,
   type ApprovalReconciliationInput
 } from "./approval-reconciliation";
 
@@ -346,7 +347,13 @@ export class ApprovalsService {
       outcome = ManagerRecommendationOutcome.dismissed;
       outcomeReason = "approval_rejected";
     } else if (approvals.every((row) => row.status === ApprovalStatus.executed)) {
-      if (approvals.some((row) => eventLogisticsApprovalIsSimulated(row))) {
+      if (
+        approvals.some(
+          (row) =>
+            eventLogisticsApprovalIsSimulated(row) ||
+            socialPostBatchApprovalIsSimulated(row)
+        )
+      ) {
         outcome = ManagerRecommendationOutcome.blocked;
         outcomeReason = "approval_simulated";
       } else {

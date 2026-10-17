@@ -443,6 +443,53 @@ test("FacebookRealAdapter.publishLocalVideo aborts with unknown deliveryState wh
   assert.match(tooLarge.errorMessage ?? "", /invalid offsets/);
 });
 
+test("YouTubeRealAdapter refreshes OAuth token when stored accessToken is expired or rejected with 401 on resumable init", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sb-yt-refresh-"));
+  const mediaPath = join(root, "clip.mp4");
+  await writeFile(mediaPath, "yt-bytes");
+  const authHeaders = [];
+  let initAttempts = 0;
+  const http = async (url, init) => {
+    const authorization = init?.headers?.Authorization ?? "";
+    if (String(url).includes("oauth2.googleapis.com/token")) {
+      return jsonResponse(200, { access_token: "fresh-yt-token" });
+    }
+    if (String(url).includes("uploadType=resumable")) {
+      initAttempts += 1;
+      authHeaders.push(authorization);
+      if (initAttempts === 1) {
+        return jsonResponse(401, { error: "invalid_token" });
+      }
+      return jsonResponse(200, {}, { location: "https://upload.example/session" });
+    }
+    if (String(url).includes("upload.example")) {
+      return jsonResponse(200, { id: "yt_vid_refresh" });
+    }
+    return jsonResponse(500, {});
+  };
+  const adapter = new adapters.YouTubeRealAdapter(http);
+  const result = await adapter.publish({
+    platform: "youtube",
+    caption: "Local",
+    mediaKind: "video",
+    mediaPath,
+    mediaByteSize: 8,
+    mediaMimeType: "video/mp4",
+    account: {
+      ...account,
+      accessToken: "stale-yt",
+      refreshToken: "refresh-token",
+      clientId: "client-id",
+      clientSecret: "client-secret"
+    }
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.externalPostId, "yt_vid_refresh");
+  assert.equal(initAttempts, 2);
+  assert.equal(authHeaders[0], "Bearer stale-yt");
+  assert.equal(authHeaders[1], "Bearer fresh-yt-token");
+});
+
 test("YouTubeRealAdapter.publish fails without unknown deliveryState when token refresh fails before resumable init", async () => {
   let calls = 0;
   const root = await mkdtemp(join(tmpdir(), "sb-yt-auth-"));

@@ -151,7 +151,7 @@ Quality gate (no live providers):
 pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm manager:eval
 ```
 
-Local 2026-10-17 snapshot on this branch: typecheck, lint, 11/11 recovery,
+Local 2026-04-17 snapshot on this branch: typecheck, lint, 11/11 recovery,
 186/186 shared, 673/673 API unit, 8/8 integration (49 migrations), both
 production builds (22 web routes), 138/138 `manager_evals_v45` at 100% safety.
 The [Quality workflow](https://github.com/rupret007/StoryBoard/actions/workflows/quality.yml)

@@ -204,6 +204,42 @@ test("known provider effects are detected narrowly and mock references are not t
     }),
     false
   );
+  assert.equal(
+    policy.socialPostBatchApprovalIsSimulated({
+      status: "executed",
+      actionType: "social_post_batch",
+      payload: {
+        executionResult: {
+          socialMode: "mock",
+          results: [{ platform: "facebook", deliveryState: "simulated" }]
+        }
+      }
+    }),
+    true
+  );
+  assert.equal(
+    policy.socialPostBatchApprovalIsSimulated({
+      status: "executed",
+      actionType: "social_post_batch",
+      payload: {
+        executionResult: {
+          socialMode: "real",
+          results: [{ platform: "facebook", deliveryState: "simulated" }]
+        }
+      }
+    }),
+    true
+  );
+  assert.equal(
+    policy.socialPostBatchApprovalIsSimulated({
+      status: "executed",
+      actionType: "calendar_hold_batch",
+      payload: {
+        executionResult: { calendarMode: "mock", holds: [{ eventId: "mock-1" }] }
+      }
+    }),
+    false
+  );
 });
 
 function serviceHarness({
