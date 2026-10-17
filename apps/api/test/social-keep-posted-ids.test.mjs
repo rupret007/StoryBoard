@@ -72,7 +72,82 @@ test("a failed send without an id does not erase a platform id recorded during t
   const result = await execute(h);
   assert.equal(result.approvalStatus, "failed");
   assert.equal(h.target.externalPostId, "page_99");
+  assert.equal(h.target.externalPostUrl, "https://example.invalid/posts/99");
   assert.equal(h.post.sendLogs[0].externalPostId, "page_99");
+  assert.equal(h.audits.at(-1).metadata.externalPostId, "page_99");
+  assert.equal(result.executionResult.results[0].externalPostId, "page_99");
+});
+
+test("a multi-target post refuses before sending any target when another enabled target already has a platform id", async () => {
+  const h = harness();
+  const matches = (row, where) => Object.entries(where).every(([key, value]) => {
+    if (value?.in) return value.in.includes(row[key]);
+    return row[key] === value;
+  });
+  const account2 = { ...h.target.account, id: "account-2", externalAccountId: "page-2", accountLabel: "Second" };
+  const target2 = {
+    ...structuredClone(h.target),
+    id: "target-2",
+    account: account2,
+    accountId: account2.id,
+    externalPostId: "page_99",
+    externalPostUrl: "https://example.invalid/posts/99"
+  };
+  h.post.targets.push(target2);
+  h.approval.payload.targets.push({
+    targetId: "target-2",
+    platform: "facebook",
+    enabled: true,
+    caption: target2.caption,
+    tags: [],
+    includeFacebookEvent: false,
+    accountExternalId: "page-2",
+    accountLabel: "Second",
+    accountVoiceKey: "stalemate"
+  });
+  h.client.socialPostTarget.findUnique = async ({ where, select }) => {
+    const row = h.post.targets.find((item) => item.id === where.id);
+    if (!row) return null;
+    if (!select) return structuredClone(row);
+    return Object.fromEntries(
+      Object.keys(select).filter((key) => key in row).map((key) => [key, row[key]])
+    );
+  };
+  h.client.socialPostTarget.updateMany = async ({ where, data }) => {
+    const row = h.post.targets.find((item) => matches(item, where));
+    if (!row) return { count: 0 };
+    Object.assign(row, data);
+    h.writes.push("target");
+    return { count: 1 };
+  };
+  h.client.socialPostTarget.update = async ({ where, data }) => {
+    const row = h.post.targets.find((item) => item.id === where.id);
+    if (!row) throw new Error("target not found");
+    Object.assign(row, data);
+    h.writes.push("target");
+    return row;
+  };
+  h.execution.adapters = () => ({
+    facebook: {
+      platform: "facebook",
+      mode: "real",
+      publish: async (input) => {
+        h.calls.push(input);
+        return {
+          success: true,
+          deliveryState: "published",
+          isDraftOnly: false,
+          externalPostId: "should-not-run",
+          durationMs: 1,
+          requestSummary: {}
+        };
+      }
+    }
+  });
+
+  await assert.rejects(execute(h), /Posting stopped/);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.post.sendLogs.length, 0);
 });
 
 test("a platform id recorded after the read snapshot survives a later send attempt", async () => {

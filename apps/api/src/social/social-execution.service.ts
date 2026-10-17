@@ -270,6 +270,9 @@ export class SocialExecutionService implements SocialPublisherPort {
         if (shouldSkipSocialTargetSend(row)) {
           throw new BadRequestException("A target already has a posting attempt.");
         }
+      }
+      for (const target of enabled) {
+        const row = post.targets.find((item) => item.id === target.targetId)!;
         const secrets = adapters[target.platform].mode === "real"
           ? await this.secretsFor(artistId, target.platform, target.accountExternalId ?? "") : null;
         const attempt = await this.prisma.client.$transaction(async (tx) => {
@@ -305,14 +308,20 @@ export class SocialExecutionService implements SocialPublisherPort {
           sent.deliveryState === "simulated" || sent.deliveryState === "private_upload" ||
           sent.deliveryState === "processing" || sent.deliveryState === "draft_only" || sent.deliveryState === "unknown"
             ? sent.deliveryState : sent.log.outcome.startsWith("refused") ? "refused" : "failed";
+        let externalPostId: string | null = null;
+        let externalPostUrl: string | null = null;
         await this.prisma.client.$transaction(async (tx) => {
           const liveTarget = await tx.socialPostTarget.findUnique({
             where: { id: row.id },
-            select: { externalPostId: true }
+            select: { externalPostId: true, externalPostUrl: true }
           });
-          const externalPostId = preserveSocialTargetPostId(
+          externalPostId = preserveSocialTargetPostId(
             liveTarget?.externalPostId ?? row.externalPostId,
             sent.externalPostId ?? null
+          );
+          externalPostUrl = preserveSocialTargetPostId(
+            liveTarget?.externalPostUrl ?? row.externalPostUrl,
+            sent.externalPostUrl ?? null
           );
           await tx.socialSendLog.update({ where: { id: attempt.id }, data: {
             outcome: sent.log.outcome, requestSummary: sent.log.requestSummary as object,
@@ -320,17 +329,17 @@ export class SocialExecutionService implements SocialPublisherPort {
             errorMessage: sent.errorMessage ?? null, durationMs: sent.log.durationMs
           } });
           await tx.socialPostTarget.update({ where: { id: row.id }, data: {
-            status, externalPostId, externalPostUrl: sent.externalPostUrl ?? null,
+            status, externalPostId, externalPostUrl,
             isDraftOnly: sent.isDraftOnly, lastError: sent.errorMessage ?? null
           } });
           await tx.auditEvent.create({ data: {
             artistId, severity: status === "failed" || status === "unknown" ? AuditSeverity.warning : AuditSeverity.info,
             aggregateType: "SocialSendLog", aggregateId: attempt.id, action: "social.send.logged",
             actorLabel: actor.label, actorOperatorId: actor.operatorId ?? null,
-            metadata: { platform: target.platform, outcome: sent.log.outcome, externalPostId: sent.externalPostId ?? null }
+            metadata: { platform: target.platform, outcome: sent.log.outcome, externalPostId }
           } });
         });
-        results.push(sent);
+        results.push({ ...sent, externalPostId, externalPostUrl });
       }
     } catch {
       await this.prisma.client.socialPost.update({ where: { id: post.id }, data: { status: "unknown" } });

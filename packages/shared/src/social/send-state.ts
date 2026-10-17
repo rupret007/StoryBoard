@@ -9,8 +9,8 @@ export function preserveSocialTargetPostId(
   currentId: string | null | undefined,
   sentId: string | null | undefined
 ): string | null {
-  const sent = sentId?.trim();
-  if (sent) return sent;
   const current = currentId?.trim();
-  return current || null;
+  if (current) return current;
+  const sent = sentId?.trim();
+  return sent || null;
 }

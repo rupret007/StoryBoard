@@ -19,3 +19,8 @@ test("a refused later attempt keeps the id that already landed", () => {
   assert.equal(shared.preserveSocialTargetPostId(null, "page-1_100"), "page-1_100");
   assert.equal(shared.preserveSocialTargetPostId(null, undefined), null);
 });
+
+test("an existing platform id is not overwritten by a later sent id or whitespace", () => {
+  assert.equal(shared.preserveSocialTargetPostId("page-1_99", "page-1_100"), "page-1_99");
+  assert.equal(shared.preserveSocialTargetPostId("page-1_99", "   "), "page-1_99");
+});
