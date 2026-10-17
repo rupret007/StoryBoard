@@ -1,6 +1,6 @@
 "use client";
 
-import { bookingStageReviewCopy, nextBookingStages } from "@storyboard/shared";
+import { bookingStageReviewCopy, describeBookingTarget, nextBookingStages } from "@storyboard/shared";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -119,11 +119,23 @@ export function BookingStageEditor({ opportunity, artistId, canManage, onSaved }
 }
 
 function BookingReviewFacts({ opportunity }: { opportunity: BookingOpportunity }) {
-  const date = opportunity.targetDate ? new Date(opportunity.targetDate) : null;
+  const target = describeBookingTarget({
+    targetDate: opportunity.targetDate,
+    stage: opportunity.stage
+  });
+  const targetDateTime = target.timing !== "none" && opportunity.targetDate
+    ? new Date(opportunity.targetDate).toISOString()
+    : null;
   return <dl className="space-y-2 text-xs break-words">
     <div><dt className="text-[var(--text-muted)]">Title</dt><dd>{opportunity.title}</dd></div>
     <div><dt className="text-[var(--text-muted)]">Venue</dt><dd>{opportunity.venue?.name ?? "Not recorded"}</dd></div>
-    <div><dt className="text-[var(--text-muted)]">Recorded target date (UTC)</dt><dd>{date && Number.isFinite(date.getTime()) ? date.toISOString().replace("T", " ").replace(".000Z", " UTC") : "Not recorded — the new gig will need a start time"}</dd></div>
+    <div>
+      <dt className="text-[var(--text-muted)]">Recorded target date</dt>
+      <dd data-testid="booking-review-target-date">{targetDateTime ? <>
+        <time dateTime={targetDateTime}>{target.label}</time>
+        {target.note ? ` — ${target.note}` : ""}
+      </> : "Not recorded — set show start/end/timezone in Shows & calendar after confirming"}</dd>
+    </div>
     <div><dt className="text-[var(--text-muted)]">Recorded fee</dt><dd>{opportunity.proposedFeeMinor != null ? `${opportunity.proposedCurrency ?? "Currency not recorded"} ${(opportunity.proposedFeeMinor / 100).toFixed(2)}` : "Not recorded"}</dd></div>
     <div><dt className="text-[var(--text-muted)]">Conditions</dt><dd className="whitespace-pre-wrap">{opportunity.negotiationConditions?.trim() || "Not recorded"}</dd></div>
   </dl>;

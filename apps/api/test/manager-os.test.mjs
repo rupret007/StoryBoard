@@ -3658,6 +3658,193 @@ test("manager chat refuses direct outside action and offers only reviewable inte
   assert.ok(!result.recommendation || result.recommendation.proposedAction?.type === "create_task");
 });
 
+test("venue pack questions match apostrophe variants and avoid regex traps in titles", () => {
+  const parenthesized = [{ id: "opp-fw", title: "(Fort Worth) Ballroom", stage: "target" }];
+  assert.deepEqual(
+    intelligence.managerQuestionAsksAboutVenuePack("Package Fort Worth Ballroom", parenthesized),
+    parenthesized[0]
+  );
+
+  const birdies = { id: "opp-bsc", title: "Birdie's Social Club (Fort Worth)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Birdies", [birdies])?.id, "opp-bsc");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack birdies social", [birdies])?.id, "opp-bsc");
+  assert.equal(intelligence.lookupVenuePackDetails(birdies.title)?.email, "hiring@birdiessocialclub.com");
+  assert.match(intelligence.lookupVenuePackDetails(birdies.title)?.applyUrl ?? "", /music-submission/);
+
+  const answer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [birdies] }),
+    "Package Birdies Social Club",
+    now
+  );
+  assert.match(answer.answer, /hiring@birdiessocialclub\.com/);
+  assert.match(answer.answer, /outreach on Booking/);
+  assert.ok(answer.citations.includes("opp-bsc"));
+
+  const dans = { id: "opp-dsl", title: "Dan's Silverleaf (Denton)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Dans Silverleaf", [dans])?.id, "opp-dsl");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack dan silverleaf", [dans])?.id, "opp-dsl");
+  assert.equal(intelligence.lookupVenuePackDetails(dans.title)?.email, "booking@danssilverleaf.com");
+  assert.match(intelligence.lookupVenuePackDetails(dans.title)?.applyUrl ?? "", /danssilverleaf\.com\/contact/);
+
+  const dansAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [dans] }),
+    "Package Dan's Silverleaf",
+    now
+  );
+  assert.match(dansAnswer.answer, /booking@danssilverleaf\.com/);
+  assert.match(dansAnswer.answer, /outreach on Booking/);
+  assert.ok(dansAnswer.citations.includes("opp-dsl"));
+
+  const doubleWide = { id: "opp-dw", title: "Double Wide (Deep Ellum)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Double Wide", [doubleWide])?.id, "opp-dw");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack double wide dallas", [doubleWide])?.id, "opp-dw");
+  assert.equal(intelligence.lookupVenuePackDetails(doubleWide.title)?.email, "dwbookings@gmail.com");
+  assert.match(intelligence.lookupVenuePackDetails(doubleWide.title)?.applyUrl ?? "", /doublewidedallas\.com\/contact/);
+
+  const doubleWideAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [doubleWide] }),
+    "Package Double Wide",
+    now
+  );
+  assert.match(doubleWideAnswer.answer, /dwbookings@gmail\.com/);
+  assert.match(doubleWideAnswer.answer, /outreach on Booking/);
+  assert.ok(doubleWideAnswer.citations.includes("opp-dw"));
+
+  const kessler = { id: "opp-kessler", title: "The Kessler Theater (Oak Cliff)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Kessler", [kessler])?.id, "opp-kessler");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack kessler theater", [kessler])?.id, "opp-kessler");
+  assert.equal(intelligence.lookupVenuePackDetails(kessler.title)?.email, "booking@kesslerpresents.com");
+  assert.match(intelligence.lookupVenuePackDetails(kessler.title)?.applyUrl ?? "", /thekessler\.org\/faq/);
+
+  const kesslerAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [kessler] }),
+    "Package The Kessler Theater",
+    now
+  );
+  assert.match(kesslerAnswer.answer, /booking@kesslerpresents\.com/);
+  assert.match(kesslerAnswer.answer, /outreach on Booking/);
+  assert.ok(kesslerAnswer.citations.includes("opp-kessler"));
+
+  const granada = { id: "opp-granada", title: "Granada Theater (Lower Greenville)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Granada", [granada])?.id, "opp-granada");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack granada theater", [granada])?.id, "opp-granada");
+  assert.equal(intelligence.lookupVenuePackDetails(granada.title)?.email, "booking@granadatheater.com");
+  assert.match(intelligence.lookupVenuePackDetails(granada.title)?.applyUrl ?? "", /granadatheater\.com\/faqs/);
+
+  const granadaAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [granada] }),
+    "Package Granada Theater",
+    now
+  );
+  assert.match(granadaAnswer.answer, /booking@granadatheater\.com/);
+  assert.match(granadaAnswer.answer, /outreach on Booking/);
+  assert.ok(granadaAnswer.citations.includes("opp-granada"));
+
+  const magnolia = { id: "opp-mml", title: "Magnolia Motor Lounge (Fort Worth)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Magnolia", [magnolia])?.id, "opp-mml");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack magnolia motor lounge", [magnolia])?.id, "opp-mml");
+  assert.equal(intelligence.lookupVenuePackDetails(magnolia.title)?.email, "booking@mmlbar.com");
+  assert.match(intelligence.lookupVenuePackDetails(magnolia.title)?.applyUrl ?? "", /magnoliamotorlounge\.com\/contact/);
+
+  const magnoliaAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [magnolia] }),
+    "Package Magnolia Motor Lounge",
+    now
+  );
+  assert.match(magnoliaAnswer.answer, /booking@mmlbar\.com/);
+  assert.match(magnoliaAnswer.answer, /outreach on Booking/);
+  assert.ok(magnoliaAnswer.citations.includes("opp-mml"));
+
+  const tulips = { id: "opp-tulips", title: "Tulips (Fort Worth)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Tulips", [tulips])?.id, "opp-tulips");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack tulips ftw", [tulips])?.id, "opp-tulips");
+  assert.equal(intelligence.lookupVenuePackDetails(tulips.title)?.email, "info@tulipsftw.com");
+  assert.match(intelligence.lookupVenuePackDetails(tulips.title)?.applyUrl ?? "", /tulipsftw\.com\/book-an-event/);
+
+  const tulipsAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [tulips] }),
+    "Package Tulips",
+    now
+  );
+  assert.match(tulipsAnswer.answer, /info@tulipsftw\.com/);
+  assert.match(tulipsAnswer.answer, /outreach on Booking/);
+  assert.ok(tulipsAnswer.citations.includes("opp-tulips"));
+
+  const sonsOfHermann = { id: "opp-sohh", title: "Sons of Hermann Hall (Deep Ellum)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Sons of Hermann", [sonsOfHermann])?.id, "opp-sohh");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack sons of hermann hall", [sonsOfHermann])?.id, "opp-sohh");
+  assert.equal(intelligence.lookupVenuePackDetails(sonsOfHermann.title)?.email, "sohhgm@gmail.com");
+  assert.match(intelligence.lookupVenuePackDetails(sonsOfHermann.title)?.applyUrl ?? "", /sonsofhermannhall\.com\/services-4/);
+
+  const sonsOfHermannAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [sonsOfHermann] }),
+    "Package Sons of Hermann Hall",
+    now
+  );
+  assert.match(sonsOfHermannAnswer.answer, /sohhgm@gmail\.com/);
+  assert.match(sonsOfHermannAnswer.answer, /outreach on Booking/);
+  assert.ok(sonsOfHermannAnswer.citations.includes("opp-sohh"));
+
+  const adairsSaloon = { id: "opp-adairs", title: "Adair's Saloon (Deep Ellum)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Adair's Saloon", [adairsSaloon])?.id, "opp-adairs");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack adairs saloon", [adairsSaloon])?.id, "opp-adairs");
+  assert.equal(intelligence.lookupVenuePackDetails(adairsSaloon.title)?.email, "joel@adairssaloon.com");
+  assert.match(intelligence.lookupVenuePackDetails(adairsSaloon.title)?.applyUrl ?? "", /adairssaloon\.com\/contact/);
+
+  const adairsSaloonAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [adairsSaloon] }),
+    "Package Adair's Saloon",
+    now
+  );
+  assert.match(adairsSaloonAnswer.answer, /joel@adairssaloon\.com/);
+  assert.match(adairsSaloonAnswer.answer, /outreach on Booking/);
+  assert.ok(adairsSaloonAnswer.citations.includes("opp-adairs"));
+
+  const clubDada = { id: "opp-club-dada", title: "Club Dada (Deep Ellum)", stage: "target", targetDate: null, updatedAt: now };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Club Dada", [clubDada])?.id, "opp-club-dada");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack club dada dallas", [clubDada])?.id, "opp-club-dada");
+  assert.equal(intelligence.lookupVenuePackDetails(clubDada.title)?.email, "booking@dadadallas.com");
+  assert.match(intelligence.lookupVenuePackDetails(clubDada.title)?.applyUrl ?? "", /dadadallas\.com\/contact/);
+
+  const clubDadaAnswer = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [clubDada] }),
+    "Package Club Dada",
+    now
+  );
+  assert.match(clubDadaAnswer.answer, /booking@dadadallas\.com/);
+  assert.match(clubDadaAnswer.answer, /outreach on Booking/);
+  assert.ok(clubDadaAnswer.citations.includes("opp-club-dada"));
+
+  const unknown = intelligence.deterministicManagerChat(
+    managerFacts({ opportunities: [{ id: "opp-x", title: "New Room (Dallas)", stage: "target" }] }),
+    "Package New Room Dallas",
+    now
+  );
+  assert.match(unknown.answer, /No venue-pack registry entry yet/);
+  assert.doesNotMatch(unknown.answer, /Apply URL:/);
+
+  const linkedBirdies = {
+    id: "opp-ryman-bsc",
+    title: "Ryman — fall window",
+    stage: "target",
+    targetDate: null,
+    updatedAt: now,
+    venueName: "Birdie's Social Club"
+  };
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("Package Birdie's Social Club", [linkedBirdies])?.id, "opp-ryman-bsc");
+  assert.equal(intelligence.lookupVenuePackDetails(linkedBirdies.venueName)?.email, "hiring@birdiessocialclub.com");
+  const linkedBirdiesAnswer = intelligence.deterministicManagerChat(managerFacts({ opportunities: [linkedBirdies] }), "Package Birdie's Social Club", now);
+  assert.match(linkedBirdiesAnswer.answer, /hiring@birdiessocialclub\.com/);
+  assert.ok(linkedBirdiesAnswer.citations.includes("opp-ryman-bsc"));
+
+  const kesslerTheater = { id: "opp-kessler", title: "The Kessler Theater (Oak Cliff)", stage: "target", targetDate: null, updatedAt: now };
+  const granadaTheater = { id: "opp-granada", title: "Granada Theater (Lower Greenville)", stage: "target", targetDate: null, updatedAt: now };
+  const bothTheaters = [kesslerTheater, granadaTheater];
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack the granada theater", bothTheaters)?.id, "opp-granada");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack kessler theater", bothTheaters)?.id, "opp-kessler");
+  assert.equal(intelligence.managerQuestionAsksAboutVenuePack("pack the theater", bothTheaters), null);
+});
+
 test("empty seed chat stays honest about missing setlists, songs, and booking targets", async () => {
   const emptySeed = managerFacts({
     artist: { id: "artist-a", name: "My Artist" },

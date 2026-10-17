@@ -4,7 +4,7 @@ import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
 import { CheckCircle2, CircleAlert, Link2, ListTodo, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { ApiHttpError, apiFetch } from "@/lib/api";
 import type { BandMember, BookingOpportunity, Task } from "@/lib/types";
 import { describeTaskDueDate } from "@storyboard/shared";
 
@@ -67,9 +67,13 @@ export function TasksClient({
 
   async function createTask(e: React.FormEvent) {
     e.preventDefault();
-    if (!artistId || !canManage) return;
-    setBusy(true);
+    if (!artistId || !canManage || busy) return;
     setCreateError("");
+    if (!title.trim()) {
+      setCreateError("Enter a task title.");
+      return;
+    }
+    setBusy(true);
     try {
       await apiFetch("/tasks", {
         method: "POST",
@@ -87,7 +91,11 @@ export function TasksClient({
       setBandMemberId("");
       router.refresh();
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Could not create the task");
+      setCreateError(
+        err instanceof ApiHttpError && err.status < 500
+          ? err.message
+          : "Could not confirm whether the task was created. Your draft is still here. Check the task list before trying again."
+      );
     } finally {
       setBusy(false);
     }

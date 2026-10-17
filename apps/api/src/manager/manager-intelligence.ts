@@ -1,4 +1,4 @@
-import { CATALOG_BAND_OPS_IMPORT_HINT, describeSongCatalogStatus, describeTaskDueDate, formatRecordedShowTime } from "@storyboard/shared";
+import { CATALOG_BAND_OPS_IMPORT_HINT, describeSongCatalogStatus, describeTaskDueDate, formatRecordedShowTime, VENUE_PACK_REGISTRY } from "@storyboard/shared";
 import type { ManagerGoalTargetDirection, ManagerWorkstream } from "../generated/prisma/enums";
 import { approvalLifecycleStage, type ApprovalLifecycleStage } from "../approvals/approval-lifecycle";
 import type { ShowReadiness } from "../operations/event-readiness";
@@ -101,7 +101,7 @@ export type ManagerFacts = {
   goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
   tasks: { id: string; title: string; status: string; dueAt: Date | null; updatedAt?: Date; initiativeId?: string | null; eventId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null; prerequisites?: { prerequisiteTask: { id: string; title: string; status: string; dueAt: Date | null } }[]; dependents?: { task: { id: string; title: string; status: string; dueAt: Date | null } }[] }[];
-  opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null; packRecords?: BookingPackRecords }[];
+  opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null; venueId?: string | null; venueName?: string | null; packRecords?: BookingPackRecords }[];
   events: {
     id: string;
     title: string;
@@ -1134,6 +1134,7 @@ export function managerQuestionNeedsRecordedDeskAnswer(question: string) {
     || managerQuestionAsksForBookingPack(question) || managerQuestionAsksForTravisDecision(question)
     || managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
     || managerQuestionAsksAboutCatalog(question) || managerQuestionAsksAboutPipelineStages(question)
+    || /\b(package|pack|packs)\b/i.test(question)
     || /\b(invoices?|unpaid|overdue|receivables?|next[- ]due|money|paid|payment|deposit|cash)\b/i.test(question);
 }
 
@@ -1146,6 +1147,106 @@ export function managerQuestionAsksAboutPromoCopy(question: string) {
 export function managerQuestionAsksAboutBookerPitch(question: string) {
   if (/\b(?:bob|package|pack|packs)\b/i.test(question) && /\b(?:booking|pitch|buyer|venue|show)\b/i.test(question)) return true;
   return /\b(?:travis|bob)\b/i.test(question) && /\b(?:pitch|outreach|campaign|buyer|book(?:ing|s|ed)?|send|email|contact|package|pack|packs)\b/i.test(question);
+}
+
+function normalizeVenuePackMatchText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const GENERIC_VENUE_WORDS = new Set([
+  "theater",
+  "theatre",
+  "hall",
+  "club",
+  "lounge",
+  "saloon",
+  "ballroom",
+  "social",
+  "room",
+  "live",
+  "music",
+  "tasting"
+]);
+
+function expandParentheticalVenueLabel(label: string): string {
+  return label.replace(/\(([^)]*)\)/g, " $1 ").replace(/\s+/g, " ").trim();
+}
+
+function opportunityVenuePackLabel(opp: ManagerFacts["opportunities"][number]): string {
+  return opp.venueName ?? opp.title;
+}
+
+function significantVenueWords(label: string): string[] {
+  const normalized = normalizeVenuePackMatchText(label);
+  const stop = new Set(["the", "a", "an", "and", "of", "in", "at", "for", "on"]);
+  return normalized.split(" ").filter((word) => word.length > 0 && !stop.has(word));
+}
+
+function venueLabelWordSource(label: string): string {
+  const trimmed = label.trim();
+  const withoutParens = trimmed.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  if (/^\([^)]+\)/.test(trimmed)) {
+    return expandParentheticalVenueLabel(label);
+  }
+  return withoutParens || expandParentheticalVenueLabel(label);
+}
+
+function distinctiveVenueWords(label: string): string[] {
+  const words = significantVenueWords(venueLabelWordSource(label));
+  const distinctive = words.filter((word) => !GENERIC_VENUE_WORDS.has(word) && word.length > 2);
+  return distinctive.length ? distinctive : words;
+}
+
+function questionContainsVenueWord(questionNorm: string, word: string): boolean {
+  if (questionNorm.includes(word)) return true;
+  const tokens = questionNorm.split(" ").filter((token) => token.length >= 3);
+  return tokens.some((token) => word.startsWith(token) || token.startsWith(word));
+}
+
+function venuePackMatchScore(questionNorm: string, label: string): number {
+  const coreNorm = normalizeVenuePackMatchText(expandParentheticalVenueLabel(label));
+  if (!coreNorm) return 0;
+  if (questionNorm.includes(coreNorm)) return 1000 + coreNorm.length;
+  const required = distinctiveVenueWords(label);
+  if (!required.length) return 0;
+  const matched = required.filter((word) => questionContainsVenueWord(questionNorm, word));
+  if (!matched.length) return 0;
+  const minMatched = required.length > 1 && required.some((word) => word.length >= 5) ? 1 : required.length;
+  if (matched.length < minMatched) return 0;
+  if (required.every((word) => word.length <= 4) && matched.length < required.length) return 0;
+  return matched.length;
+}
+
+export function managerQuestionAsksAboutVenuePack(question: string, opportunities: ManagerFacts["opportunities"]): ManagerFacts["opportunities"][number] | null {
+  if (!/\b(?:package|pack|packs)\b/i.test(question)) return null;
+  const questionNorm = normalizeVenuePackMatchText(question);
+  let best: { opp: ManagerFacts["opportunities"][number]; score: number } | null = null;
+  for (const opp of opportunities) {
+    const label = opportunityVenuePackLabel(opp);
+    const score = venuePackMatchScore(questionNorm, label);
+    if (!score) continue;
+    if (!best || score > best.score) best = { opp, score };
+  }
+  return best?.opp ?? null;
+}
+
+type VenuePackDetails = { email: string; phone?: string; applyUrl: string };
+
+export function lookupVenuePackDetails(opportunityLabel: string): VenuePackDetails | null {
+  const normalized = normalizeVenuePackMatchText(expandParentheticalVenueLabel(opportunityLabel));
+  let best: { key: string; details: VenuePackDetails } | null = null;
+  for (const [key, details] of Object.entries(VENUE_PACK_REGISTRY)) {
+    const keyNorm = normalizeVenuePackMatchText(key);
+    if (normalized.includes(keyNorm) && (!best || keyNorm.length > normalizeVenuePackMatchText(best.key).length)) {
+      best = { key, details };
+    }
+  }
+  return best?.details ?? null;
 }
 
 export function managerQuestionAsksAboutPipelineStages(question: string) {
@@ -1379,6 +1480,20 @@ function deterministicManagerChatBase(
 
   const bookingDesk = recordedBookingDesk(facts, question, now);
   if (bookingDesk) return bookingDesk;
+
+  const venuePackTarget = managerQuestionAsksAboutVenuePack(question, facts.opportunities);
+  if (venuePackTarget) {
+    const venuePackDetails = lookupVenuePackDetails(opportunityVenuePackLabel(venuePackTarget));
+    const applyDetails = venuePackDetails
+      ? `\nContact: ${venuePackDetails.email}${venuePackDetails.phone ? ` / ${venuePackDetails.phone}` : ""}\nApply URL: ${venuePackDetails.applyUrl}\n`
+      : "\nContact: No venue-pack registry entry yet — confirm the buyer email and apply link in CRM.\n";
+      
+    return {
+      answer: `Package summary for ${venuePackTarget.title}:\n\nPositioning: Live music application target in DFW.${applyDetails}\nLinks: [Live links placeholders]\nSet formats: Standard sets\n\nTravis owns the send. Jeff+Travis yes before pitch. StoryBoard will not auto-pitch venues.\nNext: After you both agree, Travis submits via the Apply URL when one is listed; move the opportunity to outreach on Booking once the send is recorded.\nNothing posts from this conversation.`,
+      citations: [venuePackTarget.id],
+      recommendation: null
+    };
+  }
 
   if (managerQuestionAsksAboutBookerPitch(question)) {
     return {

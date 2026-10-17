@@ -1201,6 +1201,7 @@ export class ManagerService {
       tasks,
       opportunities: opportunities.map(({ venue, event, ...opportunity }) => ({
         ...opportunity,
+        venueName: venue?.name ?? null,
         packRecords: bookingPackRecordsForArtist(artistId, { ...opportunity, venue, event })
       })),
       events: eventsWithSignals,
@@ -1256,7 +1257,7 @@ export class ManagerService {
       goalMeasurements: facts.goalMeasurements,
       initiatives: facts.initiatives,
       tasks: facts.tasks.map((row) => ({ id: row.id, title: row.title, status: row.status, ownerLabel: row.ownerLabel, bandMemberId: row.bandMemberId, dueAt: row.dueAt, updatedAt: row.updatedAt, blockedReason: row.blockedReason, waitingOn: row.waitingOn, deferralCount: row.deferralCount, lastDeferredAt: row.lastDeferredAt, opportunityId: row.opportunityId, eventId: row.eventId, projectId: row.projectId, initiativeId: row.initiativeId, prerequisites: row.prerequisites, dependents: row.dependents })),
-      opportunities: facts.opportunities.map((row) => ({ id: row.id, title: row.title, stage: row.stage, targetDate: row.targetDate, venueId: row.venueId, packRecords: row.packRecords })),
+      opportunities: facts.opportunities.map((row) => ({ id: row.id, title: row.title, stage: row.stage, targetDate: row.targetDate, venueId: row.venueId, venueName: row.venueName ?? null, packRecords: row.packRecords })),
       events: facts.events.map((row) => ({ id: row.id, type: row.type, status: row.status, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, timezone: row.timezone, venueId: row.venueId, guaranteeMinor: row.guaranteeMinor, depositMinor: row.depositMinor, currency: row.currency, calendarEventId: row.calendarEventId, driveFolderUrl: row.driveFolderUrl, logisticsAssessment: row.logisticsAssessment, readiness: row.readiness, dayOf: row.dayOf, participants: row.participants.map((participant) => ({ id: participant.id, bandMemberId: participant.bandMemberId, response: participant.response })) })),
       projects: facts.projects.map((row) => ({ id: row.id, type: row.type, status: row.status, name: row.name, startsAt: row.startsAt, dueAt: row.dueAt, budgetMinor: row.budgetMinor, currency: row.currency, successMetrics: row.successMetrics, readiness: row.readiness })),
       deals: facts.deals.map((row) => ({ id: row.id, eventId: row.eventId, opportunityId: row.opportunityId, status: row.status, title: row.title, offerAmountMinor: row.offerAmountMinor, currency: row.currency, depositMinor: row.depositMinor, depositDueAt: row.depositDueAt, balanceDueAt: row.balanceDueAt, performanceDate: row.performanceDate, expiresAt: row.expiresAt })),
