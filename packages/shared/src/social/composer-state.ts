@@ -37,11 +37,15 @@ export function socialApproveBlockReason(
 ): "missing_post" | "already_posted" | "none_enabled" | "not_ready" | null {
   if (!post) return "missing_post";
   const enabled = drafts.filter((row) => row.enabled);
+  const hasPlatformId = [...(post.targets ?? []), ...drafts].some((row) =>
+    Boolean(row.externalPostId)
+  );
   if (
     post.status === "posted" ||
     post.status === "posting" ||
+    post.status === "simulated" ||
     post.approval?.status === "executed" ||
-    (enabled.length > 0 && enabled.every((row) => Boolean(row.externalPostId)))
+    hasPlatformId
   ) {
     return "already_posted";
   }
@@ -59,8 +63,14 @@ export function socialApproveBlockReason(
 
 export function noteFromRecordedShow(
   currentNote: string,
-  event: { title: string } | null | undefined
+  event: { title: string } | null | undefined,
+  previousEvent?: { title: string } | null | undefined
 ): string {
-  if (currentNote.trim()) return currentNote;
-  return event?.title.trim() ?? "";
+  const trimmed = currentNote.trim();
+  const previousTitle = previousEvent?.title.trim() ?? "";
+  if (!trimmed) return event?.title.trim() ?? "";
+  if (previousTitle && trimmed === previousTitle) {
+    return event?.title.trim() ?? "";
+  }
+  return currentNote;
 }

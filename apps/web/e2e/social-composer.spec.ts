@@ -81,3 +81,63 @@ test("phone Social starts a new drop, keeps approval reachable through caption r
   await expect(approve).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Today's rehearsal clip", exact: true })).toHaveCount(1);
 });
+
+test("after posting an uploaded drop the composer clears media so the next drop can change kind or URL", async ({ page }) => {
+  const tinyPng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${api}/auth/dev/login`);
+  const me = await (await page.request.get(`${api}/auth/me`)).json();
+  const sourceArtistId = me.memberships.find((membership: { role: string }) => membership.role === "owner").artistId;
+  const createdBand = await page.request.post(`${api}/onboarding/additional-artist`, {
+    headers: { origin: web },
+    data: { sourceArtistId, name: `Social media reset E2E ${Date.now()}` }
+  });
+  expect(createdBand.ok(), await createdBand.text()).toBe(true);
+  const { artistId } = await createdBand.json();
+  const selected = await page.request.post(`${api}/auth/session/artist`, {
+    headers: { origin: web },
+    data: { artistId }
+  });
+  expect(selected.ok()).toBe(true);
+
+  await page.goto("/social");
+  await page.getByTestId("social-file-input").setInputFiles({
+    name: "first-drop.png",
+    mimeType: "image/png",
+    buffer: tinyPng
+  });
+  await expect(page.getByTestId("social-upload-progress")).toContainText("Stored first-drop.png");
+  await page.getByLabel("Note", { exact: true }).fill("First uploaded drop");
+  const firstDraft = page.waitForResponse(
+    (response) => response.url() === `${api}/social/drops` && response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Draft captions", exact: true }).click();
+  const firstDraftResponse = await firstDraft;
+  expect(firstDraftResponse.ok(), await firstDraftResponse.text()).toBe(true);
+  const firstPost = await firstDraftResponse.json();
+
+  const firstSend = page.waitForResponse(
+    (response) => response.url() === `${api}/social/approve-and-post` && response.request().method() === "POST"
+  );
+  await page.getByTestId("social-approve-and-post").click();
+  expect((await firstSend).ok()).toBe(true);
+
+  await expect(page.getByLabel("Note", { exact: true })).toHaveValue("");
+  const mediaKind = page.locator('label:has-text("Media kind") select');
+  await expect(mediaKind).toBeEnabled();
+  await mediaKind.selectOption("video");
+  await page.getByPlaceholder("Only if the file already lives on the web").fill("https://example.com/clip.mp4");
+  await page.getByLabel("Note", { exact: true }).fill("Second drop via URL");
+  const secondDraft = page.waitForResponse(
+    (response) => response.url() === `${api}/social/drops` && response.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Draft captions", exact: true }).click();
+  const secondDraftResponse = await secondDraft;
+  expect(secondDraftResponse.ok(), await secondDraftResponse.text()).toBe(true);
+  const secondPost = await secondDraftResponse.json();
+  expect(secondPost.id).not.toBe(firstPost.id);
+  expect(secondPost.media?.kind).toBe("video");
+});

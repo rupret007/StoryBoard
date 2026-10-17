@@ -25,3 +25,10 @@ test("Approve & post is sticky on a phone and stays off after a recorded send", 
   assert.match(client, /disabled=\{!approveEnabled\}/);
   assert.match(client, /data-testid="social-recorded-show"/);
 });
+
+test("post-approval TikTok inbox notice only applies to enabled draft-only targets", () => {
+  assert.match(
+    client,
+    /posted\.targets\.some\(\(row\) => row\.enabled && row\.isDraftOnly\)/
+  );
+});

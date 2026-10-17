@@ -325,26 +325,8 @@ function isTransactionConflict(error: unknown): boolean {
   if (code === "P2034") {
     return true;
   }
-  // Raw INSERT ... ON CONFLICT claims surface PostgreSQL serialization failures
-  // as P2010/40001 rather than Prisma model-query P2034; still retryable for Stripe.
   if (code === "P2010" && prismaDatabaseErrorCode(error) === "40001") {
     return true;
-  }
-  const meta = "meta" in error ? error.meta : null;
-  if (code === "P2010" && meta && typeof meta === "object") {
-    if ("code" in meta && meta.code === "40001") {
-      return true;
-    }
-    const adapter = "driverAdapterError" in meta ? meta.driverAdapterError : null;
-    const cause = adapter && typeof adapter === "object" && "cause" in adapter
-      ? adapter.cause : null;
-    if (
-      cause && typeof cause === "object" &&
-      "originalCode" in cause && cause.originalCode === "40001" &&
-      "kind" in cause && cause.kind === "TransactionWriteConflict"
-    ) {
-      return true;
-    }
   }
   const message = error instanceof Error ? error.message : String(error);
   return /could not serialize access|serialization failure/i.test(message);

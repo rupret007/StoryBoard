@@ -146,6 +146,17 @@ export function SocialClient({
     setWorkspace((current) => (current ? { ...current, ...mergeSocialPost(current, post) } : current));
   }
 
+  function resetComposerForNewDrop() {
+    setNote("");
+    setMediaUrl("");
+    setMediaKind("photo");
+    setMediaAssetId(null);
+    setLocalPreview(null);
+    setLocalFileName("");
+    setUploadProgress(null);
+    setEventId("");
+  }
+
   async function reloadWorkspaceFromServer(preferredPostId?: string) {
     if (!artistId) return;
     const next = await apiFetch<SocialWorkspace>("/social");
@@ -268,11 +279,12 @@ export function SocialClient({
         }
       });
       keepPost(posted);
+      resetComposerForNewDrop();
       const missing = posted.targets.filter((row) => row.enabled && !row.externalPostId);
       setNotice(
         missing.length
           ? "Approval was recorded. Platforms without an ID were not marked posted."
-          : posted.targets.some((row) => row.isDraftOnly)
+          : posted.targets.some((row) => row.enabled && row.isDraftOnly)
             ? "Approval recorded. TikTok is an inbox draft until you finish it in the TikTok app."
             : "Approval recorded. Each live platform returned an ID."
       );
@@ -445,9 +457,10 @@ export function SocialClient({
                 value={eventId}
                 onChange={(event) => {
                   const nextId = event.target.value;
+                  const previousEvent = workspace.events.find((row) => row.id === eventId) ?? null;
                   setEventId(nextId);
-                  const recorded = workspace.events.find((row) => row.id === nextId);
-                  setNote((current) => noteFromRecordedShow(current, recorded));
+                  const recorded = workspace.events.find((row) => row.id === nextId) ?? null;
+                  setNote((current) => noteFromRecordedShow(current, recorded, previousEvent));
                 }}
                 disabled={!canManage}
               >

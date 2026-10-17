@@ -53,7 +53,7 @@ test("Approve & post stays off when approval is not a pending owner review", () 
   );
 });
 
-test("Approve & post stays off after a drop already has platform IDs", () => {
+test("Approve & post stays off when any target already has a platform ID or simulated status", () => {
   const posted = {
     id: "post-1",
     status: "posted",
@@ -61,6 +61,39 @@ test("Approve & post stays off after a drop already has platform IDs", () => {
     targets: [{ enabled: true, externalPostId: "fb_1" }]
   };
   assert.equal(shared.socialApproveBlockReason(posted), "already_posted");
+  assert.equal(
+    shared.socialApproveBlockReason({
+      id: "post-sim",
+      status: "simulated",
+      approval: { status: "pending" },
+      targets: [{ enabled: true, externalPostId: null }]
+    }),
+    "already_posted"
+  );
+  assert.equal(
+    shared.socialApproveBlockReason({
+      id: "post-partial",
+      status: "pending_approval",
+      approval: { status: "pending" },
+      targets: [
+        { enabled: true, externalPostId: "fb_1" },
+        { enabled: true, externalPostId: null }
+      ]
+    }),
+    "already_posted"
+  );
+  assert.equal(
+    shared.socialApproveBlockReason(
+      {
+        id: "post-unchecked",
+        status: "pending_approval",
+        approval: { status: "pending" },
+        targets: [{ enabled: false, externalPostId: "fb_1" }]
+      },
+      [{ enabled: true, externalPostId: null }]
+    ),
+    "already_posted"
+  );
   assert.equal(
     shared.socialApproveBlockReason({
       id: "post-2",
@@ -88,4 +121,22 @@ test("an empty note can take the recorded show title and never overwrites Jeff's
   assert.equal(shared.noteFromRecordedShow("", { title: " Stalemate at Burlington " }), "Stalemate at Burlington");
   assert.equal(shared.noteFromRecordedShow("Manic clip", { title: "Stalemate at Burlington" }), "Manic clip");
   assert.equal(shared.noteFromRecordedShow("", null), "");
+});
+
+test("switching recorded shows updates an untouched show-title note without overwriting custom text", () => {
+  const showA = { title: "Stalemate at Burlington" };
+  const showB = { title: "Rad Dad at Montpelier" };
+  assert.equal(shared.noteFromRecordedShow("", showA), "Stalemate at Burlington");
+  assert.equal(
+    shared.noteFromRecordedShow("Stalemate at Burlington", showB, showA),
+    "Rad Dad at Montpelier"
+  );
+  assert.equal(
+    shared.noteFromRecordedShow("Stalemate at Burlington", null, showA),
+    ""
+  );
+  assert.equal(
+    shared.noteFromRecordedShow("Jeff's custom hook", showB, showA),
+    "Jeff's custom hook"
+  );
 });
