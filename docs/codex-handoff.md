@@ -19,6 +19,18 @@ field validation. Preserve that distinction when continuing.
 
 ## Delivery state (what already exists)
 
+### Recorded Travis decision and venue pitch-pack answers
+
+Manager now prepares Travis-owned booking review text from recorded facts, with
+explicit missing-fact blockers and no proposed write or provider call. See
+[recorded booking desk](manager-booking-desk.md) for supported questions, linked
+venue/setlist requirements, Vault-only provenance, and bounded-view limits.
+The booking-desk work in PR #49 adds Travis-decision and venue pitch-pack
+answers from recorded facts. Pipeline-by-stage routing and Bob-packages /
+Travis-books ownership language already live on `main`; this branch only
+touches booking-desk handlers, catalog provenance, and related golden copy.
+
+
 Current [dependency security assessment](dependency-security-assessment-2026-09-08.md)
 records fresh advisory counts, actual runtime/build paths and feature/deployment
 reassessment gates. No dependency upgrade or blanket security clearance is implied.

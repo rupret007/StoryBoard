@@ -31,6 +31,8 @@ import { resolveManagerWriteClaim } from "./manager-write-claim";
 import type { ManagerFollowThrough } from "./manager-follow-through";
 import { managerPilotQuestion, recordedPilotDesk } from "./manager-pilot-desk";
 
+import { recordedBookingDesk, managerQuestionAsksForBookingPack, managerQuestionAsksForTravisDecision, type BookingPackRecords } from "./manager-booking-desk";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type ManagerProposedAction = {
@@ -99,7 +101,7 @@ export type ManagerFacts = {
   goalMeasurements: ManagerGoalMeasurement[];
   initiatives: { id: string; goalId: string | null; title: string; status: string; dueAt: Date | null }[];
   tasks: { id: string; title: string; status: string; dueAt: Date | null; updatedAt?: Date; initiativeId?: string | null; eventId?: string | null; ownerLabel?: string | null; bandMemberId?: string | null; blockedReason?: string | null; waitingOn?: string | null; deferralCount?: number; lastDeferredAt?: Date | null; prerequisites?: { prerequisiteTask: { id: string; title: string; status: string; dueAt: Date | null } }[]; dependents?: { task: { id: string; title: string; status: string; dueAt: Date | null } }[] }[];
-  opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null; venueId?: string | null; venueName?: string | null }[];
+  opportunities: { id: string; title: string; stage: string; updatedAt?: Date; targetDate: Date | null; venueId?: string | null; venueName?: string | null; packRecords?: BookingPackRecords }[];
   events: {
     id: string;
     title: string;
@@ -1128,7 +1130,9 @@ export function managerQuestionAsksAboutCatalog(question: string) {
 }
 
 export function managerQuestionNeedsRecordedDeskAnswer(question: string) {
-  return Boolean(managerPilotQuestion(question)) || managerQuestionAsksAboutBandWorkspace(question) || managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
+  return Boolean(managerPilotQuestion(question)) || managerQuestionAsksAboutBandWorkspace(question)
+    || managerQuestionAsksForBookingPack(question) || managerQuestionAsksForTravisDecision(question)
+    || managerQuestionAsksAboutSchedule(question) || managerQuestionAsksForDeskSnapshot(question)
     || managerQuestionAsksAboutCatalog(question) || managerQuestionAsksAboutPipelineStages(question)
     || /\b(package|pack|packs)\b/i.test(question)
     || /\b(invoices?|unpaid|overdue|receivables?|next[- ]due|money|paid|payment|deposit|cash)\b/i.test(question);
@@ -1473,6 +1477,24 @@ function deterministicManagerChatBase(
       recommendation: null
     };
   }
+
+  if (managerQuestionAsksForBookingPack(question) || managerQuestionAsksForTravisDecision(question)) {
+    const writeClaim = resolveManagerWriteClaim(question);
+    if (writeClaim.status === "refused" && writeClaim.message) {
+      return { answer: writeClaim.message, citations: [], recommendation: null };
+    }
+    if (externalRequest) {
+      const recommendation = matchingRecommendation(brief);
+      return {
+        answer: `I can help prepare that, but I won't send, sign, pay, publish, or execute outside work from this conversation. Those actions need the exact payload reviewed in Approvals.\n\nThe useful next move is to prepare the internal work first${recommendation ? `: ${recommendation.nextAction}` : "."}`,
+        citations: recommendation?.evidenceIds ?? [],
+        recommendation: recommendation?.proposedAction ? recommendation : null
+      };
+    }
+  }
+
+  const bookingDesk = recordedBookingDesk(facts, question, now);
+  if (bookingDesk) return bookingDesk;
 
   const venuePackTarget = managerQuestionAsksAboutVenuePack(question, facts.opportunities);
   if (venuePackTarget) {
@@ -1835,7 +1857,7 @@ function deterministicManagerChatBase(
       ? " Attach a recorded setlist to a gig from Events."
       : " Build or import a running order in Band operations.";
     const closer = recorded.songs.length
-      ? " StoryBoard will not invent titles, auto-post, or auto-pitch Travis."
+      ? " StoryBoard will not invent titles, auto-post, or auto-pitch venues."
       : " StoryBoard will not invent titles, auto-post, or treat a parked catalog as another live band.";
     const provenance = `${status.message}${vaultSlice}${nextStep}${closer}`;
     return {

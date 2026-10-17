@@ -3896,7 +3896,7 @@ test("empty seed chat stays honest about missing setlists, songs, and booking ta
   assert.match(demo.answer, /not a live catalog/i);
   assert.match(demo.answer, /not a Vault import/i);
   assert.match(demo.answer, /will not invent titles, auto-post/i);
-  assert.doesNotMatch(demo.answer, /usually from a local Vault|harbor lights|everyday|parked demo|auto-pitch travis/i);
+  assert.doesNotMatch(demo.answer, /usually from a local Vault|harbor lights|everyday|parked demo|auto-pitch venues/i);
   assert.equal(demo.recommendation, null);
 
   const showNightOnVault = intelligence.deterministicManagerChat(managerFacts({
@@ -4070,7 +4070,7 @@ test("Vault import is the default song path and Manager stays honest after impor
   const setlist = intelligence.deterministicManagerChat(imported, "What's our setlist?", now);
   assert.match(setlist.answer, /Harbor Lights/);
   assert.match(setlist.answer, /Vault default-live/);
-  assert.match(setlist.answer, /will not invent titles, auto-post, or auto-pitch Travis/i);
+  assert.match(setlist.answer, /will not invent titles, auto-post, or auto-pitch venues/i);
   assert.ok(setlist.citations.includes("vault:catalog_import_v1:RD-0001"));
   assert.doesNotMatch(setlist.answer, /parked demo|trailer sketch|booking calendar|cover example/i);
   assert.equal(setlist.recommendation, null);
