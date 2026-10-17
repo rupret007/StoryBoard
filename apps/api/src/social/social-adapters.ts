@@ -142,6 +142,22 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
         return await this.publishLocalPhoto(input, token, pageId, start);
       }
 
+      const mediaKind = input.mediaKind ?? "photo";
+      const hasLocalMedia = Boolean(input.mediaPath && input.mediaByteSize);
+      const hasHostedMedia = Boolean(input.mediaUrl?.trim());
+      if (!hasLocalMedia && !hasHostedMedia) {
+        return {
+          success: false,
+          isDraftOnly: false,
+          errorMessage:
+            mediaKind === "video"
+              ? "Facebook video publish needs a local file or a hosted media URL. No request was sent."
+              : "Facebook photo publish needs a local file or a hosted media URL. No request was sent.",
+          durationMs: Date.now() - start,
+          requestSummary: { platform: "facebook" }
+        };
+      }
+
       const endpoint =
         input.mediaKind === "video"
           ? `${META_GRAPH_BASE}/${pageId}/videos`
@@ -179,12 +195,16 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
     const token = input.account.accessToken;
     const pageId = input.account.externalAccountId;
     if (!token || !pageId) return false;
-    const response = await this.http(
-      `${META_GRAPH_BASE}/${pageId}?fields=id,name&access_token=${encodeURIComponent(token)}`
-    );
-    if (!response.ok) return false;
-    const data = asRecord(await response.json());
-    return typeof data.id === "string";
+    try {
+      const response = await this.http(
+        `${META_GRAPH_BASE}/${pageId}?fields=id,name&access_token=${encodeURIComponent(token)}`
+      );
+      if (!response.ok) return false;
+      const data = asRecord(await response.json());
+      return data.id === pageId;
+    } catch {
+      return false;
+    }
   }
 
   private async publishLocalVideo(
@@ -211,8 +231,22 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
         requestSummary: { platform: "facebook", step: "resumable_start" }
       };
     }
+    const byteSize = input.mediaByteSize ?? 0;
     let offset = typeof session.start_offset === "string" ? Number(session.start_offset) : 0;
-    let end = typeof session.end_offset === "string" ? Number(session.end_offset) : input.mediaByteSize ?? 0;
+    let end = typeof session.end_offset === "string" ? Number(session.end_offset) : byteSize;
+    const invalidOffsets = (from: number, to: number) =>
+      !Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to < 0 || to > byteSize;
+    if (invalidOffsets(offset, end)) {
+      return {
+        success: false,
+        deliveryState: "unknown",
+        isDraftOnly: false,
+        errorMessage:
+          "Facebook resumable transfer returned invalid offsets. Nothing was marked posted.",
+        durationMs: Date.now() - start,
+        requestSummary: { platform: "facebook", step: "resumable_transfer" }
+      };
+    }
     while (offset < end) {
       const chunk = await readFileSlice(input.mediaPath!, offset, end - offset);
       const part = buildMultipartBody(
@@ -236,8 +270,33 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
       });
       const data = asRecord(await transferred.json());
       if (!transferred.ok) return this.fail(start, transferred.status, data, "Facebook resumable transfer failed");
-      offset = typeof data.start_offset === "string" ? Number(data.start_offset) : end;
-      end = typeof data.end_offset === "string" ? Number(data.end_offset) : end;
+      const nextOffset =
+        typeof data.start_offset === "string" ? Number(data.start_offset) : end;
+      const nextEnd = typeof data.end_offset === "string" ? Number(data.end_offset) : end;
+      if (invalidOffsets(nextOffset, nextEnd)) {
+        return {
+          success: false,
+          deliveryState: "unknown",
+          isDraftOnly: false,
+          errorMessage:
+            "Facebook resumable transfer returned invalid offsets. Nothing was marked posted.",
+          durationMs: Date.now() - start,
+          requestSummary: { platform: "facebook", step: "resumable_transfer" }
+        };
+      }
+      if (nextOffset <= offset && nextOffset < nextEnd) {
+        return {
+          success: false,
+          deliveryState: "unknown",
+          isDraftOnly: false,
+          errorMessage:
+            "Facebook resumable transfer offsets did not advance. Nothing was marked posted.",
+          durationMs: Date.now() - start,
+          requestSummary: { platform: "facebook", step: "resumable_transfer" }
+        };
+      }
+      offset = nextOffset;
+      end = nextEnd;
     }
     const finished = await this.postForm(`${META_GRAPH_VIDEO_BASE}/${pageId}/videos`, {
       upload_phase: "finish",
@@ -362,11 +421,22 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
   }
 }
 
+const INSTAGRAM_CONTAINER_POLL_INTERVAL_MS = 2_000;
+const INSTAGRAM_CONTAINER_POLL_MAX_ATTEMPTS = 30;
+
+type InstagramContainerPollOptions = {
+  intervalMs?: number;
+  maxAttempts?: number;
+};
+
 export class InstagramRealAdapter implements SocialPlatformAdapter {
   readonly platform = "instagram" as const;
   readonly mode = "real" as const;
 
-  constructor(private readonly http: SocialHttpFetch = defaultFetch) {}
+  constructor(
+    private readonly http: SocialHttpFetch = defaultFetch,
+    private readonly containerPoll: InstagramContainerPollOptions = {}
+  ) {}
 
   async publish(input: SocialPublishInput): Promise<SocialPublishResult> {
     const start = Date.now();
@@ -573,26 +643,43 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
     const token = input.account.accessToken;
     const igUserId = input.account.instagramBusinessId ?? input.account.externalAccountId;
     if (!token || !igUserId) return false;
-    const response = await this.http(
-      `${META_GRAPH_BASE}/${igUserId}?fields=id,username&access_token=${encodeURIComponent(token)}`
-    );
-    if (!response.ok) return false;
-    const data = asRecord(await response.json());
-    return typeof data.id === "string";
+    try {
+      const response = await this.http(
+        `${META_GRAPH_BASE}/${igUserId}?fields=id,username&access_token=${encodeURIComponent(token)}`
+      );
+      if (!response.ok) return false;
+      const data = asRecord(await response.json());
+      return data.id === igUserId;
+    } catch {
+      return false;
+    }
   }
 
   private async waitForContainer(
     creationId: string,
     token: string
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const response = await this.http(
-      `${META_GRAPH_BASE}/${creationId}?fields=status_code&access_token=${encodeURIComponent(token)}`
-    );
-    if (!response.ok) {
-      return { ok: false, error: "Instagram video container status could not be read. Nothing was marked posted." };
+    const intervalMs = this.containerPoll.intervalMs ?? INSTAGRAM_CONTAINER_POLL_INTERVAL_MS;
+    const maxAttempts = this.containerPoll.maxAttempts ?? INSTAGRAM_CONTAINER_POLL_MAX_ATTEMPTS;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await this.http(
+        `${META_GRAPH_BASE}/${creationId}?fields=status_code&access_token=${encodeURIComponent(token)}`
+      );
+      if (!response.ok) {
+        return { ok: false, error: "Instagram video container status could not be read. Nothing was marked posted." };
+      }
+      const status = asRecord(await response.json()).status_code;
+      if (status === "FINISHED" || status === "PUBLISHED") return { ok: true };
+      if (status === "ERROR" || status === "EXPIRED") {
+        return {
+          ok: false,
+          error: "Instagram video container failed during processing. Nothing was marked posted."
+        };
+      }
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
     }
-    const status = asRecord(await response.json()).status_code;
-    if (status === "FINISHED" || status === "PUBLISHED") return { ok: true };
     return {
       ok: false,
       error: "Instagram video container is not ready. Nothing was marked posted."
@@ -617,31 +704,68 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
         requestSummary: { platform: "youtube" }
       };
     }
+    let accessToken: string;
     try {
-      const accessToken = await this.accessToken(input);
-      const init = await this.http(
-        `${YOUTUBE_UPLOAD_URL}?uploadType=resumable&part=snippet,status`,
-        {
+      accessToken = await this.accessToken(input);
+    } catch (error) {
+      return {
+        success: false,
+        isDraftOnly: true,
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : "YouTube OAuth token refresh failed before upload.",
+        durationMs: Date.now() - start,
+        requestSummary: { platform: "youtube", step: "oauth" }
+      };
+    }
+    try {
+      const initBody = JSON.stringify({
+        snippet: {
+          title: input.title?.trim() || input.caption.slice(0, 100),
+          description: input.caption.slice(0, 5000),
+          tags: input.tags ?? []
+        },
+        status: {
+          privacyStatus: "private",
+          selfDeclaredMadeForKids: false
+        }
+      });
+      const initResumable = async (token: string) =>
+        this.http(`${YOUTUBE_UPLOAD_URL}?uploadType=resumable&part=snippet,status`, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
             "X-Upload-Content-Type": input.mediaMimeType ?? "video/*",
-            ...(input.mediaByteSize ? { "X-Upload-Content-Length": String(input.mediaByteSize) } : {})
+            ...(input.mediaByteSize
+              ? { "X-Upload-Content-Length": String(input.mediaByteSize) }
+              : {})
           },
-          body: JSON.stringify({
-            snippet: {
-              title: input.title?.trim() || input.caption.slice(0, 100),
-              description: input.caption.slice(0, 5000),
-              tags: input.tags ?? []
-            },
-            status: {
-              privacyStatus: "private",
-              selfDeclaredMadeForKids: false
-            }
-          })
+          body: initBody
+        });
+      let init = await initResumable(accessToken);
+      if (
+        !init.ok &&
+        init.status === 401 &&
+        this.youtubeOAuthRefreshAvailable(input)
+      ) {
+        try {
+          accessToken = await this.refreshYouTubeAccessToken(input);
+          init = await initResumable(accessToken);
+        } catch (error) {
+          return {
+            success: false,
+            isDraftOnly: true,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : "YouTube OAuth token refresh failed before upload.",
+            durationMs: Date.now() - start,
+            requestSummary: { platform: "youtube", step: "oauth" }
+          };
         }
-      );
+      }
       const location = init.headers.get("location") ?? init.headers.get("Location");
       if (!init.ok || !location) {
         return {
@@ -692,13 +816,29 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
 
   async validateAccount(input: SocialPublishInput): Promise<boolean> {
     try {
-      const accessToken = await this.accessToken(input);
-      const response = await this.http(`${YOUTUBE_API_BASE}/channels?part=id,snippet&mine=true`, {
+      let accessToken = await this.accessToken(input);
+      const channelsUrl = `${YOUTUBE_API_BASE}/channels?part=id,snippet&mine=true`;
+      let response = await this.http(channelsUrl, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
+      if (
+        !response.ok &&
+        response.status === 401 &&
+        this.youtubeOAuthRefreshAvailable(input)
+      ) {
+        accessToken = await this.refreshYouTubeAccessToken(input);
+        response = await this.http(channelsUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+      }
       if (!response.ok) return false;
       const items = asRecord(await response.json()).items;
-      return Array.isArray(items) && items.length > 0;
+      const channelId = input.account.externalAccountId.trim();
+      if (!channelId) return false;
+      return (
+        Array.isArray(items) &&
+        items.some((item) => asRecord(item).id === channelId)
+      );
     } catch {
       return false;
     }
@@ -741,18 +881,44 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
     throw new Error("A completed local video file is required.");
   }
 
-  private async accessToken(input: SocialPublishInput): Promise<string> {
-    if (input.account.accessToken && !input.account.refreshToken) return input.account.accessToken;
-    if (!input.account.refreshToken || !input.account.clientId || !input.account.clientSecret) {
+  private youtubeOAuthRefreshAvailable(input: SocialPublishInput): boolean {
+    const refresh = input.account.refreshToken?.trim();
+    const clientId = input.account.clientId?.trim();
+    const clientSecret = input.account.clientSecret?.trim();
+    return Boolean(
+      refresh &&
+        refresh !== "replace-me" &&
+        clientId &&
+        clientSecret &&
+        clientId !== "replace-me" &&
+        clientSecret !== "replace-me"
+    );
+  }
+
+  private async refreshYouTubeAccessToken(
+    input: SocialPublishInput
+  ): Promise<string> {
+    const refresh = input.account.refreshToken?.trim();
+    if (!refresh || refresh === "replace-me") {
       throw new Error("YouTube OAuth refresh token is missing.");
+    }
+    const clientId = input.account.clientId?.trim();
+    const clientSecret = input.account.clientSecret?.trim();
+    if (
+      !clientId ||
+      !clientSecret ||
+      clientId === "replace-me" ||
+      clientSecret === "replace-me"
+    ) {
+      throw new Error("YouTube OAuth client credentials are missing.");
     }
     const response = await this.http(GOOGLE_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: input.account.clientId,
-        client_secret: input.account.clientSecret,
-        refresh_token: input.account.refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refresh,
         grant_type: "refresh_token"
       }).toString()
     });
@@ -761,6 +927,12 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
       throw new Error(readErrorMessage(data, "YouTube OAuth token refresh failed"));
     }
     return data.access_token;
+  }
+
+  private async accessToken(input: SocialPublishInput): Promise<string> {
+    const direct = input.account.accessToken?.trim();
+    if (direct && direct !== "replace-me") return direct;
+    return this.refreshYouTubeAccessToken(input);
   }
 }
 
@@ -782,7 +954,8 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
         requestSummary: { platform: "tiktok" }
       };
     }
-    if (!input.mediaPath && !input.mediaUrl?.startsWith("https://")) {
+    const hasLocalFile = Boolean(input.mediaPath && input.mediaByteSize);
+    if (!hasLocalFile && !input.mediaUrl?.startsWith("https://")) {
       return {
         success: false,
         isDraftOnly: true,
@@ -793,7 +966,7 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
     }
     try {
       const isPhoto = input.mediaKind === "photo";
-      const fileUpload = Boolean(input.mediaPath && input.mediaByteSize);
+      const fileUpload = hasLocalFile;
       if (isPhoto && fileUpload) {
         return {
           success: false,
@@ -918,7 +1091,23 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
   }
 
   async validateAccount(input: SocialPublishInput): Promise<boolean> {
-    return Boolean(input.account.accessToken && input.account.externalAccountId);
+    try {
+      const token = input.account.accessToken?.trim();
+      const openId = input.account.externalAccountId?.trim();
+      if (!token || !openId || token === "replace-me") return false;
+      const response = await this.http(
+        "https://open.tiktokapis.com/v2/user/info/?fields=open_id",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok) return false;
+      const payload = asRecord(await response.json());
+      const error = asRecord(payload.error);
+      if (error.code && error.code !== "ok") return false;
+      const user = asRecord(asRecord(payload.data).user);
+      return user.open_id === openId;
+    } catch {
+      return false;
+    }
   }
 }
 

@@ -23,7 +23,8 @@ function fakeHarness({
   recommendation = null,
   membershipRole = "owner",
   failSuccessAudit = false,
-  driveExecution = null
+  driveExecution = null,
+  social = undefined
 } = {}) {
   const approvals = new Map(approval ? [[approval.id, approval]] : []);
   const events = new Map(event ? [[event.id, event]] : []);
@@ -221,7 +222,8 @@ function fakeHarness({
       return input;
     } },
     { resolveForArtist: async () => adapters },
-    { enqueueApprovalNotify: async (input) => notifications.push(input) }
+    { enqueueApprovalNotify: async (input) => notifications.push(input) },
+    social
   );
   return { service, approvals, opportunities, events, recommendations, auditEvents, notifications, providerCalls, reconciliationReceipts, membershipLookups };
 }
@@ -651,6 +653,43 @@ test("calendar and Drive executions can finalize concurrently without conflictin
   assert.equal(event.calendarEventId, "calendar-1");
   assert.equal(event.driveFolderUrl, "https://drive.test/folder-1");
   assert.deepEqual(harness.providerCalls, { calendar: 1, drive: 1 });
+});
+
+test("marks linked managerRecommendation as blocked (approval_simulated) when social_post_batch executes in mock mode", async () => {
+  const recommendation = recommendationRow({
+    outcome: "accepted",
+    outcomeReason: "approval_prepared"
+  });
+  const approval = approvalRow({
+    status: "approved",
+    actionType: "social_post_batch",
+    managerRecommendationId: recommendation.id,
+    payload: { postId: "post-1", targets: [{ targetId: "target-1" }] }
+  });
+  const harness = fakeHarness({
+    approval,
+    recommendation,
+    social: {
+      previewApproved: () => ({ wouldPublish: [], socialMode: "mock" }),
+      executeApproved: async () => ({
+        approvalStatus: "executed",
+        executionResult: {
+          at: new Date().toISOString(),
+          socialMode: "mock",
+          results: [{ platform: "facebook", deliveryState: "simulated" }]
+        }
+      })
+    }
+  });
+
+  const result = await harness.service.executeApproved("artist-1", approval.id, "owner@test.invalid", {
+    actorOperatorId: "owner-1"
+  });
+
+  assert.equal(result.status, "executed");
+  assert.equal(recommendation.outcome, "blocked");
+  assert.equal(recommendation.outcomeReason, "approval_simulated");
+  assert.notEqual(recommendation.outcome, "completed");
 });
 
 test("an audit failure after event finalization never reverses executed provider work", async () => {

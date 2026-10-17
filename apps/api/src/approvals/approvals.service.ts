@@ -55,6 +55,7 @@ import {
   approvalReconciliationHasKnownExternalEffect,
   approvalReconciliationIntentMatches,
   approvalReconciliationIsConclusive,
+  socialPostBatchApprovalIsSimulated,
   type ApprovalReconciliationInput
 } from "./approval-reconciliation";
 
@@ -346,7 +347,13 @@ export class ApprovalsService {
       outcome = ManagerRecommendationOutcome.dismissed;
       outcomeReason = "approval_rejected";
     } else if (approvals.every((row) => row.status === ApprovalStatus.executed)) {
-      if (approvals.some((row) => eventLogisticsApprovalIsSimulated(row))) {
+      if (
+        approvals.some(
+          (row) =>
+            eventLogisticsApprovalIsSimulated(row) ||
+            socialPostBatchApprovalIsSimulated(row)
+        )
+      ) {
         outcome = ManagerRecommendationOutcome.blocked;
         outcomeReason = "approval_simulated";
       } else {
@@ -1075,7 +1082,20 @@ export class ApprovalsService {
     };
   }
 
-  private async workQueueCounts(artistId: string, observedAt: Date) {
+  private async workQueueCounts(
+    artistId: string,
+    observedAt: Date,
+    excludeSocialPostBatch = false
+  ) {
+    const socialVisibility =
+      excludeSocialPostBatch
+        ? { actionType: { not: "social_post_batch" as const } }
+        : {};
+    const executableActionTypes = excludeSocialPostBatch
+      ? APPROVAL_EXECUTABLE_ACTION_TYPES.filter(
+          (actionType) => actionType !== "social_post_batch"
+        )
+      : [...APPROVAL_EXECUTABLE_ACTION_TYPES];
     const leaseWindowStart = new Date(
       observedAt.getTime() - APPROVAL_EXECUTION_LEASE_MS
     );
@@ -1108,14 +1128,15 @@ export class ApprovalsService {
       this.prisma.client.approvalRequest.count({
         where: {
           artistId,
-          status: { in: [ApprovalStatus.proposed, ApprovalStatus.pending] }
+          status: { in: [ApprovalStatus.proposed, ApprovalStatus.pending] },
+          ...socialVisibility
         }
       }),
       this.prisma.client.approvalRequest.count({
         where: {
           artistId,
           status: ApprovalStatus.approved,
-          actionType: { in: [...APPROVAL_EXECUTABLE_ACTION_TYPES] },
+          actionType: { in: [...executableActionTypes] },
           executionAttemptedAt: null
         }
       }),
@@ -1123,12 +1144,14 @@ export class ApprovalsService {
         where: {
           artistId,
           status: ApprovalStatus.approved,
-          executionAttemptedAt: { gte: leaseWindowStart }
+          executionAttemptedAt: { gt: leaseWindowStart },
+          ...socialVisibility
         }
       }),
       this.prisma.client.approvalRequest.count({
         where: {
           artistId,
+          ...socialVisibility,
           OR: [
             {
               status: ApprovalStatus.failed,
@@ -1146,6 +1169,7 @@ export class ApprovalsService {
         where: {
           artistId,
           status: { in: [ApprovalStatus.approved, ApprovalStatus.failed] },
+          ...socialVisibility,
           ...terminalReconciliation
         }
       }),
@@ -1192,17 +1216,38 @@ export class ApprovalsService {
     isOwner = false
   ) {
     const observedAt = new Date();
-    const capabilities = {
+    const excludeSocialPostBatch = canMutate && !isOwner;
+    const operatorCapabilities = {
       canDecide: canMutate,
       canExecute: canMutate,
       canReconcile: canMutate
     };
+    const socialCapabilities = {
+      canDecide: canMutate && isOwner,
+      canExecute: canMutate && isOwner,
+      canReconcile: canMutate && isOwner
+    };
     const queryWindow = this.approvalPagination(pagination);
-    const completeCounts = await this.workQueueCounts(artistId, observedAt);
+    const completeCounts = await this.workQueueCounts(
+      artistId,
+      observedAt,
+      excludeSocialPostBatch
+    );
+    const capabilities =
+      isOwner || !canMutate
+        ? operatorCapabilities
+        : {
+            canDecide: completeCounts.pendingDecision > 0,
+            canExecute: completeCounts.readyToExecute > 0,
+            canReconcile: completeCounts.needsReconciliation > 0
+          };
     const rows = await this.prisma.client.approvalRequest.findMany({
       where: {
         artistId,
-        status: { in: [...APPROVAL_LIFECYCLE_RELEVANT_STATUSES] }
+        status: { in: [...APPROVAL_LIFECYCLE_RELEVANT_STATUSES] },
+        ...(excludeSocialPostBatch
+          ? { actionType: { not: "social_post_batch" as const } }
+          : {})
       },
       include: {
         bookingCampaign: {
@@ -1236,8 +1281,13 @@ export class ApprovalsService {
       take: queryWindow.take
     });
     const items = rows.flatMap((row) => {
-      const item = projectApprovalLifecycleItem(row, row.actionType === "social_post_batch"
-        ? { ...capabilities, canDecide: isOwner, canExecute: isOwner } : capabilities, observedAt);
+      const item = projectApprovalLifecycleItem(
+        row,
+        row.actionType === "social_post_batch"
+          ? socialCapabilities
+          : operatorCapabilities,
+        observedAt
+      );
       return item ? [item] : [];
     });
     const {
@@ -1306,11 +1356,12 @@ export class ApprovalsService {
   async reconciliations(
     artistId: string,
     approvalId: string,
-    canMutate: boolean
+    canMutate: boolean,
+    isOwner = false
   ) {
     const approval = await this.prisma.client.approvalRequest.findFirst({
       where: { id: approvalId, artistId },
-      select: { id: true, status: true, executionAttemptedAt: true }
+      select: { id: true, status: true, executionAttemptedAt: true, actionType: true }
     });
     if (!approval) throw new NotFoundException("Approval not found");
     const [rows, terminal] = await Promise.all([
@@ -1348,7 +1399,8 @@ export class ApprovalsService {
           canMutate &&
           needsReconciliation &&
           !executionLeaseActive &&
-          !terminal,
+          !terminal &&
+          (approval.actionType !== "social_post_batch" || isOwner),
         canRetry: false as const
       },
       receipts: rows.map(projectReconciliationReceipt)
@@ -1397,6 +1449,9 @@ export class ApprovalsService {
           }
         });
         if (!approval) throw new NotFoundException("Approval not found");
+        if (approval.actionType === "social_post_batch") {
+          await assertSocialOwner(tx, artistId, actorOperatorId);
+        }
 
         const existing = await tx.approvalReconciliation.findUnique({
           where: {
