@@ -15,10 +15,20 @@ test("approve-and-post stays open while the drop is waiting for Jeff", () => {
     }),
     null
   );
-  assert.equal(
+  assert.match(
     shared.socialApproveAndPostBlockReason({
       postStatus: "pending_approval",
       approvalStatus: "approved"
+    }),
+    /already approved/i
+  );
+});
+
+test("approve-and-post stays open while the drop awaits its first owner claim", () => {
+  assert.equal(
+    shared.socialApproveAndPostBlockReason({
+      postStatus: "approved",
+      approvalStatus: "pending"
     }),
     null
   );
@@ -67,11 +77,17 @@ test("finished mock/private and uncertain receipts never claim a public post or 
 });
 
 test("a target that already has a platform id is not sent again", () => {
-  assert.equal(shared.shouldSendSocialTarget({ enabled: true, existingExternalPostId: null }), true);
-  assert.equal(shared.shouldSendSocialTarget({ enabled: true, existingExternalPostId: "  " }), true);
-  assert.equal(shared.shouldSendSocialTarget({ enabled: false, existingExternalPostId: null }), false);
+  assert.equal(shared.shouldSendSocialTarget({ enabled: true, existingExternalPostId: null, status: "pending" }), true);
+  assert.equal(shared.shouldSendSocialTarget({ enabled: true, existingExternalPostId: "  ", status: "draft" }), true);
+  assert.equal(shared.shouldSendSocialTarget({ enabled: false, existingExternalPostId: null, status: "pending" }), false);
   assert.equal(
-    shared.shouldSendSocialTarget({ enabled: true, existingExternalPostId: "fb_123" }),
+    shared.shouldSendSocialTarget({ enabled: true, existingExternalPostId: "fb_123", status: "pending" }),
     false
   );
+  for (const status of ["failed", "unknown", "processing", "sending", "posted"]) {
+    assert.equal(
+      shared.shouldSendSocialTarget({ enabled: true, existingExternalPostId: null, status }),
+      false
+    );
+  }
 });

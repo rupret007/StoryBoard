@@ -22,6 +22,7 @@ test("approve-and-post refuses a terminal drop before rewriting captions", () =>
 
 test("execution refuses a target that already has a platform id", () => {
   const executeMethod = execution.slice(execution.indexOf("async executeApproved("));
+  assert.match(executeMethod, /shouldSendSocialTarget/);
   assert.match(executeMethod, /status: \{ in: \["draft", "pending"\] \}, externalPostId: null/);
   assert.match(executeMethod, /if \(claimed.count !== 1\) throw new BadRequestException/);
   assert.ok(executeMethod.indexOf("if (claimed.count !== 1)") < executeMethod.indexOf("await sendSocialTarget("));

@@ -23,6 +23,12 @@ export function socialApproveAndPostBlockReason(input: {
   if (approval === "executed" || ["simulated", "private_upload", "draft_only"].includes(status)) {
     return "This approval has already been used. Review its receipts before drafting a new drop.";
   }
+  if (approval === "approved") {
+    return "This drop is already approved. Refresh its status before approving again.";
+  }
+  if (status === "approved" && !["pending", "proposed"].includes(approval)) {
+    return "This drop is already approved. Refresh its status before approving again.";
+  }
   if (["rejected", "expired"].includes(approval) || status === "cancelled") {
     return "This approval is closed. Draft a new drop for a new review.";
   }
@@ -32,6 +38,10 @@ export function socialApproveAndPostBlockReason(input: {
 export function shouldSendSocialTarget(input: {
   enabled: boolean;
   existingExternalPostId?: string | null;
+  status?: string | null;
 }): boolean {
-  return input.enabled && !Boolean(input.existingExternalPostId?.trim());
+  const status = input.status ?? "";
+  return input.enabled &&
+    !Boolean(input.existingExternalPostId?.trim()) &&
+    ["draft", "pending"].includes(status);
 }

@@ -325,23 +325,8 @@ function isTransactionConflict(error: unknown): boolean {
   if (code === "P2034") {
     return true;
   }
-  if (code === "P2010") {
-    const meta = "meta" in error ? error.meta : null;
-    if (meta && typeof meta === "object" && "code" in meta && meta.code === "40001") {
-      return true;
-    }
-    if (prismaDatabaseErrorCode(error) === "40001") {
-      return true;
-    }
-    const adapter = meta && typeof meta === "object" && "driverAdapterError" in meta
-      ? meta.driverAdapterError : null;
-    const cause = adapter && typeof adapter === "object" && "cause" in adapter
-      ? adapter.cause : null;
-    if (cause && typeof cause === "object" &&
-        "originalCode" in cause && cause.originalCode === "40001" &&
-        "kind" in cause && cause.kind === "TransactionWriteConflict") {
-      return true;
-    }
+  if (code === "P2010" && prismaDatabaseErrorCode(error) === "40001") {
+    return true;
   }
   const message = error instanceof Error ? error.message : String(error);
   return /could not serialize access|serialization failure/i.test(message);

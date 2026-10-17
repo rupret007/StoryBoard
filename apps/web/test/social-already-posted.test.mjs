@@ -9,6 +9,7 @@ const client = readFileSync(join(root, "src/app/(app)/social/social-client.tsx")
 
 test("Social approve-and-post is disabled after a drop already posted or failed", () => {
   assert.match(client, /socialApproveAndPostBlockReason/);
+  assert.match(client, /uncertainPostId === activePost\.id \? SOCIAL_APPROVAL_UNCERTAIN/);
   assert.match(client, /data-testid="social-approve-blocked"/);
   assert.match(client, /disabled=\{!approvalAllowed \|\| busy !== null \|\| uncertainPostId === activePost.id\}/);
   assert.match(client, /activePost.status === "posted" \? "Already posted"/);

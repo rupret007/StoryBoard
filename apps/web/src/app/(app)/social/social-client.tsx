@@ -138,7 +138,7 @@ export function SocialClient({
   const approveBlockReason = socialApproveAndPostBlockReason({
     postStatus: activePost?.status,
     approvalStatus: activePost?.approval?.status
-  });
+  }) ?? (activePost && uncertainPostId === activePost.id ? SOCIAL_APPROVAL_UNCERTAIN : null);
 
   async function refresh(preferredPostId?: string) {
     if (!artistId) return;

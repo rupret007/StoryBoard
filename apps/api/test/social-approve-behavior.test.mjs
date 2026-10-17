@@ -13,6 +13,18 @@ const [{ SocialService }, { SocialExecutionService }] = await Promise.all([
   load("social-execution.service.js")
 ]);
 
+function reviewTargetInput(target) {
+  return {
+    id: target.id,
+    enabled: target.enabled,
+    caption: target.caption,
+    title: target.title ?? undefined,
+    tags: target.tags,
+    includeFacebookEvent: target.includeFacebookEvent,
+    selectedVariantIndex: target.selectedVariantIndex ?? 0
+  };
+}
+
 for (const [postStatus, approvalStatus] of [
   ["posted", "approved"],
   ["partial", "approved"],
@@ -29,10 +41,22 @@ for (const [postStatus, approvalStatus] of [
     const target = { id: "target-1", caption: "Approved caption", enabled: true,
       title: null, tags: [], includeFacebookEvent: false, selectedVariantIndex: 0 };
     const reviewFingerprint = "a".repeat(64);
+    const unchangedTargets = [reviewTargetInput(target)];
     const approval = { id: "approval-1", artistId: "artist-1", status: approvalStatus,
       actionType: "social_post_batch", sourceKey: "social_post:post-1",
       executionAttemptedAt: new Date("2026-10-15T12:00:00Z"),
-      payload: { reviewFingerprint, caption: target.caption } };
+      payload: {
+        reviewFingerprint,
+        caption: target.caption,
+        targets: unchangedTargets.map((row) => ({
+          targetId: row.id,
+          enabled: row.enabled,
+          caption: row.caption,
+          platform: "instagram",
+          tags: row.tags,
+          includeFacebookEvent: row.includeFacebookEvent
+        }))
+      } };
     const post = { id: "post-1", status: postStatus, approval,
       targets: [target], approvalRequestId: approval.id };
     const before = structuredClone({ target, approval });
@@ -86,12 +110,79 @@ for (const [postStatus, approvalStatus] of [
     assert.deepEqual({ target, approval }, before);
 
     // The current API permits an unchanged replay only as a read of its receipt.
-    const replay = await service.approveAndPost("artist-1", { postId: post.id, reviewFingerprint }, actor);
+    const replay = await service.approveAndPost("artist-1", {
+      postId: post.id,
+      reviewFingerprint,
+      targets: unchangedTargets
+    }, actor);
     assert.equal(replay.status, postStatus);
     assert.deepEqual(calls, []);
     assert.deepEqual({ target, approval }, before);
   });
 }
+
+test("approve-and-post refuses a terminal postStatus when approvalStatus is pending", async () => {
+  const target = { id: "target-1", caption: "Approved caption", enabled: true,
+    title: null, tags: [], includeFacebookEvent: false, selectedVariantIndex: 0 };
+  const reviewFingerprint = "a".repeat(64);
+  const unchangedTargets = [reviewTargetInput(target)];
+  const approval = { id: "approval-1", artistId: "artist-1", status: "pending",
+    actionType: "social_post_batch", sourceKey: "social_post:post-1",
+    executionAttemptedAt: null,
+    payload: { reviewFingerprint, caption: target.caption } };
+  const post = { id: "post-1", status: "posted", approval,
+    targets: [target], approvalRequestId: approval.id };
+  const before = structuredClone({ target, approval });
+  const calls = [];
+  const write = (name, row) => async ({ where, data }) => {
+    if (where?.status?.in && !where.status.in.includes(row.status)) {
+      return { count: 0 };
+    }
+    calls.push(name);
+    Object.assign(row, data);
+    return { count: 1 };
+  };
+  const client = {
+    artistMembership: { findUnique: async () => ({ role: "owner" }) },
+    socialPost: { findFirst: async () => post, update: write("post write", post) },
+    socialPostTarget: {
+      updateMany: write("target write", target), update: write("target write", target)
+    },
+    approvalRequest: {
+      findUniqueOrThrow: async () => approval,
+      update: write("approval write", approval),
+      updateMany: write("approval write", approval)
+    },
+    auditEvent: { create: async () => calls.push("audit") }
+  };
+  client.$transaction = async (callback) => callback(client);
+  const service = new SocialService(
+    { client },
+    {
+      approve: async () => calls.push("approve"),
+      executeApproved: async () => calls.push("execute")
+    },
+    { log: async () => calls.push("audit") },
+    {
+      env: () => ({ SOCIAL_ADAPTER: "mock" }),
+      requirePost: async () => structuredClone(post),
+      getPost: async () => structuredClone(post)
+    },
+    {}
+  );
+  const actor = { label: "Owner", operatorId: "operator-1" };
+
+  await assert.rejects(
+    service.approveAndPost("artist-1", {
+      postId: post.id,
+      reviewFingerprint,
+      targets: unchangedTargets
+    }, actor),
+    (error) => error.getStatus() === 409 && /already posted/i.test(error.message)
+  );
+  assert.deepEqual(calls, []);
+  assert.deepEqual({ target, approval }, before);
+});
 
 function executionFixture(existingReceipt) {
   const targets = [
