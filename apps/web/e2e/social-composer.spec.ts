@@ -25,7 +25,8 @@ test("phone Social starts a new drop, keeps approval reachable through caption r
   expect(oldDrop.ok(), await oldDrop.text()).toBe(true);
   const oldPost = await oldDrop.json();
   const oldSend = await page.request.post(`${api}/social/approve-and-post`, {
-    headers, data: { postId: oldPost.id }
+    headers,
+    data: { postId: oldPost.id, reviewFingerprint: oldPost.reviewFingerprint }
   });
   expect(oldSend.ok(), await oldSend.text()).toBe(true);
   expect((await oldSend.json()).approval.status).toBe("executed");
