@@ -138,8 +138,7 @@ export function SocialClient({
   const selectedEvent = workspace?.events.find((row) => row.id === eventId) ?? null;
   const approveBlock = socialApproveBlockReason(activePost, drafts);
   const approveEnabled = isOwner && busy === null && activePost !== null &&
-    uncertainPostId !== activePost.id &&
-    socialApproveBlockReason(activePost, drafts) === null;
+    uncertainPostId !== activePost.id && approveBlock === null;
 
   function keepPost(post: SocialPost) {
     setActivePost(post);

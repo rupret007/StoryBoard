@@ -21,6 +21,38 @@ test("keepPost merges the drafted drop to the front without losing other rows", 
   assert.equal(again.posts[0].note, "posted");
 });
 
+test("Approve & post stays off when approval is not a pending owner review", () => {
+  const pendingDrop = {
+    id: "post-pending",
+    status: "pending_approval",
+    approval: { status: "pending" },
+    targets: [{ enabled: true, externalPostId: null }]
+  };
+  assert.equal(shared.socialApproveBlockReason(pendingDrop), null);
+  assert.equal(
+    shared.socialApproveBlockReason({
+      ...pendingDrop,
+      approval: { status: "rejected" }
+    }),
+    "not_ready"
+  );
+  assert.equal(
+    shared.socialApproveBlockReason({
+      ...pendingDrop,
+      status: "approved",
+      approval: { status: "approved" }
+    }),
+    "not_ready"
+  );
+  assert.equal(
+    shared.socialApproveBlockReason({
+      ...pendingDrop,
+      approval: null
+    }),
+    "not_ready"
+  );
+});
+
 test("Approve & post stays off after a drop already has platform IDs", () => {
   const posted = {
     id: "post-1",

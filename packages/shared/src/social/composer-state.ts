@@ -10,6 +10,8 @@ export type SocialComposerPost = {
   targets: SocialComposerTarget[];
 };
 
+import { canApproveSocialPost } from "./receipt";
+
 export type SocialComposerWorkspace<TPost extends { id: string }> = {
   posts: TPost[];
 };
@@ -32,7 +34,7 @@ export function mergeSocialPost<TPost extends { id: string }>(
 export function socialApproveBlockReason(
   post: SocialComposerPost | null | undefined,
   drafts: SocialComposerTarget[] = post?.targets ?? []
-): "missing_post" | "already_posted" | "none_enabled" | null {
+): "missing_post" | "already_posted" | "none_enabled" | "not_ready" | null {
   if (!post) return "missing_post";
   const enabled = drafts.filter((row) => row.enabled);
   if (
@@ -44,6 +46,14 @@ export function socialApproveBlockReason(
     return "already_posted";
   }
   if (enabled.length === 0) return "none_enabled";
+  if (!canApproveSocialPost({
+    isOwner: true,
+    approvalStatus: post.approval?.status,
+    postStatus: post.status,
+    hasEnabledTarget: true
+  })) {
+    return "not_ready";
+  }
   return null;
 }
 
