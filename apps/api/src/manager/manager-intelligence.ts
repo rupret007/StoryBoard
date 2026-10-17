@@ -1478,6 +1478,21 @@ function deterministicManagerChatBase(
     };
   }
 
+  if (managerQuestionAsksForBookingPack(question) || managerQuestionAsksForTravisDecision(question)) {
+    const writeClaim = resolveManagerWriteClaim(question);
+    if (writeClaim.status === "refused" && writeClaim.message) {
+      return { answer: writeClaim.message, citations: [], recommendation: null };
+    }
+    if (externalRequest) {
+      const recommendation = matchingRecommendation(brief);
+      return {
+        answer: `I can help prepare that, but I won't send, sign, pay, publish, or execute outside work from this conversation. Those actions need the exact payload reviewed in Approvals.\n\nThe useful next move is to prepare the internal work first${recommendation ? `: ${recommendation.nextAction}` : "."}`,
+        citations: recommendation?.evidenceIds ?? [],
+        recommendation: recommendation?.proposedAction ? recommendation : null
+      };
+    }
+  }
+
   const bookingDesk = recordedBookingDesk(facts, question, now);
   if (bookingDesk) return bookingDesk;
 

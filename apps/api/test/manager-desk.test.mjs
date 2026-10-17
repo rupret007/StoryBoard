@@ -64,4 +64,15 @@ test("AI-enabled Manager service persists recorded desk answers without attempti
   assert.equal(runs.at(-1).trace.providerContext.attempted, false);
   assert.deepEqual(runs.at(-1).output.citations, ["booking", "venue", "set", "song"]);
   assert.equal(providerKeyReads, 0);
+
+  facts.opportunities[0].stage = "hold";
+  facts.tasks = [{ id: "follow-task", title: "Follow up", status: "done", dueAt: null, initiativeId: null }];
+  facts.campaignRecipients = [
+    { id: "open-recipient", status: "sent", opportunityId: "booking", followUpDueAt: new Date("2026-10-05T00:00:00Z"), followUpTaskId: null },
+    { id: "done-recipient", status: "sent", opportunityId: "booking", followUpDueAt: new Date("2026-09-01T00:00:00Z"), followUpTaskId: "follow-task" }
+  ];
+  const travis = await service.chat("fixture", { message: "What needs a Travis decision next?" }, "offline@test", "operator");
+  assert.match(travis.message.content, /Next Travis decision/);
+  assert.doesNotMatch(travis.message.content, /done-recipient/);
+  assert.equal(runs.at(-1).trace.providerContext.attempted, false);
 });

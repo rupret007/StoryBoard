@@ -93,7 +93,7 @@ test("pitch-pack-confirmed-booking-retains-recorded-stage", () => {
   assert.match(result.answer, /\(confirmed\)/);
 });
 
-const { bookingPackRecordsForArtist } = require("../dist/manager/manager-booking-desk.js");
+const { bookingPackRecordsForArtist, recordedBookingDesk } = require("../dist/manager/manager-booking-desk.js");
 const linked = { venueId: "venue", venue: { ...opportunity.packRecords.venue, artistId: "fixture" }, event: { artistId: "fixture", venueId: "venue", status: "confirmed", setlist: { ...opportunity.packRecords.setlist, artistId: "fixture", items: [{ itemType: "song", song: { ...song, artistId: "fixture" } }] } } };
 for (const path of ["venue", "event", "setlist", "song", "event-venue", "cancelled-event"]) test(`pitch-pack-${path}-link-isolation-fails-closed`, () => {
   const record = structuredClone(linked);
@@ -110,4 +110,96 @@ for (const path of ["venue", "event", "setlist", "song", "event-venue", "cancell
 });
 test("pitch-pack-same-artist-projection-preserves-only-recorded-fields", () => {
   assert.deepEqual(bookingPackRecordsForArtist("fixture", linked), opportunity.packRecords);
+});
+
+test("travis-decision-earliest-target-date-and-tie-break-ordering", () => {
+  const datedEarly = { ...opportunity, id: "booking-early", title: "Early dated", targetDate: new Date("2026-09-20T00:00:00Z") };
+  const datedLate = { ...opportunity, id: "booking-late", title: "Late dated", targetDate: new Date("2026-09-30T00:00:00Z") };
+  const invalidDate = { ...opportunity, id: "booking-invalid", title: "Invalid date", targetDate: new Date("bad") };
+  const undatedA = { ...opportunity, id: "booking-a", title: "Undated A", targetDate: null };
+  const undatedB = { ...opportunity, id: "booking-b", title: "Undated B", targetDate: null };
+  const byTarget = deterministicManagerChat({ ...empty, opportunities: [datedLate, datedEarly, invalidDate, undatedB, undatedA] }, decision, now);
+  assert.match(byTarget.answer, /Next Travis review by earliest recorded target date/);
+  assert.match(byTarget.answer, /Early dated/);
+  assert.equal(byTarget.citations[0], "booking-early");
+
+  const followUps = [
+    { id: "recipient-late", status: "sent", opportunityId: datedEarly.id, followUpDueAt: new Date("2026-10-01T00:00:00Z"), followUpTaskId: null },
+    { id: "recipient-early", status: "sent", opportunityId: datedLate.id, followUpDueAt: new Date("2026-09-15T00:00:00Z"), followUpTaskId: null },
+    { id: "recipient-undated-b", status: "sent", opportunityId: undatedA.id, followUpDueAt: null, followUpTaskId: null },
+    { id: "recipient-undated-a", status: "sent", opportunityId: undatedB.id, followUpDueAt: null, followUpTaskId: null }
+  ];
+  const byFollowUp = deterministicManagerChat({ ...empty, opportunities: [datedEarly, datedLate, undatedA, undatedB], campaignRecipients: followUps }, decision, now);
+  assert.match(byFollowUp.answer, /Next Travis decision/);
+  assert.match(byFollowUp.answer, /Late dated/);
+  assert.deepEqual(byFollowUp.citations.slice(0, 2), ["recipient-early", "booking-late"]);
+
+  const invalidFollowUpFacts = {
+    ...empty,
+    opportunities: [datedEarly],
+    campaignRecipients: [
+      { id: "recipient-invalid", status: "sent", opportunityId: datedEarly.id, followUpDueAt: new Date("bad"), followUpTaskId: null },
+      { id: "recipient-dated", status: "sent", opportunityId: datedEarly.id, followUpDueAt: new Date("2026-09-18T00:00:00Z"), followUpTaskId: null }
+    ]
+  };
+  const invalidFollowUp = recordedBookingDesk(invalidFollowUpFacts, decision, now);
+  assert.match(invalidFollowUp.answer, /Next Travis decision/);
+  assert.equal(invalidFollowUp.citations[0], "recipient-dated");
+});
+
+test("travis-follow-up-completed-task-excluded", () => {
+  const facts = {
+    ...factsFor(opportunity),
+    tasks: [{ id: "follow-task", title: "Follow up", status: "done", dueAt: null, initiativeId: null }],
+    campaignRecipients: [
+      { id: "open-recipient", status: "sent", opportunityId: opportunity.id, followUpDueAt: new Date("2026-10-01T00:00:00Z"), followUpTaskId: null },
+      { id: "done-recipient", status: "sent", opportunityId: opportunity.id, followUpDueAt: new Date("2026-09-10T00:00:00Z"), followUpTaskId: "follow-task" }
+    ]
+  };
+  const result = deterministicManagerChat(facts, decision, now);
+  assert.match(result.answer, /Next Travis decision/);
+  assert.match(result.answer, /open-recipient|Fixture booking/);
+  assert.doesNotMatch(result.answer, /done-recipient/);
+});
+
+test("pitch-pack-external-action-and-write-claim-refusal", () => {
+  const facts = factsFor(opportunity);
+  for (const question of [
+    "Email the venue pitch pack for Fixture booking",
+    "Send the venue pitch pack now",
+    "Confirm the booking for Travis next"
+  ]) {
+    const result = deterministicManagerChat(facts, question, now);
+    assert.doesNotMatch(result.answer, /Venue pitch pack — draft for Travis review/);
+    assert.doesNotMatch(result.answer, /Next Travis decision/);
+    assert.ok(/won't send|did not book anyone/i.test(result.answer));
+    assert.equal(result.recommendation, null);
+  }
+});
+
+test("pitch-pack-unknown-target-prefix-and-reviewer-suffix", () => {
+  const facts = factsFor(opportunity);
+  assert.match(deterministicManagerChat(facts, "Draft a Missing venue pitch pack", now).answer, /requested booking\/venue is not uniquely recorded/);
+  assert.match(deterministicManagerChat(facts, "Draft a venue pitch pack for Travis review", now).answer, /Venue pitch pack — draft for Travis review/);
+});
+
+test("pitch-pack-citations-capped-at-ten", () => {
+  const songs = Array.from({ length: 10 }, (_, index) => ({
+    id: `song-${index}`,
+    title: `Vault song ${index}`,
+    active: true,
+    sourceKey: "vault:catalog_import_v1:fixture"
+  }));
+  const setlist = {
+    id: "large-set",
+    name: "Large set",
+    status: "draft",
+    items: songs.map((item) => ({ itemType: "song", song: item }))
+  };
+  const facts = factsFor({ ...opportunity, packRecords: { ...opportunity.packRecords, setlist } });
+  const result = deterministicManagerChat(facts, pitch, now);
+  assert.equal(result.citations.length, 10);
+  assert.ok(result.citations.includes("booking"));
+  assert.ok(result.citations.includes("venue"));
+  assert.ok(result.citations.includes("large-set"));
 });

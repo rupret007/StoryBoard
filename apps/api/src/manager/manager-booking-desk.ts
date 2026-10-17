@@ -34,15 +34,27 @@ function targetDate(date: Date | null, now: Date) {
   const due = describeTaskDueDate(date, now);
   return due ? `${due.label}, ${date!.getUTCFullYear()} (UTC calendar day; ${due.timing})` : "not recorded";
 }
+function finiteTime(date: Date | null | undefined) {
+  return date && Number.isFinite(date.getTime()) ? date.getTime() : Infinity;
+}
+function pitchPackRequestedTarget(question: string) {
+  const strip = (value: string) => value.trim().replace(/^["“]|["”]$/g, "");
+  const forAt = question.match(/\b(?:for|at)\s+(.+?)(?:\s+from records only)?[?.!]*$/i)?.[1];
+  const draft = question.match(/\bdraft\s+a\s+(.+?)\s+venue\s+(?:pitch\s+)?pack\b/i)?.[1];
+  const requested = strip(forAt ?? draft ?? "");
+  if (!requested) return null;
+  if (/\btravis\b/i.test(requested) && /\b(?:review|decision|decide)\b/i.test(requested)) return null;
+  return requested;
+}
 
 export function recordedBookingDesk(facts: ManagerFacts, question: string, now: Date): ManagerChatResult | null {
   const pack = managerQuestionAsksForBookingPack(question);
   if (!pack && !managerQuestionAsksForTravisDecision(question)) return null;
-  const result = (answer: string, citations: string[] = []): ManagerChatResult => ({ answer: `${answer}\n\n${boundary}`, citations: [...new Set(citations)], recommendation: null });
+  const result = (answer: string, citations: string[] = []): ManagerChatResult => ({ answer: `${answer}\n\n${boundary}`, citations: [...new Set(citations)].slice(0, 10), recommendation: null });
   const opportunities = facts.opportunities.filter((item) => openStages.has(item.stage) || (pack && item.stage === "confirmed"));
   if (pack) {
     // A target suffix must resolve exactly; never silently replace an unknown venue.
-    const requested = question.match(/\b(?:for|at)\s+(.+?)(?:\s+from records only)?[?.!]*$/i)?.[1]?.trim().replace(/^["“]|["”]$/g, "");
+    const requested = pitchPackRequestedTarget(question);
     const matches = requested ? opportunities.filter((item) => [item.id, item.title, item.packRecords?.venue?.name].some((value) => value?.toLowerCase() === requested.toLowerCase())) : opportunities;
     if (!matches.length) return result(requested
       ? "Pitch pack blocked: the requested booking/venue is not uniquely recorded in the open booking view. Open Booking and select a recorded opportunity; no substitute was chosen."
@@ -58,7 +70,7 @@ export function recordedBookingDesk(facts: ManagerFacts, question: string, now: 
   }
   const followUps = facts.campaignRecipients.filter((item) => ["drafted", "sent"].includes(item.status))
     .filter((item) => !item.followUpTaskId || facts.tasks.find((task) => task.id === item.followUpTaskId)?.status !== "done")
-    .sort((a, b) => (a.followUpDueAt?.getTime() ?? Infinity) - (b.followUpDueAt?.getTime() ?? Infinity) || a.id.localeCompare(b.id));
+    .sort((a, b) => finiteTime(a.followUpDueAt) - finiteTime(b.followUpDueAt) || a.id.localeCompare(b.id));
   if (followUps.length) {
     const followUp = followUps[0]!;
     const opportunity = opportunities.find((item) => item.id === followUp.opportunityId);
@@ -67,7 +79,7 @@ export function recordedBookingDesk(facts: ManagerFacts, question: string, now: 
     if (!describeTaskDueDate(followUp.followUpDueAt, now)) missing.unshift("follow-up due date");
     return result(`Next Travis decision: review the recorded follow-up for “${opportunity.title}”, due ${targetDate(followUp.followUpDueAt, now)}. Decide whether to prepare a reviewed follow-up or defer it in Booking.${missing.length ? ` Preparation blocked: missing ${missing.join("; ")}.` : " The linked venue and Vault setlist support preparing a pitch pack for review."}`, [followUp.id, opportunity.id]);
   }
-  const opportunity = [...opportunities].sort((a, b) => (a.targetDate?.getTime() ?? Infinity) - (b.targetDate?.getTime() ?? Infinity) || a.id.localeCompare(b.id))[0];
+  const opportunity = [...opportunities].sort((a, b) => finiteTime(a.targetDate) - finiteTime(b.targetDate) || a.id.localeCompare(b.id))[0];
   if (!opportunity) return result("No open booking or follow-up decision is supported by the records in this view. Check Booking for missing records; this does not establish that Travis has no work.");
   const missing = gaps(opportunity);
   return result(`Next Travis review by earliest recorded target date: “${opportunity.title}” (${opportunity.stage}), target ${targetDate(opportunity.targetDate, now)}. No follow-up deadline is inferred from that date.${missing.length ? ` Preparation blocked: missing ${missing.join("; ")}.` : " Decide whether to prepare a venue pitch pack from these records."}`, [opportunity.id]);
