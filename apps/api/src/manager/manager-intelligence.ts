@@ -1468,7 +1468,7 @@ function deterministicManagerChatBase(
 
   if (managerQuestionAsksAboutPromoCopy(question) || (externalRequest && /\b(social|caption|storyliner|instagram|tiktok)\b/i.test(question))) {
     return {
-      answer: "StoryBoard is the band-business OS: booking, setlists, invoices, and recorded ops. StoryLiner is promo-only. I won't send, sign, pay, publish, or execute a caption or social post from this conversation.",
+      answer: "StoryBoard is the band-business OS: booking, setlists, invoices, and recorded ops. StoryLiner is promo-only. I won't send, sign, pay, publish, or execute a caption or social post from this conversation. Approve-and-post lives on Social after an explicit approval record.",
       citations: [],
       recommendation: null
     };

@@ -10,7 +10,7 @@ catalog, a promo publisher, or a rehearsal room.
 | **[StoryBoard](https://github.com/rupret007/StoryBoard)** | Band-business OS (the engine) | Booking, setlists, invoices, Manager chat, approvals. Consume Vault. |
 | **[AI-Music-Vault](https://github.com/rupret007/AI-Music-Vault)** | Sole song catalog | Scores, rights, keys, what's alive. Private. Do not commit it here. |
 | **[Show Night](https://github.com/rupret007/rad-dad-show-night)** | Live run sheet | Optional setlist import onto the current artist. Not a fourth band. |
-| **[StoryLiner](https://github.com/rupret007/StoryLiner)** | Promo | Stays separate. StoryBoard never auto-posts. |
+| **[StoryLiner](https://github.com/rupret007/StoryLiner)** | Promo | Stays separate and is not archived. StoryBoard Phase 1 can approve-and-post with ported adapters; it never auto-posts. |
 | **[WebJam](https://github.com/rupret007/webjam)** | Making room | Stays separate. Bounces stay in Vault / local workbench. |
 
 ## Consolidated path: Vault → StoryBoard
@@ -73,4 +73,6 @@ Do not describe StoryBoard as a parallel catalog, a place to re-enter the 150
 songs by hand, or a replacement for Vault scores/rights. An empty song table
 after seed is an explicit missing import, not a second catalog.
 
-Do not fold StoryLiner or WebJam into this repo.
+Do not archive StoryLiner or fold WebJam into this repo. StoryLiner posting
+adapters were ported into StoryBoard Social; the StoryLiner repo remains the
+original promo tool.

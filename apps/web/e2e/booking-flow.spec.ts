@@ -868,7 +868,9 @@ test("manager feedback and reviewed memory feed the release gate", async ({ page
   await dismissed;
   await expect(dismissedProposal.getByText("Dismissed", { exact: true })).toBeVisible();
   await expect(dismissedProposal.getByTestId("manager-action-outcome")).toHaveAttribute("data-tone", "neutral");
+  const dismissedEvalPromoted = page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/manager/recommendations/") && response.url().endsWith("/promote-eval") && response.ok());
   await dismissedProposal.getByRole("button", { name: "Add to eval set" }).click();
+  await dismissedEvalPromoted;
   await expect(dismissedProposal.getByText("in eval set", { exact: true })).toBeVisible();
   await managerMessage.fill("Where does our money stand?");
   await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();

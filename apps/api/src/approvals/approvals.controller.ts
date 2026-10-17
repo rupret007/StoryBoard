@@ -21,6 +21,7 @@ import {
   ApprovalStatus,
   ArtistMembershipRole
 } from "../generated/prisma/enums";
+import { presentApprovalResponse } from "./approval-response";
 import { ApprovalsService } from "./approvals.service";
 import { approvalReconciliationInputSchema } from "./approval-reconciliation";
 
@@ -84,7 +85,7 @@ export class ApprovalsController {
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     const pagination = parseApprovalListPagination(limitRaw, offsetRaw);
-    return this.approvals.list(artistId, parseApprovalStatus(status), pagination);
+    return presentApprovalResponse(await this.approvals.list(artistId, parseApprovalStatus(status), pagination));
   }
 
   @Get("pending")
@@ -97,7 +98,7 @@ export class ApprovalsController {
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     const pagination = parseApprovalListPagination(limitRaw, offsetRaw);
-    return this.approvals.pending(artistId, pagination);
+    return presentApprovalResponse(await this.approvals.pending(artistId, pagination));
   }
 
   @Get("ready-to-execute")
@@ -110,7 +111,7 @@ export class ApprovalsController {
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     const pagination = parseApprovalListPagination(limitRaw, offsetRaw);
-    return this.approvals.readyToExecute(artistId, pagination);
+    return presentApprovalResponse(await this.approvals.readyToExecute(artistId, pagination));
   }
 
   @Get("work-queue")
@@ -124,11 +125,12 @@ export class ApprovalsController {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     const role = await this.roles.getRole(operator.id, artistId);
     const pagination = parseApprovalListPagination(limitRaw, offsetRaw);
-    return this.approvals.workQueue(
+    return presentApprovalResponse(await this.approvals.workQueue(
       artistId,
       role !== ArtistMembershipRole.viewer,
-      pagination
-    );
+      pagination,
+      role === ArtistMembershipRole.owner
+    ));
   }
 
   @Get(":id")
@@ -139,7 +141,7 @@ export class ApprovalsController {
     @Headers("x-artist-id") artistHeader?: string
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
-    return this.approvals.get(artistId, id);
+    return presentApprovalResponse(await this.approvals.get(artistId, id));
   }
 
   @Get(":id/reconciliations")
@@ -151,11 +153,12 @@ export class ApprovalsController {
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     const role = await this.roles.getRole(operator.id, artistId);
-    return this.approvals.reconciliations(
+    return presentApprovalResponse(await this.approvals.reconciliations(
       artistId,
       id,
-      role !== ArtistMembershipRole.viewer
-    );
+      role !== ArtistMembershipRole.viewer,
+      role === ArtistMembershipRole.owner
+    ));
   }
 
   @Post(":id/reconciliations")
@@ -172,13 +175,13 @@ export class ApprovalsController {
     if (!parsed.success) {
       throw new BadRequestException(parsed.error.flatten());
     }
-    return this.approvals.recordReconciliation(
+    return presentApprovalResponse(await this.approvals.recordReconciliation(
       artistId,
       id,
       parsed.data,
       operator.email,
       operator.id
-    );
+    ));
   }
 
   @Post(":id/approve")
@@ -190,7 +193,7 @@ export class ApprovalsController {
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
-    return this.approvals.approve(artistId, id, operator.email, operator.id);
+    return presentApprovalResponse(await this.approvals.approve(artistId, id, operator.email, operator.id));
   }
 
   @Post(":id/reject")
@@ -203,13 +206,13 @@ export class ApprovalsController {
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
-    return this.approvals.reject(
+    return presentApprovalResponse(await this.approvals.reject(
       artistId,
       id,
       operator.email,
       body.reason,
       operator.id
-    );
+    ));
   }
 
   @Post(":id/execute")
@@ -222,9 +225,9 @@ export class ApprovalsController {
   ) {
     const artistId = await this.artistId(operator.id, req, artistHeader);
     await this.roles.assertCanMutateWorkflow(operator.id, artistId);
-    return this.approvals.executeApproved(artistId, id, operator.email, {
+    return presentApprovalResponse(await this.approvals.executeApproved(artistId, id, operator.email, {
       dryRun: body?.dryRun === true,
       actorOperatorId: operator.id
-    });
+    }));
   }
 }

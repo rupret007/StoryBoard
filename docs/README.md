@@ -20,6 +20,7 @@ detail.
 | Configure local infrastructure and environment variables | [`environment-setup-plan.md`](environment-setup-plan.md) |
 | Configure Google OAuth and connected Google tools | [`integrations-google-oauth.md`](integrations-google-oauth.md) |
 | Understand provider and adapter limits | [`integration-plan.md`](integration-plan.md) |
+| Run band social approve-and-post | [`SOCIAL_MANAGER_PLAN.md`](SOCIAL_MANAGER_PLAN.md) |
 | Understand operator sign-in, sessions, and roles | [`auth-operators.md`](auth-operators.md) |
 | Invite operators or onboard an artist | [`invitations.md`](invitations.md) |
 | Populate songs (default: local Vault import) | [`catalog-import.md`](catalog-import.md) |

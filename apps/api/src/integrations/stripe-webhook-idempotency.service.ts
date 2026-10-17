@@ -286,10 +286,42 @@ export class StripeWebhookIdempotencyService {
   }
 }
 
+function prismaDatabaseErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const meta = "meta" in error ? error.meta : null;
+  if (meta && typeof meta === "object" && "code" in meta) {
+    return String(meta.code);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /Code: `([^`]+)`/.exec(message)?.[1] ?? null;
+}
+
 function isTransactionConflict(error: unknown): boolean {
-  return Boolean(
-    error && typeof error === "object" && "code" in error && error.code === "P2034"
-  );
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const code = "code" in error ? String(error.code) : "";
+  if (code === "P2034") {
+    return true;
+  }
+  if (code === "P2010" && prismaDatabaseErrorCode(error) === "40001") {
+    return true;
+  }
+  const meta = "meta" in error ? error.meta : null;
+  if (code === "P2010" && meta && typeof meta === "object") {
+    const adapter = "driverAdapterError" in meta ? meta.driverAdapterError : null;
+    const cause = adapter && typeof adapter === "object" && "cause" in adapter
+      ? adapter.cause : null;
+    if (cause && typeof cause === "object" &&
+      "originalCode" in cause && cause.originalCode === "40001" &&
+      "kind" in cause && cause.kind === "TransactionWriteConflict") {
+      return true;
+    }
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /could not serialize access|serialization failure/i.test(message);
 }
 
 function isLockNotAvailable(error: unknown): boolean {

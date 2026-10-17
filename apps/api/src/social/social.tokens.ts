@@ -1,0 +1,1 @@
+export const SOCIAL_SERVICE = "SOCIAL_SERVICE";

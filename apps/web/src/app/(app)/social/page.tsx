@@ -1,0 +1,46 @@
+import { PageHeader } from "@storyboard/ui";
+import { serverApiFetch, serverBandAccess } from "@/lib/api-server";
+import { SocialClient, type SocialWorkspace } from "./social-client";
+
+export default async function SocialPage() {
+  let workspace: SocialWorkspace | null = null;
+  let artistId: string | null = null;
+  let canManage = false;
+  let isOwner = false;
+  let loadError = "";
+  try {
+    const access = await serverBandAccess();
+    artistId = access.artistId;
+    canManage = access.canManage;
+    isOwner = access.isOwner;
+    workspace = await serverApiFetch<SocialWorkspace>("/social", {
+      cache: "no-store",
+      artistId
+    });
+  } catch {
+    loadError =
+      "Social could not be loaded. Reload to verify your band and posting status.";
+  }
+
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title="Social"
+        description="Drop a photo or video from your phone or computer (or paste a URL). The manager LLM drafts caption variants in this band's voice from confirmed facts, then an owner reviews and approves. Mock sends, private uploads, processing, and confirmed public posts have separate receipts."
+      />
+      {loadError ? (
+        <p role="alert" className="text-sm text-rose-200">
+          {loadError}
+        </p>
+      ) : (
+        <SocialClient
+          key={artistId ?? "unverified"}
+          artistId={artistId}
+          canManage={canManage}
+          isOwner={isOwner}
+          initial={workspace}
+        />
+      )}
+    </div>
+  );
+}

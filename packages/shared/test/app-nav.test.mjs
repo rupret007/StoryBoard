@@ -84,7 +84,7 @@ test("S03 phone drawer first screen is eight rows or fewer after booking is clus
   const more = shared.mobileNavClusterRows("more", true);
   assert.deepEqual(
     more.map((item) => item.href),
-    ["/approvals", "/summary", "/notifications", "/activity", "/team"]
+    ["/social", "/approvals", "/summary", "/notifications", "/activity", "/team"]
   );
   assert.equal(shared.mobileNavClusterActive("more", "/approvals", true), true);
   assert.equal(shared.mobileNavClusterRows("more", false).some((item) => item.href === "/team"), false);
