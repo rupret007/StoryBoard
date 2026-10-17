@@ -547,6 +547,74 @@ test("TikTok local photos fail before an unsupported FILE_UPLOAD request", async
   assert.equal(calls, 0);
 });
 
+test("YouTubeRealAdapter.validateAccount returns false when mine=true channel id does not match account.externalAccountId", async () => {
+  const adapter = new adapters.YouTubeRealAdapter(async (url) => {
+    if (String(url).includes("/channels")) {
+      return jsonResponse(200, { items: [{ id: "other-channel", snippet: {} }] });
+    }
+    return jsonResponse(500, {});
+  });
+  const ok = await adapter.validateAccount({
+    platform: "youtube",
+    caption: "x",
+    account: { ...account, externalAccountId: "expected-channel", accessToken: "yt-token" }
+  });
+  assert.equal(ok, false);
+});
+
+test("FacebookRealAdapter.validateAccount and InstagramRealAdapter.validateAccount return false on mismatched graph id or transport error", async () => {
+  const facebook = new adapters.FacebookRealAdapter(async () =>
+    jsonResponse(200, { id: "other-page" })
+  );
+  assert.equal(
+    await facebook.validateAccount({ platform: "facebook", caption: "x", account }),
+    false
+  );
+  let facebookCalls = 0;
+  const facebookTransport = new adapters.FacebookRealAdapter(async () => {
+    facebookCalls += 1;
+    throw new Error("network down");
+  });
+  assert.equal(
+    await facebookTransport.validateAccount({ platform: "facebook", caption: "x", account }),
+    false
+  );
+  assert.equal(facebookCalls, 1);
+
+  const instagram = new adapters.InstagramRealAdapter(async () =>
+    jsonResponse(200, { id: "other-ig" })
+  );
+  assert.equal(
+    await instagram.validateAccount({ platform: "instagram", caption: "x", account }),
+    false
+  );
+  let instagramCalls = 0;
+  const instagramTransport = new adapters.InstagramRealAdapter(async () => {
+    instagramCalls += 1;
+    throw new Error("dns failure");
+  });
+  assert.equal(
+    await instagramTransport.validateAccount({ platform: "instagram", caption: "x", account }),
+    false
+  );
+  assert.equal(instagramCalls, 1);
+});
+
+test("TikTokRealAdapter.validateAccount rejects placeholder tokens", async () => {
+  let calls = 0;
+  const adapter = new adapters.TikTokRealAdapter(async () => {
+    calls += 1;
+    return jsonResponse(200, { data: { user: { open_id: "page-1" } }, error: { code: "ok" } });
+  });
+  const ok = await adapter.validateAccount({
+    platform: "tiktok",
+    caption: "x",
+    account: { ...account, accessToken: "replace-me", externalAccountId: "page-1" }
+  });
+  assert.equal(ok, false);
+  assert.equal(calls, 0);
+});
+
 test("provider errors and transport exceptions cannot expose credentials in adapter receipts", async () => {
   const root = await mkdtemp(join(tmpdir(), "sb-errors-"));
   const mediaPath = join(root, "clip.mp4");

@@ -10,6 +10,8 @@ const { Readable } = require("node:stream");
 const Fastify = require("fastify");
 const {
   StripeWebhookIdempotencyService,
+  StripeWebhookInFlightError,
+  isStripeWebhookInFlightError,
   STRIPE_WEBHOOK_CLAIM_LEASE_MS
 } = require("../dist/integrations/stripe-webhook-idempotency.service.js");
 const { StripeWebhookController } = require("../dist/integrations/stripe-webhook.controller.js");
@@ -300,6 +302,24 @@ function controllerFor(store, processor, values) {
   }
   return new StripeWebhookController(config(values), idempotency, stripe);
 }
+
+test("runOnce converts Prisma P2010 driverAdapterError 40001 TransactionWriteConflict into StripeWebhookInFlightError", async () => {
+  const conflict = Object.assign(new Error("Raw query failed"), {
+    code: "P2010",
+    meta: { driverAdapterError: new Error("TransactionWriteConflict", { cause: {
+      kind: "TransactionWriteConflict", originalCode: "40001"
+    } }) }
+  });
+  const service = new StripeWebhookIdempotencyService({ client: {
+    $transaction: async () => { throw conflict; }
+  } });
+  await assert.rejects(
+    () => service.runOnce("evt_adapter_conflict", async () => {
+      assert.fail("serialization conflict must not run the handler");
+    }),
+    (error) => isStripeWebhookInFlightError(error) && error instanceof StripeWebhookInFlightError
+  );
+});
 
 test("raw claim serialization conflicts return a retryable webhook response without running work", async () => {
   const conflict = Object.assign(new Error("Raw query failed"), {

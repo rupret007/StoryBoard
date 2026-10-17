@@ -195,12 +195,16 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
     const token = input.account.accessToken;
     const pageId = input.account.externalAccountId;
     if (!token || !pageId) return false;
-    const response = await this.http(
-      `${META_GRAPH_BASE}/${pageId}?fields=id,name&access_token=${encodeURIComponent(token)}`
-    );
-    if (!response.ok) return false;
-    const data = asRecord(await response.json());
-    return typeof data.id === "string";
+    try {
+      const response = await this.http(
+        `${META_GRAPH_BASE}/${pageId}?fields=id,name&access_token=${encodeURIComponent(token)}`
+      );
+      if (!response.ok) return false;
+      const data = asRecord(await response.json());
+      return data.id === pageId;
+    } catch {
+      return false;
+    }
   }
 
   private async publishLocalVideo(
@@ -639,12 +643,16 @@ export class InstagramRealAdapter implements SocialPlatformAdapter {
     const token = input.account.accessToken;
     const igUserId = input.account.instagramBusinessId ?? input.account.externalAccountId;
     if (!token || !igUserId) return false;
-    const response = await this.http(
-      `${META_GRAPH_BASE}/${igUserId}?fields=id,username&access_token=${encodeURIComponent(token)}`
-    );
-    if (!response.ok) return false;
-    const data = asRecord(await response.json());
-    return typeof data.id === "string";
+    try {
+      const response = await this.http(
+        `${META_GRAPH_BASE}/${igUserId}?fields=id,username&access_token=${encodeURIComponent(token)}`
+      );
+      if (!response.ok) return false;
+      const data = asRecord(await response.json());
+      return data.id === igUserId;
+    } catch {
+      return false;
+    }
   }
 
   private async waitForContainer(
@@ -812,7 +820,12 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
       }
       if (!response.ok) return false;
       const items = asRecord(await response.json()).items;
-      return Array.isArray(items) && items.length > 0;
+      const channelId = input.account.externalAccountId.trim();
+      if (!channelId) return false;
+      return (
+        Array.isArray(items) &&
+        items.some((item) => asRecord(item).id === channelId)
+      );
     } catch {
       return false;
     }
@@ -1064,7 +1077,23 @@ export class TikTokRealAdapter implements SocialPlatformAdapter {
   }
 
   async validateAccount(input: SocialPublishInput): Promise<boolean> {
-    return Boolean(input.account.accessToken && input.account.externalAccountId);
+    try {
+      const token = input.account.accessToken?.trim();
+      const openId = input.account.externalAccountId?.trim();
+      if (!token || !openId || token === "replace-me") return false;
+      const response = await this.http(
+        "https://open.tiktokapis.com/v2/user/info/?fields=open_id",
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!response.ok) return false;
+      const payload = asRecord(await response.json());
+      const error = asRecord(payload.error);
+      if (error.code && error.code !== "ok") return false;
+      const user = asRecord(asRecord(payload.data).user);
+      return user.open_id === openId;
+    } catch {
+      return false;
+    }
   }
 }
 

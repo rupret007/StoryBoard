@@ -34,9 +34,14 @@ export function presentApprovalResponse(value: unknown): unknown {
       results: Array.isArray(execution.results) ? execution.results.map((entry) => {
         const row = record(entry);
         const state = execution.socialMode === "mock" ? "simulated" : row.deliveryState ?? "unknown";
+        const adapterDraftOnly = row.isDraftOnly;
+        const isDraftOnly =
+          typeof adapterDraftOnly === "boolean"
+            ? adapterDraftOnly
+            : ["private_upload", "draft_only", "processing"].includes(String(state));
         return { ...pick(row, ["platform", "externalPostId"]), deliveryState: state,
           posted: execution.socialMode === "real" && state === "published" && Boolean(row.externalPostId),
-          isDraftOnly: ["private_upload", "draft_only", "processing"].includes(String(state)),
+          isDraftOnly,
           ...(row.error ? { error: "Platform outcome needs review." } : {}) };
       }) : []
     };

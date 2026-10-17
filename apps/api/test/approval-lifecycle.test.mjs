@@ -101,6 +101,9 @@ function matchValue(value, filter) {
   if (Array.isArray(filter.notIn)) {
     return !filter.notIn.includes(value);
   }
+  if (Object.prototype.hasOwnProperty.call(filter, "not")) {
+    return value !== filter.not;
+  }
   if (filter.gte || filter.lte) {
     if (value == null) return false;
     const after = filter.gte ? value >= filter.gte : true;
@@ -638,5 +641,66 @@ test("list and ready-to-execute endpoints apply limits and preserve bounded read
   assert.deepEqual(
     readyQuery.where.actionType.in.sort(),
     ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch", "booking_reply_confirm", "social_post_batch"].sort()
+  );
+});
+
+test("workQueue restricts social_post_batch item capabilities to false for non-owner members while preserving owner capabilities", async () => {
+  const rows = [
+    row("social-pending", "pending", { actionType: "social_post_batch", payload: { postId: "post-1" } }),
+    row("social-ready", "approved", { actionType: "social_post_batch", payload: { postId: "post-2" } }),
+    row("drive-pending", "pending"),
+    row("drive-ready", "approved")
+  ];
+  const { service } = serviceHarness(rows);
+
+  const memberQueue = await service.workQueue("artist-1", true, {}, false);
+  assert.deepEqual(memberQueue.capabilities, {
+    canDecide: true,
+    canExecute: true,
+    canReconcile: false
+  });
+  assert.deepEqual(memberQueue.counts, {
+    pendingDecision: 1,
+    readyToExecute: 1,
+    executionInProgress: 0,
+    needsReconciliation: 0,
+    reconciled: 0,
+    approvedNotExecutable: 0,
+    attentionTotal: 2
+  });
+  const memberSocialPending = memberQueue.pendingDecision.find((item) => item.id === "social-pending");
+  const memberDrivePending = memberQueue.pendingDecision.find((item) => item.id === "drive-pending");
+  assert.equal(memberSocialPending.capabilities.canApprove, false);
+  assert.equal(memberSocialPending.capabilities.canReject, false);
+  assert.equal(memberDrivePending.capabilities.canApprove, true);
+  assert.equal(memberDrivePending.capabilities.canReject, true);
+  const memberSocialReady = memberQueue.readyToExecute.find((item) => item.id === "social-ready");
+  assert.equal(memberSocialReady.capabilities.canExecute, false);
+  assert.equal(
+    memberQueue.readyToExecute.find((item) => item.id === "drive-ready").capabilities.canExecute,
+    true
+  );
+
+  const ownerQueue = await service.workQueue("artist-1", true, {}, true);
+  assert.deepEqual(ownerQueue.capabilities, {
+    canDecide: true,
+    canExecute: true,
+    canReconcile: true
+  });
+  assert.deepEqual(ownerQueue.counts, {
+    pendingDecision: 2,
+    readyToExecute: 2,
+    executionInProgress: 0,
+    needsReconciliation: 0,
+    reconciled: 0,
+    approvedNotExecutable: 0,
+    attentionTotal: 4
+  });
+  const ownerSocialPending = ownerQueue.pendingDecision.find((item) => item.id === "social-pending");
+  assert.equal(ownerSocialPending.capabilities.canApprove, true);
+  assert.equal(ownerSocialPending.capabilities.canReject, true);
+  assert.equal(
+    ownerQueue.readyToExecute.find((item) => item.id === "social-ready").capabilities.canExecute,
+    true
   );
 });
