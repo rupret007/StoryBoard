@@ -54,6 +54,7 @@ test("owner approval with a lost response remains a single simulated send after 
   expect(posted.sendLogs).toHaveLength(4);
   expect(posted.sendLogs.every((log: { outcome: string }) => log.outcome === "simulated")).toBe(true);
   await page.reload();
+  await page.getByRole("button", { name: "Rehearsal clip", exact: true }).click();
   await expect(page.getByTestId("social-receipt-facebook")).toContainText("Simulated — nothing sent");
 });
 
@@ -83,6 +84,7 @@ test("members can review drafts but cannot approve, reject, or execute social wo
     await context.addCookies([{ name: "sb_session", value: `${payload}.${signature}`, url: web, httpOnly: true, sameSite: "Lax" }]);
     const member = await context.newPage();
     await member.goto(`${web}/social`);
+    await member.getByRole("button", { name: "Band rehearsal", exact: true }).click();
     await expect(member.getByText("Only an owner can approve and post.")).toBeVisible();
     await expect(member.getByTestId("social-approve-and-post")).toBeDisabled();
     for (const path of [
@@ -92,7 +94,8 @@ test("members can review drafts but cannot approve, reject, or execute social wo
       `/approvals/${draft.approvalRequestId}/execute`
     ]) {
       const denied = await member.request.post(`${api}${path}`, {
-        headers: { origin: web, "x-artist-id": artistId }, data: { postId: draft.id }
+        headers: { origin: web, "x-artist-id": artistId },
+        data: { postId: draft.id, reviewFingerprint: draft.reviewFingerprint }
       });
       expect(denied.status()).toBe(403);
     }

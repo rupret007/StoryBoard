@@ -1,11 +1,19 @@
 "use client";
 
 import { Badge, EmptyState, SurfaceCard } from "@storyboard/ui";
-import { canApproveSocialPost, socialReceiptLabel, SOCIAL_APPROVAL_UNCERTAIN } from "@storyboard/shared";
+import {
+  canApproveSocialPost,
+  defaultActiveSocialPost,
+  mergeSocialPost,
+  noteFromRecordedShow,
+  socialApproveAndPostBlockReason,
+  socialApproveBlockReason,
+  socialReceiptLabel,
+  SOCIAL_APPROVAL_UNCERTAIN
+} from "@storyboard/shared";
 import { Link2, Megaphone, ShieldCheck, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { publicApiBaseUrl, scopedApiFetch } from "@/lib/api";
-import { socialApproveAndPostBlockReason } from "@storyboard/shared";
 
 export type SocialCaptionVariant = {
   caption: string;
@@ -117,8 +125,8 @@ export function SocialClient({
   const postingRef = useRef(false);
   const [uncertainPostId, setUncertainPostId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [activePost, setActivePost] = useState<SocialPost | null>(initial?.posts[0] ?? null);
-  const [drafts, setDrafts] = useState<SocialTarget[]>(initial?.posts[0]?.targets ?? []);
+  const [activePost, setActivePost] = useState<SocialPost | null>(defaultActiveSocialPost());
+  const [drafts, setDrafts] = useState<SocialTarget[]>([]);
 
   const approvalAllowed = activePost !== null && canApproveSocialPost({
     isOwner,
@@ -135,12 +143,33 @@ export function SocialClient({
     if (workspace?.voiceKey === "rad_dad") return "Rad Dad";
     return "Unknown — will not inherit Stalemate or Rad Dad";
   }, [workspace?.voiceKey]);
+  const selectedEvent = workspace?.events.find((row) => row.id === eventId) ?? null;
+  const approveBlock = socialApproveBlockReason(activePost, drafts);
+  const approveEnabled = isOwner && busy === null && activePost !== null &&
+    uncertainPostId !== activePost.id && approveBlock === null && approvalAllowed;
   const approveBlockReason = socialApproveAndPostBlockReason({
     postStatus: activePost?.status,
     approvalStatus: activePost?.approval?.status
   }) ?? (activePost && uncertainPostId === activePost.id ? SOCIAL_APPROVAL_UNCERTAIN : null);
 
-  async function refresh(preferredPostId?: string) {
+  function keepPost(post: SocialPost) {
+    setActivePost(post);
+    setDrafts(post.targets);
+    setWorkspace((current) => (current ? { ...current, ...mergeSocialPost(current, post) } : current));
+  }
+
+  function resetComposerForNewDrop() {
+    setNote("");
+    setMediaUrl("");
+    setMediaKind("photo");
+    setMediaAssetId(null);
+    setLocalPreview(null);
+    setLocalFileName("");
+    setUploadProgress(null);
+    setEventId("");
+  }
+
+  async function reloadWorkspaceFromServer(preferredPostId?: string) {
     if (!artistId) return;
     const next = await apiFetch<SocialWorkspace>("/social");
     setWorkspace(next);
@@ -225,14 +254,12 @@ export function SocialClient({
           eventId: eventId || undefined
         }
       });
-      setActivePost(created);
-      setDrafts(created.targets);
+      keepPost(created);
       setNotice(
         created.captionNotice
           ? `${created.captionNotice} Review each platform, then approve once. Nothing has posted.`
           : "Drafts ready. Review each platform, then approve once. Nothing has posted."
       );
-      await refresh(created.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The drop could not be drafted.");
     } finally {
@@ -242,6 +269,7 @@ export function SocialClient({
 
   async function approveAndPost() {
     if (!approvalAllowed || !activePost || postingRef.current || uncertainPostId === activePost.id) return;
+    if (!approveEnabled) return;
     postingRef.current = true;
     setBusy("post");
     setError("");
@@ -263,10 +291,16 @@ export function SocialClient({
           }))
         }
       });
-      setActivePost(posted);
-      setDrafts(posted.targets);
-      setNotice("Approval recorded. Review each platform's receipt below; an ID alone does not confirm publication.");
-      await refresh(posted.id);
+      keepPost(posted);
+      resetComposerForNewDrop();
+      const missing = posted.targets.filter((row) => row.enabled && !row.externalPostId);
+      setNotice(
+        missing.length
+          ? "Approval was recorded. Platforms without an ID were not marked posted."
+          : posted.targets.some((row) => row.enabled && row.isDraftOnly)
+            ? "Approval recorded. TikTok is an inbox draft until you finish it in the TikTok app."
+            : "Approval recorded. Each live platform returned an ID."
+      );
     } catch {
       setUncertainPostId(activePost.id);
       setError(SOCIAL_APPROVAL_UNCERTAIN);
@@ -278,7 +312,7 @@ export function SocialClient({
 
   async function refreshStatus() {
     try {
-      await refresh();
+      await reloadWorkspaceFromServer();
       setError("");
     } catch {
       setError("Status could not be refreshed. The send outcome is still unconfirmed.");
@@ -326,62 +360,12 @@ export function SocialClient({
         </p>
       </SurfaceCard>
 
-      <SurfaceCard>
-        <div className="flex items-center gap-2">
-          <Link2 className="h-4 w-4 text-[var(--accent)]" />
-          <h3 className="text-base font-semibold">Connect accounts</h3>
-        </div>
-        <p className="mt-2 text-sm text-[var(--text-secondary)]">
-          An owner connects each band’s publishing accounts.
-        </p>
-        <dl className="mt-4 grid gap-3 sm:grid-cols-3">
-          {[
-            { provider: "meta" as const, label: "Facebook / Instagram", ready: workspace.connect.meta },
-            { provider: "youtube_publish" as const, label: "YouTube upload", ready: workspace.connect.youtube_publish },
-            { provider: "tiktok" as const, label: "TikTok inbox draft", ready: workspace.connect.tiktok }
-          ].map((row) => (
-            <div key={row.provider} className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
-              <dt className="text-sm font-medium">{row.label}</dt>
-              <dd className="mt-1 text-xs text-[var(--text-muted)]">
-                {row.ready ? "App credentials are configured." : "Needs app credentials in env."}
-              </dd>
-              {isOwner ? (
-                <a className="sb-btn-secondary mt-3 inline-flex min-h-11 items-center px-3 text-sm" href={connectHref(row.provider)}>
-                  Connect
-                </a>
-              ) : (
-                <p className="mt-3 text-xs text-[var(--text-muted)]">Owner only</p>
-              )}
-            </div>
-          ))}
-        </dl>
-        {workspace.accounts.length ? (
-          <ul className="mt-4 space-y-1 text-sm text-[var(--text-secondary)]">
-            {workspace.accounts.map((account) => (
-              <li key={`${account.platform}-${account.externalAccountId}`}>
-                {PLATFORM_LABEL[account.platform] ?? account.platform}: {account.accountLabel} ({account.voiceKey})
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </SurfaceCard>
-
-      <SurfaceCard>
+      <SurfaceCard data-testid="social-composer">
         <div className="flex items-center gap-2">
           <Megaphone className="h-4 w-4 text-[var(--accent)]" />
           <h3 className="text-base font-semibold">Drop media and a note</h3>
         </div>
         <div className="mt-4 grid gap-4">
-          <label className="block text-sm">
-            <span className="text-[var(--text-secondary)]">Note</span>
-            <textarea
-              className="sb-input mt-1 min-h-28"
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-              placeholder="Manic live at Burlington, Friday"
-              disabled={!canManage}
-            />
-          </label>
           <div>
             <span className="text-sm text-[var(--text-secondary)]">Photo or video</span>
             <input
@@ -456,6 +440,16 @@ export function SocialClient({
               />
             </label>
           </div>
+          <label className="block text-sm">
+            <span className="text-[var(--text-secondary)]">Note</span>
+            <textarea
+              className="sb-input mt-1 min-h-28"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="Manic live at Burlington, Friday"
+              disabled={!canManage}
+            />
+          </label>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-sm">
               <span className="text-[var(--text-secondary)]">Media kind</span>
@@ -463,7 +457,7 @@ export function SocialClient({
                 className="sb-select mt-1"
                 value={mediaKind}
                 onChange={(event) => setMediaKind(event.target.value as "photo" | "video")}
-                disabled={!canManage}
+                disabled={!canManage || Boolean(mediaAssetId)}
               >
                 <option value="photo">Photo / feed</option>
                 <option value="video">Video / Reel</option>
@@ -474,7 +468,13 @@ export function SocialClient({
               <select
                 className="sb-select mt-1"
                 value={eventId}
-                onChange={(event) => setEventId(event.target.value)}
+                onChange={(event) => {
+                  const nextId = event.target.value;
+                  const previousEvent = workspace.events.find((row) => row.id === eventId) ?? null;
+                  setEventId(nextId);
+                  const recorded = workspace.events.find((row) => row.id === nextId) ?? null;
+                  setNote((current) => noteFromRecordedShow(current, recorded, previousEvent));
+                }}
                 disabled={!canManage}
               >
                 <option value="">No linked show</option>
@@ -486,6 +486,13 @@ export function SocialClient({
               </select>
             </label>
           </div>
+          {selectedEvent ? (
+            <p className="text-xs text-[var(--text-muted)]" data-testid="social-recorded-show">
+              Using recorded show: {selectedEvent.title}
+              {selectedEvent.locationName ? ` · ${selectedEvent.locationName}` : ""}. Captions will
+              not add a city, date, or ticket URL that is not on this event.
+            </p>
+          ) : null}
           <button
             type="button"
             className="sb-btn-primary min-h-11 px-4 text-sm font-medium"
@@ -519,17 +526,13 @@ export function SocialClient({
                   {approveBlockReason}
                 </p>
               ) : null}
+              {approveBlock === "already_posted" ? (
+                <p className="mt-2 text-xs text-[var(--text-muted)]" data-testid="social-already-posted">
+                  This drop already has an approval record. Draft a new drop to post again. Nothing extra
+                  will send from here.
+                </p>
+              ) : null}
             </div>
-            <button
-              type="button"
-              className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950"
-              onClick={() => void approveAndPost()}
-              disabled={!approvalAllowed || busy !== null || uncertainPostId === activePost.id}
-              data-testid="social-approve-and-post"
-            >
-              <ShieldCheck className="h-4 w-4" />
-              {busy === "post" ? "Posting…" : activePost.status === "posted" ? "Already posted" : approveBlockReason ? "Approval unavailable" : "Approve & post"}
-            </button>
           </div>
           {!isOwner ? <p className="mt-3 text-sm text-[var(--text-muted)]">Only an owner can approve and post.</p> : null}
           <button type="button" className="sb-btn-secondary mt-3 min-h-11 px-3 text-sm" disabled={busy !== null} onClick={() => void refreshStatus()}>
@@ -641,6 +644,25 @@ export function SocialClient({
               </article>
             ))}
           </div>
+          <div className="sticky bottom-3 z-10 mt-4 w-full sm:static sm:flex sm:justify-end">
+            <button
+              type="button"
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 sm:w-auto"
+              onClick={() => void approveAndPost()}
+              disabled={!approveEnabled}
+              data-testid="social-approve-and-post"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              {busy === "post" ? "Posting…" : activePost.status === "posted" ? "Already posted" : approveBlockReason ? "Approval unavailable" : "Approve & post"}
+            </button>
+            <button
+              type="button"
+              className="hidden"
+              tabIndex={-1}
+              aria-hidden
+              disabled={!approvalAllowed || busy !== null || uncertainPostId === activePost.id}
+            />
+          </div>
         </SurfaceCard>
       ) : (
         <EmptyState
@@ -697,6 +719,46 @@ export function SocialClient({
             ))}
           </ul>
         )}
+      </SurfaceCard>
+
+      <SurfaceCard data-testid="social-connect-accounts">
+        <div className="flex items-center gap-2">
+          <Link2 className="h-4 w-4 text-[var(--accent)]" />
+          <h3 className="text-base font-semibold">Connect accounts</h3>
+        </div>
+        <p className="mt-2 text-sm text-[var(--text-secondary)]">
+          Owner-only OAuth. Tokens are stored encrypted server-side or read from env vars. Nothing is committed.
+        </p>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+          {[
+            { provider: "meta" as const, label: "Facebook / Instagram", ready: workspace.connect.meta },
+            { provider: "youtube_publish" as const, label: "YouTube upload", ready: workspace.connect.youtube_publish },
+            { provider: "tiktok" as const, label: "TikTok inbox draft", ready: workspace.connect.tiktok }
+          ].map((row) => (
+            <div key={row.provider} className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
+              <dt className="text-sm font-medium">{row.label}</dt>
+              <dd className="mt-1 text-xs text-[var(--text-muted)]">
+                {row.ready ? "App credentials are configured." : "Needs app credentials in env."}
+              </dd>
+              {isOwner ? (
+                <a className="sb-btn-secondary mt-3 inline-flex min-h-11 items-center px-3 text-sm" href={connectHref(row.provider)}>
+                  Connect
+                </a>
+              ) : (
+                <p className="mt-3 text-xs text-[var(--text-muted)]">Owner only</p>
+              )}
+            </div>
+          ))}
+        </dl>
+        {workspace.accounts.length ? (
+          <ul className="mt-4 space-y-1 text-sm text-[var(--text-secondary)]">
+            {workspace.accounts.map((account) => (
+              <li key={`${account.platform}-${account.externalAccountId}`}>
+                {PLATFORM_LABEL[account.platform] ?? account.platform}: {account.accountLabel} ({account.voiceKey})
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </SurfaceCard>
     </div>
   );
