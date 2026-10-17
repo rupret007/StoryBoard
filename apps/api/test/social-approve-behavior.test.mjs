@@ -288,6 +288,14 @@ function executionFixture(existingReceipt) {
       }
     },
     socialPostTarget: {
+      findUnique: async ({ where, select }) => {
+        const target = targets.find((row) => row.id === where.id);
+        if (!target) return null;
+        if (!select) return structuredClone(target);
+        return Object.fromEntries(
+          Object.keys(select).filter((key) => key in target).map((key) => [key, target[key]])
+        );
+      },
       updateMany: async ({ where, data }) => {
         const target = targets.find((row) => matches(row, where));
         if (!target) return { count: 0 };
