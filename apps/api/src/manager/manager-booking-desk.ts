@@ -41,7 +41,8 @@ function pitchPackRequestedTarget(question: string) {
   const strip = (value: string) => value.trim().replace(/^["“]|["”]$/g, "");
   const forAt = question.match(/\b(?:for|at)\s+(.+?)(?:\s+from records only)?[?.!]*$/i)?.[1];
   const draft = question.match(/\bdraft\s+a\s+(.+?)\s+venue\s+(?:pitch\s+)?pack\b/i)?.[1];
-  const requested = strip(forAt ?? draft ?? "");
+  let requested = strip(forAt ?? draft ?? "");
+  requested = requested.replace(/\s*(?:for\s+)?travis(?:'s)?\s+(?:review|decision)\b\s*$/i, "").trim();
   if (!requested) return null;
   if (/\btravis\b/i.test(requested) && /\b(?:review|decision|decide)\b/i.test(requested)) return null;
   return requested;
@@ -97,7 +98,7 @@ export function bookingPackRecordsForArtist(artistId: string, opportunity: {
   const { venue, event } = opportunity;
   return {
     venue: venue?.artistId === artistId ? { id: venue.id, name: venue.name, city: venue.city } : null,
-    setlist: event?.artistId === artistId && event.venueId === opportunity.venueId && ["draft", "hold", "confirmed"].includes(event.status) && event.setlist?.artistId === artistId
+    setlist: event?.artistId === artistId && Boolean(opportunity.venueId) && event.venueId === opportunity.venueId && ["draft", "hold", "confirmed"].includes(event.status) && event.setlist?.artistId === artistId
       ? { id: event.setlist.id, name: event.setlist.name, status: event.setlist.status, items: event.setlist.items.map((item) => ({
         itemType: item.itemType,
         song: item.song?.artistId === artistId ? { id: item.song.id, title: item.song.title, active: item.song.active, sourceKey: item.song.sourceKey } : null

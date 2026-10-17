@@ -112,6 +112,19 @@ test("pitch-pack-same-artist-projection-preserves-only-recorded-fields", () => {
   assert.deepEqual(bookingPackRecordsForArtist("fixture", linked), opportunity.packRecords);
 });
 
+test("pitch-pack-null-venue-id-does-not-link-venue-less-event-setlist", () => {
+  const record = structuredClone(linked);
+  record.venueId = null;
+  record.venue = null;
+  record.event.venueId = null;
+  const packRecords = bookingPackRecordsForArtist("fixture", record);
+  assert.equal(packRecords.venue, null);
+  assert.equal(packRecords.setlist, null);
+  const result = deterministicManagerChat(factsFor({ ...opportunity, packRecords }), pitch, now);
+  assert.match(result.answer, /Pitch pack blocked/);
+  assert.match(result.answer, /missing linked venue name\/city/);
+});
+
 test("travis-decision-earliest-target-date-and-tie-break-ordering", () => {
   const datedEarly = { ...opportunity, id: "booking-early", title: "Early dated", targetDate: new Date("2026-09-20T00:00:00Z") };
   const datedLate = { ...opportunity, id: "booking-late", title: "Late dated", targetDate: new Date("2026-09-30T00:00:00Z") };
@@ -181,6 +194,18 @@ test("pitch-pack-unknown-target-prefix-and-reviewer-suffix", () => {
   const facts = factsFor(opportunity);
   assert.match(deterministicManagerChat(facts, "Draft a Missing venue pitch pack", now).answer, /requested booking\/venue is not uniquely recorded/);
   assert.match(deterministicManagerChat(facts, "Draft a venue pitch pack for Travis review", now).answer, /Venue pitch pack — draft for Travis review/);
+});
+
+test("pitch-pack-target-with-travis-review-suffix-preserves-target", () => {
+  const facts = factsFor(opportunity);
+  const result = deterministicManagerChat(
+    facts,
+    "Draft a venue pitch pack for Fixture booking for Travis review",
+    now
+  );
+  assert.match(result.answer, /Venue pitch pack — draft for Travis review/);
+  assert.match(result.answer, /Fixture booking/);
+  assert.match(result.answer, /Fixture Vault title/);
 });
 
 test("pitch-pack-citations-capped-at-ten", () => {
