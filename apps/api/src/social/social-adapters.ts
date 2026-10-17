@@ -142,6 +142,22 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
         return await this.publishLocalPhoto(input, token, pageId, start);
       }
 
+      const mediaKind = input.mediaKind ?? "photo";
+      const hasLocalMedia = Boolean(input.mediaPath && input.mediaByteSize);
+      const hasHostedMedia = Boolean(input.mediaUrl?.trim());
+      if (!hasLocalMedia && !hasHostedMedia) {
+        return {
+          success: false,
+          isDraftOnly: false,
+          errorMessage:
+            mediaKind === "video"
+              ? "Facebook video publish needs a local file or a hosted media URL. No request was sent."
+              : "Facebook photo publish needs a local file or a hosted media URL. No request was sent.",
+          durationMs: Date.now() - start,
+          requestSummary: { platform: "facebook" }
+        };
+      }
+
       const endpoint =
         input.mediaKind === "video"
           ? `${META_GRAPH_BASE}/${pageId}/videos`
@@ -211,8 +227,22 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
         requestSummary: { platform: "facebook", step: "resumable_start" }
       };
     }
+    const byteSize = input.mediaByteSize ?? 0;
     let offset = typeof session.start_offset === "string" ? Number(session.start_offset) : 0;
-    let end = typeof session.end_offset === "string" ? Number(session.end_offset) : input.mediaByteSize ?? 0;
+    let end = typeof session.end_offset === "string" ? Number(session.end_offset) : byteSize;
+    const invalidOffsets = (from: number, to: number) =>
+      !Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to < 0 || to > byteSize;
+    if (invalidOffsets(offset, end)) {
+      return {
+        success: false,
+        deliveryState: "unknown",
+        isDraftOnly: false,
+        errorMessage:
+          "Facebook resumable transfer returned invalid offsets. Nothing was marked posted.",
+        durationMs: Date.now() - start,
+        requestSummary: { platform: "facebook", step: "resumable_transfer" }
+      };
+    }
     while (offset < end) {
       const chunk = await readFileSlice(input.mediaPath!, offset, end - offset);
       const part = buildMultipartBody(
@@ -236,8 +266,33 @@ export class FacebookRealAdapter implements SocialPlatformAdapter {
       });
       const data = asRecord(await transferred.json());
       if (!transferred.ok) return this.fail(start, transferred.status, data, "Facebook resumable transfer failed");
-      offset = typeof data.start_offset === "string" ? Number(data.start_offset) : end;
-      end = typeof data.end_offset === "string" ? Number(data.end_offset) : end;
+      const nextOffset =
+        typeof data.start_offset === "string" ? Number(data.start_offset) : end;
+      const nextEnd = typeof data.end_offset === "string" ? Number(data.end_offset) : end;
+      if (invalidOffsets(nextOffset, nextEnd)) {
+        return {
+          success: false,
+          deliveryState: "unknown",
+          isDraftOnly: false,
+          errorMessage:
+            "Facebook resumable transfer returned invalid offsets. Nothing was marked posted.",
+          durationMs: Date.now() - start,
+          requestSummary: { platform: "facebook", step: "resumable_transfer" }
+        };
+      }
+      if (nextOffset <= offset && nextOffset < nextEnd) {
+        return {
+          success: false,
+          deliveryState: "unknown",
+          isDraftOnly: false,
+          errorMessage:
+            "Facebook resumable transfer offsets did not advance. Nothing was marked posted.",
+          durationMs: Date.now() - start,
+          requestSummary: { platform: "facebook", step: "resumable_transfer" }
+        };
+      }
+      offset = nextOffset;
+      end = nextEnd;
     }
     const finished = await this.postForm(`${META_GRAPH_VIDEO_BASE}/${pageId}/videos`, {
       upload_phase: "finish",
@@ -641,8 +696,22 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
         requestSummary: { platform: "youtube" }
       };
     }
+    let accessToken: string;
     try {
-      const accessToken = await this.accessToken(input);
+      accessToken = await this.accessToken(input);
+    } catch (error) {
+      return {
+        success: false,
+        isDraftOnly: true,
+        errorMessage:
+          error instanceof Error
+            ? error.message
+            : "YouTube OAuth token refresh failed before upload.",
+        durationMs: Date.now() - start,
+        requestSummary: { platform: "youtube", step: "oauth" }
+      };
+    }
+    try {
       const init = await this.http(
         `${YOUTUBE_UPLOAD_URL}?uploadType=resumable&part=snippet,status`,
         {
@@ -766,17 +835,24 @@ export class YouTubeRealAdapter implements SocialPlatformAdapter {
   }
 
   private async accessToken(input: SocialPublishInput): Promise<string> {
-    if (input.account.accessToken && !input.account.refreshToken) return input.account.accessToken;
-    if (!input.account.refreshToken || !input.account.clientId || !input.account.clientSecret) {
+    const direct = input.account.accessToken?.trim();
+    if (direct && direct !== "replace-me") return direct;
+    const refresh = input.account.refreshToken?.trim();
+    if (!refresh || refresh === "replace-me") {
       throw new Error("YouTube OAuth refresh token is missing.");
+    }
+    const clientId = input.account.clientId?.trim();
+    const clientSecret = input.account.clientSecret?.trim();
+    if (!clientId || !clientSecret || clientId === "replace-me" || clientSecret === "replace-me") {
+      throw new Error("YouTube OAuth client credentials are missing.");
     }
     const response = await this.http(GOOGLE_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: input.account.clientId,
-        client_secret: input.account.clientSecret,
-        refresh_token: input.account.refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refresh,
         grant_type: "refresh_token"
       }).toString()
     });

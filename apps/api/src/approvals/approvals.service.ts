@@ -1237,7 +1237,8 @@ export class ApprovalsService {
     });
     const items = rows.flatMap((row) => {
       const item = projectApprovalLifecycleItem(row, row.actionType === "social_post_batch"
-        ? { ...capabilities, canDecide: isOwner, canExecute: isOwner } : capabilities, observedAt);
+        ? { ...capabilities, canDecide: isOwner, canExecute: isOwner, canReconcile: isOwner }
+        : capabilities, observedAt);
       return item ? [item] : [];
     });
     const {
@@ -1306,11 +1307,12 @@ export class ApprovalsService {
   async reconciliations(
     artistId: string,
     approvalId: string,
-    canMutate: boolean
+    canMutate: boolean,
+    isOwner = false
   ) {
     const approval = await this.prisma.client.approvalRequest.findFirst({
       where: { id: approvalId, artistId },
-      select: { id: true, status: true, executionAttemptedAt: true }
+      select: { id: true, status: true, executionAttemptedAt: true, actionType: true }
     });
     if (!approval) throw new NotFoundException("Approval not found");
     const [rows, terminal] = await Promise.all([
@@ -1348,7 +1350,8 @@ export class ApprovalsService {
           canMutate &&
           needsReconciliation &&
           !executionLeaseActive &&
-          !terminal,
+          !terminal &&
+          (approval.actionType !== "social_post_batch" || isOwner),
         canRetry: false as const
       },
       receipts: rows.map(projectReconciliationReceipt)
@@ -1397,6 +1400,9 @@ export class ApprovalsService {
           }
         });
         if (!approval) throw new NotFoundException("Approval not found");
+        if (approval.actionType === "social_post_batch") {
+          await assertSocialOwner(tx, artistId, actorOperatorId);
+        }
 
         const existing = await tx.approvalReconciliation.findUnique({
           where: {

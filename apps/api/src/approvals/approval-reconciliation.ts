@@ -114,6 +114,22 @@ function resultRows(
     : [];
 }
 
+function socialResultRows(result: Record<string, unknown>): Record<string, unknown>[] {
+  const value = result.results;
+  return Array.isArray(value)
+    ? value.flatMap((item) => {
+        const row = record(item);
+        return row ? [row] : [];
+      })
+    : [];
+}
+
+const DELIVERED_SOCIAL_STATES = new Set([
+  "published",
+  "private_upload",
+  "processing"
+]);
+
 /**
  * Detects provider effects already proven by StoryBoard's own persisted result
  * fields. It is deliberately narrow: absence is not proof that nothing
@@ -128,7 +144,8 @@ export function approvalReconciliationHasKnownExternalEffect(
   const simulated =
     result?.gmailMode === "mock" ||
     result?.calendarMode === "mock" ||
-    result?.driveMode === "mock";
+    result?.driveMode === "mock" ||
+    result?.socialMode === "mock";
 
   if (!simulated) {
     if (
@@ -172,6 +189,16 @@ export function approvalReconciliationHasKnownExternalEffect(
         return true;
       }
       if (nonEmpty(result.folderId) || nonEmpty(result.webViewLink)) {
+        return true;
+      }
+      if (
+        socialResultRows(result).some(
+          (row) =>
+            nonEmpty(row.externalPostId) ||
+            (typeof row.deliveryState === "string" &&
+              DELIVERED_SOCIAL_STATES.has(row.deliveryState))
+        )
+      ) {
         return true;
       }
     }

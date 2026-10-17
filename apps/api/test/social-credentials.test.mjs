@@ -32,3 +32,22 @@ test("YouTube refresh tokens still require a verified channel identity", () => {
   assert.ok(boundSocialSecrets("youtube", "channel", { v: 1, channelId: "channel", refreshToken: "refresh" }));
   assert.equal(boundSocialSecrets("youtube", "youtube-env", { v: 1, refreshToken: "refresh" }), null);
 });
+
+test("boundSocialSecrets normalizes and strips placeholder accessToken and refreshToken values", () => {
+  const bound = boundSocialSecrets("youtube", "channel", {
+    v: 1,
+    channelId: "channel",
+    accessToken: " replace-me ",
+    refreshToken: "replace-me",
+    pageAccessToken: " replace-me "
+  });
+  assert.equal(bound, null);
+  const usable = boundSocialSecrets("youtube", "channel", {
+    v: 1,
+    channelId: "channel",
+    accessToken: " live-token ",
+    refreshToken: " replace-me "
+  });
+  assert.equal(usable.accessToken, "live-token");
+  assert.equal(usable.refreshToken, undefined);
+});

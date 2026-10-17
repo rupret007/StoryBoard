@@ -156,7 +156,8 @@ export class ApprovalsController {
     return presentApprovalResponse(await this.approvals.reconciliations(
       artistId,
       id,
-      role !== ArtistMembershipRole.viewer
+      role !== ArtistMembershipRole.viewer,
+      role === ArtistMembershipRole.owner
     ));
   }
 

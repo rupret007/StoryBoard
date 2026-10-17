@@ -55,6 +55,8 @@ test("Facebook success without an id is not posted", async () => {
   const result = await adapter.publish({
     platform: "facebook",
     caption: "No id",
+    mediaUrl: "https://cdn.example/photo.jpg",
+    mediaKind: "photo",
     account
   });
   assert.equal(result.success, false);
@@ -358,6 +360,118 @@ test("Facebook photo object ids cannot claim the corresponding feed post exists"
   assert.equal(result.success, true);
   assert.equal(result.deliveryState, "processing");
   assert.equal(result.externalPostUrl, undefined);
+});
+
+test("FacebookRealAdapter.publish fails pre-flight without calling Graph API when photo or video media is missing both local bytes and mediaUrl", async () => {
+  let calls = 0;
+  const adapter = new adapters.FacebookRealAdapter(async () => {
+    calls += 1;
+    return jsonResponse(200, { id: "page-1_99", post_id: "page-1_99" });
+  });
+  for (const mediaKind of ["photo", "video", undefined]) {
+    calls = 0;
+    const result = await adapter.publish({
+      platform: "facebook",
+      caption: "Caption only",
+      mediaKind,
+      account
+    });
+    assert.equal(result.success, false);
+    assert.equal(calls, 0);
+    assert.match(result.errorMessage ?? "", /No request was sent/);
+  }
+});
+
+test("FacebookRealAdapter.publishLocalVideo aborts with unknown deliveryState when transfer offsets do not advance or exceed mediaByteSize", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sb-fb-stall-"));
+  const mediaPath = join(root, "clip.mp4");
+  await writeFile(mediaPath, "1234567890");
+  const stall = async () => {
+    const adapter = new adapters.FacebookRealAdapter(async (url, init) => {
+      const body = String(init?.body ?? "");
+      if (body.includes("upload_phase=start")) {
+        return jsonResponse(200, {
+          upload_session_id: "sess-stall",
+          start_offset: "0",
+          end_offset: "10"
+        });
+      }
+      if (body.includes("video_file_chunk")) {
+        return jsonResponse(200, { start_offset: "0", end_offset: "10" });
+      }
+      return jsonResponse(500, {});
+    });
+    return adapter.publish({
+      platform: "facebook",
+      caption: "Local clip",
+      mediaKind: "video",
+      mediaPath,
+      mediaByteSize: 10,
+      mediaMimeType: "video/mp4",
+      account
+    });
+  };
+  const oversize = async () => {
+    const adapter = new adapters.FacebookRealAdapter(async (url, init) => {
+      const body = String(init?.body ?? "");
+      if (body.includes("upload_phase=start")) {
+        return jsonResponse(200, {
+          upload_session_id: "sess-big",
+          start_offset: "0",
+          end_offset: "99"
+        });
+      }
+      return jsonResponse(500, {});
+    });
+    return adapter.publish({
+      platform: "facebook",
+      caption: "Local clip",
+      mediaKind: "video",
+      mediaPath,
+      mediaByteSize: 10,
+      mediaMimeType: "video/mp4",
+      account
+    });
+  };
+  const stalled = await stall();
+  assert.equal(stalled.success, false);
+  assert.equal(stalled.deliveryState, "unknown");
+  assert.match(stalled.errorMessage ?? "", /offsets did not advance/);
+  const tooLarge = await oversize();
+  assert.equal(tooLarge.success, false);
+  assert.equal(tooLarge.deliveryState, "unknown");
+  assert.match(tooLarge.errorMessage ?? "", /invalid offsets/);
+});
+
+test("YouTubeRealAdapter.publish fails without unknown deliveryState when token refresh fails before resumable init", async () => {
+  let calls = 0;
+  const root = await mkdtemp(join(tmpdir(), "sb-yt-auth-"));
+  const mediaPath = join(root, "clip.mp4");
+  await writeFile(mediaPath, "video");
+  const adapter = new adapters.YouTubeRealAdapter(async () => {
+    calls += 1;
+    throw new Error("unexpected network access");
+  });
+  const result = await adapter.publish({
+    platform: "youtube",
+    caption: "Local",
+    mediaKind: "video",
+    mediaPath,
+    mediaByteSize: 5,
+    mediaMimeType: "video/mp4",
+    account: {
+      ...account,
+      externalAccountId: "channel-1",
+      accessToken: undefined,
+      refreshToken: "refresh",
+      clientId: undefined,
+      clientSecret: undefined
+    }
+  });
+  assert.equal(result.success, false);
+  assert.equal(result.deliveryState, undefined);
+  assert.equal(calls, 0);
+  assert.match(result.errorMessage ?? "", /client credentials are missing/);
 });
 
 test("Facebook event option fails before either external effect", async () => {

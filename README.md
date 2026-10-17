@@ -151,9 +151,9 @@ Quality gate (no live providers):
 pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm manager:eval
 ```
 
-Local 2026-10-07 snapshot on this branch: typecheck, lint, 11/11 recovery,
-106/106 shared, 347/347 API unit, 8/8 integration (42 migrations), both
-production builds (21 web routes), 119/119 `manager_evals_v45` at 100% safety.
+Local 2026-10-17 snapshot on this branch: typecheck, lint, 11/11 recovery,
+186/186 shared, 673/673 API unit, 8/8 integration (49 migrations), both
+production builds (22 web routes), 138/138 `manager_evals_v45` at 100% safety.
 The [Quality workflow](https://github.com/rupret007/StoryBoard/actions/workflows/quality.yml)
 also runs Playwright and a Compose container smoke on pull requests and `main`.
 
@@ -161,17 +161,19 @@ also runs Playwright and a Compose container smoke on pull requests and `main`.
 
 - **Not a second catalog.** Songs come from a local Vault import (dry-run
   default). Empty after seed is expected unless you apply a feed.
-- **Risky work is approval-gated.** Gmail drafts/sends, Calendar holds, and
-  Drive folders need a separate Execute step. Unknown provider outcomes are
-  never auto-retried.
+- **Risky work is approval-gated.** Gmail drafts/sends, Calendar holds, Drive
+  folders, and social post batches need a separate Execute step. Unknown
+  provider outcomes are never auto-retried.
 - **Gmail reply sync** stays off until restricted-scope Google requirements
-  are met. YouTube and Spotify remain mock-only.
+  are met. YouTube read-only analytics and Spotify remain mock-only; YouTube
+  private video uploads run through the approval-gated Social adapter when
+  `SOCIAL_ADAPTER=real` and a publishing channel is connected.
 - **Telegram** is outbound `sendMessage` plus inbound `/start` registration
   only (no command bot). Owner-only settings and tokens.
 - **Two-band pilot** is an engineering candidate. It is not a live URL, real
   Google login, delivered reminder, or field-validated show. See
   [`docs/pilot-evidence.md`](docs/pilot-evidence.md).
-- **42** forward Prisma migrations. One tracked non-fatal `pg@8.14.1`
+- **49** forward Prisma migrations. One tracked non-fatal `pg@8.14.1`
   concurrent-query deprecation remains before any `pg@9` upgrade.
 
 ## Core product principles

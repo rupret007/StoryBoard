@@ -28,12 +28,18 @@ export function boundSocialSecrets(
     : platform === "instagram" ? secrets.instagramBusinessId
       : platform === "youtube" ? secrets.channelId : secrets.openId;
   if (!actualId || actualId !== externalAccountId) return null;
+  const normalized: SocialStoredSecrets = {
+    ...secrets,
+    accessToken: cred(secrets.accessToken),
+    refreshToken: cred(secrets.refreshToken),
+    pageAccessToken: cred(secrets.pageAccessToken)
+  };
   if (platform === "facebook" || platform === "instagram") {
-    if (!cred(secrets.pageAccessToken)) return null;
-    return { ...secrets, accessToken: secrets.pageAccessToken };
+    if (!normalized.pageAccessToken) return null;
+    return { ...normalized, accessToken: normalized.pageAccessToken };
   }
-  if (!cred(secrets.accessToken) && !(platform === "youtube" && cred(secrets.refreshToken))) return null;
-  return secrets;
+  if (!normalized.accessToken && !(platform === "youtube" && normalized.refreshToken)) return null;
+  return normalized;
 }
 
 export type SocialCredentialEnv = {
