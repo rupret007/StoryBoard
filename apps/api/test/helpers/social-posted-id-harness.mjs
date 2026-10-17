@@ -46,6 +46,13 @@ export function postedIdHarness({ role = "owner", deliveryState = "published", m
       update: async ({ data }) => { Object.assign(post, data); writes.push("post"); return post; }
     },
     socialPostTarget: {
+      findUnique: async ({ where, select }) => {
+        if (where.id !== target.id) return null;
+        if (!select) return structuredClone(target);
+        return Object.fromEntries(
+          Object.keys(select).filter((key) => key in target).map((key) => [key, target[key]])
+        );
+      },
       updateMany: async ({ where, data }) => {
         if (!matches(target, where)) return { count: 0 };
         Object.assign(target, data); writes.push("target"); return { count: 1 };

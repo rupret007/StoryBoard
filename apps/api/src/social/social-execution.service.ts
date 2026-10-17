@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import type { SocialPlatform, SocialVoiceKey } from "@storyboard/shared";
+import {
+  preserveSocialTargetPostId,
+  shouldSkipSocialTargetSend,
+  type SocialPlatform,
+  type SocialVoiceKey
+} from "@storyboard/shared";
 import { ApprovalStatus, AuditSeverity, type SocialPostStatus, type SocialTargetStatus } from "../generated/prisma/enums";
 import { AuditService } from "../audit/audit.service";
 import { SecretBox } from "../integrations/crypto/secret-box";
@@ -262,6 +267,9 @@ export class SocialExecutionService implements SocialPublisherPort {
     try {
       for (const target of enabled) {
         const row = post.targets.find((item) => item.id === target.targetId)!;
+        if (shouldSkipSocialTargetSend(row)) {
+          throw new BadRequestException("A target already has a posting attempt.");
+        }
         const secrets = adapters[target.platform].mode === "real"
           ? await this.secretsFor(artistId, target.platform, target.accountExternalId ?? "") : null;
         const attempt = await this.prisma.client.$transaction(async (tx) => {
@@ -298,13 +306,21 @@ export class SocialExecutionService implements SocialPublisherPort {
           sent.deliveryState === "processing" || sent.deliveryState === "draft_only" || sent.deliveryState === "unknown"
             ? sent.deliveryState : sent.log.outcome.startsWith("refused") ? "refused" : "failed";
         await this.prisma.client.$transaction(async (tx) => {
+          const liveTarget = await tx.socialPostTarget.findUnique({
+            where: { id: row.id },
+            select: { externalPostId: true }
+          });
+          const externalPostId = preserveSocialTargetPostId(
+            liveTarget?.externalPostId ?? row.externalPostId,
+            sent.externalPostId ?? null
+          );
           await tx.socialSendLog.update({ where: { id: attempt.id }, data: {
             outcome: sent.log.outcome, requestSummary: sent.log.requestSummary as object,
-            responseCode: sent.log.responseCode ?? null, externalPostId: sent.externalPostId ?? null,
+            responseCode: sent.log.responseCode ?? null, externalPostId,
             errorMessage: sent.errorMessage ?? null, durationMs: sent.log.durationMs
           } });
           await tx.socialPostTarget.update({ where: { id: row.id }, data: {
-            status, externalPostId: sent.externalPostId ?? null, externalPostUrl: sent.externalPostUrl ?? null,
+            status, externalPostId, externalPostUrl: sent.externalPostUrl ?? null,
             isDraftOnly: sent.isDraftOnly, lastError: sent.errorMessage ?? null
           } });
           await tx.auditEvent.create({ data: {

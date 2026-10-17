@@ -46,25 +46,6 @@ type LockedEventRow = {
   appliedAt: Date | null;
 };
 
-// Prisma's pg adapter can wrap a raw-query serialization failure without a
-// top-level SQLSTATE. Keep this metadata path alongside the existing Prisma
-// code/message handling so either representation asks Stripe to retry.
-function isPgAdapterTransactionConflict(error: unknown): boolean {
-  if (!error || typeof error !== "object" || !("code" in error) || error.code !== "P2010") {
-    return false;
-  }
-  const meta = "meta" in error ? error.meta : null;
-  const adapter = meta && typeof meta === "object" && "driverAdapterError" in meta
-    ? meta.driverAdapterError : null;
-  const cause = adapter && typeof adapter === "object" && "cause" in adapter
-    ? adapter.cause : null;
-  return Boolean(
-    cause && typeof cause === "object" &&
-    "originalCode" in cause && cause.originalCode === "40001" &&
-    "kind" in cause && cause.kind === "TransactionWriteConflict"
-  );
-}
-
 @Injectable()
 export class StripeWebhookIdempotencyService {
   private readonly log = new Logger(StripeWebhookIdempotencyService.name);
@@ -109,7 +90,7 @@ export class StripeWebhookIdempotencyService {
       if (isStripeWebhookInFlightError(error)) {
         throw error;
       }
-      if (isTransactionConflict(error) || isPgAdapterTransactionConflict(error) || isLockNotAvailable(error)) {
+      if (isTransactionConflict(error) || isLockNotAvailable(error)) {
         throw new StripeWebhookInFlightError(eventId);
       }
       throw error;

@@ -18,6 +18,8 @@ test("social execution will not re-send or erase a platform id", () => {
   assert.match(execution, /if \(claim.count !== 1\) throw new BadRequestException/);
   assert.match(execution, /const claimed = await tx.socialPostTarget.updateMany\(\{\s*where: \{ id: row.id, postId: post.id, status: \{ in: \["draft", "pending"\] \}, externalPostId: null \}/);
   assert.match(execution, /if \(claimed.count !== 1\) throw new BadRequestException/);
+  assert.match(execution, /shouldSkipSocialTargetSend\(row\)/);
+  assert.match(execution, /preserveSocialTargetPostId\(\s*liveTarget\?\.externalPostId/);
   assert.doesNotMatch(
     execution,
     /approval.status !== ApprovalStatus.approved && approval.status !== ApprovalStatus.executed/
@@ -56,6 +58,21 @@ test("an existing platform id prevents a target send even when its status is sti
   assert.equal(h.calls.length, 0);
   assert.equal(h.post.sendLogs.length, 0);
   assert.equal(h.writes.includes("target"), false);
+});
+
+test("a failed send without an id does not erase a platform id recorded during the attempt", async () => {
+  const h = harness({
+    publish: async () => {
+      h.target.externalPostId = "page_99";
+      h.target.externalPostUrl = "https://example.invalid/posts/99";
+      return { success: false, isDraftOnly: false, durationMs: 1, requestSummary: {} };
+    }
+  });
+
+  const result = await execute(h);
+  assert.equal(result.approvalStatus, "failed");
+  assert.equal(h.target.externalPostId, "page_99");
+  assert.equal(h.post.sendLogs[0].externalPostId, "page_99");
 });
 
 test("a platform id recorded after the read snapshot survives a later send attempt", async () => {

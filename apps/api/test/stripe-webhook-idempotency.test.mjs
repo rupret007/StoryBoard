@@ -1,8 +1,11 @@
 import "reflect-metadata";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createHmac } from "node:crypto";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const http = require("node:http");
@@ -18,6 +21,15 @@ const signature = require("../dist/integrations/stripe-webhook-signature.js");
 const rawBody = require("../dist/integrations/stripe-webhook-raw-body.js");
 
 const SECRET = "whsec_test_secret";
+const idempotencySource = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../src/integrations/stripe-webhook-idempotency.service.ts"),
+  "utf8"
+);
+
+test("pg-adapter serialization conflicts are handled only through isTransactionConflict", () => {
+  assert.doesNotMatch(idempotencySource, /isPgAdapterTransactionConflict/);
+  assert.match(idempotencySource, /function isTransactionConflict/);
+});
 
 function uniqueError() {
   return Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
