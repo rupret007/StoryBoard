@@ -2681,3 +2681,255 @@ test("pilot: owner creates two isolated workspaces and failed audit rolls back c
   assert.equal(await client.artist.count(), before);
   assert.equal(sessions.length, 2);
 });
+
+test("database integration: social owner approval is atomic, concurrent posting is one-shot, and uncertain outcomes cannot retry", async () => {
+  const [{ SocialService }, { SocialExecutionService }, { SocialCaptionService }, { SocialCaptionBudgetService }] = await Promise.all([
+    load("social/social.service.js"),
+    load("social/social-execution.service.js"),
+    load("social/social-caption.service.js"),
+    load("social/social-caption-budget.service.js")
+  ]);
+  const suffix = randomUUID();
+  const artist = await client.artist.create({ data: { name: "Stalemate", slug: `social-safety-${suffix}` } });
+  const owner = await client.operator.create({ data: { email: `social-owner-${suffix}@test.invalid` } });
+  const member = await client.operator.create({ data: { email: `social-member-${suffix}@test.invalid` } });
+  const ownerActor = { label: owner.email, operatorId: owner.id };
+  const memberActor = { label: member.email, operatorId: member.id };
+  await client.artistMembership.createMany({ data: [
+    { artistId: artist.id, operatorId: owner.id, role: "owner" },
+    { artistId: artist.id, operatorId: member.id, role: "member" }
+  ] });
+  await client.socialAccount.create({ data: {
+    artistId: artist.id, platform: "facebook", accountLabel: "Stalemate Facebook",
+    externalAccountId: "synthetic-social-page", voiceKey: "stalemate", status: "active", scopes: []
+  } });
+  await client.integrationConnection.create({ data: {
+    artistId: artist.id, provider: "meta", status: "active", scopes: [],
+    encryptedSecrets: { blob: "synthetic-encrypted-fixture" }
+  } });
+  let adapterMode = "real";
+  const config = { get: (key) => key === "SOCIAL_ADAPTER" ? adapterMode : key === "OPENAI_ENABLED" ? false : undefined };
+  const execution = new SocialExecutionService(prisma, audit, config, {
+    configured: () => true,
+    decryptJson: () => ({ v: 1, pageId: "synthetic-social-page", pageAccessToken: "synthetic-test-credential" })
+  });
+  let adapterCalls = 0;
+  let publish = async () => ({
+    success: true, deliveryState: "published", externalPostId: "synthetic-provider-post",
+    externalPostUrl: "https://example.invalid/posts/synthetic-provider-post", durationMs: 1, requestSummary: {}
+  });
+  // All provider work is replaced at the adapter boundary; no network or paid LLM calls.
+  execution.adapters = () => ({ facebook: { mode: "real", publish: async (input) => {
+    adapterCalls += 1;
+    return publish(input);
+  } } });
+  const approvals = new approvalsMod.ApprovalsService(prisma, audit,
+    { resolveForArtist: async () => mockAdaptersMod.mockAdapters },
+    { enqueueApprovalNotify: async () => undefined }, execution);
+  const captions = new SocialCaptionService(config, new SocialCaptionBudgetService(config, prisma));
+  const social = new SocialService(prisma, approvals, audit, execution, captions);
+  const newDrop = (note) => social.createDrop(artist.id, {
+    note, mediaUrl: "https://example.invalid/synthetic-photo.jpg", mediaKind: "photo", platforms: ["facebook"]
+  }, ownerActor);
+  const review = (post, caption = post.targets[0].caption) => ({ postId: post.id, reviewFingerprint: post.reviewFingerprint, targets: [{
+    id: post.targets[0].id, enabled: true, caption, tags: post.targets[0].tags,
+    includeFacebookEvent: false, selectedVariantIndex: 0
+  }] });
+
+  const post = await newDrop("Friday at Burlington Bar.");
+  assert.equal(adapterCalls, 0);
+  assert.equal(post.status, "pending_approval");
+  for (const attempt of [
+    () => social.approveAndPost(artist.id, review(post), memberActor),
+    () => approvals.approve(artist.id, post.approvalRequestId, member.email, member.id),
+    () => approvals.executeApproved(artist.id, post.approvalRequestId, member.email, { actorOperatorId: member.id }),
+    () => execution.executeApproved(artist.id, post.approvalRequestId, memberActor)
+  ]) await assert.rejects(attempt, (error) => error.getStatus() === 403);
+  await assert.rejects(() => execution.executeApproved(artist.id, post.approvalRequestId, ownerActor), /explicit claimed owner approval/);
+  assert.equal(adapterCalls, 0);
+  assert.equal((await client.approvalRequest.findUniqueOrThrow({ where: { id: post.approvalRequestId } })).status, "pending");
+
+  let releasePublish;
+  let enteredPublish;
+  const entered = new Promise((resolve) => { enteredPublish = resolve; });
+  const released = new Promise((resolve) => { releasePublish = resolve; });
+  const acceptedReceipt = await publish();
+  publish = async () => { enteredPublish(); await released; return acceptedReceipt; };
+  const requested = review(post, "Owner reviewed Friday at Burlington Bar.");
+  const first = social.approveAndPost(artist.id, requested, ownerActor);
+  const second = social.approveAndPost(artist.id, requested, ownerActor);
+  try {
+    await Promise.race([entered, Promise.all([first, second]).then(() => { throw new Error("No adapter attempt occurred"); })]);
+    assert.equal(adapterCalls, 1);
+    const inFlight = await client.socialSendLog.findMany({ where: { postId: post.id } });
+    assert.equal(inFlight.length, 1);
+    assert.equal(inFlight[0].outcome, "unknown");
+  } finally {
+    releasePublish();
+  }
+  await Promise.all([first, second]);
+  const posted = await execution.getPost(artist.id, post.id);
+  assert.equal(posted.status, "posted");
+  assert.equal(posted.targets[0].caption, requested.targets[0].caption);
+  assert.equal(posted.targets[0].externalPostId, "synthetic-provider-post");
+  assert.equal(adapterCalls, 1);
+  assert.equal(await client.socialSendLog.count({ where: { postId: post.id } }), 1);
+  assert.equal(await client.auditEvent.count({ where: { aggregateId: post.approvalRequestId, action: "approval.approved" } }), 1);
+  const frozen = await client.approvalRequest.findUniqueOrThrow({ where: { id: post.approvalRequestId } });
+  assert.equal(frozen.status, "executed");
+  assert.equal(frozen.payload.targets[0].caption, requested.targets[0].caption);
+  assert.equal((await social.approveAndPost(artist.id, requested, ownerActor)).status, "posted");
+  await assert.rejects(() => social.approveAndPost(artist.id, review(post, "Changed after approval"), ownerActor), (error) => error.getStatus() === 409);
+  assert.equal(adapterCalls, 1);
+  assert.deepEqual((await client.approvalRequest.findUniqueOrThrow({ where: { id: post.approvalRequestId } })).payload, frozen.payload);
+
+  const unknown = await newDrop("Burlington Bar Friday.");
+  publish = async () => { throw new Error("Synthetic timeout containing synthetic-private-value"); };
+  const uncertain = await social.approveAndPost(artist.id, review(unknown), ownerActor);
+  assert.equal(uncertain.status, "unknown");
+  assert.equal(uncertain.targets[0].status, "unknown");
+  assert.equal(uncertain.approval.status, "failed");
+  assert.equal(uncertain.sendLogs[0].outcome, "unknown");
+  assert.doesNotMatch(JSON.stringify(uncertain), /synthetic-private-value/);
+  assert.equal(adapterCalls, 2);
+  assert.equal((await social.approveAndPost(artist.id, review(unknown), ownerActor)).status, "unknown");
+  await assert.rejects(() => approvals.executeApproved(artist.id, unknown.approvalRequestId, owner.email, { actorOperatorId: owner.id }), /previously failed/);
+  assert.equal(adapterCalls, 2);
+  assert.equal(await client.socialSendLog.count({ where: { postId: unknown.id } }), 1);
+
+  const rollback = await newDrop("Original review caption.");
+  const failingPrisma = { client: new Proxy(client, { get(target, key) {
+    if (key !== "$transaction") return Reflect.get(target, key);
+    return (operation, options) => target.$transaction(async (tx) => operation(new Proxy(tx, {
+      get(transaction, delegate) {
+        if (delegate !== "auditEvent") return Reflect.get(transaction, delegate);
+        return { ...transaction.auditEvent, create: async (args) => {
+          await transaction.auditEvent.create(args);
+          if (args.data.action === "approval.approved") throw new Error("Synthetic approval audit failure");
+        } };
+      }
+    })), options);
+  } }) };
+  const failingSocial = new SocialService(failingPrisma, approvals, audit, execution, captions);
+  await assert.rejects(() => failingSocial.approveAndPost(artist.id, review(rollback, "Changed in rolled back transaction"), ownerActor), /Synthetic approval audit failure/);
+  const rolledBack = await execution.getPost(artist.id, rollback.id);
+  assert.equal(rolledBack.status, "pending_approval");
+  assert.equal(rolledBack.approval.status, "pending");
+  assert.equal(rolledBack.targets[0].caption, rollback.targets[0].caption);
+  assert.equal(await client.auditEvent.count({ where: { aggregateId: rollback.approvalRequestId, action: "approval.approved" } }), 0);
+  assert.equal(adapterCalls, 2);
+
+  const staleReview = await newDrop("Review this exact destination.");
+  await client.socialAccount.update({ where: { artistId_platform: { artistId: artist.id, platform: "facebook" } }, data: {
+    externalAccountId: "different-synthetic-page"
+  } });
+  await assert.rejects(() => social.approveAndPost(artist.id, review(staleReview), ownerActor), (error) => error.getStatus() === 409);
+  await client.socialAccount.update({ where: { artistId_platform: { artistId: artist.id, platform: "facebook" } }, data: {
+    externalAccountId: "synthetic-social-page"
+  } });
+  adapterMode = "mock";
+  await assert.rejects(() => social.approveAndPost(artist.id, review(staleReview), ownerActor), (error) => error.getStatus() === 409);
+  adapterMode = "real";
+  assert.equal((await execution.getPost(artist.id, staleReview.id)).approval.status, "pending");
+  assert.equal(adapterCalls, 2);
+
+  const counts = async () => Promise.all([
+    client.socialPost.count({ where: { artistId: artist.id } }),
+    client.socialPostTarget.count({ where: { post: { artistId: artist.id } } }),
+    client.socialMediaAsset.count({ where: { artistId: artist.id } }),
+    client.approvalRequest.count({ where: { artistId: artist.id } })
+  ]);
+  const beforeCaptionFailure = await counts();
+  const captionConfig = { get: (key) => key === "OPENAI_ENABLED" ? true : undefined };
+  const configuredCaptions = new SocialCaptionService(captionConfig, new SocialCaptionBudgetService(captionConfig, prisma));
+  let captionCalls = 0;
+  const failingCaptions = new SocialService(prisma, approvals, audit, execution, {
+    draft: (input) => configuredCaptions.draft(input, {
+      responses: { create: async () => { captionCalls += 1; throw new Error("Synthetic configured LLM failure"); } }
+    })
+  });
+  await assert.rejects(() => failingCaptions.createDrop(artist.id, {
+    note: "Friday at Burlington Bar.", mediaKind: "photo",
+    mediaUrl: "https://example.invalid/never-persisted.jpg", platforms: ["facebook"]
+  }, ownerActor), (error) => error.getStatus() === 503);
+  assert.equal(captionCalls, 1, "the reserved attempt reaches the failing provider exactly once");
+  assert.deepEqual(await counts(), beforeCaptionFailure);
+  assert.equal(adapterCalls, 2);
+
+  const receiptFailure = await newDrop("Receipt audit failure after provider acceptance.");
+  const receiptPrisma = { client: new Proxy(client, { get(target, key) {
+    if (key !== "$transaction") return Reflect.get(target, key);
+    return (operation, options) => target.$transaction(async (tx) => operation(new Proxy(tx, {
+      get(transaction, delegate) {
+        if (delegate !== "auditEvent") return Reflect.get(transaction, delegate);
+        return { ...transaction.auditEvent, create: async (args) => {
+          await transaction.auditEvent.create(args);
+          if (args.data.action === "social.send.logged") throw new Error("Synthetic receipt audit failure");
+        } };
+      }
+    })), options);
+  } }) };
+  const receiptExecution = new SocialExecutionService(receiptPrisma, audit, config, {
+    configured: () => true,
+    decryptJson: () => ({ v: 1, pageId: "synthetic-social-page", pageAccessToken: "synthetic-test-credential" })
+  });
+  receiptExecution.adapters = execution.adapters;
+  const receiptApprovals = new approvalsMod.ApprovalsService(receiptPrisma, audit,
+    { resolveForArtist: async () => mockAdaptersMod.mockAdapters },
+    { enqueueApprovalNotify: async () => undefined }, receiptExecution);
+  const receiptSocial = new SocialService(receiptPrisma, receiptApprovals, audit, receiptExecution, captions);
+  publish = async () => acceptedReceipt;
+  const failedReceipt = await receiptSocial.approveAndPost(artist.id, review(receiptFailure), ownerActor);
+  assert.equal(adapterCalls, 3);
+  assert.equal(failedReceipt.status, "unknown");
+  assert.equal(failedReceipt.targets[0].status, "unknown");
+  assert.equal(failedReceipt.targets[0].externalPostId, null);
+  assert.equal(failedReceipt.sendLogs.length, 1);
+  assert.equal(failedReceipt.sendLogs[0].outcome, "unknown");
+  assert.equal(failedReceipt.approval.status, "failed");
+  assert.equal(await client.auditEvent.count({ where: { aggregateId: failedReceipt.sendLogs[0].id, action: "social.send.logged" } }), 0);
+  assert.equal((await receiptSocial.approveAndPost(artist.id, review(receiptFailure), ownerActor)).targets[0].status, "unknown");
+  assert.equal(adapterCalls, 3);
+
+  const interrupted = await newDrop("Claim interrupted before the post started.");
+  await client.approvalRequest.update({ where: { id: interrupted.approvalRequestId }, data: {
+    status: "approved", approvedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    executionAttemptedAt: new Date(Date.now() - 2 * 60 * 60 * 1000)
+  } });
+  assert.equal((await execution.getPost(artist.id, interrupted.id)).status, "unknown");
+  assert.equal((await social.approveAndPost(artist.id, review(interrupted), ownerActor)).status, "unknown");
+  assert.equal(adapterCalls, 3);
+});
+
+test("database integration: racing media chunks cannot alter completed review media", async () => {
+  const [{ SocialMediaService }, { mkdtemp, rm, appendFile }, { tmpdir }] = await Promise.all([
+    load("social/social-media.service.js"), import("node:fs/promises"), import("node:os")
+  ]);
+  const root = await mkdtemp(join(tmpdir(), "storyboard-media-lock-"));
+  try {
+    const artist = await client.artist.create({ data: { name: "Stalemate", slug: `media-lock-${randomUUID()}` } });
+    const values = { SOCIAL_MEDIA_DIR: root, SESSION_SECRET: "synthetic-media-secret", API_URL: "http://api.example" };
+    const config = { get: (key) => values[key], getOrThrow: (key) => values[key] };
+    const media = new SocialMediaService(prisma, config);
+    const asset = await media.init(artist.id, { filename: "clip.mp4", mimeType: "video/mp4", byteSize: 4 });
+    const attempts = await Promise.allSettled([
+      media.appendChunk(artist.id, asset.id, "bytes 0-3/4", Buffer.from("abcd")),
+      media.appendChunk(artist.id, asset.id, "bytes 0-3/4", Buffer.from("wxyz"))
+    ]);
+    assert.equal(attempts.filter((attempt) => attempt.status === "fulfilled").length, 1);
+    assert.equal(attempts.filter((attempt) => attempt.status === "rejected").length, 1);
+    const [completed] = await Promise.all([
+      media.complete(artist.id, asset.id),
+      assert.rejects(() => media.appendChunk(artist.id, asset.id, "bytes 0-3/4", Buffer.from("evil")))
+    ]);
+    assert.equal(completed.ready, true);
+    const saved = await client.socialMediaAsset.findUniqueOrThrow({ where: { id: asset.id } });
+    const bytes = await readFile(join(root, saved.storageKey));
+    assert.ok(bytes.toString() === "abcd" || bytes.toString() === "wxyz");
+    assert.equal(bytes.length, 4);
+    await appendFile(join(root, saved.storageKey), "extra");
+    await assert.rejects(() => media.complete(artist.id, asset.id), /file size does not match/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

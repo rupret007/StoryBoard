@@ -3,15 +3,16 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
-import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
+import { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module";
 import "./auth/request-operator";
 import { attachStripeWebhookRawBody } from "./integrations/stripe-webhook-raw-body";
+import { SocialMediaUploadAdapter } from "./social/social-media-upload-adapter";
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter()
+    new SocialMediaUploadAdapter()
   );
 
   const config = app.get(ConfigService);
@@ -31,7 +32,8 @@ async function bootstrap() {
     secret: config.getOrThrow<string>("SESSION_SECRET")
   });
 
-  attachStripeWebhookRawBody(app.getHttpAdapter().getInstance());
+  const fastify = app.getHttpAdapter().getInstance();
+  attachStripeWebhookRawBody(fastify);
 
   const port = config.getOrThrow<number>("API_PORT");
   await app.listen(port, "0.0.0.0");

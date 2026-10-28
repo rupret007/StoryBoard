@@ -180,6 +180,66 @@ test("known provider effects are detected narrowly and mock references are not t
     false,
     "absence of a stable provider reference must not be treated as proof"
   );
+  assert.equal(
+    policy.approvalReconciliationHasKnownExternalEffect({
+      actionType: "social_post_batch",
+      payload: {
+        executionResult: {
+          socialMode: "real",
+          results: [{ platform: "facebook", deliveryState: "published", externalPostId: "page-1_99" }]
+        }
+      }
+    }),
+    true
+  );
+  assert.equal(
+    policy.approvalReconciliationHasKnownExternalEffect({
+      actionType: "social_post_batch",
+      payload: {
+        executionResult: {
+          socialMode: "mock",
+          results: [{ platform: "facebook", deliveryState: "published", externalPostId: "mock-1" }]
+        }
+      }
+    }),
+    false
+  );
+  assert.equal(
+    policy.socialPostBatchApprovalIsSimulated({
+      status: "executed",
+      actionType: "social_post_batch",
+      payload: {
+        executionResult: {
+          socialMode: "mock",
+          results: [{ platform: "facebook", deliveryState: "simulated" }]
+        }
+      }
+    }),
+    true
+  );
+  assert.equal(
+    policy.socialPostBatchApprovalIsSimulated({
+      status: "executed",
+      actionType: "social_post_batch",
+      payload: {
+        executionResult: {
+          socialMode: "real",
+          results: [{ platform: "facebook", deliveryState: "simulated" }]
+        }
+      }
+    }),
+    true
+  );
+  assert.equal(
+    policy.socialPostBatchApprovalIsSimulated({
+      status: "executed",
+      actionType: "calendar_hold_batch",
+      payload: {
+        executionResult: { calendarMode: "mock", holds: [{ eventId: "mock-1" }] }
+      }
+    }),
+    false
+  );
 });
 
 function serviceHarness({
@@ -190,7 +250,8 @@ function serviceHarness({
   payload = {},
   campaignDeliveries = [],
   managerRecommendationId = null,
-  siblingApprovals = []
+  siblingApprovals = [],
+  membershipRole = "owner"
 } = {}) {
   const approval = {
     id: "approval-1",
@@ -220,6 +281,9 @@ function serviceHarness({
       (row) => row.artistId === artistId && row.idempotencyKey === idempotencyKey
     ) ?? null;
   const transaction = {
+    artistMembership: {
+      findUnique: async () => ({ role: membershipRole })
+    },
     approvalRequest: {
       findFirst: async ({ where }) => {
         if (where.id !== approval.id || where.artistId !== approval.artistId) return null;
@@ -303,6 +367,9 @@ function serviceHarness({
     }
   };
   const client = {
+    artistMembership: {
+      findUnique: async () => ({ role: membershipRole })
+    },
     $transaction: async (callback) => callback(transaction),
     approvalRequest: {
       findFirst: async ({ where }) =>
@@ -496,6 +563,64 @@ test("a conclusive receipt resolves review without mutating or re-executing the 
       /already final/
     );
   }
+});
+
+test("ApprovalsService.recordReconciliation requires owner role for social_post_batch and rejects no_external_effect_observed when executionResult contains a delivered target", async () => {
+  const socialPayload = {
+    executionResult: {
+      socialMode: "real",
+      results: [
+        {
+          platform: "facebook",
+          posted: true,
+          deliveryState: "published",
+          externalPostId: "page-1_99"
+        }
+      ]
+    }
+  };
+  const memberHarness = serviceHarness({
+    status: "failed",
+    attempted: true,
+    actionType: "social_post_batch",
+    payload: socialPayload,
+    membershipRole: "member"
+  });
+  await assert.rejects(
+    memberHarness.service.recordReconciliation(
+      "artist-1",
+      "approval-1",
+      validInput({
+        idempotencyKey: "2f8c5b1a-4d3e-4f9a-8b2c-1e0d9a7f6c5b"
+      }),
+      "member@test.invalid",
+      "member-1"
+    ),
+    /owner/
+  );
+  assert.equal(memberHarness.receipts.length, 0);
+
+  const ownerHarness = serviceHarness({
+    status: "failed",
+    attempted: true,
+    actionType: "social_post_batch",
+    payload: socialPayload,
+    membershipRole: "owner"
+  });
+  await assert.rejects(
+    ownerHarness.service.recordReconciliation(
+      "artist-1",
+      "approval-1",
+      validInput({
+        outcome: "no_external_effect_observed",
+        idempotencyKey: "9a1b2c3d-4e5f-6789-abcd-ef0123456789"
+      }),
+      "owner@test.invalid",
+      "owner-1"
+    ),
+    /already has a recorded external effect/
+  );
+  assert.equal(ownerHarness.receipts.length, 0);
 });
 
 test("a contradictory no-effect receipt is rejected when StoryBoard already saved a provider effect", async () => {

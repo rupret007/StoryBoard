@@ -20,6 +20,8 @@ postgres-data
 redis-data
 prisma/dev.db
 apps/api/src/generated/
+data/social-media/
+apps/api/data/social-media/
 
 # Private production configuration and database archives
 .env.production

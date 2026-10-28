@@ -101,11 +101,16 @@ function matchValue(value, filter) {
   if (Array.isArray(filter.notIn)) {
     return !filter.notIn.includes(value);
   }
-  if (filter.gte || filter.lte) {
+  if (Object.prototype.hasOwnProperty.call(filter, "not")) {
+    return value !== filter.not;
+  }
+  if (filter.gt || filter.gte || filter.lt || filter.lte) {
     if (value == null) return false;
-    const after = filter.gte ? value >= filter.gte : true;
-    const before = filter.lte ? value <= filter.lte : true;
-    return after && before;
+    const afterGte = filter.gte ? value >= filter.gte : true;
+    const afterGt = filter.gt ? value > filter.gt : true;
+    const beforeLte = filter.lte ? value <= filter.lte : true;
+    const beforeLt = filter.lt ? value < filter.lt : true;
+    return afterGte && afterGt && beforeLte && beforeLt;
   }
   return true;
 }
@@ -553,7 +558,7 @@ test("legacy ready-to-execute endpoint uses the shared executable predicate", as
   const readyQuery = queries.find((entry) => entry.op === "findMany").query;
   assert.deepEqual(
     readyQuery.where.actionType.in.sort(),
-    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch", "booking_reply_confirm"].sort()
+    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch", "booking_reply_confirm", "social_post_batch"].sort()
   );
   assert.equal(readyQuery.where.executionAttemptedAt, null);
   assert.deepEqual(result.map((item) => item.id), ["ready"]);
@@ -637,6 +642,126 @@ test("list and ready-to-execute endpoints apply limits and preserve bounded read
   );
   assert.deepEqual(
     readyQuery.where.actionType.in.sort(),
-    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch", "booking_reply_confirm"].sort()
+    ["calendar_hold_batch", "drive_ensure_folder", "outbound_email_batch", "outbound_email_send_batch", "booking_reply_confirm", "social_post_batch"].sort()
+  );
+});
+
+test("workQueueCounts does not double count approval at exact lease boundary", async () => {
+  const leaseMs = lifecycle.APPROVAL_EXECUTION_LEASE_MS;
+  const executionAttemptedAt = new Date(Date.now() - leaseMs);
+  const { service, queries } = serviceHarness([
+    row("boundary", "approved", { executionAttemptedAt }),
+    row("in-progress", "approved", {
+      executionAttemptedAt: new Date(Date.now() - leaseMs + 5_000)
+    })
+  ]);
+  const result = await service.workQueue("artist-1", true);
+  assert.equal(result.counts.executionInProgress, 1);
+  assert.equal(result.counts.needsReconciliation, 1);
+  assert.deepEqual(
+    result.executionInProgress.map((item) => item.id),
+    ["in-progress"]
+  );
+  assert.deepEqual(
+    result.needsReconciliation.map((item) => item.id),
+    ["boundary"]
+  );
+  const inProgressCountQuery = queries
+    .filter((entry) => entry.op === "count")
+    .map((entry) => entry.query.where)
+    .find(
+      (where) =>
+        where.status === "approved" &&
+        where.executionAttemptedAt &&
+        !where.OR
+    );
+  assert.ok(inProgressCountQuery.executionAttemptedAt.gt);
+  assert.equal(inProgressCountQuery.executionAttemptedAt.gte, undefined);
+});
+
+test("workQueue member excludes social_post_batch consistent with counts", async () => {
+  const rows = [
+    row("social-pending", "pending", { actionType: "social_post_batch", payload: { postId: "post-1" } }),
+    row("social-ready", "approved", { actionType: "social_post_batch", payload: { postId: "post-2" } }),
+    row("drive-pending", "pending"),
+    row("drive-ready", "approved")
+  ];
+  const { service, queries } = serviceHarness(rows);
+
+  const memberQueue = await service.workQueue("artist-1", true, {}, false);
+  assert.deepEqual(memberQueue.counts, {
+    pendingDecision: 1,
+    readyToExecute: 1,
+    executionInProgress: 0,
+    needsReconciliation: 0,
+    reconciled: 0,
+    approvedNotExecutable: 0,
+    attentionTotal: 2
+  });
+  assert.deepEqual(memberQueue.pendingDecision.map((item) => item.id), ["drive-pending"]);
+  assert.deepEqual(memberQueue.readyToExecute.map((item) => item.id), ["drive-ready"]);
+  assert.equal(
+    memberQueue.pendingDecision.some((item) => item.actionType === "social_post_batch"),
+    false
+  );
+  const queueQuery = queries.find((entry) => entry.op === "findMany").query;
+  assert.equal(queueQuery.where.actionType?.not, "social_post_batch");
+});
+
+test("workQueue restricts social_post_batch item capabilities to false for non-owner members while preserving owner capabilities", async () => {
+  const rows = [
+    row("social-pending", "pending", { actionType: "social_post_batch", payload: { postId: "post-1" } }),
+    row("social-ready", "approved", { actionType: "social_post_batch", payload: { postId: "post-2" } }),
+    row("drive-pending", "pending"),
+    row("drive-ready", "approved")
+  ];
+  const { service } = serviceHarness(rows);
+
+  const memberQueue = await service.workQueue("artist-1", true, {}, false);
+  assert.deepEqual(memberQueue.capabilities, {
+    canDecide: true,
+    canExecute: true,
+    canReconcile: false
+  });
+  assert.deepEqual(memberQueue.counts, {
+    pendingDecision: 1,
+    readyToExecute: 1,
+    executionInProgress: 0,
+    needsReconciliation: 0,
+    reconciled: 0,
+    approvedNotExecutable: 0,
+    attentionTotal: 2
+  });
+  assert.equal(memberQueue.pendingDecision.find((item) => item.id === "social-pending"), undefined);
+  assert.equal(memberQueue.readyToExecute.find((item) => item.id === "social-ready"), undefined);
+  const memberDrivePending = memberQueue.pendingDecision.find((item) => item.id === "drive-pending");
+  assert.equal(memberDrivePending.capabilities.canApprove, true);
+  assert.equal(memberDrivePending.capabilities.canReject, true);
+  assert.equal(
+    memberQueue.readyToExecute.find((item) => item.id === "drive-ready").capabilities.canExecute,
+    true
+  );
+
+  const ownerQueue = await service.workQueue("artist-1", true, {}, true);
+  assert.deepEqual(ownerQueue.capabilities, {
+    canDecide: true,
+    canExecute: true,
+    canReconcile: true
+  });
+  assert.deepEqual(ownerQueue.counts, {
+    pendingDecision: 2,
+    readyToExecute: 2,
+    executionInProgress: 0,
+    needsReconciliation: 0,
+    reconciled: 0,
+    approvedNotExecutable: 0,
+    attentionTotal: 4
+  });
+  const ownerSocialPending = ownerQueue.pendingDecision.find((item) => item.id === "social-pending");
+  assert.equal(ownerSocialPending.capabilities.canApprove, true);
+  assert.equal(ownerSocialPending.capabilities.canReject, true);
+  assert.equal(
+    ownerQueue.readyToExecute.find((item) => item.id === "social-ready").capabilities.canExecute,
+    true
   );
 });
