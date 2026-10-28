@@ -15,11 +15,16 @@ A target date is explicitly a UTC calendar day, never a confirmed performance
 time. The pack does not assert fees, availability, buyer interest, or show times.
 
 With multiple bookings, ask **“Draft a venue pitch pack for EXACT BOOKING TITLE
-from records only”** (an exact booking ID or venue name also works). Ambiguous
-and unknown targets block instead of substituting another venue. Missing linked
-facts block with the fields to record in Booking / Band operations. There is no
-fallback to the first library setlist or to a generated catalog. Use the existing
-local Vault import; this feature neither imports nor fetches catalog data.
+from records only”** (an exact booking ID or venue name also works). A question
+with no target still uses the single open booking. An explicit slot that is
+missing, malformed, unknown, ambiguous, conflicting, or only a reserved token
+(including a quoted “the”, “venue”, “records”, or “package”) blocks instead of
+substituting another booking. Reviewer and “from records only” suffixes are
+removed only as whole tokens, so a glued name such as FooTravis is kept whole.
+A quoted target must be one matching pair; a missing or mismatched quote blocks. Missing linked facts block with the fields to
+record in Booking / Band operations. There is no fallback to the first library
+setlist or to a generated catalog. Use the existing local Vault import; this
+feature neither imports nor fetches catalog data.
 
 Travis's decision answer selects the earliest recorded campaign follow-up
 (deadlines before undated records; ID breaks ties), excluding recorded completed

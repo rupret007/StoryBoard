@@ -1054,3 +1054,33 @@ test("in-limit Stripe webhook over a real socket is delivered to the handler", a
     assert.equal(response.body, JSON.stringify({ ok: true }));
   });
 });
+
+test("Prisma raw-query serialization conflict is retryable without running work", async () => {
+  for (const error of [
+    Object.assign(new Error("synthetic serialization conflict"), { code: "40001" }),
+    Object.assign(new Error("synthetic raw-query conflict"), {
+      code: "P2010", meta: { driverAdapterError: { cause: { originalCode: "40001" } } }
+    })
+  ]) {
+    let calls = 0;
+    const service = new StripeWebhookIdempotencyService({ client: {
+      $transaction: async () => { throw error; }
+    } });
+    await assert.rejects(() => service.runOnce("evt_serialization_fixture", async () => { calls += 1; }),
+      (failure) => failure.code === "STRIPE_WEBHOOK_IN_FLIGHT");
+    assert.equal(calls, 0);
+  }
+});
+
+test("unrelated raw-query errors are not acknowledged or classified as duplicates", async () => {
+  for (const code of ["23505", "23503", "42601"]) {
+    const error = Object.assign(new Error("synthetic non-retryable SQL failure"), {
+      code: "P2010", meta: { driverAdapterError: { cause: { originalCode: code } } }
+    });
+    const service = new StripeWebhookIdempotencyService({ client: {
+      $transaction: async () => { throw error; }
+    } });
+    await assert.rejects(() => service.runOnce("evt_sql_error_fixture", async () => {}),
+      (failure) => failure === error);
+  }
+});

@@ -287,9 +287,17 @@ export class StripeWebhookIdempotencyService {
 }
 
 function isTransactionConflict(error: unknown): boolean {
-  return Boolean(
-    error && typeof error === "object" && "code" in error && error.code === "P2034"
-  );
+  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  if (error.code === "P2034" || error.code === "40001") return true;
+  // Prisma's PostgreSQL adapter preserves raw-query SQLSTATE in this wrapper.
+  // Classify only serialization failure, never unrelated P2010 SQL errors.
+  if (error.code !== "P2010" || !("meta" in error) || !error.meta || typeof error.meta !== "object") return false;
+  const meta = error.meta;
+  if ("code" in meta && meta.code === "40001") return true;
+  if (!("driverAdapterError" in meta) || !meta.driverAdapterError || typeof meta.driverAdapterError !== "object") return false;
+  const adapter = meta.driverAdapterError;
+  if (!("cause" in adapter) || !adapter.cause || typeof adapter.cause !== "object") return false;
+  return "originalCode" in adapter.cause && adapter.cause.originalCode === "40001";
 }
 
 function isLockNotAvailable(error: unknown): boolean {
