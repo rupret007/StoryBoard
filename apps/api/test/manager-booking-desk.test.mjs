@@ -702,3 +702,44 @@ test("pitch-pack-citations-capped-at-ten", () => {
   assert.ok(result.citations.includes("venue"));
   assert.ok(result.citations.includes("large-set"));
 });
+
+
+test("pitch-pack-unicode-names-do-not-hide-unbalanced-quotes", () => {
+  for (const quote of ["'", "’"]) {
+    const title = `𝒜𝒜Foo${quote} Hall`;
+    const facts = factsFor({ ...opportunity, title });
+    const result = deterministicManagerChat(facts, `Draft a venue pitch pack for ${title}`, now);
+    assert.match(result.answer, /Pitch pack blocked/);
+    assert.doesNotMatch(result.answer, /Venue pitch pack — draft/);
+    assert.deepEqual(result.citations, []);
+    assert.equal(result.recommendation, null);
+  }
+});
+
+test("pitch-pack-unicode-prefix-preserves-delimited-review-and-real-apostrophes", () => {
+  for (const title of ["𝒜𐐀 O'Neal Hall", "𝒜𐐀 O’Neal Hall"]) {
+    const facts = factsFor({ ...opportunity, title });
+    for (const target of [title, `"${title}"`]) {
+      const result = deterministicManagerChat(facts, `Draft a venue pitch pack for ${target} for Travis review`, now);
+      assert.match(result.answer, /Venue pitch pack — draft/);
+      assert.ok(result.answer.includes(title));
+      assert.equal(result.citations[0], opportunity.id);
+    }
+  }
+});
+
+test("pitch-pack-explicit-reserved-slots-never-become-untargeted-after-suffixes", () => {
+  for (const name of ["a", "an", "the", "venue", "pitch", "pack", "package", "records", "recorded"]) {
+    for (const slot of ["for", "at"]) {
+      for (const target of [name, `"${name}"`, `'${name}'`]) {
+        for (const suffix of ["", " from records only", " for Travis review"]) {
+          const result = deterministicManagerChat(factsFor(opportunity), `Draft a venue pitch pack ${slot} ${target}${suffix}`, now);
+          assert.match(result.answer, /Pitch pack blocked/);
+          assert.doesNotMatch(result.answer, /Venue pitch pack — draft/);
+          assert.deepEqual(result.citations, []);
+          assert.equal(result.recommendation, null);
+        }
+      }
+    }
+  }
+});

@@ -68,7 +68,7 @@ const RESERVED_PITCH_TARGET = /^(?:a|an|the|venue|pitch|pack|package|records|rec
 const MATCHING_QUOTE: Readonly<Record<string, string>> = { '"': '"', "'": "'", "“": "”", "‘": "’" };
 const QUOTE_CHARS = new Set([...Object.keys(MATCHING_QUOTE), ...Object.values(MATCHING_QUOTE)]);
 
-function isApostropheBetweenAlphanumerics(text: string, index: number) {
+function isApostropheBetweenAlphanumerics(text: readonly string[], index: number) {
   const ch = text[index] ?? "";
   if (ch !== "'" && ch !== "’" && ch !== "ʼ") return false;
   return /[\p{L}\p{N}]/u.test(text[index - 1] ?? "") && /[\p{L}\p{N}]/u.test(text[index + 1] ?? "");
@@ -76,10 +76,11 @@ function isApostropheBetweenAlphanumerics(text: string, index: number) {
 
 function hasLooseQuote(text: string, wrapperOpen?: string) {
   const wrapperClose = wrapperOpen ? MATCHING_QUOTE[wrapperOpen] : undefined;
-  return [...text].some((ch, index) => {
+  const characters = [...text];
+  return characters.some((ch, index) => {
     if (!QUOTE_CHARS.has(ch)) return false;
     if (wrapperOpen && (ch === wrapperOpen || ch === wrapperClose)) return true;
-    return !isApostropheBetweenAlphanumerics(text, index);
+    return !isApostropheBetweenAlphanumerics(characters, index);
   });
 }
 
