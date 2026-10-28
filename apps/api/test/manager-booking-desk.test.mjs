@@ -743,3 +743,63 @@ test("pitch-pack-explicit-reserved-slots-never-become-untargeted-after-suffixes"
     }
   }
 });
+
+
+test("pitch-pack-quoted-punctuation-is-literal-and-never-selects-the-stripped-name", () => {
+  const wrappers = [['"', '"'], ["'", "'"], ["“", "”"], ["‘", "’"]];
+  const plain = { ...opportunity, id: "plain-bang", title: "Bang" };
+  const assertBlocked = (facts, question) => {
+    const result = deterministicManagerChat(facts, question, now);
+    assert.match(result.answer, /Pitch pack blocked/, question);
+    assert.doesNotMatch(result.answer, /Venue pitch pack — draft/, question);
+    assert.deepEqual(result.citations, [], question);
+    assert.equal(result.recommendation, null, question);
+  };
+  const assertExact = (facts, question, record) => {
+    const result = deterministicManagerChat(facts, question, now);
+    assert.match(result.answer, /Venue pitch pack — draft/, question);
+    assert.ok(result.answer.includes(`Booking: “${record.title}”`), question);
+    assert.equal(result.citations[0], record.id, question);
+    assert.equal(result.recommendation, null, question);
+  };
+  for (const punctuation of ["!", "?", "..."]) {
+    const literal = { ...opportunity, id: `literal-${punctuation.length}-${punctuation.charCodeAt(0)}`, title: `Bang${punctuation}` };
+    for (const [open, close] of wrappers) {
+      const question = `Draft a venue pitch pack for ${open}${literal.title}${close}`;
+      assertBlocked(factsFor(plain), question);
+      assertBlocked(empty, question);
+      assertExact(factsFor(literal), question, literal);
+      assertExact({ ...empty, opportunities: [plain, literal] }, question, literal);
+      assertExact(factsFor(literal), `${question} for Travis review`, literal);
+      assertBlocked({ ...empty, opportunities: [literal, { ...literal, id: "duplicate-literal" }] }, question);
+      // Sentence punctuation belongs outside the closing delimiter, not to the recorded name.
+      assertExact(factsFor(plain), `Draft a venue pitch pack for ${open}Bang${close}${punctuation}`, plain);
+      assertExact(factsFor(literal), `${question}${punctuation}`, literal);
+    }
+  }
+});
+
+test("pitch-pack-combining-marks-preserve-real-apostrophes-without-accepting-loose-quotes", () => {
+  for (const title of ["Café's Hall", "Cafe\u0301's Hall", "Cafe\u0301’s Hall", "𝒜𐐀 Cafe\u0301's Hall"]) {
+    const record = { ...opportunity, id: "combining-mark-title", title };
+    for (const target of [title, `"${title}"`]) {
+      const question = `Draft a venue pitch pack for ${target} for Travis review`;
+      const result = deterministicManagerChat(factsFor(record), question, now);
+      assert.match(result.answer, /Venue pitch pack — draft/, question);
+      assert.ok(result.answer.includes(`Booking: “${title}”`), question);
+      assert.equal(result.citations[0], record.id, question);
+      assert.equal(result.recommendation, null, question);
+    }
+  }
+  for (const title of ["Cafe \u0301's Hall", "Cafe \u0301’X Hall", "Cafe'\u0301s Hall"]) {
+    const record = { ...opportunity, id: "loose-combining-mark", title };
+    for (const target of [title, `"${title}"`]) {
+      const question = `Draft a venue pitch pack for ${target}`;
+      const result = deterministicManagerChat(factsFor(record), question, now);
+      assert.match(result.answer, /Pitch pack blocked/, question);
+      assert.doesNotMatch(result.answer, /Venue pitch pack — draft/, question);
+      assert.deepEqual(result.citations, [], question);
+      assert.equal(result.recommendation, null, question);
+    }
+  }
+});

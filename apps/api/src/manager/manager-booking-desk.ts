@@ -71,7 +71,10 @@ const QUOTE_CHARS = new Set([...Object.keys(MATCHING_QUOTE), ...Object.values(MA
 function isApostropheBetweenAlphanumerics(text: readonly string[], index: number) {
   const ch = text[index] ?? "";
   if (ch !== "'" && ch !== "’" && ch !== "ʼ") return false;
-  return /[\p{L}\p{N}]/u.test(text[index - 1] ?? "") && /[\p{L}\p{N}]/u.test(text[index + 1] ?? "");
+  let previous = index - 1;
+  // A combining mark belongs to its preceding base; it is not itself a word.
+  while (previous >= 0 && /\p{M}/u.test(text[previous] ?? "")) previous -= 1;
+  return /[\p{L}\p{N}]/u.test(text[previous] ?? "") && /[\p{L}\p{N}]/u.test(text[index + 1] ?? "");
 }
 
 function hasLooseQuote(text: string, wrapperOpen?: string) {
@@ -105,10 +108,12 @@ function classifyPitchTarget(raw: string): { kind: "absent" } | { kind: "rejecte
   if (!raw.trim()) return { kind: "absent" };
   const unwrapped = unwrapQuotedTarget(raw);
   if (unwrapped.kind === "rejected") return { kind: "rejected" };
-  const value = unwrapped.value.trim().replace(/\s+/g, " ").replace(/[?.!]+$/g, "").trim();
-  // Blank after quote/punctuation cleanup, or a reserved token, means a slot was present but unusable.
-  // That must not be treated as "no target", or the sole open booking is substituted.
-  if (!value || RESERVED_PITCH_TARGET.test(value)) return { kind: "rejected" };
+  const value = unwrapped.value.trim().replace(/\s+/g, " ");
+  // Keep punctuation inside a quoted literal as part of its exact identity.
+  // Only the reserved-token guard uses a punctuation-stripped stem.
+  const reservedStem = value.replace(/[?.!]+$/g, "").trim();
+  // A present unusable slot must never become "no target" and select the sole booking.
+  if (!value || !reservedStem || RESERVED_PITCH_TARGET.test(reservedStem)) return { kind: "rejected" };
   if (value.length > MAX_PITCH_TARGET_LENGTH || !/^[\p{L}\p{N}]/u.test(value)) return { kind: "rejected" };
   return { kind: "exact", value };
 }
