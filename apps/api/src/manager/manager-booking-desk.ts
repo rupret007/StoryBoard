@@ -60,24 +60,30 @@ function normalizePitchQuestion(question: string) {
   return value;
 }
 
+const RESERVED_PITCH_TARGET = /^(?:a|an|the|venue|pitch|pack|package|records|recorded)$/i;
+
 function classifyPitchTarget(raw: string): { kind: "absent" } | { kind: "rejected" } | { kind: "exact"; value: string } {
   if (!raw.trim()) return { kind: "absent" };
   const value = raw.trim().replace(/^["“”']+|["“”']+$/g, "").trim().replace(/\s+/g, " ").replace(/[?.!]+$/g, "").trim();
-  if (!value) return { kind: "rejected" };
-  if (/^(?:a|an|the|venue|pitch|pack|package|records|recorded)$/i.test(value)) return { kind: "absent" };
+  // Blank after quote/punctuation cleanup, or a reserved token, means a slot was present but unusable.
+  // That must not be treated as "no target", or the sole open booking is substituted.
+  if (!value || RESERVED_PITCH_TARGET.test(value)) return { kind: "rejected" };
   if (value.length > MAX_PITCH_TARGET_LENGTH || !/^[\p{L}\p{N}]/u.test(value)) return { kind: "rejected" };
   return { kind: "exact", value };
 }
 
 function leadingPitchName(before: string) {
+  // trim() removes the space after a lone article ("Draft a "), so the article must also match at end-of-string.
+  // Otherwise that article is left behind and a later reserved-token check treats an untargeted request as a target.
   let text = before.trim();
-  const command = /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:draft|prepare|make|build|create|give|get|show|pack)\s+(?:me\s+)?(?:(?:a|an|the)\b\s+)?/i;
-  text = command.test(text) ? text.replace(command, "") : text.replace(/^(?:please\s+)?(?:a|an|the)\s+/i, "");
+  const command = /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:draft|prepare|make|build|create|give|get|show|pack)\s+(?:me\s+)?(?:(?:a|an|the)\b(?:\s+|$))?/i;
+  const commandMatch = command.exec(text);
+  text = commandMatch?.index === 0 ? text.slice(commandMatch[0].length) : text.replace(/^(?:please\s+)?(?:a|an|the)\b(?:\s+|$)/i, "");
   return text.trim();
 }
 
 // A pitch-pack question with no name still means "the one open booking".
-// A name that is missing, unreadable, conflicting, or not in a single exact slot must not fall through to that booking.
+// A present slot that is empty, reserved, malformed, conflicting, or not one exact name must not fall through to that booking.
 function resolvePitchPackTarget(question: string): PitchPackTarget {
   const working = normalizePitchQuestion(question);
   const pack = PACK_PHRASE.exec(working);
@@ -111,7 +117,7 @@ export function recordedBookingDesk(facts: ManagerFacts, question: string, now: 
   if (pack) {
     // A named target must resolve to one exact recorded booking. An unparsed or conflicting name never falls back to another booking.
     const target = resolvePitchPackTarget(question);
-    if (target.kind === "rejected") return result("Pitch pack blocked: the booking or venue target is missing, conflicting, malformed, or not a single exact name. No substitute booking was chosen.");
+    if (target.kind === "rejected") return result("Pitch pack blocked: the booking or venue target is missing, conflicting, malformed, ambiguous, or not a single exact name. No substitute booking was chosen.");
     const requested = target.kind === "exact" ? target.value : null;
     const matches = requested ? opportunities.filter((item) => [item.id, item.title, item.packRecords?.venue?.name].some((value) => value?.toLowerCase() === requested.toLowerCase())) : opportunities;
     if (!matches.length) return result(requested
