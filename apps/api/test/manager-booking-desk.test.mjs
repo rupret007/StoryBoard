@@ -532,6 +532,156 @@ test("pitch-pack-explicit-reserved-unmatched-and-ambiguous-targets-never-substit
   assert.match(untargetedReservedLookalike.answer, /Records/);
 });
 
+test("pitch-pack-reviewer-suffix-boundary-and-quote-balance-fail-closed", () => {
+  const packaged = /Venue pitch pack — draft/;
+  const foo = factsFor({ ...opportunity, id: "foo", title: "Foo" });
+  const other = { ...opportunity, id: "other", title: "Other booking" };
+  const fooAndOther = { ...empty, opportunities: [foo.opportunities[0], other] };
+  const fooTravis = factsFor({ ...opportunity, id: "foo-travis", title: "FooTravis" });
+  const fooTravisPhrase = factsFor({ ...opportunity, id: "foo-travis-review", title: "FooTravis review" });
+  const fooFrom = factsFor({ ...opportunity, id: "foo-from", title: "Foofrom" });
+  const dans = factsFor({ ...opportunity, id: "dans", title: "Dan's Hall" });
+  const dansUnicode = factsFor({ ...opportunity, id: "dans-unicode", title: "Dan’s Hall" });
+  const venueFoo = factsFor({ ...opportunity, id: "venue-foo", title: "Other booking", packRecords: { ...opportunity.packRecords, venue: { id: "venue-foo-row", name: "Foo", city: "Fixture city" } } });
+  const assertBlocked = (facts, question) => {
+    const result = deterministicManagerChat(facts, question, now);
+    assert.match(result.answer, /Pitch pack blocked/, question);
+    assert.doesNotMatch(result.answer, packaged, question);
+    assert.doesNotMatch(result.answer, /multiple open opportunities/, question);
+    assert.equal(result.recommendation, null, question);
+    assert.deepEqual(result.citations, [], question);
+  };
+  const assertUnknown = (facts, question) => {
+    assertBlocked(facts, question);
+    assert.match(deterministicManagerChat(facts, question, now).answer, /not uniquely recorded/, question);
+  };
+  const assertRejected = (facts, question) => {
+    assertBlocked(facts, question);
+    assert.match(deterministicManagerChat(facts, question, now).answer, /missing, conflicting, malformed, ambiguous/, question);
+  };
+  const assertPack = (facts, question, title) => {
+    const result = deterministicManagerChat(facts, question, now);
+    assert.match(result.answer, packaged, question);
+    assert.match(result.answer, new RegExp(`Booking: “${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}”`), question);
+    assert.equal(result.citations[0], facts.opportunities[0].id, question);
+    assert.equal(result.recommendation, null, question);
+  };
+
+  for (const question of [
+    "Draft a venue pitch pack for FooTravis review",
+    "Draft a venue pitch pack for FooTravis's review",
+    "Draft a venue pitch pack for FooTravis’s review",
+    "Draft a venue pitch pack for FooTravisʼs decision",
+    "Draft a venue pitch pack for Foo-Travis review",
+    "Draft a venue pitch pack for FooTravis review.",
+    "Draft a venue pitch pack for FooTravis review from records only",
+    "Draft a venue pitch pack for FooTravisreview",
+    "Draft a venue pitch pack for \"FooTravis review\""
+  ]) {
+    assertUnknown(foo, question);
+    assertUnknown(fooAndOther, question);
+    assertUnknown(venueFoo, question);
+    assertUnknown(fooTravis, question);
+  }
+  for (const question of [
+    "Draft a FooTravis pitch pack",
+    "Draft a FooTravis pitch pack for Travis review",
+    "Draft a venue pitch pack for FooTravis",
+    "Draft a venue pitch pack for \"FooTravis\""
+  ]) {
+    assertUnknown(foo, question);
+    assertUnknown(fooAndOther, question);
+    assertUnknown(venueFoo, question);
+    assertPack(fooTravis, question, "FooTravis");
+  }
+  assertPack(fooTravisPhrase, "Draft a venue pitch pack for FooTravis review", "FooTravis review");
+
+  for (const question of [
+    "Draft a venue pitch pack for Foo Travis review",
+    "Draft a venue pitch pack for Foo for Travis review",
+    "Draft a venue pitch pack for Foo for Travis's review",
+    "Draft a venue pitch pack for Foo for Travis’s decision",
+    "Draft a venue pitch pack for Foo for Travis' review",
+    "Draft a venue pitch pack for \"Foo\" Travis review",
+    "Draft a Foo pitch pack for Travis review",
+    "Draft a venue pitch pack for Foo from records only",
+    "Draft a venue pitch pack for Foo from records only."
+  ]) assertPack(foo, question, "Foo");
+
+  for (const question of [
+    "Draft a venue pitch pack for Travis review",
+    "Draft a venue pitch pack for Travis review.",
+    "Draft a venue pitch pack for Travis's review",
+    "Draft a venue pitch pack for Travis’s review",
+    "Draft a venue pitch pack for Travis' review",
+    "Draft a venue pitch pack for Travis’s decision",
+    "Draft a venue pitch pack for TRAVIS REVIEW",
+    "Draft a venue pitch pack from records only",
+    "Draft a venue pitch pack from records only."
+  ]) assertPack(foo, question, "Foo");
+  const untargetedMany = deterministicManagerChat(fooAndOther, "Draft a venue pitch pack for Travis's review", now);
+  assert.match(untargetedMany.answer, /multiple open opportunities/);
+  assert.doesNotMatch(untargetedMany.answer, packaged);
+
+  for (const question of [
+    "Draft a venue pitch pack forTravis review",
+    "Draft a venue pitch pack for Travis reviewing",
+    "Draft a venue pitch pack for Travis reviewboard",
+    "Draft a venue pitch pack for Travis'sreview",
+    "Draft a venue pitch pack fromrecords only",
+    "Draft a venue pitch pack for Foofrom records only"
+  ]) {
+    assertBlocked(foo, question);
+    assertBlocked(factsFor(opportunity), question);
+  }
+  assertPack(fooFrom, "Draft a venue pitch pack for Foofrom", "Foofrom");
+  assertUnknown(foo, "Draft a venue pitch pack for Foofrom records only");
+
+  for (const question of [
+    "Draft a venue pitch pack for \"Fixture booking",
+    "Draft a venue pitch pack for Fixture booking\"",
+    "Draft a venue pitch pack for \"Fixture booking'",
+    "Draft a venue pitch pack for 'Fixture booking\"",
+    "Draft a venue pitch pack for “Fixture booking\"",
+    "Draft a venue pitch pack for \"Fixture booking”",
+    "Draft a venue pitch pack for ”Fixture booking“",
+    "Draft a venue pitch pack for \"Fixture booking\"\"",
+    "Draft a venue pitch pack for \"\"Fixture booking\"",
+    "Draft a venue pitch pack for Fixture \"booking\"",
+    "Draft a venue pitch pack for \"Fixture booking.",
+    "Draft a venue pitch pack for 'Fixture booking",
+    "Draft a venue pitch pack for Fixture booking'",
+    "Draft a venue pitch pack for “Fixture booking",
+    "Draft a venue pitch pack for 'Tis",
+    "Draft a \"Fixture booking pitch pack",
+    "Draft a Fixture booking\" pitch pack",
+    "Draft a \"Fixture booking' pitch pack",
+    `Draft a venue pitch pack for "${"N".repeat(240)}`
+  ]) assertRejected(factsFor(opportunity), question);
+
+  for (const question of [
+    "Draft a venue pitch pack for \"Fixture booking\"",
+    "Draft a venue pitch pack for 'Fixture booking'",
+    "Draft a venue pitch pack for “Fixture booking”",
+    "Draft a venue pitch pack for ‘Fixture booking’",
+    "Draft a venue pitch pack for \"Fixture booking\".",
+    "Draft a venue pitch pack for \"  Fixture    booking  \"",
+    "Draft a \"Fixture booking\" pitch pack",
+    "Draft a 'Fixture booking' pitch pack"
+  ]) assertPack(factsFor(opportunity), question, "Fixture booking");
+
+  assertPack(dans, "Draft a venue pitch pack for Dan's Hall", "Dan's Hall");
+  assertPack(dans, "Draft a venue pitch pack for \"Dan's Hall\"", "Dan's Hall");
+  assertRejected(dans, "Draft a venue pitch pack for 'Dan's Hall'");
+  assertPack(dansUnicode, "Draft a venue pitch pack for Dan’s Hall", "Dan’s Hall");
+  assertPack(dansUnicode, "Draft a venue pitch pack for \"Dan’s Hall\"", "Dan’s Hall");
+
+  const exactTitle = "N".repeat(240);
+  assertPack(factsFor({ ...opportunity, id: "long-quoted", title: exactTitle }), `Draft a venue pitch pack for "${exactTitle}"`, exactTitle);
+  assertRejected(factsFor({ ...opportunity, id: "long-quoted", title: exactTitle }), `Draft a venue pitch pack for "${"N".repeat(241)}"`);
+  assertRejected(factsFor({ ...opportunity, id: "long-quoted", title: exactTitle }), `Draft a venue pitch pack for "${exactTitle}`);
+});
+
 test("pitch-pack-citations-capped-at-ten", () => {
   const songs = Array.from({ length: 10 }, (_, index) => ({
     id: `song-${index}`,

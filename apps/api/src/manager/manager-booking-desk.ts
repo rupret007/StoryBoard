@@ -48,23 +48,63 @@ const PACK_PHRASE = /\b(?:pitch|venue)\s+(?:pitch\s+)?pack(?:age)?\b/i;
 
 type PitchPackTarget = { kind: "unspecified" } | { kind: "exact"; value: string } | { kind: "rejected" };
 
+// Suffixes are whole whitespace-delimited tokens. A glued tail such as "FooTravis review" must stay intact.
+const REVIEWER_SUFFIX = /(?:^|\s)(?:for\s+)?travis(?:['’ʼ]s|['’ʼ])?\s+(?:review|decision)$/i;
+const RECORDS_SUFFIX = /(?:^|\s)from\s+records\s+only$/i;
+
 function normalizePitchQuestion(question: string) {
   let value = question.replace(/\s+/g, " ").trim();
   let previous = "";
   while (value !== previous) {
     previous = value;
     value = value.replace(/[?.!]+$/g, "").trim();
-    value = value.replace(/\s*(?:for\s+)?travis(?:'s)?\s+(?:review|decision)\b$/i, "").trim();
-    value = value.replace(/\s+from records only\b$/i, "").trim();
+    value = value.replace(REVIEWER_SUFFIX, "").trim();
+    value = value.replace(RECORDS_SUFFIX, "").trim();
   }
   return value;
 }
 
 const RESERVED_PITCH_TARGET = /^(?:a|an|the|venue|pitch|pack|package|records|recorded)$/i;
+const MATCHING_QUOTE: Readonly<Record<string, string>> = { '"': '"', "'": "'", "“": "”", "‘": "’" };
+const QUOTE_CHARS = new Set([...Object.keys(MATCHING_QUOTE), ...Object.values(MATCHING_QUOTE)]);
+
+function isApostropheBetweenAlphanumerics(text: string, index: number) {
+  const ch = text[index] ?? "";
+  if (ch !== "'" && ch !== "’" && ch !== "ʼ") return false;
+  return /[\p{L}\p{N}]/u.test(text[index - 1] ?? "") && /[\p{L}\p{N}]/u.test(text[index + 1] ?? "");
+}
+
+function hasLooseQuote(text: string, wrapperOpen?: string) {
+  const wrapperClose = wrapperOpen ? MATCHING_QUOTE[wrapperOpen] : undefined;
+  return [...text].some((ch, index) => {
+    if (!QUOTE_CHARS.has(ch)) return false;
+    if (wrapperOpen && (ch === wrapperOpen || ch === wrapperClose)) return true;
+    return !isApostropheBetweenAlphanumerics(text, index);
+  });
+}
+
+// One matching pair may wrap a target. A missing, extra, or mismatched quote is malformed and must not be peeled off.
+function unwrapQuotedTarget(raw: string): { kind: "rejected" } | { kind: "text"; value: string } {
+  const trimmed = raw.trim().replace(/\s+/g, " ");
+  if (!trimmed) return { kind: "rejected" };
+  const first = trimmed[0]!;
+  const last = trimmed[trimmed.length - 1]!;
+  if (QUOTE_CHARS.has(first) || QUOTE_CHARS.has(last)) {
+    const expected = MATCHING_QUOTE[first];
+    if (!expected || trimmed.length < 2 || last !== expected) return { kind: "rejected" };
+    const inner = trimmed.slice(1, -1);
+    if (hasLooseQuote(inner, first)) return { kind: "rejected" };
+    return { kind: "text", value: inner };
+  }
+  if (hasLooseQuote(trimmed)) return { kind: "rejected" };
+  return { kind: "text", value: trimmed };
+}
 
 function classifyPitchTarget(raw: string): { kind: "absent" } | { kind: "rejected" } | { kind: "exact"; value: string } {
   if (!raw.trim()) return { kind: "absent" };
-  const value = raw.trim().replace(/^["“”']+|["“”']+$/g, "").trim().replace(/\s+/g, " ").replace(/[?.!]+$/g, "").trim();
+  const unwrapped = unwrapQuotedTarget(raw);
+  if (unwrapped.kind === "rejected") return { kind: "rejected" };
+  const value = unwrapped.value.trim().replace(/\s+/g, " ").replace(/[?.!]+$/g, "").trim();
   // Blank after quote/punctuation cleanup, or a reserved token, means a slot was present but unusable.
   // That must not be treated as "no target", or the sole open booking is substituted.
   if (!value || RESERVED_PITCH_TARGET.test(value)) return { kind: "rejected" };

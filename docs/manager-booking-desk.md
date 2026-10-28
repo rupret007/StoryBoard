@@ -19,7 +19,9 @@ from records only”** (an exact booking ID or venue name also works). A questio
 with no target still uses the single open booking. An explicit slot that is
 missing, malformed, unknown, ambiguous, conflicting, or only a reserved token
 (including a quoted “the”, “venue”, “records”, or “package”) blocks instead of
-substituting another booking. Missing linked facts block with the fields to
+substituting another booking. Reviewer and “from records only” suffixes are
+removed only as whole tokens, so a glued name such as FooTravis is kept whole.
+A quoted target must be one matching pair; a missing or mismatched quote blocks. Missing linked facts block with the fields to
 record in Booking / Band operations. There is no fallback to the first library
 setlist or to a generated catalog. Use the existing local Vault import; this
 feature neither imports nor fetches catalog data.
