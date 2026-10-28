@@ -251,6 +251,88 @@ test("venue-pack-vs-recorded-pitch-pack-routing", () => {
   assert.doesNotMatch(pitchPack.answer, /Package summary/);
 });
 
+test("pitch-pack-named-unparsed-and-conflicting-targets-never-substitute", () => {
+  const threeLinks = {
+    ...opportunity,
+    id: "three-links",
+    title: "Three Links",
+    packRecords: { ...opportunity.packRecords, venue: { id: "three-venue", name: "Three Links", city: "Fixture city" } }
+  };
+  const other = { ...opportunity, id: "other", title: "Other booking", packRecords: { ...opportunity.packRecords, venue: { id: "other-venue", name: "Other venue", city: "Fixture city" } } };
+  const onlyOther = factsFor(other);
+  const both = { ...empty, opportunities: [threeLinks, other] };
+  const blocked = /Pitch pack blocked/;
+  const packaged = /Venue pitch pack — draft/;
+  for (const [question, facts] of [
+    ["Draft a Three Links pitch pack", onlyOther],
+    ["Draft a Three Links pitch package from records only", onlyOther],
+    ["Show me the Three Links pitch pack", onlyOther],
+    ["Pitch pack about Three Links", onlyOther],
+    ["Draft a Three Links venue pitch pack at Other venue", both],
+    ["Draft a Three Links venue pitch pack at Other venue", onlyOther],
+    ["Draft a Fixture booking venue pitch pack at Fixture venue", factsFor(opportunity)],
+    ["Draft a venue pitch pack for", onlyOther],
+    ["Draft a venue pitch pack at", onlyOther],
+    ["Draft a \"\" pitch pack", onlyOther],
+    ["Draft a venue pitch pack for \"\"", onlyOther],
+    ["Draft a venue pitch pack for ...", onlyOther],
+    ["Draft a !!! pitch pack", onlyOther]
+  ]) {
+    const result = deterministicManagerChat(facts, question, now);
+    assert.match(result.answer, blocked, question);
+    assert.doesNotMatch(result.answer, packaged, question);
+    assert.doesNotMatch(result.answer, /Other booking/, question);
+    assert.equal(result.recommendation, null, question);
+    assert.deepEqual(result.citations, [], question);
+  }
+
+  const named = deterministicManagerChat(both, "Draft a Three Links pitch pack", now);
+  assert.match(named.answer, packaged);
+  assert.match(named.answer, /Three Links/);
+  assert.doesNotMatch(named.answer, /Other booking/);
+  assert.equal(named.citations[0], "three-links");
+
+  const byVenue = deterministicManagerChat(both, "Draft a venue pitch pack for Other venue", now);
+  assert.match(byVenue.answer, /Other booking/);
+  assert.doesNotMatch(byVenue.answer, /Three Links/);
+
+  const byId = deterministicManagerChat(both, "Draft a venue pitch pack for three-links", now);
+  assert.match(byId.answer, /Booking: “Three Links”/);
+  assert.doesNotMatch(byId.answer, /Other booking/);
+
+  const agreed = deterministicManagerChat(factsFor(opportunity), "Draft a Fixture booking venue pitch pack for Fixture booking", now);
+  assert.match(agreed.answer, packaged);
+  assert.match(agreed.answer, /Fixture booking/);
+
+  const polite = deterministicManagerChat(factsFor(opportunity), "Can you draft a venue pitch pack", now);
+  assert.match(polite.answer, packaged);
+  assert.match(polite.answer, /Fixture booking/);
+
+  const shared = { ...opportunity, id: "shared-b", title: "Second shared", packRecords: { ...opportunity.packRecords, venue: { ...opportunity.packRecords.venue, id: "shared-venue-b", name: "Shared Room" } } };
+  const firstShared = { ...opportunity, id: "shared-a", title: "First shared", packRecords: { ...opportunity.packRecords, venue: { ...opportunity.packRecords.venue, id: "shared-venue-a", name: "Shared Room" } } };
+  const ambiguous = deterministicManagerChat({ ...empty, opportunities: [firstShared, shared] }, "Draft a venue pitch pack for Shared Room", now);
+  assert.match(ambiguous.answer, /multiple open opportunities/);
+  assert.doesNotMatch(ambiguous.answer, packaged);
+  assert.doesNotMatch(ambiguous.answer, /First shared|Second shared/);
+
+  const theRoom = { ...opportunity, id: "the-room", title: "The Room" };
+  const article = deterministicManagerChat(factsFor(theRoom), "Draft a venue pitch pack for The Room", now);
+  assert.match(article.answer, /The Room/);
+  const collapsed = deterministicManagerChat(factsFor(opportunity), "Draft a venue pitch pack for   Fixture    booking  ", now);
+  assert.match(collapsed.answer, packaged);
+
+  const exactTitle = "N".repeat(240);
+  const longBooking = { ...opportunity, id: "long-booking", title: exactTitle };
+  const atLimit = deterministicManagerChat(factsFor(longBooking), `Draft a venue pitch pack for ${exactTitle}`, now);
+  assert.match(atLimit.answer, packaged);
+  assert.ok(atLimit.answer.includes(exactTitle));
+  const overLimit = deterministicManagerChat({ ...empty, opportunities: [longBooking, other] }, `Draft a venue pitch pack for ${"N".repeat(241)}`, now);
+  assert.match(overLimit.answer, /malformed|not a single exact name/);
+  assert.doesNotMatch(overLimit.answer, packaged);
+  assert.doesNotMatch(overLimit.answer, /Other booking/);
+  assert.equal(overLimit.answer.includes(exactTitle), false);
+});
+
 test("pitch-pack-citations-capped-at-ten", () => {
   const songs = Array.from({ length: 10 }, (_, index) => ({
     id: `song-${index}`,

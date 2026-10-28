@@ -43,16 +43,64 @@ function targetDate(date: Date | null, now: Date) {
 function finiteTime(date: Date | null | undefined) {
   return date && Number.isFinite(date.getTime()) ? date.getTime() : Infinity;
 }
-function pitchPackRequestedTarget(question: string) {
-  const strip = (value: string) => value.trim().replace(/^["“]|["”]$/g, "");
-  const withoutReviewerSuffix = question.replace(/\s*(?:for\s+)?travis(?:'s)?\s+(?:review|decision)\b[?.!]*$/i, "").trim();
-  const forAt = withoutReviewerSuffix.match(/\b(?:for|at)\s+(.+?)(?:\s+from records only)?[?.!]*$/i)?.[1];
-  const draft = withoutReviewerSuffix.match(/\bdraft\s+a\s+(.+?)\s+venue\s+(?:pitch\s+)?pack\b/i)?.[1];
-  let requested = strip(forAt ?? "");
-  if (!requested && draft) requested = strip(draft);
-  if (!requested) return null;
-  if (/\btravis\b/i.test(requested) && /\b(?:review|decision|decide)\b/i.test(requested)) return null;
-  return requested;
+const MAX_PITCH_TARGET_LENGTH = 240;
+const PACK_PHRASE = /\b(?:pitch|venue)\s+(?:pitch\s+)?pack(?:age)?\b/i;
+
+type PitchPackTarget = { kind: "unspecified" } | { kind: "exact"; value: string } | { kind: "rejected" };
+
+function normalizePitchQuestion(question: string) {
+  let value = question.replace(/\s+/g, " ").trim();
+  let previous = "";
+  while (value !== previous) {
+    previous = value;
+    value = value.replace(/[?.!]+$/g, "").trim();
+    value = value.replace(/\s*(?:for\s+)?travis(?:'s)?\s+(?:review|decision)\b$/i, "").trim();
+    value = value.replace(/\s+from records only\b$/i, "").trim();
+  }
+  return value;
+}
+
+function classifyPitchTarget(raw: string): { kind: "absent" } | { kind: "rejected" } | { kind: "exact"; value: string } {
+  if (!raw.trim()) return { kind: "absent" };
+  const value = raw.trim().replace(/^["“”']+|["“”']+$/g, "").trim().replace(/\s+/g, " ").replace(/[?.!]+$/g, "").trim();
+  if (!value) return { kind: "rejected" };
+  if (/^(?:a|an|the|venue|pitch|pack|package|records|recorded)$/i.test(value)) return { kind: "absent" };
+  if (value.length > MAX_PITCH_TARGET_LENGTH || !/^[\p{L}\p{N}]/u.test(value)) return { kind: "rejected" };
+  return { kind: "exact", value };
+}
+
+function leadingPitchName(before: string) {
+  let text = before.trim();
+  const command = /^(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:draft|prepare|make|build|create|give|get|show|pack)\s+(?:me\s+)?(?:(?:a|an|the)\b\s+)?/i;
+  text = command.test(text) ? text.replace(command, "") : text.replace(/^(?:please\s+)?(?:a|an|the)\s+/i, "");
+  return text.trim();
+}
+
+// A pitch-pack question with no name still means "the one open booking".
+// A name that is missing, unreadable, conflicting, or not in a single exact slot must not fall through to that booking.
+function resolvePitchPackTarget(question: string): PitchPackTarget {
+  const working = normalizePitchQuestion(question);
+  const pack = PACK_PHRASE.exec(working);
+  if (!pack) return { kind: "rejected" };
+  const names: string[] = [];
+  let rejected = false;
+  const add = (raw: string) => {
+    const classified = classifyPitchTarget(raw);
+    if (classified.kind === "rejected") rejected = true;
+    if (classified.kind === "exact") names.push(classified.value);
+  };
+  add(leadingPitchName(working.slice(0, pack.index)));
+  const after = working.slice(pack.index + pack[0].length).trim();
+  if (after) {
+    const trailing = after.match(/^(?:for|at)\b(?:\s+([\s\S]*))?$/i);
+    if (!trailing || !trailing[1]?.trim()) rejected = true;
+    else add(trailing[1]);
+  }
+  if (rejected) return { kind: "rejected" };
+  const distinct = [...new Set(names.map((name) => name.toLowerCase()))];
+  if (distinct.length > 1) return { kind: "rejected" };
+  if (distinct.length === 1) return { kind: "exact", value: names.find((name) => name.toLowerCase() === distinct[0]) ?? names[0]! };
+  return { kind: "unspecified" };
 }
 
 export function recordedBookingDesk(facts: ManagerFacts, question: string, now: Date): ManagerChatResult | null {
@@ -61,8 +109,10 @@ export function recordedBookingDesk(facts: ManagerFacts, question: string, now: 
   const result = (answer: string, citations: string[] = []): ManagerChatResult => ({ answer: `${answer}\n\n${boundary}`, citations: [...new Set(citations)].slice(0, 10), recommendation: null });
   const opportunities = facts.opportunities.filter((item) => openStages.has(item.stage) || (pack && item.stage === "confirmed"));
   if (pack) {
-    // A target suffix must resolve exactly; never silently replace an unknown venue.
-    const requested = pitchPackRequestedTarget(question);
+    // A named target must resolve to one exact recorded booking. An unparsed or conflicting name never falls back to another booking.
+    const target = resolvePitchPackTarget(question);
+    if (target.kind === "rejected") return result("Pitch pack blocked: the booking or venue target is missing, conflicting, malformed, or not a single exact name. No substitute booking was chosen.");
+    const requested = target.kind === "exact" ? target.value : null;
     const matches = requested ? opportunities.filter((item) => [item.id, item.title, item.packRecords?.venue?.name].some((value) => value?.toLowerCase() === requested.toLowerCase())) : opportunities;
     if (!matches.length) return result(requested
       ? "Pitch pack blocked: the requested booking/venue is not uniquely recorded in the open booking view. Open Booking and select a recorded opportunity; no substitute was chosen."
