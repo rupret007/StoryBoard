@@ -286,11 +286,19 @@ test("pitch-pack-named-unparsed-and-conflicting-targets-never-substitute", () =>
     assert.deepEqual(result.citations, [], question);
   }
 
-  const named = deterministicManagerChat(both, "Draft a Three Links pitch pack", now);
-  assert.match(named.answer, packaged);
-  assert.match(named.answer, /Three Links/);
-  assert.doesNotMatch(named.answer, /Other booking/);
-  assert.equal(named.citations[0], "three-links");
+  for (const question of [
+    "Draft a Three Links pitch pack",
+    "Draft a Three Links pitch pack for Travis review",
+    "Draft a Three Links pitch package from records only",
+    "Draft a venue pitch pack for Three Links from records only",
+    "Show me the Three Links pitch pack"
+  ]) {
+    const named = deterministicManagerChat(both, question, now);
+    assert.match(named.answer, packaged, question);
+    assert.match(named.answer, /Booking: “Three Links”/, question);
+    assert.doesNotMatch(named.answer, /Other booking/, question);
+    assert.equal(named.citations[0], "three-links", question);
+  }
 
   const byVenue = deterministicManagerChat(both, "Draft a venue pitch pack for Other venue", now);
   assert.match(byVenue.answer, /Other booking/);
